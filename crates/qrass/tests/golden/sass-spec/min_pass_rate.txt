@@ -1,0 +1,10 @@
+# sass-spec hrx runner — pass-rate regression floor (percent of attempted
+# non-skipped cases). A FULL modern-subset run must not drop below this.
+# Raised each convergence round as failures are fixed forward.
+#
+# Baseline after task-11 setup + Sass --load-path fidelity fix (round 1).
+# Dominant remaining debt is the modern CSS Color 4 surface (color.<space>()
+# constructors, `.to-space` gamut conversion, gamut predicates) and selector
+# algebra (`selector.is-superselector` / `.unify` / `.extend`) — fixed in later
+# rounds, each of which bumps this number.
+12.0

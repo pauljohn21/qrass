@@ -1,0 +1,10 @@
+[submodule "sass-spec"]
+	path = sass-spec
+	url = git@github.com:sass/sass-spec.git
+	shallow = true
+
+[submodule "element-plus"]
+	path = element-plus
+	url = git@github.com:element-plus/element-plus.git
+	shallow = true
+

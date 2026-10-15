@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["crates/qrass", "crates/qrass-macros"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+[profile.release]
+opt-level = 3
