@@ -7,4 +7,9 @@
 # constructors, `.to-space` gamut conversion, gamut predicates) and selector
 # algebra (`selector.is-superselector` / `.unify` / `.extend`) — fixed in later
 # rounds, each of which bumps this number.
-12.0
+#
+# Round 2: CSS Color 4 literals (color()/lab/lch/oklab/oklch/hsl/hwb space
+# forms) parse into first-class colors; color.adjust/change/scale edit channels
+# in-space (no clamp, powerless `none`, hue wrap, faithful `... / a` form).
+# 1320 -> 1850 passed (+530).
+16.0

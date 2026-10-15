@@ -154,7 +154,8 @@ fn css_serialization_forms() {
             g: 110.0,
             b: 253.0,
             a: 1.0,
-            hex: true
+            hex: true,
+            c4: None
         }
         .to_css(),
         "#0d6efd"
@@ -165,7 +166,8 @@ fn css_serialization_forms() {
             g: 110.0,
             b: 253.0,
             a: 0.5,
-            hex: true
+            hex: true,
+            c4: None
         }
         .to_css(),
         "rgba(13, 110, 253, 0.5)"

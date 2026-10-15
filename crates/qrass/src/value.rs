@@ -81,18 +81,26 @@ impl PartialEq for SassValue {
 /// a `#rrggbb` literal serializes back to hex, while one produced by a function
 /// (`rgb()`/`rgba()`/`mix()`/…) serializes as `rgb()`/`rgba()` — matching how
 /// dart-sass preserves the representation form. `hex` is ignored by equality.
-#[derive(Clone, Copy, Debug)]
+/// Colors parsed from CSS Color 4 literals carry their space and components in
+/// `c4`; the RGBA fields then hold the converted sRGB value and `c4` drives
+/// both equality and serialization.
+#[derive(Clone, Debug)]
 pub struct Color {
     pub r: f64,
     pub g: f64,
     pub b: f64,
     pub a: f64,
     pub hex: bool,
+    pub c4: Option<Box<crate::color4::Color4>>,
 }
 
 impl PartialEq for Color {
     fn eq(&self, other: &Self) -> bool {
-        self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a
+        match (&self.c4, &other.c4) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a,
+            _ => false,
+        }
     }
 }
 
@@ -220,6 +228,7 @@ impl Color {
             b: b as f64,
             a: 1.0,
             hex: false,
+            c4: None,
         }
     }
 
@@ -230,6 +239,7 @@ impl Color {
             b: b as f64,
             a,
             hex: false,
+            c4: None,
         }
     }
 
@@ -262,6 +272,7 @@ impl Color {
             b: round(b1),
             a,
             hex: false,
+            c4: None,
         }
     }
 
@@ -298,6 +309,9 @@ impl Color {
     /// as `#rrggbb`, while function-produced colors print as `rgb(r, g, b)`; any
     /// color with alpha `< 1.0` prints as `rgba(r, g, b, a)`.
     pub fn to_css(&self) -> String {
+        if let Some(c4) = &self.c4 {
+            return c4.to_css();
+        }
         let clamp = |v: f64| (v.round().clamp(0.0, 255.0)) as u8;
         let (r, g, b) = (clamp(self.r), clamp(self.g), clamp(self.b));
         if self.a >= 1.0 {

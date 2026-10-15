@@ -18,6 +18,7 @@ pub mod tracing_setup;
 pub mod ast;
 pub mod ast_expr;
 mod builtins;
+pub mod color4;
 mod css;
 pub mod env;
 pub mod eval;

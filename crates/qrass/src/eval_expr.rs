@@ -408,6 +408,7 @@ fn parse_hex(raw: &str) -> Color {
                 b: expand(chars[2]),
                 a: 1.0,
                 hex: true,
+                c4: None,
             }
         }
         6 => {
@@ -418,6 +419,7 @@ fn parse_hex(raw: &str) -> Color {
                 b: at(4),
                 a: 1.0,
                 hex: true,
+                c4: None,
             }
         }
         8 => {
@@ -428,6 +430,7 @@ fn parse_hex(raw: &str) -> Color {
                 b: at(4),
                 a: at(6) / 255.0,
                 hex: true,
+                c4: None,
             }
         }
         _ => Color::rgb(0, 0, 0),

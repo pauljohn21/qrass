@@ -35,7 +35,7 @@ fn err(msg: impl Into<String>) -> SassError {
 
 fn color_at(c: &super::Call, i: usize) -> Or<Color> {
     match c.positional.get(i) {
-        Some(SassValue::Color(col)) => Ok(*col),
+        Some(SassValue::Color(col)) => Ok(col.clone()),
         Some(other) => Err(err(format!(
             "expected a color, given {}",
             other.type_name()
@@ -44,9 +44,11 @@ fn color_at(c: &super::Call, i: usize) -> Or<Color> {
     }
 }
 
-/// A color-valued named argument or positional `pos`.
-fn amount(c: &super::Call, key: &str) -> Option<f64> {
-    c.named.get(key).and_then(|v| v.as_number().map(|(n, _)| n))
+/// A numeric-valued argument (named or default-free) with its unit, if any.
+fn amount(c: &super::Call, key: &str) -> Option<(f64, Option<String>)> {
+    c.named
+        .get(key)
+        .and_then(|v| v.as_number().map(|(n, u)| (n, u.map(str::to_string))))
 }
 
 fn make(col: Color) -> SassValue {
@@ -105,19 +107,22 @@ enum Mode {
 /// the given mode (absolute delta, relative scaling, or absolute set).
 fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
     let base = color_at(c, 0)?;
-    let mut col = base;
+    if base.c4.is_some() {
+        return transform_c4(&base, c, mode);
+    }
+    let mut col = base.clone();
 
     // RGB channels (independent of the HSL round-trip).
-    if let Some(v) = amount(c, "red") {
+    if let Some((v, _)) = amount(c, "red") {
         col.r = edit(base.r, v, mode, 0.0, 255.0);
     }
-    if let Some(v) = amount(c, "green") {
+    if let Some((v, _)) = amount(c, "green") {
         col.g = edit(base.g, v, mode, 0.0, 255.0);
     }
-    if let Some(v) = amount(c, "blue") {
+    if let Some((v, _)) = amount(c, "blue") {
         col.b = edit(base.b, v, mode, 0.0, 255.0);
     }
-    if let Some(v) = amount(c, "alpha") {
+    if let Some((v, _)) = amount(c, "alpha") {
         col.a = match mode {
             Mode::Change => v,
             Mode::Adjust => base.a + v,
@@ -138,21 +143,108 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
         .any(|k| amount(c, k).is_some());
     if hsl_edits {
         let mut hsl = col.to_hsl();
-        if let Some(v) = amount(c, "hue") {
+        if let Some((v, _)) = amount(c, "hue") {
             hsl.h = match mode {
                 Mode::Change => v,
                 _ => hsl.h + v,
             };
         }
-        if let Some(v) = amount(c, "saturation") {
+        if let Some((v, _)) = amount(c, "saturation") {
             hsl.s = edit(hsl.s, v, mode, 0.0, 100.0);
         }
-        if let Some(v) = amount(c, "lightness") {
+        if let Some((v, _)) = amount(c, "lightness") {
             hsl.l = edit(hsl.l, v, mode, 0.0, 100.0);
         }
         col = Color::from_hsla(hsl.h, hsl.s, hsl.l, col.a);
     }
     Ok(make(col))
+}
+
+/// Color 4 channel editing: the named channels of the color's own space. gamut
+/// channels are *not* clamped (out-of-range values are legal, matching the
+/// `above_max`/`below_min` spec cases); hues wrap; alpha clamps to `0..=1`.
+fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<SassValue> {
+    let mut c4 = base.c4.as_ref().expect("checked by caller").as_ref().clone();
+    const LEGACY: [&str; 8] = [
+        "red",
+        "green",
+        "blue",
+        "hue",
+        "saturation",
+        "lightness",
+        "whiteness",
+        "blackness",
+    ];
+    for (key, val) in c.named.iter() {
+        if key == "alpha" {
+            continue;
+        }
+        let Some((v, unit)) = val.as_number() else { continue };
+        let Some(idx) = c4.space.channels.iter().position(|ch| ch.name == *key) else {
+            if LEGACY.contains(&key.as_str()) {
+                return Err(err(format!("{} color has no {key} channel", c4.space.name)));
+            }
+            continue;
+        };
+        let ch = &c4.space.channels[idx];
+        let pct = unit == Some("%");
+        let cur = c4.comps[idx].unwrap_or(ch.lo);
+        let next = match mode {
+            Mode::Change => {
+                if pct && ch.unit == crate::color4::Unit::Num {
+                    v / 100.0
+                } else {
+                    v
+                }
+            }
+            Mode::Adjust => {
+                let delta = if pct && ch.unit == crate::color4::Unit::Num {
+                    v / 100.0 * (ch.hi - ch.lo)
+                } else {
+                    v
+                };
+                cur + delta
+            }
+            Mode::Scale => {
+                if v >= 0.0 {
+                    cur + (ch.hi - cur) * (v / 100.0)
+                } else {
+                    cur + (cur - ch.lo) * (v / 100.0)
+                }
+            }
+        };
+        c4.comps[idx] = Some(if ch.unit == crate::color4::Unit::Deg {
+            (next % 360.0 + 360.0) % 360.0
+        } else {
+            next
+        });
+    }
+    if let Some((v, _)) = amount(c, "alpha") {
+        c4.alpha = Some(
+            match mode {
+                Mode::Change => v,
+                Mode::Adjust => c4.alpha() + v,
+                Mode::Scale => {
+                    if v >= 0.0 {
+                        c4.alpha() + (1.0 - c4.alpha()) * (v / 100.0)
+                    } else {
+                        c4.alpha() * (1.0 + v / 100.0)
+                    }
+                }
+            }
+            .clamp(0.0, 1.0),
+        );
+    }
+    let [r, g, b] = c4.to_rgb();
+    let a = c4.alpha();
+    Ok(make(Color {
+        r,
+        g,
+        b,
+        a,
+        hex: false,
+        c4: Some(Box::new(c4)),
+    }))
 }
 
 /// Combine the current value `cur` with edit `v` in `[lo, hi]` by mode.
@@ -188,6 +280,7 @@ fn mix(c: &super::Call) -> Or<SassValue> {
         a: ch(a.a, b.a),
         // dart-sass inherits the first operand's representation form.
         hex: a.hex,
+        c4: None,
     }))
 }
 

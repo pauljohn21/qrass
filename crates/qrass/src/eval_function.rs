@@ -18,6 +18,43 @@ use super::eval_mixin::RawArgs;
 use super::{Ev, EvalState};
 use crate::eval::eval_control::{each_elements, int_bound};
 
+/// Coerce an evaluated component into a channel's canonical scale. The outer
+/// `None` marks a value that can never be a channel (the caller then lets the
+/// literal fall through to plain-CSS passthrough); the inner `None` is a
+/// powerless `none`.
+fn channel_value(v: &SassValue, ch: &crate::color4::Channel) -> Option<Option<f64>> {
+    use crate::color4::Unit;
+    match v {
+        SassValue::Str {
+            text,
+            quoted: false,
+        } if text == "none" => Some(None),
+        SassValue::Number { value, unit } => {
+            let u = unit.as_deref();
+            let out = match ch.unit {
+                Unit::Pct => match u {
+                    None | Some("%") => *value,
+                    Some(_) => return None,
+                },
+                Unit::Deg => match u {
+                    None | Some("deg") => *value,
+                    Some("rad") => value.to_degrees(),
+                    Some("grad") => *value * 0.9,
+                    Some("turn") => *value * 360.0,
+                    Some(_) => return None,
+                },
+                Unit::Num => match u {
+                    None => *value,
+                    Some("%") => *value / 100.0,
+                    Some(_) => return None,
+                },
+            };
+            Some(Some(out))
+        }
+        _ => None,
+    }
+}
+
 impl EvalState {
     /// Register a `@function` definition (last definition wins for the name),
     /// snapshotting the defining module's environment so the body resolves its
@@ -77,6 +114,11 @@ impl EvalState {
         // raw argument AST here — before argument evaluation runs — and routed to the
         // `rgb`/`rgba` builtin as comma positional arguments.
         if let Some(v) = self.eval_space_color(call)? {
+            return Ok(v);
+        }
+
+        // CSS Color 4 literals (`color(a98-rgb 0.2 0.5 0.7)`, `lab(...)`, ...).
+        if let Some(v) = self.eval_color4_literal(call)? {
             return Ok(v);
         }
 
@@ -174,6 +216,94 @@ impl EvalState {
             })?;
         result.map_err(|e| e.note(format!("during color `{}` in module {}", call.name, self.name)))
             .map(Some)
+    }
+
+    /// Parse CSS Color 4 space-separated literals into a Color 4 value:
+    /// `color(<space> c1 c2 c3 [/ a])` plus the bare forms `lab`/`lch`/`oklab`/
+    /// `oklch`/`hsl`/`hwb`. Returns `Ok(None)` for any other shape or for a
+    /// component that does not parse as a channel value, leaving the existing
+    /// plain-CSS passthrough untouched.
+    fn eval_color4_literal(&mut self, call: &FunctionCall) -> Ev<Option<SassValue>> {
+        if call.namespace.is_some() {
+            return Ok(None);
+        }
+        let wrapper = call.name == "color";
+        if !wrapper && crate::color4::lookup(&call.name).is_none() {
+            return Ok(None);
+        }
+        let Some(Arg::Positional(Expr::List {
+            items,
+            sep: ListSep::Space,
+            ..
+        })) = call.args.first()
+        else {
+            return Ok(None);
+        };
+        let mut iter = items.iter();
+        let space: &'static crate::color4::Space = if wrapper {
+            let Some(first) = iter.next() else { return Ok(None) };
+            match self.eval_expr(first)? {
+                SassValue::Str { text, quoted: false } => match crate::color4::lookup(&text) {
+                    Some(s) => s,
+                    None => return Ok(None),
+                },
+                _ => return Ok(None),
+            }
+        } else {
+            crate::color4::lookup(&call.name).expect("checked above")
+        };
+        let mut comps: Vec<SassValue> = Vec::new();
+        let mut alpha_expr: Option<&Expr> = None;
+        for item in iter {
+            if let Expr::Binary {
+                op: BinOp::Div,
+                left,
+                right,
+                ..
+            } = item
+            {
+                comps.push(self.eval_expr(left)?);
+                alpha_expr = Some(right);
+            } else {
+                comps.push(self.eval_expr(item)?);
+            }
+        }
+        if comps.len() != 3 {
+            return Ok(None);
+        }
+        let mut parsed: [Option<f64>; 3] = [None, None, None];
+        for (idx, (v, ch)) in comps.iter().zip(&space.channels).enumerate() {
+            match channel_value(v, ch) {
+                Some(cv) => parsed[idx] = cv,
+                None => return Ok(None),
+            }
+        }
+        let alpha = match alpha_expr {
+            Some(e) => match self.eval_expr(e)? {
+                SassValue::Str { text, quoted: false } if text == "none" => None,
+                SassValue::Number { value, unit } => Some(match unit.as_deref() {
+                    Some("%") => value / 100.0,
+                    _ => value,
+                }),
+                _ => return Ok(None),
+            },
+            None => None,
+        };
+        let c4 = crate::color4::Color4 {
+            space,
+            comps: parsed,
+            alpha,
+        };
+        let [r, g, b] = c4.to_rgb();
+        let a = c4.alpha();
+        Ok(Some(SassValue::Color(crate::value::Color {
+            r,
+            g,
+            b,
+            a,
+            hex: false,
+            c4: Some(Box::new(c4)),
+        })))
     }
 
     /// Resolve the environment-dependent `meta` predicates that cannot live in

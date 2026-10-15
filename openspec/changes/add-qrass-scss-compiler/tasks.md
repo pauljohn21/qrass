@@ -67,7 +67,7 @@
 
 - [x] 11.1 实现 `tests/common/hrx.rs`：解析 `<===> path` 块（input.scss/output.css/options.scss/errors）、目录递归发现，验证：对 sass-spec 任一单用例文件解析出正确的 input/output 段（`tests/hrx_parse.rs` 内联三段 + 真实 `css/percent.hrx` 均绿）
 - [x] 11.2 实现 `tests/hrx_spec.rs` runner：遍历 `spec/{core_functions,expressions,directives,callable,css}`，`:legacy`/libsass-only 目录按规则 skip，`allowlist.txt` 外全部必须通过，info! 汇总通过率，验证：本地运行输出通过率且失败清单非空时可见首条原因。附带：per-case 多文件临时物化（保 `@use` partial）+ 反哺实现 Sass `--load-path`（`Options.load_paths`→pipeline→`canonicalize_with`，spec-root 加载路径使 `@use "core_functions/color/utils"` 可解析，load error 673→64）；`canonicalize` 以 `catch_unwind` 兜底 lightningcss 对畸形色值的 panic
-- [ ] 11.3 迭代收敛：按失败聚类修复编译器（每轮 ≥1 类），更新 allowlist 仅限真实 legacy-only 用例，验证：modern 子集通过率 ≥95% 且 `cargo test -p qrass` 全绿。**进度**：round-1 已修 load-path 类；全量基线 12.04%（passed 1320 / failed 9641，indented 跳过 332），回归地板固化于 `tests/golden/sass-spec/min_pass_rate.txt`。剩余债务高度集中于「现代 CSS Color 4」（`color.<space>()` 构造 1188 + `.to-space` 色域转换矩阵 2544 + gamut 谓词）与 `selector.*` 选择器代数（~700），后续轮次逐类收敛并抬升地板
+- [ ] 11.3 迭代收敛：按失败聚类修复编译器（每轮 ≥1 类），更新 allowlist 仅限真实 legacy-only 用例，验证：modern 子集通过率 ≥95% 且 `cargo test -p qrass` 全绿。**进度**：round-1 已修 load-path 类；全量基线 12.04%（passed 1320 / failed 9641，indented 跳过 332），回归地板固化于 `tests/golden/sass-spec/min_pass_rate.txt`。round-2 落地 CSS Color 4 字面量（`src/color4.rs`：色空间表/序列化/sRGB 互转）+ `color.adjust/change/scale` 在原空间按通道编辑（不钳制、`none` 无权通道、hue 回绕、alpha 括号内序列化），1320→1850（+530，16.88%），地板抬至 16.0，回归挂 `tests/color4.rs`。剩余债务：`.to-space` 色域转换 2918、`utils.inspect` mixin 554、error text 对齐 ~1650、Color 4 其余表面/output mismatch ~1200、`selector.*` 710，后续轮次逐类收敛并抬升地板
 
 ## 12. 集成门禁
 

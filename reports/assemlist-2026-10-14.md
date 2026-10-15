@@ -10,11 +10,17 @@
 | 指标 | 数值 |
 |---|---|
 | 用例总数 | 11406 |
-| PASS | 1320 |
-| FAIL | 9641 |
+| PASS | 1850 |
+| FAIL | 9111 |
 | SKIP（indented 等） | 445 |
-| 通过率 | 12.04% |
-| 回归地板（min_pass_rate.txt） | 12.0% |
+| 通过率 | 16.88% |
+| 回归地板（min_pass_rate.txt） | 16.0% |
+
+> **Round 2（2026-10-15）：CSS Color 4 字面量 + 通道编辑**，1320 → 1850（+530）：
+> `color(a98-rgb …)`/`lab`/`lch`/`oklab`/`oklch`/`hsl`/`hwb` 空格形式解析为一等
+> Color（`src/color4.rs`），`color.adjust/change/scale` 在原色空间按通道编辑（不钳制、
+> `none` 无权通道、hue 回绕、alpha 括号内序列化），12 个用例回归于 `tests/color4.rs`。
+> 上表以下为 2026-10-14 基线快照，逐类收敛后另行重算。
 
 > 上一会话的最终资产（501 行 allowlist、374 个 src 内联单测、hrx 调试 bin、
 > reports/assemlist-2026-10-14.md）在会话之间的检查点回滚中丢失，无法逐条恢复；
