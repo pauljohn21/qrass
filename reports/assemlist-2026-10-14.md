@@ -2,6 +2,7 @@
 
 - 生成时间：2026-10-14（工作区回滚后重算的新基线，替代上一会话丢失的 10-14 报告）
 - 运行方式：`QRASS_HRX_OUT=/tmp/hrx_results.txt cargo test -p qrass --test hrx_spec`（全量现代子集，无深度限制）
+- 过时套件硬性跳过：`libsass*` / `non_conformant` 目录（任意深度）由 runner `is_outdated_dir` 排除，不计入通过率；本次 1212 个 `.hrx` 均无来自这些目录的用例
 - sass-spec checkout：main@85d5d71，1212 个 `.hrx` 文件
 
 ## 总览

@@ -80,12 +80,27 @@ fn read_floor(path: &Path) -> Option<f64> {
         .find_map(|l| l.parse::<f64>().ok())
 }
 
+/// Outdated libsass-era / non-conformant suites (`libsass*`, `non_conformant`
+/// directories at any depth). They test legacy behavior dart-sass itself has
+/// dropped, so the runner skips them unconditionally — a hard guarantee that
+/// holds even if [`TARGETS`] is ever widened.
+fn is_outdated_dir(name: &str) -> bool {
+    name == "non_conformant" || name.starts_with("libsass")
+}
+
 /// Recursively collect `*.hrx` files under `root` (relative to `root` returned).
 fn discover(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(is_outdated_dir)
+            {
+                continue;
+            }
             discover(root, &path, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some("hrx") {
             out.push(path);
