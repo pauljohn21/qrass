@@ -167,6 +167,7 @@ impl EvalState {
             url = %url,
             id = tracing::field::Empty,
             cached = tracing::field::Empty,
+            hubs = tracing::field::Empty,
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
@@ -196,7 +197,10 @@ impl EvalState {
             .note(chain.join(" -> ")));
         }
 
-        if let Some(module) = self.modules.get(&key).cloned() {
+        if self.bus.is_open(&key) {
+            // A carrier already exists: join its multicast — the body must not run
+            // a second time for this parent.
+            let module = self.bus.share(&key)?;
             // Re-opening a configuration the first load already settled: the body
             // will not run again, so no `!default` can claim the offer — the
             // golden gives that its own message rather than the "not declared
@@ -221,8 +225,13 @@ impl EvalState {
                 "elapsed_ms",
                 tracing::field::debug(started.elapsed().as_millis() as u64),
             );
-            return Ok((module, false)); // cached: no CSS, no re-run
+            return Ok((module, false)); // settled: no CSS, no re-run
         }
+
+        // Open the carrier *before* the body runs, so a request that arrives while
+        // this one is still instantiating joins the same multicast (the "or still in
+        // flight" half of the singleton contract).
+        self.bus.open(&key);
 
         let ran = resolved.kind != SourceKind::Css;
         let module = if !ran {
@@ -251,7 +260,14 @@ impl EvalState {
         };
 
         let module = Arc::new(module);
-        self.modules.insert(key, module.clone());
+        // Broadcast the singleton and close the carrier. This parent already holds
+        // the `Arc` it just produced, so it takes it directly; every later parent
+        // lands on the `is_open` branch above and joins the same carrier — which is
+        // why the payload keeps its `None` ("not settled yet") state: a request that
+        // arrived mid-body would join this instantiation instead of starting another.
+        self.bus.settle(&key, module.clone())?;
+        // The singleton set's size: a diamond graph must grow it by exactly one.
+        span.record("hubs", self.bus.len());
         out.extend(module.css.iter().cloned());
         span.record("cached", false);
         span.record(
@@ -314,7 +330,7 @@ impl EvalState {
     }
 
     /// Run a module body in a fresh global scope, returning its CSS + exports.
-    /// Nested `@use`/`@forward` share `self.modules`/`self.stack`, so a diamond
+    /// Nested `@use`/`@forward` share `self.bus`/`self.stack`, so a diamond
     /// loads once. The incoming configuration is *not* pre-bound: the body sees it
     /// only through its own `!default` declarations (`with/variable_exists.hrx`
     /// wants `meta.variable-exists` false before the first one).

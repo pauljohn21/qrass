@@ -4,6 +4,12 @@
 //! (the shared `drain` terminal, `collect` / `reduce_initial` folds), passing
 //! *owned* plain data between stages. No `Arc<Mutex<_>>` business state
 //! anywhere. Orchestration is builder-style: see [`pipeline::PipelineBuilder`].
+//!
+//! Context layering (design D1): the per-item stage kernels are `Local`, while the
+//! module singletons are broadcast by a `Shared` multicast carrier
+//! (`module_bus`, one `BehaviorSubject` per canonical path) — the only place the
+//! framework's own `Arc`/`Mutex` plumbing is allowed, and it keeps [`eval::EvalState`]
+//! `Send + Sync` for the concurrent-branch step of D1.
 
 use std::path::Path;
 
@@ -27,6 +33,7 @@ mod css;
 pub mod env;
 pub mod eval;
 pub mod module;
+mod module_bus;
 pub mod parser;
 mod plain_css;
 pub mod value;

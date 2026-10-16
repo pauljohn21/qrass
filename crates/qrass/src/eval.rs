@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
 
 use rxrust::prelude::*;
@@ -22,7 +21,7 @@ use crate::ast::Stmt;
 use crate::ast::{FunctionDecl, MixinDecl};
 use crate::env::{Env, ScopeId};
 use crate::error::SassError;
-use crate::module::Module;
+use crate::module_bus::ModuleBus;
 use crate::parser::parse;
 use crate::span::FileId;
 use crate::token::Piece;
@@ -115,10 +114,10 @@ pub struct EvalState {
     pub file: FileId,
     pub name: String,
     pub content: String,
-    /// Instantiated modules keyed by canonical path (instantiate-once). Shared
-    /// as a read-only `Arc` so a diamond `@use` costs a refcount bump instead of
-    /// deep-copying the module's variable/mixin/function tables.
-    pub modules: HashMap<String, Arc<Module>>,
+    /// The L2 module singletons (design D1): one `Shared` multicast carrier per
+    /// canonical path, so a diamond `@use` broadcasts the *same* `Arc<Module>` to
+    /// every parent instead of copying — or re-running — the instantiation.
+    pub(crate) bus: ModuleBus,
     /// Canonical paths on the current `@use` chain, for cycle detection.
     pub stack: Vec<String>,
     /// The live `@use`/`@forward` chain, innermost last, behind an error's
@@ -200,7 +199,7 @@ impl EvalState {
             file,
             name,
             content,
-            modules: HashMap::new(),
+            bus: ModuleBus::new(),
             stack: Vec::new(),
             links: Vec::new(),
             forward_buf: Vec::new(),
