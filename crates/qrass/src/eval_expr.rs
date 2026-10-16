@@ -6,15 +6,16 @@
 use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep, Literal, UnaryOp};
 use crate::error::{ErrorKind, SassError};
 use crate::token::{Piece, Quote};
-use crate::value::{Color, SassValue, convert_number};
+use crate::value::{Color, SassValue};
 
+use super::eval_arith::{arith, compare, negate, values_equal};
 use super::eval_function::is_meta_name;
 
 use crate::ast::Stmt;
 
 use super::{Ev, EvalState};
 
-type Ee<T> = Result<T, SassError>;
+pub(crate) type Ee<T> = Result<T, SassError>;
 
 impl EvalState {
     /// Evaluate `expr` against the current environment.
@@ -37,17 +38,26 @@ impl EvalState {
             }),
             Expr::Member {
                 namespace, name, ..
-            } => self
-                .env
-                .get_member(namespace, name)
-                .cloned()
-                .or_else(|| crate::builtins::module_const(namespace, name))
-                .ok_or_else(|| {
-                    err(
-                        ErrorKind::UndefinedVariable,
-                        format!("Undefined variable \"${name}\" in module \"{namespace}\""),
-                    )
-                }),
+            } => {
+                let bound = self.env.has_namespace(namespace);
+                self.env
+                    .get_member(namespace, name)
+                    .cloned()
+                    .or_else(|| crate::builtins::module_const(namespace, name))
+                    .ok_or_else(|| {
+                        // Like the plain-variable case above the name lives in the
+                        // annotated line, but a member read off a namespace no
+                        // `@use` bound is called out as such.
+                        err(
+                            ErrorKind::UndefinedVariable,
+                            if bound {
+                                "Undefined variable.".to_string()
+                            } else {
+                                format!("There is no module with namespace \"{namespace}\".")
+                            },
+                        )
+                    })
+            }
             Expr::Paren(inner, _) => self.eval_expr(inner),
             Expr::List { items, sep, bracketed, .. } => {
                 let mut out = Vec::with_capacity(items.len());
@@ -266,100 +276,6 @@ impl EvalState {
     }
 }
 
-// ─── Numeric arithmetic with unit conversion ─────────────────────────────────
-
-fn arith(op: BinOp, l: SassValue, r: SassValue) -> Ee<SassValue> {
-    let (SassValue::Number { value: a, unit: ua }, SassValue::Number { value: b, unit: ub }) =
-        (l, r)
-    else {
-        return Err(err(ErrorKind::Eval, "arithmetic operands must be numbers"));
-    };
-    let ua = ua.as_deref();
-    let ub = ub.as_deref();
-    let value = match op {
-        BinOp::Add => a + convert(b, ub, ua)?,
-        BinOp::Sub => a - convert(b, ub, ua)?,
-        BinOp::Mul => a * b,
-        BinOp::Div => {
-            if b == 0.0 {
-                return Err(err(ErrorKind::Eval, "division by zero"));
-            }
-            a / b
-        }
-        _ => unreachable!("arith on non-arithmetic op"),
-    };
-    let unit = match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul => ua.or(ub).map(str::to_string),
-        BinOp::Div => {
-            if ua == ub {
-                None
-            } else {
-                ua.map(str::to_string)
-            }
-        }
-        _ => None,
-    };
-    Ok(SassValue::Number { value, unit })
-}
-
-/// Convert `value` in unit `from` into `to` (no-op when equal or one is unitless).
-fn convert(value: f64, from: Option<&str>, to: Option<&str>) -> Ee<f64> {
-    if from == to || from.is_none() || to.is_none() {
-        return Ok(value);
-    }
-    convert_number(value, from, to).ok_or_else(|| {
-        err(
-            ErrorKind::Eval,
-            format!("incompatible units {from:?} and {to:?}"),
-        )
-    })
-}
-
-fn compare(op: BinOp, l: SassValue, r: SassValue) -> Ee<SassValue> {
-    let (ln, rn) = (l.as_number(), r.as_number());
-    if let (Some((a, ua)), Some((b, ub))) = (ln, rn) {
-        let b = convert(b, ub, ua)?;
-        let ordering = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
-        return Ok(SassValue::Bool(ord(&op, ordering)));
-    }
-    // Non-numeric ordering: compare by CSS text.
-    let (x, y) = (l.to_css(), r.to_css());
-    Ok(SassValue::Bool(ord(&op, x.cmp(&y))))
-}
-
-fn ord(op: &BinOp, o: std::cmp::Ordering) -> bool {
-    use std::cmp::Ordering::*;
-    match op {
-        BinOp::Lt => o == Less,
-        BinOp::Le => o != Greater,
-        BinOp::Gt => o == Greater,
-        BinOp::Ge => o != Less,
-        _ => false,
-    }
-}
-
-fn values_equal(l: &SassValue, r: &SassValue) -> bool {
-    if let (SassValue::Number { value: a, unit: ua }, SassValue::Number { value: b, unit: ub }) =
-        (l, r)
-    {
-        return match convert(*b, ub.as_deref(), ua.as_deref()) {
-            Ok(b2) => a == &b2,
-            Err(_) => false,
-        };
-    }
-    l == r
-}
-
-fn negate(v: SassValue) -> Ee<SassValue> {
-    match v {
-        SassValue::Number { value, unit } => Ok(SassValue::Number {
-            value: -value,
-            unit,
-        }),
-        _ => Err(err(ErrorKind::Eval, "cannot negate a non-number")),
-    }
-}
-
 // ─── Literals & interpolation helpers ────────────────────────────────────────
 
 /// Serialize a value appearing as an argument inside a plain-CSS passthrough
@@ -450,7 +366,7 @@ fn parse_hex(raw: &str) -> Color {
     }
 }
 
-fn err(kind: ErrorKind, message: impl Into<String>) -> SassError {
+pub(crate) fn err(kind: ErrorKind, message: impl Into<String>) -> SassError {
     SassError::new(kind, message)
 }
 

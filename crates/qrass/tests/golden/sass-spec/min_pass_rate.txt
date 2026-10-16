@@ -245,4 +245,37 @@
 # directives/use/error/with 3 -> 16, use/error/syntax/with.hrx 3 -> 8,
 # forward/error/syntax.hrx 2 -> 9).
 # 6037 -> 6100 passed (+63, 6100/10961 = 55.65%).
-55.6
+# Round 20 lifted the module-load *frame stack* out of debt. Each golden error
+# block closes with one `<basename> <line>:<col>  <label>` line per frame, the
+# fields left-aligned in a common column and the label gap being two spaces:
+# the innermost frame is the error's own location captioned by the keyword that
+# loaded its file, every ancestor frame is the position of the statement that
+# pulled the next file in (captioned in turn), and the entry stylesheet reads
+# `root stylesheet` — `directives/forward/error/with.hrx` `undefined` gives
+# `_midstream.scss 1:31  @use` / `input.scss 1:1        root stylesheet`. An
+# empty stack keeps the historical single line, so the 63 if_error blocks and
+# the Round 19 with blocks stayed byte-identical. Loading a module now runs
+# inside its `@use`/`@forward` link (EvalState::links), and a hard (flag-free)
+# `@forward … with` clause owns a site checked once the target's body has run:
+# `forward/error/with.hrx` `undefined`/`not_default`/`namespace`/`nested` report
+# it in the file that wrote it, `through_forward/*` one frame further out. A
+# `with (…)` entry that is still unclaimed and names a `!default` variable of an
+# already-loaded module is its own error, `This module was already loaded, so
+# it can't be configured using "with".` — `use/error/with/multi_configuration`,
+# `through_forward_twice` and `forward/error/with.hrx` `multi_configuration`
+# (only an *unclaimed* entry re-opens anything: `with/distributed_vars.hrx` and
+# `error/with/missing_distributed_vars.hrx` forward one module down two branches
+# and must stay silent; a module with no `!default` cannot be re-opened, so the
+# message cites its `new load` statement without the golden's `original load`
+# / `configuration` companion runs, which need multi-statement blocks — recorded
+# in tests/use_with.rs). Wordings read off the spec as a whole: 31 goldens spell
+# `<lhs> and <rhs> have incompatible units.` with the operands in source order,
+# ~37 spell `There is no module with namespace "X".` (a bound namespace with a
+# missing member stays the bare `Undefined variable.`, and a built-in's namespace
+# is its suffix, `@use "sass:color"` reading `color.…`), and `@forward "sass:…"
+# with (…)` is rejected at parse time like its `@use` twin (`forward/error/with
+# core_module`, 34 carets over the statement text without its `;`).
+# tests/use_with.rs walks forward/error/with.hrx verbatim too: 112 whole blocks
+# and output members compared, 17 recorded as debt.
+# 6100 -> 6124 passed (+24, 6124/10961 = 55.87%).
+55.8

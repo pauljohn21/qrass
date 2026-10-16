@@ -28,17 +28,7 @@ pub(crate) fn build_use(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     let rest = strip_comments(rest);
     let url = module_url(&rest);
     let config = with_config(p, &rest, false)?;
-    // A built-in module has no configurable surface, and the golden rejects it
-    // where the statement was written, underlining the whole `@use …` text
-    // (statement start through the closing `)`, terminator excluded).
-    if url.starts_with("sass:") && !config.is_empty() {
-        let (start, end) = stmt_span(span, &rest);
-        return Err(p.err_marked(
-            "Built-in modules can't be configured.",
-            start,
-            vec![p.marker('^', start, end, None)],
-        ));
-    }
+    reject_builtin_config(p, &url, &config, span, &rest)?;
     Ok(Stmt::Use(Use {
         url,
         alias: use_alias(&rest),
@@ -47,14 +37,40 @@ pub(crate) fn build_use(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     }))
 }
 
+/// A built-in module has no configurable surface, and the golden rejects the
+/// attempt where the statement was written — for both `@use` and `@forward`
+/// (`directives/use/error/with/core_module.hrx`,
+/// `directives/forward/error/with.hrx` `core_module`) — underlining the whole
+/// statement text (its start through the closing `)`, terminator excluded).
+fn reject_builtin_config(
+    p: &Parser,
+    url: &str,
+    config: &[crate::ast::ConfigEntry],
+    span: Span,
+    rest: &[Spanned],
+) -> Or<()> {
+    if !url.starts_with("sass:") || config.is_empty() {
+        return Ok(());
+    }
+    let (start, end) = stmt_span(span, rest);
+    Err(p.err_marked(
+        "Built-in modules can't be configured.",
+        start,
+        vec![p.marker('^', start, end, None)],
+    ))
+}
+
 pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     let rest = strip_comments(rest);
+    let url = module_url(&rest);
+    let config = with_config(p, &rest, true)?;
+    reject_builtin_config(p, &url, &config, span, &rest)?;
     Ok(Stmt::Forward(crate::ast::Forward {
-        url: module_url(&rest),
+        url,
         prefix: forward_prefix(&rest),
         shown: forward_members(&rest, "show"),
         hidden: forward_members(&rest, "hide"),
-        config: with_config(p, &rest, true)?,
+        config,
         span,
     }))
 }

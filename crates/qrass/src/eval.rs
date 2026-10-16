@@ -24,6 +24,8 @@ use crate::parser::parse;
 use crate::span::FileId;
 use crate::token::Piece;
 
+#[path = "eval_arith.rs"]
+mod eval_arith;
 #[path = "eval_control.rs"]
 mod eval_control;
 #[path = "eval_color4.rs"]
@@ -56,6 +58,22 @@ pub(crate) struct ConfigOffer {
     pub(crate) consumed: bool,
     /// Where the entry was written, for the golden's marker run.
     pub(crate) entry: crate::span::Span,
+}
+
+/// One live `@use`/`@forward` edge of the module-load stack. The goldens render
+/// this chain under an error's snippet: each ancestor frame shows the position
+/// of the statement that pulled the next file in, inside the file that wrote it
+/// (`directives/forward/error/with.hrx` `namespace`: `_downstream.scss 1:28 @use`
+/// then `input.scss 1:1 root stylesheet`). `keyword` labels the frame *below*
+/// this link, since a frame is captioned by how it entered.
+pub(crate) struct LoadLink {
+    /// The file that wrote the `@use`/`@forward`.
+    pub(crate) parent_file: String,
+    /// Where in that file it was written, already resolved to 1-based line/col.
+    pub(crate) parent_line: u32,
+    pub(crate) parent_col: u32,
+    /// `"@use"` or `"@forward"` — the golden's frame label.
+    pub(crate) keyword: &'static str,
 }
 
 /// A rule whose selector is (or contains) a placeholder `%name`, collected
@@ -98,6 +116,9 @@ pub struct EvalState {
     pub modules: HashMap<String, Module>,
     /// Canonical paths on the current `@use` chain, for cycle detection.
     pub stack: Vec<String>,
+    /// The live `@use`/`@forward` chain, innermost last, behind an error's
+    /// frame stack (see [`LoadLink`]).
+    pub(crate) links: Vec<LoadLink>,
     /// Per-instantiation-frame buffer of `@forward`ed exports (task 6.3).
     pub forward_buf: Vec<Vec<(String, crate::value::SassValue)>>,
     /// Per-instantiation-frame view of the `with (…)` configuration visible to
@@ -176,6 +197,7 @@ impl EvalState {
             content,
             modules: HashMap::new(),
             stack: Vec::new(),
+            links: Vec::new(),
             forward_buf: Vec::new(),
             config_stack: Vec::new(),
             config_offers: Vec::new(),

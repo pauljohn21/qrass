@@ -163,6 +163,14 @@ impl Env {
         self.namespaces.get(namespace).and_then(|m| m.get(name))
     }
 
+    /// True when `ns` names a module some `@use` has loaded here. A missing
+    /// namespace is reported as its own error rather than as an undefined
+    /// member (`directives/forward/error/with.hrx`
+    /// `invalid_expression/module_loaded_later`).
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        self.namespaces.contains_key(namespace)
+    }
+
     /// Publish a module's exported variables under `ns`.
     pub fn bind_namespace(&mut self, namespace: &str, vars: Vec<(String, SassValue)>) {
         self.namespaces

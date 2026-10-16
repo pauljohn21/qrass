@@ -53,6 +53,20 @@ pub struct Located {
     pub excerpt: Option<String>,
 }
 
+/// One frame of the module-load stack the goldens print under the `'` foot of a
+/// snippet: `<file> <line>:<col>  <label>`. The innermost frame is where the
+/// error was raised; every ancestor shows the `@use`/`@forward` statement that
+/// pulled the next file in, labelled by the keyword through which *it* entered
+/// (the entry file is labelled `root stylesheet`) — the shape of
+/// `directives/forward/error/with.hrx` `undefined`/`namespace`/`nested`.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub file: String,
+    pub line: u32,
+    pub col: u32,
+    pub label: String,
+}
+
 /// One annotation run of a rendered source snippet: `marker` repeated `len`
 /// times starting at 1-based `col` of `line`, with an optional label (the
 /// `arbitrary substitution` / `sass() expression` captions of the
@@ -80,10 +94,15 @@ pub struct SassError {
     pub snippet: Option<Box<Snippet>>,
 }
 
-/// Annotation runs attached to an error for snippet rendering.
+/// Annotation runs attached to an error for snippet rendering, plus the
+/// module-load stack rendered as the snippet's trailing location lines. An
+/// empty stack keeps the single `<file> <line>:<col>  root stylesheet` line the
+/// entry stylesheet's errors have always produced. Both live behind one box so
+/// the error type stays small on the `Err` path of every stage.
 #[derive(Clone, Debug)]
 pub struct Snippet {
     pub markers: Vec<Marker>,
+    pub trace: Vec<Frame>,
 }
 
 impl SassError {
@@ -95,6 +114,21 @@ impl SassError {
             notes: Vec::new(),
             snippet: None,
         }
+    }
+
+    /// Read [`Snippet::trace`] off a frame stack the loader captured. Only a
+    /// snippet renders location lines, so an error without one keeps its plain
+    /// `kind: message` form.
+    pub fn with_trace(mut self, trace: Vec<Frame>) -> Self {
+        if let Some(sn) = &mut self.snippet {
+            sn.trace = trace;
+        }
+        self
+    }
+
+    /// Whether the loader has already captioned this error with its frames.
+    pub fn has_trace(&self) -> bool {
+        self.snippet.as_ref().is_some_and(|sn| !sn.trace.is_empty())
     }
 
     /// Attach a span, resolving it to line/col and a source excerpt when possible.
@@ -132,7 +166,10 @@ impl SassError {
     /// Attach the snippet annotations a golden-style block renders.
     pub fn with_markers(mut self, markers: Vec<Marker>) -> Self {
         if !markers.is_empty() {
-            self.snippet = Some(Box::new(Snippet { markers }));
+            self.snippet = Some(Box::new(Snippet {
+                markers,
+                trace: Vec::new(),
+            }));
         }
         self
     }
@@ -154,7 +191,11 @@ impl fmt::Display for SassError {
         if let Some(sn) = &self.snippet
             && let Some(loc) = &self.located
         {
-            return write!(f, "{}", crate::diag::snippet(&self.message, loc, &sn.markers));
+            return write!(
+                f,
+                "{}",
+                crate::diag::snippet(&self.message, loc, &sn.markers, &sn.trace)
+            );
         }
         write!(f, "{}: {}", self.kind.as_str(), self.message)?;
         if let Some(loc) = &self.located {

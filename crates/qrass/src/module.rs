@@ -19,6 +19,13 @@ pub struct Module {
     pub mixins: Vec<String>,
     /// Public `@function` names, same aliasing contract as [`Module::mixins`].
     pub functions: Vec<String>,
+    /// Normalized names of this module's public top-level `!default`
+    /// declarations — the configuration surface a second `with (…)` would try to
+    /// re-open. Only a module that has one makes re-configuring it an error
+    /// (`directives/forward/error/with.hrx` `multi_configuration/through_forward`
+    /// spells out that its target "only throws an error because it defines a
+    /// configurable variable").
+    pub configurable: Vec<String>,
 }
 
 /// A private member (`$-name`) is not re-exported to importers.
@@ -39,5 +46,7 @@ pub fn export_vars(bindings: Vec<(String, SassValue)>) -> Vec<(String, SassValue
 pub fn default_namespace(url: &str) -> String {
     let seg = url.rsplit('/').next().unwrap_or(url);
     let stem = seg.split_once('.').map(|(s, _)| s).unwrap_or(seg);
-    stem.trim_start_matches(['.', '_']).to_string()
+    // A built-in URL's namespace is its suffix: `@use "sass:color"` is reached
+    // as `color.…`, not `sass:color.…`.
+    stem.trim_start_matches(['.', '_']).trim_start_matches("sass:").to_string()
 }

@@ -1,14 +1,14 @@
 //! Dart-style source-snippet rendering for errors, matching the annotation
 //! blocks of the `expressions/if/error/*.hrx` goldens: a `,` corner, the
 //! numbered source line, one marker run per annotation with an optional
-//! trailing label, a `'` foot, and the final
-//! `<file> <line>:<col>  root stylesheet` location line.
+//! trailing label, a `'` foot, and the module-load stack beneath it
+//! (`<file> <line>:<col>  <label>`, `root stylesheet` for the entry file).
 //!
 //! Layout is derived from the goldens byte-for-byte: the marker line is
 //! `"  |" + col spaces + marker×len (+ " " + label)`, so a 1-based column `C`
 //! lines up with the source line's `"1 | "` gutter of width 4.
 
-use crate::error::{Located, Marker, SassError};
+use crate::error::{Frame, Located, Marker, SassError};
 use crate::parser::Parser;
 use crate::span::{BytePos, excerpt_line, line_col};
 
@@ -86,7 +86,14 @@ pub(crate) fn located_in(file: &str, source: &str, at: BytePos) -> Located {
 /// put the `^` run before the `=` run regardless of their source order) and
 /// only markers on the primary marker's line are drawn — every golden snippet
 /// annotates a single line.
-pub(crate) fn snippet(message: &str, loc: &Located, markers: &[Marker]) -> String {
+///
+/// The lines under the `'` foot are the module-load stack: one
+/// `<file> <line>:<col>  <label>` per frame, the `<file> <line>:<col>` fields
+/// left-aligned in a common column (the goldens pad the shorter ones before the
+/// two-space label gap, e.g. `_midstream.scss 1:27  @use` / `input.scss 1:1` +
+/// 6 spaces + `root stylesheet`). An empty stack means the error came from the
+/// entry stylesheet, which renders as the single `root stylesheet` line.
+pub(crate) fn snippet(message: &str, loc: &Located, markers: &[Marker], trace: &[Frame]) -> String {
     let Some(primary) = markers.first() else {
         return String::new();
     };
@@ -113,13 +120,36 @@ pub(crate) fn snippet(message: &str, loc: &Located, markers: &[Marker]) -> Strin
         out.push('\n');
     }
     out.push_str("  '\n");
-    out.push_str(&format!(
-        "  {} {}:{}  root stylesheet",
-        short_name(&loc.file),
-        primary.line,
-        primary.col
-    ));
+    out.push_str(&footer(loc, primary.line, primary.col, trace));
     out
+}
+
+/// The lines under a snippet's `'` foot: the module-load stack, one
+/// `<file> <line>:<col>  <label>` per frame, the `<file> <line>:<col>` fields
+/// left-aligned in a common column (the goldens pad the shorter ones before the
+/// two-space label gap, e.g. `_midstream.scss 1:27  @use` / `input.scss 1:1` +
+/// 6 spaces + `root stylesheet`). An empty stack means the error came from the
+/// entry stylesheet, which renders as the single `root stylesheet` line under the
+/// location the golden gives it.
+fn footer(loc: &Located, line: u32, col: u32, trace: &[Frame]) -> String {
+    let root = Frame {
+        file: loc.file.clone(),
+        line,
+        col,
+        label: "root stylesheet".to_string(),
+    };
+    let frames: Vec<&Frame> = if trace.is_empty() { vec![&root] } else { trace.iter().collect() };
+    let cells: Vec<String> = frames
+        .iter()
+        .map(|f| format!("{} {}:{}", short_name(&f.file), f.line, f.col))
+        .collect();
+    let width = cells.iter().map(|c| c.chars().count()).max().unwrap_or(0);
+    cells
+        .iter()
+        .zip(&frames)
+        .map(|(cell, f)| format!("  {cell}{}  {}", " ".repeat(width - cell.chars().count()), f.label))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Goldens name the source file without its directory.

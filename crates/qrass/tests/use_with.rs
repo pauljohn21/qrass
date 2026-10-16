@@ -1,6 +1,7 @@
 //! Verbatim golden verification for `with (…)` configuration propagation
-//! (Round 19): `directives/use/with`, `directives/use/error/with`,
-//! `directives/forward/with` and the `with` clause syntax cases.
+//! (Rounds 19–20): `directives/use/with`, `directives/use/error/with`,
+//! `directives/forward/with`, `directives/forward/error/with.hrx` and the `with`
+//! clause syntax cases.
 //!
 //! The shared hrx runner compares only an error's first `Error:` line, which
 //! cannot catch a mis-placed caret, a wrong run length or a bad location column —
@@ -21,17 +22,19 @@ use tracing::{info, warn};
 
 /// Cases whose golden block needs features this round deliberately left out:
 /// * `…/through_import.hrx`: configuration travelling through SCSS `@import`.
-/// * `multi_configuration` / `through_forward_twice`: the
-///   `This module was already loaded…` message, whose block pairs an
-///   `original load` `=` run against a `new load` `^` run across two frames.
-/// * `conflict.hrx`: three marker runs with `... |` elision and a two-frame
-///   location.
-/// * `invalid_expression.hrx`: the `have incompatible units` / `no module with
-///   namespace` wordings, which differ from qrass' current phrasing.
+/// * `conflict.hrx` (`use/error/with`, `forward/error/with#4`): three marker runs
+///   with a `... |` elision row, a widened numeric gutter, and the
+///   `available from multiple global modules` detection behind them.
+/// * `multi_configuration` / `through_forward_twice` / `forward/error/with#15-#18`:
+///   the `This module was already loaded…` block, which draws the `new load` and
+///   the colliding `original load` (plus a `configuration` run when the offer
+///   came from another file) as separate labelled rows, in one block per file.
+///   qrass emits the message and the frame stack; the multi-statement block is
+///   the missing half.
 /// * `syntax…#3` / `syntax…#29`: `Expected identifier.` for `$ a`, which the
 ///   lexer raises as a bare lexical error — it never reaches the snippet
 ///   renderer, and the message is worded differently.
-const KNOWN_DEBT: [&str; 14] = [
+const KNOWN_DEBT: [&str; 17] = [
     "directives/use/with/through_import.hrx#0",
     "directives/use/with/through_import.hrx#1",
     "directives/forward/with/through_import.hrx#0",
@@ -42,21 +45,26 @@ const KNOWN_DEBT: [&str; 14] = [
     "directives/use/error/with/multi_configuration.hrx#2",
     "directives/use/error/with/multi_configuration.hrx#3",
     "directives/use/error/with/multi_configuration.hrx#4",
-    "directives/use/error/with/invalid_expression.hrx#0",
-    "directives/use/error/with/invalid_expression.hrx#2",
     "directives/use/error/syntax/with.hrx#3",
     "directives/forward/error/syntax.hrx#29",
+    "directives/forward/error/with.hrx#4",
+    "directives/forward/error/with.hrx#15",
+    "directives/forward/error/with.hrx#16",
+    "directives/forward/error/with.hrx#17",
+    "directives/forward/error/with.hrx#18",
 ];
 
 /// Golden trees this harness walks, plus the two syntax files whose `with/*`
-/// cases are picked out of a larger set. `directives/forward/error/with.hrx` is
-/// left out on purpose: every case there locates across two frames
-/// (`_midstream.scss 1:27  @use` plus `input.scss 1:1  root stylesheet`), which
-/// is recorded debt for the next round.
-const SUITES: [&str; 5] = [
+/// cases are picked out of a larger set. `directives/forward/error/with.hrx`
+/// joined the set with the module-load stack rendering: each of its cases
+/// locates across at least two frames (`_midstream.scss 1:27  @use` plus
+/// `input.scss 1:1  root stylesheet`), so walking it verbatim is what proves the
+/// frame stack is right.
+const SUITES: [&str; 6] = [
     "directives/use/with",
     "directives/use/error/with",
     "directives/forward/with",
+    "directives/forward/error/with.hrx",
     "directives/use/error/syntax/with.hrx",
     "directives/forward/error/syntax.hrx",
 ];
@@ -219,7 +227,7 @@ fn use_with_matches_goldens_verbatim() {
         "with configuration cases compared against the goldens"
     );
     // Guard against the harness silently vacuating (a moved/renamed spec tree).
-    assert!(checked >= 90, "only {checked} golden cases compared");
+    assert!(checked >= 110, "only {checked} golden cases compared");
     assert_eq!(debt, KNOWN_DEBT.len(), "debt list no longer matches the run");
     assert!(
         mismatched.is_empty(),

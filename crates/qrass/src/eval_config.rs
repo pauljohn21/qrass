@@ -59,8 +59,14 @@ impl EvalState {
 
     /// The view a `@forward` hands its target: the incoming offers that survive
     /// `show`/`hide`/`as` (renamed by the `as` prefix), overridden by whatever
-    /// the forward's own `with (…)` clause resolves to.
-    pub(crate) fn forward_config_view(&mut self, f: &Forward) -> Ev<Vec<(String, usize)>> {
+    /// the forward's own `with (…)` clause resolves to. Entries the statement
+    /// hard-coded (no `!default`) are recorded under `site`, which the forwarder
+    /// checks once the target has run.
+    pub(crate) fn forward_config_view(
+        &mut self,
+        f: &Forward,
+        site: usize,
+    ) -> Ev<Vec<(String, usize)>> {
         let span = debug_span!("with_config", stage = "forward", module = %self.name, url = %f.url, clauses = f.config.len());
         let _entered = span.entered();
         let incoming = self.config_stack.last().cloned().unwrap_or_default();
@@ -99,7 +105,9 @@ impl EvalState {
                 None | Some(SassValue::Null) => self.eval_config_value(e)?,
                 Some(value) => value,
             };
-            let idx = self.register_offer(key.clone(), value, None, e).1;
+            let idx = self
+                .register_offer(key.clone(), value, if e.default { None } else { Some(site) }, e)
+                .1;
             if let Some(slot) = view.iter().position(|(n, _)| *n == key) {
                 view[slot].1 = idx;
             } else {
