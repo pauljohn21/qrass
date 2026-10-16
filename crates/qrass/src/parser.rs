@@ -459,19 +459,14 @@ pub fn parse_stream(
         .box_it()
 }
 
-/// Synchronous convenience API for tests: parse a full token vector into a program.
+/// Synchronous convenience API: parse a full token vector into a program.
+/// Drains the very stream the pipeline runs, so there is one parsing fold in
+/// the crate.
 pub fn parse(
     file: FileId,
     name: String,
     content: String,
     tokens: Vec<Spanned>,
 ) -> Result<Vec<Stmt>, SassError> {
-    let mut p = Parser::new(file, name, content);
-    let mut stmts = Vec::new();
-    for t in tokens.into_iter().map(Some).chain(std::iter::once(None)) {
-        for r in p.step(t) {
-            stmts.push(r?);
-        }
-    }
-    Ok(stmts)
+    crate::drain::drain(parse_stream(file, name, content, tokens))
 }

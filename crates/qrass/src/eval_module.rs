@@ -8,6 +8,10 @@
 //! `!default` variables; a supplied-but-unconsumed name is an error (design D3).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
+
+use tracing::{Level, span};
 
 use crate::ast::{Forward, Use, UseAlias};
 use crate::env::AssignFlags;
@@ -152,7 +156,21 @@ impl EvalState {
         direct: bool,
         link: LoadLink,
         stmt: Span,
-    ) -> Ev<(Module, bool)> {
+    ) -> Ev<(Arc<Module>, bool)> {
+        // Cross-file pipeline boundary: one span per load so a module graph's
+        // instantiation chain is readable as nested spans with timings.
+        let span = span!(
+            Level::DEBUG,
+            "module_load",
+            stage = "load_module",
+            module = %self.name,
+            url = %url,
+            id = tracing::field::Empty,
+            cached = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+        let started = Instant::now();
         // Built-in modules (`sass:math`, `sass:color`, …) have no source file: their
         // functions resolve through the builtin registry by namespace at call time
         // and their constants (`math.$pi`, …) through the `module_const` fallback, so
@@ -161,11 +179,12 @@ impl EvalState {
             if direct {
                 self.settle_offers(&view);
             }
-            return Ok((Module { css: Vec::new(), vars: Vec::new(), ..Default::default() }, false));
+            return Ok((Arc::new(Module::default()), false));
         }
         let base = parent_dir(&self.name);
         let resolved = canonicalize_with(url, &base, &self.load_paths)?;
         let key = resolved.path.display().to_string();
+        span.record("id", key.as_str());
 
         if self.stack.contains(&key) {
             let mut chain = self.stack.clone();
@@ -197,6 +216,11 @@ impl EvalState {
             if direct {
                 self.settle_offers(&view);
             }
+            span.record("cached", true);
+            span.record(
+                "elapsed_ms",
+                tracing::field::debug(started.elapsed().as_millis() as u64),
+            );
             return Ok((module, false)); // cached: no CSS, no re-run
         }
 
@@ -226,8 +250,14 @@ impl EvalState {
             self.with_link(link, |st| st.instantiate(&key, &content, &view))?
         };
 
+        let module = Arc::new(module);
         self.modules.insert(key, module.clone());
         out.extend(module.css.iter().cloned());
+        span.record("cached", false);
+        span.record(
+            "elapsed_ms",
+            tracing::field::debug(started.elapsed().as_millis() as u64),
+        );
         Ok((module, ran))
     }
 
@@ -294,10 +324,23 @@ impl EvalState {
         content: &str,
         view: &[(String, usize)],
     ) -> Ev<Module> {
+        // One span per module body, nested inside its `module_load` parent, so a
+        // diamond graph reads as a tree of instantiation costs.
+        let span = span!(
+            Level::DEBUG,
+            "module_instantiate",
+            stage = "instantiate",
+            module = %key,
+            stmts = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+        let started = Instant::now();
         let program =
             crate::lexer::lex(0, key.to_string(), content.to_string()).and_then(|tokens| {
                 crate::parser::parse(0, key.to_string(), content.to_string(), tokens)
             })?;
+        span.record("stmts", program.len());
 
         let outer_env = std::mem::take(&mut self.env);
         let outer_owner = std::mem::replace(&mut self.env_owner, key.to_string());
@@ -366,6 +409,10 @@ impl EvalState {
         self.file = outer_file;
         self.name = outer_name;
         self.content = outer_content;
+        span.record(
+            "elapsed_ms",
+            tracing::field::debug(started.elapsed().as_millis() as u64),
+        );
 
         ran
     }

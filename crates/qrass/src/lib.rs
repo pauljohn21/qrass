@@ -1,13 +1,14 @@
 //! qrass - a reactive SCSS→CSS compiler built on rxrust ownership pipelines.
 //!
 //! Each pipeline stage builds an Observable and drains it in place
-//! (collect / reduce_initial + channel), passing *owned* plain data between
-//! stages. No `Arc<Mutex<_>>` business state anywhere. Orchestration is
-//! builder-style: see [`pipeline::PipelineBuilder`].
+//! (the shared `drain` terminal, `collect` / `reduce_initial` folds), passing
+//! *owned* plain data between stages. No `Arc<Mutex<_>>` business state
+//! anywhere. Orchestration is builder-style: see [`pipeline::PipelineBuilder`].
 
 use std::path::Path;
 
 mod diag;
+mod drain;
 pub mod error;
 pub mod lexer;
 pub mod loader;

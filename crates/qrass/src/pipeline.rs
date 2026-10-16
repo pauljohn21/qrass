@@ -20,39 +20,33 @@ use rxrust::prelude::*;
 
 use crate::OutputStyle;
 use crate::error::{ErrorKind, SassError};
-use crate::span::{FileId, Files};
+use crate::span::FileId;
 use crate::token::Spanned;
 
 /// A type-erased stage stream: value channel is `Result<T, SassError>`, error
 /// channel is `Infallible` (errors ride the value channel as `Result::Err`).
 type Stage<T> = LocalBoxedObservable<'static, Result<T, SassError>, Infallible>;
 
-/// Stage payloads: each owns the data for the next stage, moved by value.
-#[derive(Clone)]
+/// Stage payloads: each owns the data for the next stage and **is not `Clone`**.
+/// A payload moves by value down the chain; a closure that has to hand it back
+/// out takes it from an `Option` once, so no stage pays for a deep copy of the
+/// token vector or the program just to satisfy `FnMut` capture.
 struct Loaded {
-    /// Source registry; read starting in the module system (task 6) when @use/@forward
-    /// resolves additional files. Unused by the single-entry lex→parse→eval chain.
-    #[allow(dead_code)]
-    files: Files,
     file: FileId,
     name: String,
     content: String,
 }
-#[derive(Clone)]
 struct Lexed {
     loaded: Loaded,
     tokens: Vec<Spanned>,
 }
-#[derive(Clone)]
 struct Parsed {
-    lexed: Lexed,
+    loaded: Loaded,
     program: Vec<crate::ast::Stmt>,
 }
-#[derive(Clone)]
 struct Evaled {
     chunks: Vec<String>,
 }
-#[derive(Clone)]
 struct Rendered {
     css: String,
 }
@@ -78,7 +72,7 @@ fn load_stage(path: PathBuf) -> Stage<Loaded> {
         move |emitter: &mut dyn Emitter<Result<Loaded, SassError>, Infallible>| {
             let _g = span2.enter();
             let out = (|| -> Result<Loaded, SassError> {
-                let mut files = Files::default();
+                let mut files = crate::span::Files::default();
                 let src = crate::loader::load_entry(&path, &mut files)?;
                 let content = src
                     .content(&files)
@@ -88,7 +82,6 @@ fn load_stage(path: PathBuf) -> Stage<Loaded> {
                     .to_owned();
                 let name = files.name(src.file).to_owned();
                 Ok(Loaded {
-                    files,
                     file: src.file,
                     name,
                     content,
@@ -101,7 +94,7 @@ fn load_stage(path: PathBuf) -> Stage<Loaded> {
     .tap(move |_| {
         span.record(
             "elapsed_ms",
-            &tracing::field::debug(started.elapsed().as_millis() as u64),
+            tracing::field::debug(started.elapsed().as_millis() as u64),
         );
     })
     .box_it()
@@ -117,19 +110,23 @@ fn lex_stage(loaded: Loaded) -> Stage<Lexed> {
         module = loaded.name.as_str(),
         elapsed_ms = tracing::field::Empty
     );
-    crate::lexer::token_stream(loaded.file, loaded.name.clone(), loaded.content.clone())
+    // The lexer owns its input slice, so `content` is copied once here while the
+    // payload itself moves: `Loaded` travels to parse/eval without a second copy.
+    let file = loaded.file;
+    let name = loaded.name.clone();
+    let content = loaded.content.clone();
+    let mut carrier = Some(loaded);
+    crate::lexer::token_stream(file, name, content)
         .collect::<Vec<_>>()
         .map(move |items| {
+            let loaded = carrier.take().expect("lex stage emits once");
             let result: Result<Vec<_>, _> = items.into_iter().collect();
-            result.map(|tokens| Lexed {
-                loaded: loaded.clone(),
-                tokens,
-            })
+            result.map(|tokens| Lexed { loaded, tokens })
         })
         .tap(move |_| {
             span.record(
                 "elapsed_ms",
-                &tracing::field::debug(started.elapsed().as_millis() as u64),
+                tracing::field::debug(started.elapsed().as_millis() as u64),
             );
         })
         .box_it()
@@ -148,31 +145,28 @@ fn parse_stage(lexed: Lexed) -> Stage<Parsed> {
         stmts = tracing::field::Empty,
         elapsed_ms = tracing::field::Empty
     );
-    let src = lexed.loaded.clone();
     let span2 = span.clone();
-    crate::parser::parse_stream(
-        src.file,
-        src.name.clone(),
-        src.content.clone(),
-        lexed.tokens.clone(),
-    )
-    .collect::<Vec<_>>()
-    .map(move |items| {
-        let _g = span2.enter();
-        let result: Result<Vec<_>, _> = items.into_iter().collect();
-        result.map(|program| {
-            span2.record("stmts", &tracing::field::debug(program.len()));
-            Parsed {
-                lexed: lexed.clone(),
-                program,
-            }
+    let file = lexed.loaded.file;
+    let name = lexed.loaded.name.clone();
+    let content = lexed.loaded.content.clone();
+    let tokens = lexed.tokens; // moved: the parser consumes the token vector
+    let mut carrier = Some(lexed.loaded);
+    crate::parser::parse_stream(file, name, content, tokens)
+        .collect::<Vec<_>>()
+        .map(move |items| {
+            let _g = span2.enter();
+            let loaded = carrier.take().expect("parse stage emits once");
+            let result: Result<Vec<_>, _> = items.into_iter().collect();
+            result.map(|program| {
+                span2.record("stmts", tracing::field::debug(program.len()));
+                Parsed { loaded, program }
+            })
         })
-    })
     .tap(move |_| {
         let _g = span.enter();
         span.record(
             "elapsed_ms",
-            &tracing::field::debug(started.elapsed().as_millis() as u64),
+            tracing::field::debug(started.elapsed().as_millis() as u64),
         );
     })
     .box_it()
@@ -182,38 +176,35 @@ fn parse_stage(lexed: Lexed) -> Stage<Parsed> {
 /// per-statement eval stream, short-circuiting on the first error.
 fn eval_stage(parsed: Parsed, load_paths: Vec<PathBuf>) -> Stage<Evaled> {
     let started = Instant::now();
-    let loaded = &parsed.lexed.loaded;
+    let Parsed { loaded, program } = parsed;
     let span = tracing::span!(
         tracing::Level::INFO,
         "compile",
         stage = "eval",
         module = loaded.name.as_str(),
-        stmts = parsed.program.len(),
+        stmts = program.len(),
         chunks = tracing::field::Empty,
         elapsed_ms = tracing::field::Empty
     );
     let span2 = span.clone();
-    crate::eval::eval_stream(
-        loaded.file,
-        loaded.name.clone(),
-        loaded.content.clone(),
-        parsed.program.clone(),
-        load_paths,
-    )
-    .collect::<Vec<_>>()
-    .map(move |items| {
-        let _g = span2.enter();
-        let result: Result<Vec<String>, SassError> = items.into_iter().collect();
-        result.map(|chunks| {
-            span2.record("chunks", &tracing::field::debug(chunks.len()));
-            Evaled { chunks }
+    let file = loaded.file;
+    let name = loaded.name.clone();
+    let content = loaded.content.clone();
+    crate::eval::eval_stream(file, name, content, program, load_paths)
+        .collect::<Vec<_>>()
+        .map(move |items| {
+            let _g = span2.enter();
+            let result: Result<Vec<String>, SassError> = items.into_iter().collect();
+            result.map(|chunks| {
+                span2.record("chunks", tracing::field::debug(chunks.len()));
+                Evaled { chunks }
+            })
         })
-    })
     .tap(move |_| {
         let _g = span.enter();
         span.record(
             "elapsed_ms",
-            &tracing::field::debug(started.elapsed().as_millis() as u64),
+            tracing::field::debug(started.elapsed().as_millis() as u64),
         );
     })
     .box_it()
@@ -243,7 +234,7 @@ fn render_stage(evaled: Evaled) -> Stage<Rendered> {
         .tap(move |_| {
             span.record(
                 "elapsed_ms",
-                &tracing::field::debug(started.elapsed().as_millis() as u64),
+                tracing::field::debug(started.elapsed().as_millis() as u64),
             );
         })
         .box_it()
@@ -280,7 +271,8 @@ impl PipelineBuilder {
             .ok_or_else(|| SassError::new(ErrorKind::Load, "pipeline has no entry file"))?;
 
         let (tx, rx) = mpsc::channel::<Result<String, SassError>>();
-        let load_paths = self.load_paths.clone();
+        // The `Vec` travels by value into the one closure that needs it.
+        let mut load_paths = Some(self.load_paths);
         load_stage(entry)
             .flat_map(|r| match r {
                 Ok(loaded) => lex_stage(loaded),
@@ -291,7 +283,7 @@ impl PipelineBuilder {
                 Err(e) => fail(e),
             })
             .flat_map(move |r| match r {
-                Ok(parsed) => eval_stage(parsed, load_paths.clone()),
+                Ok(parsed) => eval_stage(parsed, load_paths.take().expect("eval stage runs once")),
                 Err(e) => fail(e),
             })
             .flat_map(|r| match r {

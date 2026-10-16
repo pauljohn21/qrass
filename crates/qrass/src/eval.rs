@@ -1,8 +1,9 @@
 //! Eval stage (task 5.3): fold the owned statement tree into a stream of CSS
 //! rule chunks. The reactive shape mirrors the lexer/parser: `from_iter(program)`
-//! drives a `scan_map(&mut EvalState, …)` transducer that carries the [`Env`]
-//! **by value**, emitting the owned chunks produced by each top-level statement
-//! (which `flat_map` spreads into the event stream that render reduces).
+//! drives a fold whose accumulator — the [`EvalFold`] carrying state, chunks and
+//! a parked error — moves **by value** through every statement via
+//! `reduce_initial`, and `flat_map` re-emits the resolved chunks that render
+//! reduces. No `Clone` is needed to satisfy `FnMut` capture.
 //!
 //! Nested traversal lives in [`eval_stmt`] (an `impl EvalState` sibling) and
 //! expression evaluation in [`eval_expr`] — structural recursion over owned
@@ -12,6 +13,8 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
 
 use rxrust::prelude::*;
 
@@ -112,8 +115,10 @@ pub struct EvalState {
     pub file: FileId,
     pub name: String,
     pub content: String,
-    /// Instantiated modules keyed by canonical path (instantiate-once).
-    pub modules: HashMap<String, Module>,
+    /// Instantiated modules keyed by canonical path (instantiate-once). Shared
+    /// as a read-only `Arc` so a diamond `@use` costs a refcount bump instead of
+    /// deep-copying the module's variable/mixin/function tables.
+    pub modules: HashMap<String, Arc<Module>>,
     /// Canonical paths on the current `@use` chain, for cycle detection.
     pub stack: Vec<String>,
     /// The live `@use`/`@forward` chain, innermost last, behind an error's
@@ -291,32 +296,85 @@ impl EvalState {
     }
 }
 
-/// Fold the whole program into owned CSS chunks (synchronous: used by tests and
-/// by the pipeline, which drives [`eval_stream`] and collects it).
+/// Fold the whole program into owned CSS chunks. A thin synchronous drain of
+/// [`eval_stream`] through the standard `mpsc` terminal, so a test harness reads
+/// the very stream the pipeline runs rather than a second implementation.
 pub fn eval_all(
     file: FileId,
     name: String,
     content: String,
     program: Vec<Stmt>,
 ) -> Result<Vec<String>, SassError> {
-    let mut st = EvalState::new(file, name, content);
-    let mut chunks: Vec<String> = Vec::new();
-    for stmt in &program {
-        st.eval_top_level(stmt, &mut chunks)?;
-    }
-    // Global `@extend` pass (D4): placeholders and extend sites are only fully
-    // known once the whole module is traversed, so resolution substitutes each
-    // placeholder's source-position marker in place.
-    st.extend_pass(&mut chunks)?;
-    Ok(chunks)
+    crate::drain::drain(eval_stream(file, name, content, program, Vec::new()))
 }
 
-/// Cold CSS-event stream. `@extend` is a global constraint — placeholder rules
-/// and their extend sites are only fully known after the whole module is
-/// traversed — so per-statement chunks are buffered and each placeholder's
-/// source-position marker is substituted in place by the `@extend` pass before
-/// the resolved chunks are emitted and the stream completes. Errors
-/// short-circuit via the value channel.
+/// Owned accumulator of the eval fold: the live [`EvalState`], the chunks it has
+/// emitted, and the first error. The error is *parked* rather than unwound so the
+/// fold keeps transporting one value by ownership (no `Clone` of the arena, no
+/// shared cell); statements after the failure simply do not run.
+pub(crate) struct EvalFold {
+    st: EvalState,
+    chunks: Vec<String>,
+    failure: Option<SassError>,
+}
+
+impl EvalFold {
+    /// Run one top-level statement, appending the chunks it produced.
+    fn step(mut self, stmt: Stmt) -> Self {
+        if self.failure.is_none() {
+            let outcome = self.st.eval_top_level(&stmt, &mut self.chunks);
+            if let Err(err) = outcome {
+                self.failure = Some(err);
+            }
+        }
+        self
+    }
+
+    /// Boundary emission: the global `@extend` pass (D4 — placeholders and their
+    /// sites are only fully known once the whole module ran) substitutes each
+    /// marker in place, then the resolved chunks leave as their own stream. A
+    /// parked error short-circuits onto the value channel instead.
+    fn finish(mut self) -> LocalBoxedObservable<'static, Ev<String>, Infallible> {
+        // The batch pass is its own pipeline stage: one span with the module it
+        // resolved and how many chunks left it, nested in the `eval` stage span.
+        let span = tracing::span!(
+            tracing::Level::DEBUG,
+            "extend",
+            stage = "extend",
+            module = %self.st.name,
+            chunks = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+        let started = Instant::now();
+        if self.failure.is_none() {
+            let outcome = self.st.extend_pass(&mut self.chunks);
+            if let Err(err) = outcome {
+                self.failure = Some(err);
+            }
+        }
+        span.record("chunks", self.chunks.len());
+        span.record(
+            "elapsed_ms",
+            tracing::field::debug(started.elapsed().as_millis() as u64),
+        );
+        let Self {
+            chunks,
+            failure,
+            st: _,
+        } = self;
+        match failure {
+            Some(err) => Local::of(Err::<String, SassError>(err)).box_it(),
+            None => Local::from_iter(chunks.into_iter().map(Ok::<String, SassError>)).box_it(),
+        }
+    }
+}
+
+/// Cold CSS-event stream, shaped like the lexer/parser transducers: the owned
+/// program is driven statement-by-statement by `from_iter`, the [`EvalFold`]
+/// moves by value through `reduce_initial` (which emits exactly its final
+/// accumulator, so the state leaves the fold owned rather than borrowed back),
+/// and `flat_map` re-emits the chunks resolved at that boundary.
 pub fn eval_stream(
     file: FileId,
     name: String,
@@ -324,28 +382,17 @@ pub fn eval_stream(
     program: Vec<Stmt>,
     load_paths: Vec<PathBuf>,
 ) -> LocalBoxedObservable<'static, Ev<String>, Infallible> {
-    Local::create(
-        move |emitter: &mut dyn rxrust::observer::Emitter<Ev<String>, Infallible>| {
-            let mut st = EvalState::new(file, name, content);
-            st.load_paths = load_paths;
-            let mut chunks: Vec<String> = Vec::new();
-            for stmt in &program {
-                if let Err(e) = st.eval_top_level(stmt, &mut chunks) {
-                    emitter.next(Err(e));
-                    emitter.complete();
-                    return;
-                }
-            }
-            if let Err(e) = st.extend_pass(&mut chunks) {
-                emitter.next(Err(e));
-                emitter.complete();
-                return;
-            }
-            for chunk in chunks {
-                emitter.next(Ok(chunk));
-            }
-            emitter.complete();
-        },
-    )
-    .box_it()
+    let mut st = EvalState::new(file, name, content);
+    st.load_paths = load_paths;
+    Local::from_iter(program)
+        .reduce_initial(
+            EvalFold {
+                st,
+                chunks: Vec::new(),
+                failure: None,
+            },
+            |fold, stmt| fold.step(stmt),
+        )
+        .flat_map(|fold| fold.finish())
+        .box_it()
 }

@@ -261,27 +261,12 @@ pub fn token_stream(
     )
     .scan_map(Lexer::new(file, name), |lx, ch| lx.feed(ch))
     .filter(|batch| !batch.is_empty())
-    .flat_map(|batch| Local::from_iter(batch))
+    .flat_map(Local::from_iter)
     .box_it()
 }
 
-/// Synchronous convenience API for tests: lex an entire source into tokens.
+/// Synchronous convenience API: lex an entire source into tokens. Drains the
+/// very stream the pipeline runs, so there is one lexing fold in the crate.
 pub fn lex(file: FileId, name: String, content: String) -> Result<Vec<Spanned>, SassError> {
-    let mut lx = Lexer::new(file, name);
-    let mut tokens = Vec::new();
-    for ch in content.chars() {
-        for r in lx.feed(Some(ch)) {
-            match r {
-                Ok(s) => tokens.push(s),
-                Err(e) => return Err(e),
-            }
-        }
-    }
-    for r in lx.feed(None) {
-        match r {
-            Ok(s) => tokens.push(s),
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(tokens)
+    crate::drain::drain(token_stream(file, name, content))
 }
