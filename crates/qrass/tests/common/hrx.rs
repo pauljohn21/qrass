@@ -104,12 +104,54 @@ fn lookup(files: &[Entry], name: &str) -> Option<String> {
 
 /// Parse a `.hrx` document into its test cases. Empty / headerless fragments
 /// (which the writer can emit around separators) are dropped.
+///
+/// Follows sass-spec's *accumulating file set*: source files (partials like
+/// `_utils.scss`) declared in any section stay in scope for all later sections
+/// of the same document — a section that only declares fixtures contributes no
+/// case but seeds the shared files, and a later input section sees both. Each
+/// case's `files` are the inherited sources plus the section's own entries, so
+/// expectation lookups (`output.css`, `error`) never leak across cases.
 pub fn parse(text: &str) -> Vec<Case> {
+    let mut inherited: Vec<Entry> = Vec::new();
     text.split(SECTION_SEPARATOR)
         .map(parse_files)
         .filter(|files| !files.is_empty())
-        .map(Case::from_entries)
+        .map(|files| {
+            for (path, contents) in &files {
+                if is_source_file(path) {
+                    upsert(&mut inherited, path.clone(), contents.clone());
+                }
+            }
+            // The section's own entries win over inherited ones at the same
+            // path (a later declaration redefines the file), so they come first.
+            let mut merged = files.clone();
+            for (path, contents) in inherited.iter() {
+                if !merged.iter().any(|(p, _)| p == path) {
+                    merged.push((path.clone(), contents.clone()));
+                }
+            }
+            Case::from_entries(merged)
+        })
         .collect()
+}
+
+/// Whether a member is a Sass source file (subject to cross-section
+/// inheritance) rather than an expectation (`output*`, `error`, `warning`,
+/// `options.yml`) which belongs to its own section only.
+fn is_source_file(path: &str) -> bool {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    !(base.starts_with("output")
+        || base.starts_with("error")
+        || base.starts_with("warning")
+        || base == "options.yml")
+}
+
+/// Insert or replace an entry by path, preserving source order.
+fn upsert(entries: &mut Vec<Entry>, path: String, contents: String) {
+    match entries.iter_mut().find(|(p, _)| *p == path) {
+        Some(slot) => slot.1 = contents,
+        None => entries.push((path, contents)),
+    }
 }
 
 /// Split one case fragment into ordered `(path, contents)` entries. A line

@@ -1,7 +1,7 @@
 //! CSS Color 4 value model (sass-spec `color.*` suites).
 //!
 //! A `Color4` is a color space plus three (possibly powerless `none`) channel
-//! components and an alpha, exactly as dart-sass stores parsed `color(...)` /
+//! components and an alpha, exactly as the goldens store parsed `color(...)` /
 //! `lab()` / `lch()` / `oklab()` / `oklch()` / `hsl()` / `hwb()` literals. The
 //! legacy RGBA fields on [`crate::value::Color`] are filled through
 //! [`Color4::to_rgb`], so old channel APIs keep working; serialization of a
@@ -52,10 +52,20 @@ pub static SPACES: &[Space] = &[
     Space { name: "srgb-linear", wrapper: true, channels: rgb_channels() },
     Space { name: "a98-rgb", wrapper: true, channels: rgb_channels() },
     Space { name: "display-p3", wrapper: true, channels: rgb_channels() },
+    Space { name: "display-p3-linear", wrapper: true, channels: rgb_channels() },
     Space { name: "prophoto-rgb", wrapper: true, channels: rgb_channels() },
     Space { name: "rec2020", wrapper: true, channels: rgb_channels() },
     Space {
         name: "xyz",
+        wrapper: true,
+        channels: [
+            ch("x", Unit::Num, 0.0, 1.0),
+            ch("y", Unit::Num, 0.0, 1.0),
+            ch("z", Unit::Num, 0.0, 1.0),
+        ],
+    },
+    Space {
+        name: "xyz-d50",
         wrapper: true,
         channels: [
             ch("x", Unit::Num, 0.0, 1.0),
@@ -71,10 +81,10 @@ pub static SPACES: &[Space] = &[
     Space { name: "oklch", wrapper: false, channels: [ch("lightness", Unit::Pct, 0.0, 100.0), ch("chroma", Unit::Num, 0.0, 0.4), ch("hue", Unit::Deg, 0.0, 360.0)] },
 ];
 
-/// `xyz-d50` / `xyz-d65` alias onto the `xyz` definition.
+/// `xyz-d65` aliases onto the `xyz` (D65) definition; `xyz-d50` is its own space.
 pub fn lookup(name: &str) -> Option<&'static Space> {
     match name {
-        "xyz-d50" | "xyz-d65" => SPACES.iter().find(|s| s.name == "xyz"),
+        "xyz-d65" => SPACES.iter().find(|s| s.name == "xyz"),
         other => SPACES.iter().find(|s| s.name == other),
     }
 }
@@ -86,17 +96,23 @@ pub struct Color4 {
     pub space: &'static Space,
     pub comps: [Option<f64>; 3],
     pub alpha: Option<f64>,
+    /// True only when the literal wrote `/ none` explicitly (an omitted alpha
+    /// defaults to opaque 1 and is never "missing").
+    pub alpha_missing: bool,
 }
 
 impl PartialEq for Color4 {
     fn eq(&self, other: &Self) -> bool {
-        self.space.name == other.space.name && self.comps == other.comps && self.alpha == other.alpha
+        self.space.name == other.space.name
+            && self.comps == other.comps
+            && self.alpha == other.alpha
+            && self.alpha_missing == other.alpha_missing
     }
 }
 
 impl Color4 {
     pub fn new(space: &'static Space, comps: [f64; 3]) -> Self {
-        Self { space, comps: comps.map(Some), alpha: None }
+        Self { space, comps: comps.map(Some), alpha: None, alpha_missing: false }
     }
 
     pub fn alpha(&self) -> f64 {
@@ -124,7 +140,10 @@ impl Color4 {
             .collect();
         let mut args = parts.join(" ");
         let a = self.alpha();
-        if self.alpha.is_some() {
+        if self.alpha_missing {
+            args.push_str(" / none");
+        } else if self.alpha.is_some() && a != 1.0 {
+            // An explicit `/ 1` round-trips without the alpha slot (the goldens).
             args.push_str(&format!(" / {}", format_number(a)));
         }
         if self.space.wrapper {
@@ -136,7 +155,7 @@ impl Color4 {
 
     /// Convert to 8-bit-scale sRGB channels (unclamped) for the legacy API.
     pub fn to_rgb(&self) -> [f64; 3] {
-        let lin = linear_srgb_from(self, self.raw());
+        let lin = mul(&xyz_to_lin_srgb(), self.to_xyz_d65());
         [
             encode_srgb(lin[0]) * 255.0,
             encode_srgb(lin[1]) * 255.0,
@@ -144,7 +163,7 @@ impl Color4 {
         ]
     }
 
-    fn raw(&self) -> [f64; 3] {
+    pub(crate) fn raw(&self) -> [f64; 3] {
         [c0(self.comps[0]), c0(self.comps[1]), c0(self.comps[2])]
     }
 }
@@ -168,9 +187,9 @@ fn fmt_comp(v: Option<f64>, c: &Channel) -> String {
 // Space → linear sRGB conversions (CSS Color 4 reference matrices, D65).
 // ---------------------------------------------------------------------------
 
-type Mat = [[f64; 3]; 3];
+pub(crate) type Mat = [[f64; 3]; 3];
 
-fn mul(m: &Mat, v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn mul(m: &Mat, v: [f64; 3]) -> [f64; 3] {
     [
         m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
         m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
@@ -178,38 +197,84 @@ fn mul(m: &Mat, v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-const XYZ_TO_LIN_SRGB: Mat = [
-    [3.24096995, -1.53738317, -0.49861072],
-    [-0.96924320, 1.87596754, 0.04155506],
-    [0.05563010, -0.20397695, 1.05697152],
+// The RGB -> XYZ matrices are the CSS Color 4 reference matrices, taken as the
+// spec's own exact rationals (computed from the R/G/B/W chromaticities with the
+// white-scaling that forces rgb (1,1,1) exactly onto the reference white). Using
+// the rationals keeps every space closing onto the *same* D65/D50 white, so a
+// neutral grey survives a cross-gamut round-trip unchanged (hand-rounded decimal
+// copies drifted the white by ~1e-8 and split greys across channels, and a fresh
+// derive from the primaries does not reproduce golden — e.g. the spec resolves
+// display-P3 green to Y = 247089/357200 ≈ 0.6917, not the 0.640 a naive derive
+// yields). ProPhoto's matrix is irrational; the spec's 64-bit form is used.
+
+/// linear sRGB -> XYZ-D65 (CSS Color 4 reference).
+pub(crate) fn lin_srgb_to_xyz() -> Mat {
+    [
+        [506752.0 / 1228815.0, 87881.0 / 245763.0, 12673.0 / 70218.0],
+        [87098.0 / 409605.0, 175762.0 / 245763.0, 12673.0 / 175545.0],
+        [7918.0 / 409605.0, 87881.0 / 737289.0, 1001167.0 / 1053270.0],
+    ]
+}
+/// linear Display P3 -> XYZ-D65 (CSS Color 4 reference).
+pub(crate) fn lin_p3_to_xyz() -> Mat {
+    [
+        [608311.0 / 1250200.0, 189793.0 / 714400.0, 198249.0 / 1000160.0],
+        [35783.0 / 156275.0, 247089.0 / 357200.0, 198249.0 / 2500400.0],
+        [0.0, 32229.0 / 714400.0, 5220557.0 / 5000800.0],
+    ]
+}
+/// linear a98-rgb -> XYZ-D65 (CSS Color 4 reference).
+pub(crate) fn lin_a98_to_xyz() -> Mat {
+    [
+        [573536.0 / 994567.0, 263643.0 / 1420810.0, 187206.0 / 994567.0],
+        [591459.0 / 1989134.0, 6239551.0 / 9945670.0, 374412.0 / 4972835.0],
+        [53769.0 / 1989134.0, 351524.0 / 4972835.0, 4929758.0 / 4972835.0],
+    ]
+}
+/// linear Rec. 2020 -> XYZ-D65 (CSS Color 4 reference).
+pub(crate) fn lin_rec2020_to_xyz() -> Mat {
+    [
+        [63426534.0 / 99577255.0, 20160776.0 / 139408157.0, 47086771.0 / 278816314.0],
+        [26158966.0 / 99577255.0, 472592308.0 / 697040785.0, 8267143.0 / 139408157.0],
+        [0.0, 19567812.0 / 697040785.0, 295819943.0 / 278816314.0],
+    ]
+}
+/// linear ProPhoto RGB -> XYZ-D50 (CSS Color 4 reference, 64-bit irrational form;
+/// defined on the D50 white, `to_xyz_d65` adapts it up).
+pub(crate) fn lin_prophoto_to_xyz_d50() -> Mat {
+    [
+        [0.79776664490064230, 0.13518129740053308, 0.03134773412839220],
+        [0.28807482881940130, 0.71183523424187300, 0.00008993693872564],
+        [0.0, 0.0, 0.82510460251046020],
+    ]
+}
+/// XYZ-D65 -> linear sRGB (the exact inverse of [`lin_srgb_to_xyz`]).
+pub(crate) fn xyz_to_lin_srgb() -> Mat {
+    crate::color4_convert::inv(&lin_srgb_to_xyz())
+}
+/// Bradford chromatic adaptation, D65 → D50 (CSS Color 4 reference). This is the
+/// single canonical adaptation matrix: the D50→D65 direction is its exact numeric
+/// inverse ([`bradford_d50_to_d65`]) and the D50 reference white is derived from it
+/// ([`white_d50`]). Keeping all three mutually consistent is what lets a neutral
+/// survive `lab`/`lch`/`xyz-d50`/`prophoto` round-trips exactly — the spec's
+/// separately-rounded inverse and a hand-picked D50 white disagreed by ~6e-6,
+/// which leaked float noise into the a/b channels of every neutral.
+pub(crate) const BRADFORD_D65_TO_D50: Mat = [
+    [1.0479298208, 0.0229467933, -0.0501922295],
+    [0.0296278157, 0.9904344745, -0.0170738250],
+    [-0.0092430582, 0.0150551448, 0.7518742899],
 ];
-const LIN_P3_TO_XYZ: Mat = [
-    [0.48657095, 0.26566770, 0.19821729],
-    [0.22897456, 0.69173853, 0.07928691],
-    [0.00000000, 0.04511371, 1.04394423],
-];
-const LIN_A98_TO_XYZ: Mat = [
-    [0.57666904, 0.18555824, 0.18643497],
-    [0.29734498, 0.62736357, 0.07529146],
-    [0.02703137, 0.07068875, 0.99133754],
-];
-const LIN_REC2020_TO_XYZ: Mat = [
-    [0.63695805, 0.14461691, 0.16888098],
-    [0.26270036, 0.67799808, 0.05930163],
-    [0.00000000, 0.02807257, 1.06098506],
-];
-const LIN_PROPHOTO_TO_XYZ_D50: Mat = [
-    [0.79767490, 0.13519171, 0.03135341],
-    [0.28804021, 0.71187414, 0.00008566],
-    [0.00000000, 0.00000000, 0.82521000],
-];
-/// Bradford chromatic adaptation, D50 → D65.
-const BRADFORD_D50_TO_D65: Mat = [
-    [0.9555766, -0.0230393, 0.0631636],
-    [-0.0282895, 1.0099416, 0.0210077],
-    [0.0122982, -0.0204830, 1.3299098],
-];
-const WHITE_D50: [f64; 3] = [0.9642956764, 1.0, 0.8251046025];
+/// Bradford chromatic adaptation, D50 → D65: the exact inverse of
+/// [`BRADFORD_D65_TO_D50`].
+pub(crate) fn bradford_d50_to_d65() -> Mat {
+    crate::color4_convert::inv(&BRADFORD_D65_TO_D50)
+}
+/// CIE D50 reference white (Y = 1): `BRADFORD_D65_TO_D50` applied to the sRGB D65
+/// white, so the adaptation chain closes on itself and D65 white maps to `a = b = 0`.
+pub(crate) fn white_d50() -> [f64; 3] {
+    let d65 = mul(&lin_srgb_to_xyz(), [1.0, 1.0, 1.0]);
+    mul(&BRADFORD_D65_TO_D50, d65)
+}
 
 fn decode_srgb(c: f64) -> f64 {
     let s = c.abs();
@@ -217,31 +282,35 @@ fn decode_srgb(c: f64) -> f64 {
     l * c.signum()
 }
 
-fn encode_srgb(c: f64) -> f64 {
+pub(crate) fn encode_srgb(c: f64) -> f64 {
     let s = c.abs();
     let v = if s <= 0.0031308 { 12.92 * s } else { 1.055 * s.powf(1.0 / 2.4) - 0.055 };
     v * c.signum()
 }
 
 fn decode_rec2020(c: f64) -> f64 {
-    let s = c.abs();
-    let l = if s <= 0.081 { s / 4.5 } else { ((s + 0.099) / 1.099).powf(1.0 / 0.45) };
-    l * c.signum()
+    // The goldens model the rec2020 *display* with the pure-power BT.1886
+    // EOTF, L = V^2.4, not the CSS Color 4 piecewise α/β (0.45) OETF inverse:
+    // a neutral 0.5 decodes to 0.5^2.4 = 0.1894645708, which the spec's `to-space`
+    // goldens reproduce exactly. Kept symmetric with `encode_rec2020`.
+    c.abs().powf(2.4) * c.signum()
 }
 
 fn decode_a98(c: f64) -> f64 {
-    c.abs().powf(256.0 / 563.0) * c.signum()
+    // a98 gamma is 563/256 ≈ 2.2: nonlinear → linear raises by that exponent.
+    c.abs().powf(563.0 / 256.0) * c.signum()
 }
 
 fn decode_prophoto(c: f64) -> f64 {
-    if c.abs() < 1.0 / 16.0 { c / 16.0 } else { c.abs().powf(1.8) * c.signum() }
+    // ProPhoto extended transfer (CSS Color 4): linear segment below Et2 = 16/512.
+    if c.abs() <= 16.0 / 512.0 { c / 16.0 } else { c.abs().powf(1.8) * c.signum() }
 }
 
 /// Non-linear comps of a gamut space → linear.
-fn gamut_to_linear(space: &str, v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn gamut_to_linear(space: &str, v: [f64; 3]) -> [f64; 3] {
     match space {
         "srgb" | "display-p3" => [decode_srgb(v[0]), decode_srgb(v[1]), decode_srgb(v[2])],
-        "srgb-linear" => v,
+        "srgb-linear" | "display-p3-linear" => v,
         "a98-rgb" => [decode_a98(v[0]), decode_a98(v[1]), decode_a98(v[2])],
         "rec2020" => [decode_rec2020(v[0]), decode_rec2020(v[1]), decode_rec2020(v[2])],
         "prophoto-rgb" => [decode_prophoto(v[0]), decode_prophoto(v[1]), decode_prophoto(v[2])],
@@ -250,30 +319,7 @@ fn gamut_to_linear(space: &str, v: [f64; 3]) -> [f64; 3] {
 }
 
 #[allow(non_snake_case)]
-fn hsl_to_lin_rgb(h: f64, s: f64, l: f64) -> [f64; 3] {
-    // dart-sass keeps the HSL round-trip in the non-linear sRGB encoding.
-    let col = crate::value::Color::from_hsla(h, s, l, 1.0);
-    [
-        decode_srgb(col.r / 255.0),
-        decode_srgb(col.g / 255.0),
-        decode_srgb(col.b / 255.0),
-    ]
-}
-
-fn hwb_to_lin_rgb(h: f64, w: f64, b: f64) -> [f64; 3] {
-    let total = w + b;
-    let (w, b) = if total >= 100.0 {
-        (w / total * 100.0, b / total * 100.0)
-    } else {
-        (w, b)
-    };
-    let s = 100.0 - w - b;
-    let l = w + s / 2.0;
-    hsl_to_lin_rgb(h, if s == 0.0 { 0.0 } else { s / (100.0 - (2.0 * l - 100.0).abs()) * 100.0 }.min(100.0), l)
-}
-
-#[allow(non_snake_case)]
-fn lab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
+pub(crate) fn lab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
     const K: f64 = 6.0 / 29.0;
     let fy = (L + 16.0) / 116.0;
     let fx = a / 500.0 + fy;
@@ -282,68 +328,13 @@ fn lab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
         if t > K {
             t * t * t
         } else {
-            3.0 * K * K * (t - 4.0 * K)
+            3.0 * K * K * (t - 4.0 / 29.0)
         }
     };
+    let w = white_d50();
     [
-        WHITE_D50[0] * finv(fx),
-        WHITE_D50[1] * finv(fy),
-        WHITE_D50[2] * finv(fz),
+        w[0] * finv(fx),
+        w[1] * finv(fy),
+        w[2] * finv(fz),
     ]
 }
-
-#[allow(non_snake_case)]
-fn oklab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
-    let l_ = L + 0.3963377794 * a + 0.2158037573 * b;
-    let m_ = L - 0.1055613458 * a - 0.0638541728 * b;
-    let s_ = L - 0.0894841775 * a - 1.2914855480 * b;
-    let (l, m, s) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
-    [
-        4.0767416621 * l - 1.2684380046 * m - 0.0041960863 * s,
-        -1.2686807231 * l + 2.6093000011 * m - 0.3413193967 * s,
-        -0.0041960863 * l - 0.7034160958 * m + 1.7076693116 * s,
-    ]
-}
-
-/// Convert a Color 4 value's (possibly powerless) components to linear sRGB.
-fn linear_srgb_from(c4: &Color4, raw: [f64; 3]) -> [f64; 3] {
-    let name = c4.space.name;
-    match name {
-        "srgb" | "srgb-linear" | "display-p3" | "a98-rgb" | "rec2020" | "prophoto-rgb" => {
-            let lin = gamut_to_linear(name, raw);
-            let xyz = match name {
-                "srgb" | "srgb-linear" => mul(&LIN_SRGB_TO_XYZ, lin),
-                "display-p3" => mul(&LIN_P3_TO_XYZ, lin),
-                "a98-rgb" => mul(&LIN_A98_TO_XYZ, lin),
-                "rec2020" => mul(&LIN_REC2020_TO_XYZ, lin),
-                _ => mul(&BRADFORD_D50_TO_D65, mul(&LIN_PROPHOTO_TO_XYZ_D50, lin)),
-            };
-            mul(&XYZ_TO_LIN_SRGB, xyz)
-        }
-        "xyz" => mul(&XYZ_TO_LIN_SRGB, raw),
-        "hsl" => hsl_to_lin_rgb(raw[0], raw[1], raw[2]),
-        "hwb" => hwb_to_lin_rgb(raw[0], raw[1], raw[2]),
-        "lab" => mul(&XYZ_TO_LIN_SRGB, mul(&BRADFORD_D50_TO_D65, lab_to_xyz(raw[0], raw[1], raw[2]))),
-        "oklab" => mul(&XYZ_TO_LIN_SRGB, oklab_to_xyz(raw[0], raw[1], raw[2])),
-        "lch" => {
-            let h = raw[2].to_radians();
-            lab_to_xyz_into(c4, raw[0], raw[1] * h.cos(), raw[1] * h.sin())
-        }
-        "oklch" => {
-            let h = raw[2].to_radians();
-            mul(&XYZ_TO_LIN_SRGB, oklab_to_xyz(raw[0], raw[1] * h.cos(), raw[1] * h.sin()))
-        }
-        _ => [0.0, 0.0, 0.0],
-    }
-}
-
-#[allow(non_snake_case)]
-fn lab_to_xyz_into(_c4: &Color4, L: f64, a: f64, b: f64) -> [f64; 3] {
-    mul(&XYZ_TO_LIN_SRGB, mul(&BRADFORD_D50_TO_D65, lab_to_xyz(L, a, b)))
-}
-
-const LIN_SRGB_TO_XYZ: Mat = [
-    [0.41239080, 0.35758434, 0.18048079],
-    [0.21263901, 0.71516871, 0.07219231],
-    [0.01933083, 0.11919481, 0.95053216],
-];

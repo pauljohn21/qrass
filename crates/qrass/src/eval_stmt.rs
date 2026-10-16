@@ -136,7 +136,7 @@ impl EvalState {
     }
 
     /// Flush a rule's accumulated declarations into a CSS block emitted to `out`,
-    /// then clear them — dart-sass does this at every nested-rule / at-rule
+    /// then clear them — the goldens do this at every nested-rule / at-rule
     /// boundary so a rule's declarations get split around its children. Only the
     /// concrete (non-placeholder) selectors render; a pure placeholder rule keeps
     /// its declarations for the `@extend` capture instead.
@@ -180,7 +180,7 @@ impl EvalState {
 
         // Expand the body in source order into the shared `out` stream, keeping
         // this rule's pending declarations in `rule_decls`. Nested rules / at-rules
-        // flush `rule_decls` first (dart-sass splits a rule's declarations whenever
+        // flush `rule_decls` first (the goldens split a rule's declarations whenever
         // a child block interrupts them) — see `collect_stmt`.
         let mut rule_decls: Vec<Item> = Vec::new();
         let saved_parents = std::mem::replace(&mut self.current_parents, resolved.clone());
@@ -202,7 +202,7 @@ impl EvalState {
             // Reserve a slot in the emitted stream at this placeholder's own
             // source position; the global `@extend` pass later replaces the
             // marker with the grouped extended rule (or drops it when nothing
-            // extends the placeholder), reproducing dart-sass's inline placement.
+            // extends the placeholder), reproducing the goldens' inline placement.
             let slot = self.placeholder_rules.len();
             out.push(format!("\u{f0000}qrass_extend_slot {slot}\u{f0001}"));
             self.placeholder_rules.push(super::PlaceholderRule {
@@ -235,7 +235,7 @@ impl EvalState {
         }
         // Declarations written directly under the query (no nested selector) apply
         // to the current nesting context, so render them as a leading rule inside
-        // the block — dart-sass emits `@media { .parent { … } }` for these.
+        // the block — the goldens emit `@media { .parent { … } }` for these.
         let concrete: Vec<String> = sel_ctx
             .iter()
             .filter(|s| !contains_placeholder(s))
@@ -300,14 +300,43 @@ impl EvalState {
     }
 }
 
-/// A CSS `@import` target (passed through) is a `url(…)` or a quoted string whose
-/// URL ends in `.css`. Anything else is an SCSS module import (rejected, D3).
+/// A CSS `@import` target (passed through) is a `url(…)`, a quoted string whose
+/// URL ends in `.css`, or a quoted URL carrying a support condition (a media
+/// query, `layer`, `supports(…)`, or a bare ident/function after the URL — the
+/// condition makes it unambiguously CSS rather than an SCSS module reference).
+/// A bare `@import "a"` (nothing after the quote) stays an SCSS import (D3).
 fn looks_like_css_import(value: &str) -> bool {
-    value.contains("url(")
-        || value
-            .split(',')
-            .map(|t| t.trim().trim_matches(|c| c == '"' || c == '\''))
-            .any(|t| t.ends_with(".css"))
+    if value.contains("url(") {
+        return true;
+    }
+    crate::builtins::selector::split_commas(value)
+        .into_iter()
+        .any(|spec| {
+            let s = spec.trim();
+            if s.trim_matches(|c| c == '"' || c == '\'').ends_with(".css") {
+                return true;
+            }
+            after_leading_quoted(s).is_some_and(|rest| !rest.trim().is_empty())
+        })
+}
+
+/// If `s` begins with a single- or double-quoted string, return the text after
+/// its closing quote (honoring backslash escapes); otherwise `None`.
+fn after_leading_quoted(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let open = *bytes.first()?;
+    if open != b'"' && open != b'\'' {
+        return None;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            c if c == open => return Some(&s[i + 1..]),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// Combine a selector list for a `@at-root`-lifted ruleset. Like

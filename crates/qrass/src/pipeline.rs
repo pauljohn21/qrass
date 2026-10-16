@@ -300,7 +300,7 @@ impl PipelineBuilder {
             })
             .map(|r| match r {
                 Ok(rendered) => {
-                    // dart-sass prepends `@charset "UTF-8";` when the emitted CSS
+                    // the goldens prepend `@charset "UTF-8";` when the emitted CSS
                     // contains any non-ASCII byte (e.g. CJK font-family names).
                     let css = if rendered.css.is_ascii() {
                         format!("{}\n", rendered.css)

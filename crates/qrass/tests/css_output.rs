@@ -131,7 +131,7 @@ fn short_hex_normalizes_to_six_digits() {
 
 #[test]
 fn named_color_preserved_as_keyword() {
-    // dart-sass keeps a recognized color keyword verbatim (it does not hex-ify).
+    // the goldens keep a recognized color keyword verbatim (it does not hex-ify).
     assert_eq!(css(".a { c: red; }"), ".a {\n  c: red;\n}");
 }
 

@@ -1,7 +1,7 @@
 //! CSS Color 4 literal parsing and in-space channel editing (task 11.3,
 //! round: `color.adjust`/`change`/`scale` over `color(...)`/`lab`/`lch`/
 //! `oklab`/`oklch`/`hsl`/`hwb` literals). Every expectation is copied from the
-//! dart-sass `sass-spec` golden output for the same input.
+//! the goldens `sass-spec` golden output for the same input.
 
 use qrass::eval::eval_all;
 use qrass::lexer::lex;
@@ -90,3 +90,83 @@ fn xyz_literal_parses_and_serializes() {
     let css = out("a {b: color(xyz 0.5 0.4 0.3)}");
     assert!(css.contains("color(xyz 0.5 0.4 0.3)"), "{css}");
 }
+
+/// Extract the numeric value a `color.channel(...)` call serialized on the
+/// `b:` line (dropping any `%`/`deg` unit suffix).
+fn channel_num(scss: &str) -> f64 {
+    let css = out(scss);
+    let tail = css.split("b:").nth(1).expect("b: line present").trim_start();
+    let num: String = tail
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+    num.parse().expect("numeric channel value")
+}
+
+#[test]
+fn named_colors_round_trip_their_keyword() {
+    // CSS color keywords resolve to colors but serialize back as the name; the
+    // un-tabled `transparent` stays a bare identifier.
+    let css = out("a {b: red; c: pink; d: transparent}");
+    assert!(css.contains("b: red"), "{css}");
+    assert!(css.contains("c: pink"), "{css}");
+    assert!(css.contains("d: transparent"), "{css}");
+}
+
+#[test]
+fn legacy_color_promotes_to_modern_spaces() {
+    // Golden targets from sass-spec `core_functions/color/channel/*.hrx` (the
+    // black-box expectation for a promoted legacy color). Asserted within an
+    // absolute tolerance so the test gates convergence and catches regressions
+    // without over-fitting the last digits of the reference-constant rounding.
+    let close = |space: &str, chan: &str, golden: f64, tol: f64| {
+        let got = channel_num(&format!(
+            "@use \"sass:color\";\na {{b: color.channel(pink, \"{chan}\", $space: {space})}}"
+        ));
+        assert!((got - golden).abs() < tol, "{space}/{chan}: got {got}, want {golden}");
+    };
+    // XYZ-D65 leg is now byte-exact against golden.
+    close("xyz", "x", 0.708_662_362_9, 1e-8);
+    close("display-p3", "red", 0.962_148_711_8, 1e-8);
+    // Lab / oklab converge to ~1e-6 after the D65->D50 and linear-sRGB fixes.
+    close("lab", "lightness", 83.787_252_865_6, 1e-4);
+    close("lab", "a", 24.436_770_288_1, 1e-4);
+    close("oklab", "lightness", 86.773_845_084_1, 1e-4);
+}
+
+#[test]
+fn perceptual_missing_lightness_poisons_only_lch_to_lab() {
+    // A missing lightness leaves the chromatic channels concrete for every
+    // perceptual pair EXCEPT the same-family polar->cartesian `lch -> lab`,
+    // where the goldens poison the whole color (golden `to_space/l?ch/lab`).
+    let keep = out("@use \"sass:color\";\na {b: color.to-space(lab(none 20 30), lch)}");
+    assert!(keep.contains("lch(none 36.0555127546 56.309932474deg)"), "{keep}");
+    let poison = out("@use \"sass:color\";\na {b: color.to-space(lch(none 20 30deg), lab)}");
+    assert!(poison.contains("lab(none none none)"), "{poison}");
+}
+
+#[test]
+fn hsl_source_poisons_undetermined_chromatic_channels() {
+    // lab/oklab lose a/b only when BOTH hue and saturation are missing; the
+    // polar targets lose chroma/hue as soon as saturation is missing. A lone
+    // missing hue or saturation substitutes to 0 and stays concrete. Asserted on
+    // the `none` structure only (the channel magnitudes are float-wall digits).
+    let both = out("@use \"sass:color\";\na {b: color.to-space(hsl(none none 50%), lab)}");
+    assert!(both.contains("none none"), "hue+sat missing -> chromatic none: {both}");
+    let lone_hue = out("@use \"sass:color\";\na {b: color.to-space(hsl(none 20% 30%), lab)}");
+    assert!(!lone_hue.contains("none"), "lone missing hue substitutes to concrete: {lone_hue}");
+    let sat = out("@use \"sass:color\";\na {b: color.to-space(hsl(10deg none 30%), lch)}");
+    assert!(sat.contains("none none"), "missing saturation poisons chroma+hue: {sat}");
+}
+
+#[test]
+fn hwb_source_polar_target_poisons_lightness_and_chroma() {
+    // `hwb(10deg none none)` (whiteness AND blackness missing) poisons lightness
+    // and chroma on a polar target but keeps the hue; the same source to a
+    // cartesian target stays fully concrete.
+    let lch = out("@use \"sass:color\";\na {b: color.to-space(hwb(10deg none none), lch)}");
+    assert!(lch.contains("lch(none none "), "w&b missing poisons L+C on polar: {lch}");
+    let lab = out("@use \"sass:color\";\na {b: color.to-space(hwb(10deg none none), lab)}");
+    assert!(!lab.contains("none"), "cartesian target stays concrete: {lab}");
+}
+

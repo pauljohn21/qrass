@@ -45,6 +45,68 @@ fn parses_sections_and_members() {
     assert!(c2.error.as_deref().unwrap().contains("expected number"));
 }
 
+#[test]
+fn inherited_fixtures_accumulate_across_sections() {
+    // sass-spec hrx semantics: a fixture-only leading section (no input) seeds
+    // shared source files for every later case in the same document, exactly
+    // like `callable/arguments.hrx` whose `_utils.scss` is `@use`d by all cases.
+    let sep = hrx::SECTION_SEPARATOR;
+    let mut s = String::new();
+    s.push_str("<===> mixin/_utils.scss\n@mixin a($args...) { b {c: 1} }\n\n");
+    s.push_str(sep);
+    s.push_str("<===> mixin/one/input.scss\n@use 'utils';\n@include utils.a(1, );\n\n<===> mixin/one/output.css\nb {\n  c: 1;\n}\n\n");
+    s.push_str(sep);
+    // A later section redefining the same path must win over the inherited copy.
+    s.push_str("<===> mixin/_utils.scss\n@mixin a($args...) { b {c: 2} }\n\n");
+    s.push_str(sep);
+    s.push_str("<===> mixin/two/input.scss\n@use 'utils';\n@include utils.a(2, );\n\n<===> mixin/two/output.css\nb {\n  c: 2;\n}\n");
+
+    let cases = hrx::parse(&s);
+    assert_eq!(cases.len(), 4, "fixture-only section still occupies a slot");
+
+    let with_one = cases
+        .iter()
+        .find(|c| c.dir == "mixin/one")
+        .expect("mixin/one case");
+    assert!(
+        with_one
+            .files
+            .iter()
+            .any(|(p, c)| p == "mixin/_utils.scss" && c.contains("c: 1")),
+        "inherited fixture visible to a later case: {:?}",
+        with_one.files
+    );
+
+    let with_two = cases
+        .iter()
+        .find(|c| c.dir == "mixin/two")
+        .expect("mixin/two case");
+    let redefined = with_two
+        .files
+        .iter()
+        .filter(|(p, _)| p == "mixin/_utils.scss")
+        .count();
+    assert_eq!(redefined, 1, "same-path file is not duplicated");
+    assert!(
+        with_two
+            .files
+            .iter()
+            .any(|(p, c)| p == "mixin/_utils.scss" && c.contains("c: 2")),
+        "latest declaration wins for later sections"
+    );
+
+    // Expectation members never leak across sections.
+    assert_eq!(
+        with_two
+            .files
+            .iter()
+            .filter(|(p, _)| p.ends_with("output.css"))
+            .count(),
+        1,
+        "outputs stay section-local"
+    );
+}
+
 /// Real sass-spec files must parse with every case carrying an input and at
 /// least one expected member (output or error).
 #[test]

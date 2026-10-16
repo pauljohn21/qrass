@@ -1,0 +1,7 @@
+/* CSS custom at-rules pass through verbatim, body not SassScript-validated. */
+@function --a() {
+  result: $b;
+}
+@FUNCTION --c() {
+  RESULT: $d;
+}

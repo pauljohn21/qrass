@@ -126,7 +126,7 @@ impl Env {
         true
     }
 
-    /// Reassign a plain (non-`!global`) assignment following dart-sass scoping: it
+    /// Reassign a plain (non-`!global`) assignment following golden scoping: it
     /// updates the existing binding in the innermost *local* (non-global) scope that
     /// already declares it — so a loop/mixin accumulator like `$n: $n + …` persists —
     /// but a name found only in the module-global scope is *shadowed* locally instead

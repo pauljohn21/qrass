@@ -15,22 +15,34 @@ use super::parser_expr::args_of;
 
 type Or<T> = Result<T, SassError>;
 
+/// Drop loud-comment tokens from a `@use`/`@forward` argument run: within a
+/// module directive's head, `/* */` carries no meaning and the goldens treat it
+/// as whitespace, so `@use /**/ "m"` must still resolve the URL `"m"`.
+fn strip_comments(rest: &[Spanned]) -> Vec<Spanned> {
+    rest.iter()
+        .filter(|s| !matches!(s.token, Token::Comment(_)))
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn build_use(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
+    let rest = strip_comments(rest);
     Ok(Stmt::Use(Use {
-        url: module_url(rest),
-        alias: use_alias(rest),
-        config: with_config(p, rest)?,
+        url: module_url(&rest),
+        alias: use_alias(&rest),
+        config: with_config(p, &rest)?,
         span,
     }))
 }
 
 pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
+    let rest = strip_comments(rest);
     Ok(Stmt::Forward(crate::ast::Forward {
-        url: module_url(rest),
-        prefix: forward_prefix(rest),
-        shown: forward_members(rest, "show"),
-        hidden: forward_members(rest, "hide"),
-        config: with_config(p, rest)?,
+        url: module_url(&rest),
+        prefix: forward_prefix(&rest),
+        shown: forward_members(&rest, "show"),
+        hidden: forward_members(&rest, "hide"),
+        config: with_config(p, &rest)?,
         span,
     }))
 }

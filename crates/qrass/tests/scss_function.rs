@@ -68,7 +68,7 @@ fn function_return_inside_each_short_circuits() {
 
 #[test]
 fn unknown_bare_function_passes_through_namespaced_errors() {
-    // A bare unknown call is emitted verbatim as plain CSS (dart-sass leaves calls it
+    // A bare unknown call is emitted verbatim as plain CSS (the goldens leave calls it
     // doesn't recognize to the browser). A *namespaced* unknown still errors.
     let out = css(".a { p: nope(1); }");
     assert!(out.contains("p: nope(1);"), "{out}");

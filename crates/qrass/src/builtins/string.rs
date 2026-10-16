@@ -6,13 +6,14 @@ use super::{Or, Registry};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("string", "unquote", 1, Some(1), unquote);
-    r.ns("string", "quote", 1, Some(1), quote);
-    r.ns("string", "length", 1, Some(1), length);
-    r.ns("string", "slice", 2, Some(3), slice);
-    r.ns("string", "index", 2, Some(2), index);
-    r.ns("string", "to-upper-case", 1, Some(1), upper);
-    r.ns("string", "to-lower-case", 1, Some(1), lower);
+    r.nsp("string", "unquote", 1, Some(1), &["string"], unquote);
+    r.nsp("string", "quote", 1, Some(1), &["string"], quote);
+    r.nsp("string", "length", 1, Some(1), &["string"], length);
+    r.nsp("string", "slice", 2, Some(3), &["string", "start-at", "end-at"], slice);
+    r.nsp("string", "index", 2, Some(2), &["string", "substring"], index);
+    r.nsp("string", "insert", 3, Some(3), &["string", "insert", "index"], insert);
+    r.nsp("string", "to-upper-case", 1, Some(1), &["string"], upper);
+    r.nsp("string", "to-lower-case", 1, Some(1), &["string"], lower);
     r.def("unquote", 1, Some(1), unquote);
     r.def("quote", 1, Some(1), quote);
     r.def("str-length", 1, Some(1), length);
@@ -97,6 +98,38 @@ fn index(c: &super::Call) -> Or<SassValue> {
         },
         None => SassValue::Null,
     })
+}
+
+/// `str-insert($string, $insert, $index)`: 1-based Dart-style insertion point.
+/// Sass indexes by Unicode codepoint (a `Vec<char>` matches exactly: an emoji is
+/// one char even when UTF-16 needs two units, while a base+combining pair is two
+/// chars). Out-of-range indices clamp to the nearest edge; index 0 inserts at the
+/// front. The result mirrors `$string`'s quoting.
+fn insert(c: &super::Call) -> Or<SassValue> {
+    let chars: Vec<char> = text(c, 0).chars().collect();
+    let n = chars.len() as i64;
+    let insertion = text(c, 1);
+    let index = c
+        .positional
+        .get(2)
+        .and_then(|a| a.as_number())
+        .map(|(v, _)| v as i64)
+        .unwrap_or(0);
+    let pos: usize = if index > 0 {
+        (index - 1).min(n)
+    } else if index < 0 {
+        (n + 1 + index).max(0)
+    } else {
+        0
+    } as usize;
+    let mut out: String = chars[..pos].iter().collect();
+    out.push_str(&insertion);
+    out.extend(chars[pos..].iter());
+    let quoted = matches!(
+        c.positional.first(),
+        Some(SassValue::Str { quoted: true, .. })
+    );
+    Ok(SassValue::Str { text: out, quoted })
 }
 
 fn upper(c: &super::Call) -> Or<SassValue> {

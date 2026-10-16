@@ -23,6 +23,10 @@ pub enum Expr {
     },
     /// `ns.fun(args…)` or bare `fun(args…)` call.
     FunctionCall(FunctionCall),
+    /// Modern `if(…)` clause call (`sass()`/`css()` conditions per the
+    /// `expressions/if/*.hrx` goldens),
+    /// parsed whole and evaluated by three-valued symbolic execution.
+    IfCall(Box<IfCall>),
     /// Binary operation with precedence resolved by the parser.
     Binary {
         op: BinOp,
@@ -38,10 +42,12 @@ pub enum Expr {
     },
     /// Parenthesized expression `( … )` — preserved so `/` division context matters.
     Paren(Box<Expr>, Span),
-    /// A list literal with a separator (comma / space / slash).
+    /// A list literal with a separator (comma / space / slash). `bracketed`
+    /// is set for a CSS-`[]` bracketed list literal (`[a b c]`).
     List {
         items: Vec<Expr>,
         sep: ListSep,
+        bracketed: bool,
         span: Span,
     },
     /// A map literal `(k: v, …)`.
@@ -72,6 +78,9 @@ pub enum Literal {
     },
     /// Color kept as its raw source text (`#0d6efd`), normalized during eval.
     Color(String),
+    /// A CSS color keyword resolved to its hex value; `name` round-trips on
+    /// serialization (`red` stays `red`, not `#ff0000`).
+    NamedColor { hex: &'static str, name: &'static str },
     /// `url(…)` consumed whole by the lexer.
     Url(String),
     Bool(bool),
@@ -88,6 +97,53 @@ pub struct FunctionCall {
     pub name: String,
     pub args: Vec<Arg>,
     pub span: Span,
+}
+
+/// A whole modern `if(…)`: one or more `;`-separated clauses.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IfCall {
+    pub clauses: Vec<IfClause>,
+    pub span: Span,
+}
+
+/// One `if()` clause: `[cond:] value`; `cond == None` is the `else:` arm.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IfClause {
+    pub cond: Option<IfCond>,
+    /// Always a Sass expression — a CSS-mode arm renders its evaluated value.
+    pub value: Expr,
+}
+
+/// Syntax-level condition term. Kept separate from [`Expr`] because `css()`
+/// bodies and bare CSS terms are raw text whose `#{…}` parts alone are
+/// evaluated, and the tree is re-rendered (whitespace-normalized) verbatim
+/// when the call survives as a CSS `if()` function.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IfCond {
+    /// `sass(expr)` — a fully Sass-evaluable test.
+    Sass(Expr),
+    /// Raw CSS term text: `css(…)` body, `var(…)`, a bare ident — with the
+    /// `#{…}` interpolation split into [`Piece::Expr`] slots.
+    Css(Vec<Piece>),
+    /// `not <term>`.
+    Not(Box<IfCond>),
+    /// Terms joined by connectives; `joins[i]` connects `parts[i]`/`parts[i+1]`
+    /// (`parts.len() == joins.len() + 1`).
+    Chain {
+        parts: Vec<IfCond>,
+        joins: Vec<Join>,
+    },
+    /// `( … )` — parens are restored on CSS rendering.
+    Paren(Box<IfCond>),
+}
+
+/// Connective between [`IfCond::Chain`] parts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    And,
+    Or,
+    /// `css(1) var(--x) css(2)` — space-separated, implicit conjunction.
+    Adjacent,
 }
 
 /// One call argument: positional, named (`$k: v`), or a rest spread (`$args…`).

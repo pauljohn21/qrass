@@ -53,6 +53,19 @@ pub struct Located {
     pub excerpt: Option<String>,
 }
 
+/// One annotation run of a rendered source snippet: `marker` repeated `len`
+/// times starting at 1-based `col` of `line`, with an optional label (the
+/// `arbitrary substitution` / `sass() expression` captions of the
+/// `expressions/if/error/raw.hrx` goldens).
+#[derive(Clone, Debug)]
+pub struct Marker {
+    pub marker: char,
+    pub line: u32,
+    pub col: u32,
+    pub len: u32,
+    pub label: Option<String>,
+}
+
 /// The single error type every stage emits into its observable stream.
 #[derive(Clone, Debug)]
 pub struct SassError {
@@ -61,6 +74,16 @@ pub struct SassError {
     pub located: Option<Located>,
     /// Extra trailing context (e.g. dependency cycle path, candidate list).
     pub notes: Vec<String>,
+    /// Golden-style snippet annotations; boxed because a snippet is the rare
+    /// path and the error travels through every stage's stream (see
+    /// [`crate::diag`]). Non-empty switches rendering to the annotated block.
+    pub snippet: Option<Box<Snippet>>,
+}
+
+/// Annotation runs attached to an error for snippet rendering.
+#[derive(Clone, Debug)]
+pub struct Snippet {
+    pub markers: Vec<Marker>,
 }
 
 impl SassError {
@@ -70,6 +93,7 @@ impl SassError {
             message: message.into(),
             located: None,
             notes: Vec::new(),
+            snippet: None,
         }
     }
 
@@ -105,6 +129,14 @@ impl SassError {
         self
     }
 
+    /// Attach the snippet annotations a golden-style block renders.
+    pub fn with_markers(mut self, markers: Vec<Marker>) -> Self {
+        if !markers.is_empty() {
+            self.snippet = Some(Box::new(Snippet { markers }));
+        }
+        self
+    }
+
     pub fn io(err: std::io::Error, path: &str) -> Self {
         let mut e = Self::new(ErrorKind::Io, format!("{path}: {}", err));
         e.located = Some(Located {
@@ -119,6 +151,11 @@ impl SassError {
 
 impl fmt::Display for SassError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(sn) = &self.snippet
+            && let Some(loc) = &self.located
+        {
+            return write!(f, "{}", crate::diag::snippet(&self.message, loc, &sn.markers));
+        }
         write!(f, "{}: {}", self.kind.as_str(), self.message)?;
         if let Some(loc) = &self.located {
             write!(f, "\n  --> {}:{}:{}", loc.file, loc.line, loc.col)?;

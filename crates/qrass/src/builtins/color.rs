@@ -4,36 +4,44 @@
 //! Colors are RGBA f64 with on-demand HSL conversion (D2).
 
 use super::{Or, Registry};
+use super::color_ops::{hsl_from_legacy_src, wrap_hue};
 use crate::error::{ErrorKind, SassError};
 use crate::value::{Color, SassValue};
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("color", "channel", 2, Some(2), channel);
-    r.ns("color", "adjust", 1, None, |c| transform(c, Mode::Adjust));
-    r.ns("color", "scale", 1, None, |c| transform(c, Mode::Scale));
-    r.ns("color", "change", 1, None, |c| transform(c, Mode::Change));
-    r.ns("color", "mix", 2, Some(3), mix);
-    r.ns("color", "alpha", 1, Some(1), alpha);
-    r.ns("color", "opacity", 1, Some(1), alpha);
-    r.ns("color", "ie-hex-str", 1, Some(1), ie_hex_str);
-    r.ns("color", "rgb", 1, Some(3), rgb);
-    r.ns("color", "hsl", 1, Some(3), hsl);
+    // `nsp` declares the leading `$color` parameter name so named calls
+    // (`color.channel($color: …, $channel: …)`, `color.scale($color: …,
+    // $lightness: …)`) fold `$color` into positional slot 0. The channel kwargs
+    // (`$red`/`$lightness`/…) are *not* declared: for these variadic setters
+    // (`max == None`) `fold_named` leaves unknown names in `Call::named`, where
+    // `amount`/`c.opt` still read them.
+    r.nsp(
+        "color",
+        "channel",
+        2,
+        Some(3),
+        &["color", "channel", "space"],
+        channel,
+    );
+    r.nsp("color", "space", 1, Some(1), &["color"], space);
+    r.nsp("color", "is-missing", 2, Some(2), &["color", "channel"], is_missing);
+    r.nsp("color", "to-space", 1, None, &["color", "space"], to_space);
+    r.nsp("color", "adjust", 1, None, &["color"], |c| transform(c, Mode::Adjust));
+    r.nsp("color", "scale", 1, None, &["color"], |c| transform(c, Mode::Scale));
+    r.nsp("color", "change", 1, None, &["color"], |c| transform(c, Mode::Change));
     // Legacy global spellings.
     r.def("adjust-color", 1, None, |c| transform(c, Mode::Adjust));
     r.def("scale-color", 1, None, |c| transform(c, Mode::Scale));
     r.def("change-color", 1, None, |c| transform(c, Mode::Change));
-    r.def("ie-hex-str", 1, Some(1), ie_hex_str);
-    // Legacy global color constructors element-plus leans on (`rgba($c, $a)`,
-    // `rgb(r, g, b)` / `rgba(r, g, b, $a)`); both spellings share one impl.
-    r.def("rgb", 1, Some(4), rgb);
-    r.def("rgba", 1, Some(4), rgb);
+    // Legacy constructors / mix / alpha / ie-hex-str live in `color_ops`.
+    super::color_ops::register(r);
 }
 
-fn err(msg: impl Into<String>) -> SassError {
+pub(super) fn err(msg: impl Into<String>) -> SassError {
     SassError::new(ErrorKind::Builtins, msg)
 }
 
-fn color_at(c: &super::Call, i: usize) -> Or<Color> {
+pub(super) fn color_at(c: &super::Call, i: usize) -> Or<Color> {
     match c.positional.get(i) {
         Some(SassValue::Color(col)) => Ok(col.clone()),
         Some(other) => Err(err(format!(
@@ -44,6 +52,153 @@ fn color_at(c: &super::Call, i: usize) -> Or<Color> {
     }
 }
 
+/// `color.space($color)`: the Color 4 space name, or `rgb` for legacy colors.
+fn space(c: &super::Call) -> Or<SassValue> {
+    let col = color_at(c, 0)?;
+    let name = col.c4.as_ref().map(|c4| c4.space.name).unwrap_or("rgb");
+    Ok(SassValue::Str { text: name.to_string(), quoted: false })
+}
+
+/// `color.is-missing($color, $channel)`: true only for a `none` Color 4 channel.
+fn is_missing(c: &super::Call) -> Or<SassValue> {
+    let col = color_at(c, 0)?;
+    let name = match c.positional.get(1) {
+        Some(SassValue::Str { text, .. }) => text.clone(),
+        Some(other) => {
+            return Err(err(format!("expected a string, given {}", other.type_name())));
+        }
+        None => return Err(err("expected a string")),
+    };
+    let missing = match &col.c4 {
+        Some(c4) => {
+            if name == "alpha" {
+                c4.alpha_missing
+            } else {
+                match c4.space.channels.iter().position(|ch| ch.name == name) {
+                    Some(idx) => c4.comps[idx].is_none(),
+                    None => return Err(err(format!("unknown color channel \"{name}\""))),
+                }
+            }
+        }
+        // Legacy colors always carry concrete channels (powerless components are
+        // still serialized with values).
+        None => false,
+    };
+    Ok(SassValue::Bool(missing))
+}
+
+/// `color.to-space($color, $space)`: convert a color into another space.
+///
+/// Modern targets (`lab`/`lch`/`oklab`/`oklch`/`xyz`/`xyz-d50`/`srgb`/gamut
+/// spaces) carry a `Color4` and serialize in CSS Color 4 form. The legacy `rgb`
+/// target keeps the historical representation (an unchanged legacy color, or a
+/// concrete legacy color built from sRGB when the source is Color 4).
+fn to_space(c: &super::Call) -> Or<SassValue> {
+    let col = color_at(c, 0)?;
+    let space = match c.opt("space", Some(1)) {
+        Some(SassValue::Str { text, .. }) => text.clone(),
+        Some(other) => other.to_css(),
+        None => return Err(err("expected a color space")),
+    };
+
+    // The Color 4 source for the conversion: the color's own payload, or a legacy
+    // sRGB color promoted through its 0..255 display channels.
+    let src: crate::color4::Color4 = match &col.c4 {
+        Some(c4) => (**c4).clone(),
+        None => {
+            let mut c4 = crate::color4::Color4::new(
+                crate::color4::lookup("srgb").expect("srgb space registered"),
+                [col.r / 255.0, col.g / 255.0, col.b / 255.0],
+            );
+            if col.a != 1.0 {
+                c4.alpha = Some(col.a);
+            }
+            c4
+        }
+    };
+
+    let hsl_like = matches!(src.space.name, "hsl" | "hwb");
+
+    if space == "rgb" {
+        // Legacy target: a legacy color is returned untouched (hex/rgb form).
+        if col.c4.is_none() {
+            return Ok(make(col));
+        }
+        // `to-space(_, rgb)` always yields the golden's *legacy* rgb form: a missing
+        // channel resolves to 0 (`to_rgb` reads `raw()`), so the result is a
+        // concrete rgb color serialized as keyword/`#hex`/`rgb(%)` — never a
+        // `color(srgb …)` wrapper (confirmed across the to-space rgb goldens).
+        // An hsl/hwb source also carries its verbatim HSL triple so an
+        // out-of-gamut `hsl()` fallback emits the golden's exact channels.
+        let converted = src.convert(crate::color4::lookup("srgb").expect("srgb space"));
+        let rgb = converted.to_rgb();
+        let legacy_hsl = if hsl_like { hsl_from_legacy_src(&src).map(|h| wrap_hue(h)) } else { None };
+        return Ok(make(Color {
+            r: rgb[0],
+            g: rgb[1],
+            b: rgb[2],
+            a: converted.alpha(),
+            hex: false,
+            c4: None,
+            name: None,
+            legacy: Some("rgb"),
+            legacy_hsl,
+        }));
+    }
+
+    let Some(target) = crate::color4::lookup(&space) else {
+        return Err(err(format!("Unknown color space: {space}")));
+    };
+    let converted = if target.name == src.space.name {
+        src
+    } else {
+        src.convert(target)
+    };
+    // `to-space(hsl|hwb, hsl|hwb)` with every channel concrete yields the golden's
+    // *legacy* color built directly from the source's HSL-formula channels: an
+    // out-of-gamut result serializes as an unclamped `hsl()` (channels past 1,
+    // a negative saturation flipped to hue +180° — see `legacy_to_css`), and the
+    // carried triple is the golden's exact inversion (`hsl(200, 11.1111111111%,
+    // 212.5%)`), which the RGB round trip cannot recover. Only an `hsl`/`hwb`
+    // *source* takes this path; a modern source (srgb/xyz/…) keeps the Color 4
+    // payload so `.space`/`.channel` still report the target space.
+    let legacy_target = matches!(target.name, "hsl" | "hwb");
+    let missing = converted.comps.iter().any(|c| c.is_none()) || converted.alpha_missing;
+    let modern = converted.space.name == "hsl" && missing;
+    if hsl_like && legacy_target && !modern && !missing {
+        let [r, g, b] = converted.to_rgb();
+        let carried = hsl_from_legacy_src(&converted).map(wrap_hue);
+        return Ok(make(Color {
+            r,
+            g,
+            b,
+            a: converted.alpha(),
+            hex: false,
+            c4: Some(Box::new(converted)),
+            name: None,
+            legacy: Some(target.name),
+            legacy_hsl: carried,
+        }));
+    }
+    // Every other result keeps the Color 4 payload. A legacy `hsl`/`hwb` target
+    // from a *modern* source still serializes in the golden's legacy CSS form (keyword
+    // /`#hex`/`rgb(%)`/`hsl()`); a modern target, or an `hsl`/`hwb` target with a
+    // `none` channel (`hwb(10deg none none)`), serializes in the `color(…)` or
+    // bare-space form.
+    let rgb = converted.to_rgb();
+    Ok(make(Color {
+        r: rgb[0],
+        g: rgb[1],
+        b: rgb[2],
+        a: converted.alpha(),
+        hex: false,
+        c4: Some(Box::new(converted)),
+        name: None,
+        legacy: legacy_target.then_some(target.name).filter(|_| !hsl_like),
+        legacy_hsl: None,
+    }))
+}
+
 /// A numeric-valued argument (named or default-free) with its unit, if any.
 fn amount(c: &super::Call, key: &str) -> Option<(f64, Option<String>)> {
     c.named
@@ -51,7 +206,7 @@ fn amount(c: &super::Call, key: &str) -> Option<(f64, Option<String>)> {
         .and_then(|v| v.as_number().map(|(n, u)| (n, u.map(str::to_string))))
 }
 
-fn make(col: Color) -> SassValue {
+pub(super) fn make(col: Color) -> SassValue {
     SassValue::Color(col)
 }
 
@@ -63,31 +218,95 @@ fn channel(c: &super::Call) -> Or<SassValue> {
         Some(other) => other.to_css(),
         None => return Err(err("expected a channel name")),
     };
-    let space = c
-        .named
-        .get("space")
-        .map(|v| v.to_css())
-        .unwrap_or_else(|| "rgb".into());
-    let hsl = if matches!(space.as_str(), "hsl" | "hwb") || is_hsl_channel(&name) {
+    let space = c.named.get("space").map(|v| v.to_css());
+    read_channel(&col, &name, space.as_deref())
+}
+
+/// Core single-channel read for a color. `space` is the resolved `$space`
+/// argument (`None` → the color's own space for a Color 4 color, or the
+/// historical RGB/HSL/HWB-from-RGB behaviour for a legacy color). Shared by
+/// `color.channel` and the deprecated single-channel accessors (`color.red`,
+/// `color.blackness`, …) which pass no explicit space.
+pub(super) fn read_channel(col: &Color, name: &str, space: Option<&str>) -> Or<SassValue> {
+    // The *resolved* space string used for the legacy fallback and the promotion
+    // decision (`None` behaves as `rgb`); the `Option` itself is retained below
+    // to distinguish "no explicit space" from an explicit `$space: rgb`.
+    let resolved = space.unwrap_or("rgb");
+    // Color 4 colors read channels through the requested space (`$space` defaults
+    // to the color's own space; `rgb` maps to `srgb`).
+    //
+    // A legacy color carries no space (`c4 == None`). An explicit `$space` other
+    // than `rgb` promotes its sRGB display channels (0..255 → 0..1) into a Color4
+    // so the conversion path can read them; an absent `$space` (or `rgb`) keeps
+    // the historical 0..255 / HSL behaviour below.
+    let mut promoted: Option<crate::color4::Color4> = None;
+    if col.c4.is_none() && resolved != "rgb" && crate::color4::lookup(resolved).is_some() {
+        let mut c4 = crate::color4::Color4::new(
+            crate::color4::lookup("srgb").expect("srgb space registered"),
+            [col.r / 255.0, col.g / 255.0, col.b / 255.0],
+        );
+        if col.a != 1.0 {
+            c4.alpha = Some(col.a);
+        }
+        promoted = Some(c4);
+    }
+    let c4 = col.c4.as_deref().or(promoted.as_ref());
+    if let Some(c4) = c4 {
+        let own = c4.space.name;
+        let target_name: String = match space {
+            None => own.to_string(),
+            Some(s) => {
+                if s == "rgb" { "srgb".to_string() } else { s.to_string() }
+            }
+        };
+        let Some(target) = crate::color4::lookup(&target_name) else {
+            return Err(err(format!("Unknown color space: {target_name}")));
+        };
+        let borrowed;
+        let src = if target.name == own {
+            c4
+        } else {
+            borrowed = c4.convert(target);
+            &borrowed
+        };
+        if name == "alpha" {
+            return Ok(SassValue::Number { value: src.alpha(), unit: None });
+        }
+        let idx = src.space.channels.iter().position(|ch| ch.name == name);
+        let Some(idx) = idx else {
+            return Err(err(format!("Invalid channel name: {name}")));
+        };
+        let Some(v) = src.comps[idx] else {
+            return Ok(SassValue::Null); // missing channels read as null
+        };
+        let unit = match src.space.channels[idx].unit {
+            crate::color4::Unit::Pct => Some("%".into()),
+            crate::color4::Unit::Deg => Some("deg".into()),
+            crate::color4::Unit::Num => None,
+        };
+        return Ok(SassValue::Number { value: v, unit });
+    }
+    let hsl = if matches!(resolved, "hsl" | "hwb") || is_hsl_channel(name) {
         Some(col.to_hsl())
     } else {
         None
     };
-    let value = match name.as_str() {
-        "red" => col.r,
-        "green" => col.g,
-        "blue" => col.b,
-        "alpha" => col.a,
-        "hue" => hsl.map(|h| h.h).unwrap_or(0.0),
-        "saturation" => hsl.map(|h| h.s).unwrap_or(0.0),
-        "lightness" => hsl.map(|h| h.l).unwrap_or(0.0),
+    // Legacy `whiteness`/`blackness` recover exactly from the RGB extremes: HWB
+    // mixes the pure hue toward white by `W` and toward black by `B`, so `W` is
+    // the smallest display channel and `B` is the shortfall below the largest.
+    let mn = col.r.min(col.g).min(col.b);
+    let mx = col.r.max(col.g).max(col.b);
+    let (value, unit) = match name {
+        "red" => (col.r, None),
+        "green" => (col.g, None),
+        "blue" => (col.b, None),
+        "alpha" => (col.a, None),
+        "hue" => (hsl.map(|h| h.h).unwrap_or(0.0), Some("deg".into())),
+        "saturation" => (hsl.map(|h| h.s).unwrap_or(0.0), Some("%".into())),
+        "lightness" => (hsl.map(|h| h.l).unwrap_or(0.0), Some("%".into())),
+        "whiteness" => (mn / 255.0 * 100.0, Some("%".into())),
+        "blackness" => ((255.0 - mx) / 255.0 * 100.0, Some("%".into())),
         other => return Err(err(format!("unknown color channel \"{other}\""))),
-    };
-    let unit = match name.as_str() {
-        "alpha" => None,
-        "hue" => Some("deg".into()),
-        "saturation" | "lightness" => Some("%".into()),
-        _ => None,
     };
     Ok(SassValue::Number { value, unit })
 }
@@ -220,6 +439,7 @@ fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<SassValue> {
         });
     }
     if let Some((v, _)) = amount(c, "alpha") {
+        c4.alpha_missing = false;
         c4.alpha = Some(
             match mode {
                 Mode::Change => v,
@@ -244,13 +464,21 @@ fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<SassValue> {
         a,
         hex: false,
         c4: Some(Box::new(c4)),
+        name: None,
+        legacy: None,
+            legacy_hsl: None,
     }))
 }
 
 /// Combine the current value `cur` with edit `v` in `[lo, hi]` by mode.
+///
+/// `change` stores the requested value verbatim: the goldens let a legacy color
+/// keep out-of-gamut channels (e.g. `change(rgb(0,100,0), $red: -50)` → the red
+/// stays `-50`), deferring any clamping to serialization. `adjust` and `scale`
+/// stay bounded to `[lo, hi]` as before.
 fn edit(cur: f64, v: f64, mode: Mode, lo: f64, hi: f64) -> f64 {
     let out = match mode {
-        Mode::Change => v,
+        Mode::Change => return v,
         Mode::Adjust => cur + v,
         Mode::Scale => {
             if v >= 0.0 {
@@ -263,108 +491,3 @@ fn edit(cur: f64, v: f64, mode: Mode, lo: f64, hi: f64) -> f64 {
     out.clamp(lo, hi)
 }
 
-/// `color.mix($c1, $c2, $weight: 50%)`: linear RGB blend by `pct` weight of `$c1`.
-fn mix(c: &super::Call) -> Or<SassValue> {
-    let a = color_at(c, 0)?;
-    let b = color_at(c, 1)?;
-    let weight = c
-        .opt("weight", Some(2))
-        .map(|v| v.to_css())
-        .unwrap_or_default();
-    let p = parse_percent(&weight, 50.0) / 100.0;
-    let ch = |x: f64, y: f64| x * p + y * (1.0 - p);
-    Ok(make(Color {
-        r: ch(a.r, b.r),
-        g: ch(a.g, b.g),
-        b: ch(a.b, b.b),
-        a: ch(a.a, b.a),
-        // dart-sass inherits the first operand's representation form.
-        hex: a.hex,
-        c4: None,
-    }))
-}
-
-fn parse_percent(text: &str, default: f64) -> f64 {
-    let trimmed = text.trim().trim_end_matches('%');
-    trimmed.parse::<f64>().unwrap_or(default)
-}
-
-fn alpha(c: &super::Call) -> Or<SassValue> {
-    let col = color_at(c, 0)?;
-    Ok(SassValue::Number {
-        value: col.a,
-        unit: None,
-    })
-}
-
-fn ie_hex_str(c: &super::Call) -> Or<SassValue> {
-    let col = color_at(c, 0)?;
-    let hex = |v: f64| format!("{:02X}", v.round().clamp(0.0, 255.0) as u8);
-    Ok(SassValue::Str {
-        text: format!(
-            "#{}{}{}{}",
-            hex(col.a * 255.0),
-            hex(col.r),
-            hex(col.g),
-            hex(col.b)
-        ),
-        quoted: false,
-    })
-}
-
-fn rgb(c: &super::Call) -> Or<SassValue> {
-    // `rgb/rgba($color, $alpha)` recomputes alpha; `rgb(r, g, b)` /
-    // `rgba(r, g, b, $alpha)` build from channels.
-    let n = c.positional.len();
-    if n == 1 {
-        return Ok(make(color_at(c, 0)?));
-    }
-    if n == 2 {
-        let mut col = color_at(c, 0)?;
-        col.a = alpha_arg(c, 1)?;
-        return Ok(make(col));
-    }
-    let r = channel_byte(c, 0)?;
-    let g = channel_byte(c, 1)?;
-    let b = channel_byte(c, 2)?;
-    let mut col = Color::rgb(r, g, b);
-    if n >= 4 {
-        col.a = alpha_arg(c, 3)?;
-    }
-    Ok(make(col))
-}
-
-/// Read an alpha argument, accepting a `0..=1` number or a percentage.
-fn alpha_arg(c: &super::Call, i: usize) -> Or<f64> {
-    let (v, unit) = c
-        .positional
-        .get(i)
-        .and_then(|a| a.as_number())
-        .ok_or_else(|| err("expected a number for alpha"))?;
-    Ok(if unit == Some("%") { v / 100.0 } else { v })
-}
-
-fn hsl(c: &super::Call) -> Or<SassValue> {
-    if c.positional.len() == 1 {
-        return Ok(make(color_at(c, 0)?));
-    }
-    let h = number_arg(c, 0)?;
-    let s = number_arg(c, 1)?;
-    let l = number_arg(c, 2)?;
-    Ok(make(Color::from_hsl(h, s, l)))
-}
-
-fn channel_byte(c: &super::Call, i: usize) -> Or<u8> {
-    Ok(number_arg(c, i)?.round().clamp(0.0, 255.0) as u8)
-}
-
-fn number_arg(c: &super::Call, i: usize) -> Or<f64> {
-    match c.positional.get(i) {
-        Some(SassValue::Number { value, .. }) => Ok(*value),
-        Some(other) => Err(err(format!(
-            "expected a number, given {}",
-            other.type_name()
-        ))),
-        None => Err(err("expected a number")),
-    }
-}

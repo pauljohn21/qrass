@@ -1,0 +1,2 @@
+$var: 10px;
+.a { width: $var; }

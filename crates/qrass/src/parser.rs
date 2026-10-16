@@ -21,7 +21,7 @@ use crate::ast::{Block, IfClause, InterpText, Stmt};
 use crate::ast_expr::{Arg, Expr};
 use crate::error::{ErrorKind, Located, SassError};
 use crate::span::{BytePos, FileId, Span};
-use crate::token::{Punct, Quote, Spanned, Token};
+use crate::token::{Punct, Spanned, Token};
 
 pub(crate) type PsResult = Result<Stmt, SassError>;
 
@@ -29,8 +29,19 @@ pub(crate) type PsResult = Result<Stmt, SassError>;
 mod parser_at;
 #[path = "parser_expr.rs"]
 mod parser_expr;
+#[path = "parser_args.rs"]
+mod parser_args;
+#[path = "parser_if.rs"]
+mod parser_if;
+#[path = "parser_if_raw.rs"]
+mod parser_if_raw;
 #[path = "parser_module.rs"]
 mod parser_module;
+#[path = "parser_text.rs"]
+mod parser_text;
+pub(crate) use parser_text::token_to_pieces;
+#[path = "named_colors.rs"]
+pub(crate) mod named_colors;
 
 // ─── Pushdown state (owned values, moved — not a mutable cursor object) ────────
 
@@ -121,6 +132,9 @@ pub struct Parser {
     file: FileId,
     name: String,
     cs: Vec<char>,
+    /// Full source text; kept so raw-capture regions (modern `if()`) can slice
+    /// byte spans verbatim instead of rebuilding from tokens.
+    content: String,
     stack: Vec<Frame>,
     pending: Vec<Spanned>,
     /// Nesting depth of `(`/`[` inside `pending` so `;`/`{`/`}` there stay literal.
@@ -130,10 +144,12 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(file: FileId, name: String, content: String) -> Self {
+        let cs = content.chars().collect();
         Self {
             file,
             name,
-            cs: content.chars().collect(),
+            cs,
+            content,
             stack: vec![Frame {
                 owner: None,
                 stmts: Vec::new(),
@@ -263,13 +279,18 @@ impl Parser {
         Ok(())
     }
 
-    /// Stream end: an open block or non-empty pending is unterminated; otherwise
-    /// drain the finished root program as owned statements.
+    /// Stream end: an unbalanced `(`/`[` in `pending` is unterminated; otherwise a
+    /// final statement may omit its trailing `;` (the goldens treat EOF like a `}`
+    /// boundary), so drain the pending run semicolon-less before sealing the root.
     fn finish(&mut self) -> Vec<PsResult> {
-        if self.depth != 0 || !self.pending.is_empty() {
+        if self.depth != 0 {
             self.failed = true;
             let at = self.cur_pending_start();
             return vec![Err(self.err("unexpected end of input", at))];
+        }
+        if !self.pending.is_empty() && let Err(e) = self.finish_simple(true) {
+            self.failed = true;
+            return vec![Err(e)];
         }
         if self.stack.len() > 1 {
             self.failed = true;
@@ -323,6 +344,16 @@ impl Frame {
 // ─── Shared helpers for the sub-folds ──────────────────────────────────────────
 
 impl Parser {
+    /// Verbatim source text of a byte-span region (token boundaries are char
+    /// boundaries, so slicing is always safe).
+    pub(crate) fn slice(&self, from: BytePos, to: BytePos) -> String {
+        let end = to.0.min(self.content.len());
+        if from.0 >= end {
+            return String::new();
+        }
+        self.content[from.0..end].to_string()
+    }
+
     pub(crate) fn err(&self, msg: impl Into<String>, at: BytePos) -> SassError {
         let (line, col) = self.line_col(at.0);
         let excerpt = self
@@ -365,13 +396,13 @@ impl Parser {
         let mut out = InterpText::new();
         let mut prev_end: Option<BytePos> = None;
         for s in tokens {
-            if let Some(end) = prev_end {
-                if s.span.start.0 > end.0 {
-                    // A gap in the source is whitespace (the lexer emits no other
-                    // gap), but a comment token already carries its own spacing.
-                    if !matches!(s.token, Token::Comment(_)) {
-                        out.push(Piece::Text(" ".into()));
-                    }
+            if let Some(end) = prev_end
+                && s.span.start.0 > end.0
+            {
+                // A gap in the source is whitespace (the lexer emits no other
+                // gap), but a comment token already carries its own spacing.
+                if !matches!(s.token, Token::Comment(_)) {
+                    out.push(Piece::Text(" ".into()));
                 }
             }
             token_to_pieces(&s.token, &mut out);
@@ -410,71 +441,6 @@ impl Parser {
     }
 }
 
-/// Render a single token into interpolated pieces.
-pub(crate) fn token_to_pieces(t: &Token, out: &mut InterpText) {
-    use crate::token::Piece;
-    match t {
-        Token::Ident(s) => out.push(Piece::Text(s.clone())),
-        Token::Variable(v) => out.push(Piece::Text(format!("${v}"))),
-        Token::Number { value, unit } => {
-            let mut s = crate::css::number_to_string(*value);
-            if let Some(u) = unit {
-                s.push_str(u);
-            }
-            out.push(Piece::Text(s));
-        }
-        Token::HexColor(raw) | Token::Url(raw) => out.push(Piece::Text(raw.clone())),
-        Token::Str { text, quote } => {
-            let q = match quote {
-                Quote::Single => '\'',
-                Quote::Double => '"',
-            };
-            out.push(Piece::Text(format!("{q}{text}{q}")));
-        }
-        Token::Placeholder(p) => out.push(Piece::Text(format!("%{p}"))),
-        Token::Ampersand => out.push(Piece::Text("&".into())),
-        Token::AtKeyword(a) => out.push(Piece::Text(format!("@{a}"))),
-        Token::Interpolated { pieces, .. } => out.extend(pieces.iter().cloned()),
-        Token::Punct(p) => out.push(Piece::Text(punct_text(*p).to_string())),
-        Token::Comment(_) => {}
-    }
-}
-
-/// Reverse of the `LexPunct` table: source text for a punct token.
-pub(crate) fn punct_text(p: Punct) -> &'static str {
-    use Punct::*;
-    match p {
-        LBrace => "{",
-        RBrace => "}",
-        LParen => "(",
-        RParen => ")",
-        LBracket => "[",
-        RBracket => "]",
-        Comma => ",",
-        Semicolon => ";",
-        Colon => ":",
-        Dot => ".",
-        Ellipsis => "...",
-        Plus => "+",
-        Minus => "-",
-        Star => "*",
-        Slash => "/",
-        Percent => "%",
-        Tilde => "~",
-        Gt => ">",
-        Lt => "<",
-        Ge => ">=",
-        Le => "<=",
-        Eq => "=",
-        Ne => "!=",
-        Bang => "!",
-        Hash => "#",
-        Caret => "^",
-        Dollar => "$",
-        EqualsEquals => "==",
-    }
-}
-
 // ─── Public reactive API ─────────────────────────────────────────────────────
 
 /// Cold statement stream: tokens flow one at a time through `scan_map`; completed
@@ -488,7 +454,7 @@ pub fn parse_stream(
     Local::from_iter(tokens.into_iter().map(Some).chain(std::iter::once(None)))
         .scan_map(Parser::new(file, name, content), |p, t| p.step(t))
         .filter(|batch| !batch.is_empty())
-        .flat_map(|batch| Local::from_iter(batch))
+        .flat_map(Local::from_iter)
         .box_it()
 }
 
@@ -503,10 +469,7 @@ pub fn parse(
     let mut stmts = Vec::new();
     for t in tokens.into_iter().map(Some).chain(std::iter::once(None)) {
         for r in p.step(t) {
-            match r {
-                Ok(s) => stmts.push(s),
-                Err(e) => return Err(e),
-            }
+            stmts.push(r?);
         }
     }
     Ok(stmts)

@@ -12,4 +12,198 @@
 # forms) parse into first-class colors; color.adjust/change/scale edit channels
 # in-space (no clamp, powerless `none`, hue wrap, faithful `... / a` form).
 # 1320 -> 1850 passed (+530).
-16.0
+#
+# Round 3: gamut<->XYZ switched to the CSS Color 4 spec's exact rational matrices
+# (every space closes onto one D65/D50 white, so neutrals survive cross-gamut
+# round-trips); CIELab inverse-f offset fixed; oklab->linear sRGB now inverts the
+# true forward matrices (Ottosson's separately-rounded inverse skewed white ~5%);
+# Bradford D50<->D65 and the D50 reference white made mutually self-consistent
+# (kills the ~6e-6 neutral a/b residue across lab/lch/xyz-d50/prophoto); rec2020
+# transfer corrected to the pure-power BT.1886 EOTF (L = V^2.4) the goldens encode.
+# 3805 -> 4631 passed (+826, ~42.3%).
+#
+# Round 4: legacy color serialization for `to-space(c, rgb|hsl|hwb)` (the golden's
+# keyword/#hex/hsl()/rgb%() forms + out-of-gamut hsl() fallback, with the XYZ
+# round-trip noise absorbed by a 1e-4 integral snap); CSS Color 4 neutral handling
+# (chroma 0 -> hue `none` in lch/oklch, tiny OKLab a/b residue snapped to 0, achromatic
+# hsl/hwb forced to `hsl(0, 0%, L)`); and `none` propagation — positionally across
+# the tristimulus (gamut/xyz) family and via the lightness-pivot rules for the
+# perceptual (lab/lch/oklab/oklch) pairs.
+# 4631 -> 5109 passed (+478, ~46.6%).
+#
+# Round 5: legacy `rgb()`/`hsl()` constructors resolve a `none` channel to 0
+# (the hrx goldens) instead of erroring; `format_number` normalizes the `-0` signed-zero
+# artifact an hwb whiteness picks up on the RGB round trip; and `color.change`
+# stores out-of-gamut channels verbatim (clamping deferred to serialization) so a
+# `change(..., $red: -50, $blue: 400)` fed to `to-space` matches the golden's hsl/hwb/
+# gamut results. Pure refactors also split value.rs and builtins/color.rs under the
+# 500-line budget (color_css.rs, builtins/color_ops.rs).
+# 5109 -> 5164 passed (+55, ~47.1%).
+#
+# Round 6: out-of-gamut HWB->HSL serialization (signed saturation `num/den`,
+# negative-saturation hue flip, a carried verbatim HSL triple so `to-space(hwb,
+# rgb|hsl)` reproduces the golden's past-gamut `hsl()`/`color(srgb)` channels); the
+# `lch -> lab` missing-lightness poison is scoped to that one pair (the other
+# eleven perceptual source->target pairs keep their chromatic channels); and
+# `hsl`/`hwb` sources poison only the undetermined channels of a modern target
+# (`hsl(none none L)` -> `lab(L none none)`, `hwb(H none none)` -> `lch(none none H)`).
+# Also split the hsl/hwb `to-space` helpers into builtins/color_ops.rs under the
+# 500-line budget.
+# 5198 -> 5290 passed (+92, ~48.3%).
+# Round 7: math builtins. Non-finite numbers now serialize through `calc(...)`
+# (`NaN`/`±infinity`, with a `* 1<unit>` factor when a unit is carried) and
+# `math.div(1, 0)` returns IEEE infinity instead of raising -- both cross-cutting,
+# lifting the whole suite. Added the trig family (sin/cos/tan take deg/grad/rad/
+# turn, inverse family returns `deg` and reads `calc(NaN * 1deg)` out of domain)
+# plus hypot/clamp/unit/is-unitless/compatible. Undefined-function gaps remain the
+# next frontier (selector unify/is-superselector/extend; golden error-text rendering).
+# 5290 -> 5499 passed (+209, ~50.2%).
+# Round 8: named-argument dispatch. Builtins now carry their golden-declared parameter
+# names, and the dispatcher folds `$name:`-style arguments into the positional
+# slot each name declares, so every namespace reads inputs positionally no matter
+# how the caller spelled them (math/color/selector/list/map/string/meta). A named
+# argument colliding with a positional one raises "was passed both positionally
+# and by name"; an unknown name is rejected for fixed-arity builtins but left in
+# the named map for variadic channel-setters (color.scale/adjust/change).
+# Also corrected math.clamp's parameter order to (min, number, max). Non-naming
+# regressions guarded to zero across the rollout.
+# 5499 -> 5574 passed (+75, ~50.85%).
+# Round 9: modern color surface — the deprecated single-channel accessors
+# (`color.red`/`green`/`blue`/`hue`/`saturation`/`lightness`/`whiteness`/
+# `blackness`), implemented as thin shims over a shared `read_channel` core that
+# also gained WHB-from-RGB recovery (`whiteness = min·100/255`,
+# `blackness = (255-max)·100/255`). A bare global `hsl()`/`hsla()` constructor was
+# tried and reverted: producing a real Color regressed ~100 `hsl/` cases whose
+# goldens echo the input text (channel/slash/var()/calc()/out-of-range forms), so
+# `hsl(…)` stays an unresolved-call passthrough string as before.
+# 5574 -> 5600 passed (+26, ~51.0%).
+# Round 10: undefined-function quick harvest. `color.is-legacy` (predicate =
+# "carries no Color 4 payload") and `string.insert`, which indexes by Unicode
+# codepoint (a `Vec<char>` matches the hrx goldens: astral emoji are one char, a
+# base+combining pair is two) with 1-based Dart-style clamping at both edges and
+# the result mirroring `$string`'s quoting. The remaining insert failures are
+# error-text cases needing full golden span rendering.
+# 5600 -> 5638 passed (+38, ~51.4%).
+# Round 11: bracketed (`[…]`) list literals. The value/AST model gained a
+# `bracketed` flag (default false, so every prior list is unchanged); the
+# expression parser learned `[a b c]` / `[1, 2]` / `[]`; serialization re-wraps
+# bracketed lists; `list.is-bracketed` reads the flag and `join`/`append`/
+# `set-nth` propagate it (join result bracketed iff `$bracketed` [default true]
+# holds AND `list1` was bracketed, and a single-element space `list1` defers its
+# separator to `list2`). Cross-cutting fix: `fold_named` no longer truncates at
+# the first unfilled slot — it pads interior gaps with `Null` so a named argument
+# targeting a later slot (e.g. `join($list1, $list2, $bracketed: false)`) is not
+# dropped; A/B verified zero regressions.
+# 5638 -> 5674 passed (+36, ~51.76%).
+# Round 12: semicolon-less final statements + module-head loud comments. The
+# parser now treats EOF like a `}` boundary (finish() flushes a depth-0 pending
+# run through finish_simple(true) instead of blanket-erroring), so a trailing
+# `@use`/`@forward`/`@warn` (and any final statement) may omit its `;` as
+# the hrx goldens allows; newlines/`as <prefix>`/param-list line breaks already worked.
+# `build_use`/`build_forward` strip `/* */` tokens from the argument run so
+# `@use /**/ "m"` resolves `"m"`, not the comment. Collapsed the ~120-strong
+# `unexpected end of input` cluster (132 -> 5). Four `css/plain/error/*` and
+# `directives/if/error/*` cases that had only ever "passed" via the fragile
+# `"expected" in "unexpected end of input"` substring accident now surface the
+# separate, still-missing plain-CSS content enforcement (rejecting maps /
+# SCSS-only functions / `@at-root` inside a loaded `.css`) — recorded as debt,
+# not a behavioural regression of this change.
+# 5674 -> 5753 passed (+79, ~52.5%).
+# Round 13: plain-CSS content enforcement. A `.css` source reached through
+# `@use`/`@forward` (or the entry) is parsed in the golden's *plain CSS* mode, where
+# SCSS-only constructs are rejected; qrass had passed such payloads through
+# verbatim without inspecting them. `plain_css::validate` walks the parsed
+# program and raises the golden's message for the first violation: SCSS-only at-rules
+# (`@mixin`/`@function`/`@each`/`@if`/`@extend`/`@at-root`/diagnostics/`@return`
+# ...) -> "This at-rule isn't allowed in plain CSS."; `$var` -> "Sass variables
+# aren't allowed..."; `#{...}` -> "Interpolation isn't allowed..."; SCSS
+# arithmetic/logic -> "Operators aren't allowed...". It is deliberately
+# conservative — the CSS branch in eval_module only validates when the payload
+# parses, and the walker guards the golden's literal-verbatim regions: `calc`/`min`/
+# `max`/`clamp` operands, `/`+`=`+bare `and`/`or`, and any at-rule the golden's CSS
+# parser does not special-case (custom `@function --a()`, uppercased spellings)
+# are passed through untouched. Collapsed the css/plain `expected error, got
+# success` cluster (net +33; css/plain 92 -> 96, zero false-rejects).
+# Round 13b (plain-CSS selector/namespace families): extended `plain_css`
+# with unambiguous selector rejections the golden's CSS parser raises but a valid CSS
+# selector can never trip — placeholder (`%ph` -> "Placeholder selectors…"),
+# a leading combinator on a top-level rule (`> a` -> "Top-level leading
+# combinators…", gated on nesting depth so a nested `>` stays legal), and a
+# parent selector with an ident suffix (`&b` -> "Parent selectors can't have
+# suffixes…", while bare `&`/`&:hover` and keyframes `50%` steps stay allowed) —
+# plus routed `ns.$x`/`ns.fn()` through "Module namespaces aren't allowed…"
+# instead of the variable message. css/plain 96 -> 99; full hrx A/B 0 regressions.
+# Root-entry `.css` enforcement was checked and skipped: sass-spec has 0 hrx cases
+# with a `.css` entry, so it would add untested code with no golden payoff.
+# 5786 -> 5789 passed (+3, ~52.8%).
+# Round 14: plain-CSS map-literal + named-argument rejection. `x: (y: z)` parses
+# to `Expr::Map`; plain CSS has no `(k: v)` group so the golden's CSS parser reports
+# `expected ")"` -> `plain_css` rejects any `Expr::Map` with that message
+# (css/plain/error/expression/map.hrx#0). `f($name: v)` folds to `Arg::Named`
+# (the parser strips the `$`), which plain CSS cannot express -> rejected as
+# "Sass variables aren't allowed in plain CSS." (function.hrx#2). Two clean wins;
+# `index()`-style "This function isn't allowed in plain CSS." was skipped: it
+# needs a curated Sass-builtin-name set whose false-positive risk on CSS names
+# (min/max/hsl/rgb) outweighs its single golden case, and the splat payload
+# `hsl(… 50%...)` fails to parse in the SCSS parser (a `expected ')' after
+# arguments` parser gap, not a validator concern). css/plain 99 -> 101; A/B 0
+# regressions.
+# 5789 -> 5791 passed (+2, ~52.8%).
+# Round 15: plain-CSS @import support-condition passthrough. `@import "a" b();`
+# / `@import "a" screen;` / `@import "a" supports(b: c);` / `@import "a" (…)`
+# carry a support condition after the URL, which makes them unambiguously plain
+# CSS imports the goldens emit verbatim — but `looks_like_css_import` only recognized
+# `url(…)`/`.css`, so qrass wrongly rejected them with the SCSS-@import error.
+# Extended the predicate to split the statement into top-level import specs and
+# treat any spec whose quoted URL is followed by trailing content (a condition)
+# as a plain-CSS passthrough, while a bare `@import "a"` (nothing after the
+# quote) stays an SCSS import (still rejected). The statement is emitted
+# single-line/verbatim — the golden's finer normalizations (comma-splitting multiple
+# import URLs, `supports((a:b))`->`supports(a:b)`, `and(`->`and ` spacing) are
+# deferred. css/plain 101 -> 133; the condition form also lifted ~13 non-plain
+# @import cases elsewhere in the suite. A/B 0 regressions. (The plain-CSS test
+# group moved to tests/scss_plain_css.rs to keep scss_modules.rs under 500.)
+# 5791 -> 5836 passed (+45, ~53.2%).
+# Round 16: argument-list parser + hrx fixture inheritance. (a) `args()` now
+# promotes ANY expression followed by `...` to a splat slot — the old helper
+# only handled a leading `$var...` and fell through to re-parsing it as a
+# positional, corrupting every second consecutive splat (`f($x..., $y...)`) and
+# rejecting literal splats (`f(1...,)`); eval-side `$map...` now feeds the named
+# pool. (b) The hrx parser implements sass-spec's accumulating file set: a
+# fixture-only leading section (e.g. callable/arguments.hrx's shared
+# `_utils.scss`) now seeds every later case in the same document, latest
+# declaration winning at the same path, while expectation members (output/error/
+# warning/options.yml) stay section-local; the runner also materializes each
+# case under a virtual spec root so spec-root-relative `@use` URLs resolve
+# through the load path like the spec harness. Lifted the splat parse cluster
+# and the callable/* + css/functions/var fixture families. A/B 0 regressions.
+# 5836 -> 5848 passed (+12, ~53.35%).
+# Round 17: modern `if(…)` clause syntax (per the expressions/if goldens:
+# `sass()`/`css()` conditions, `;`-separated clause chains, `else:` arms). Parser captures CSS terms as raw
+# source slices split only around `#{…}` (parser_if.rs); eval runs three-valued
+# symbolic execution (eval_if.rs): decided sass terms short-circuit and drop out
+# of the re-rendered CSS `if(…)` chain, undetermined clauses freeze verbatim.
+# Gained the whole expressions/if success families (+150 PASS). The 24 lost
+# rows are all `expressions/if/error/*` contains-matched false positives that
+# now parse successfully; the error-text family is deferred as its own target.
+# 5848 -> 5974 passed (net +126, ~54.50%).
+# Round 18: `expressions/if/error/*` golden error annotation. The 65 cases of
+# that family (63 newly + 2 carried as known debt) demand an exact block: the
+# message, the `,` corner, the numbered source line, every marker run and its
+# label, the `'` foot and the `input.scss L:C  root stylesheet` line. The
+# condition grammar was re-derived from those goldens alone (parser_if.rs):
+# `not` only as a whole-condition prefix, one joiner kind per chain, no
+# adjacency after a parenthesized group, a glued `not(`/`and(`/`or(` reporting
+# `Whitespace is required between "X" and "("` with X spelled as written, at
+# most one `;` between clauses. A diag renderer (diag.rs) emits the marker
+# layout, and `error/raw.hrx`'s rule was read off its 28 data points: a
+# condition whose own level holds both a `var()`/`attr()` substitution and a
+# `sass()` expression is rejected with a two-anchor `^`/`=` block, a `(`-group
+# shielding the substitution but not the `sass()`. Round 17's 24 contains-matched
+# false positives are now genuinely rejected, and tests/if_error.rs compares the
+# whole block verbatim so a mis-placed caret can no longer pass. The 2 debt rows
+# (`error/empty.hrx#0`, `error/missing.hrx#0`) print a builtin `if()`
+# declaration snippet plus an `if-function` deprecation warning. A/B: 0
+# regressions, expressions/if 145 -> 207 PASS.
+# 5974 -> 6037 passed (+63, ~55.08%).
+55.0

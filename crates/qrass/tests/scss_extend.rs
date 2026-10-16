@@ -35,7 +35,7 @@ fn extend_merges_placeholder_into_selector() {
 #[test]
 fn extend_multiple_selectors_share_placeholder() {
     // Two selectors extending one placeholder collapse into a single *grouped*
-    // rule (dart-sass semantics): one declaration block shared by both selectors.
+    // rule (per the goldens): one declaration block shared by both selectors.
     let out = css("%box { color: red; } .a { @extend %box; } .b { @extend %box; }");
     assert!(out.contains(".a") && out.contains(".b"), "{out}");
     assert_eq!(

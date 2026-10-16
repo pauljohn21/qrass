@@ -36,7 +36,8 @@ fn zero_and_empty_are_truthy() {
     assert!(
         SassValue::List {
             items: vec![],
-            sep: qrass::ast_expr::ListSep::Comma
+            sep: qrass::ast_expr::ListSep::Comma,
+            bracketed: false,
         }
         .is_truthy()
     );
@@ -144,7 +145,7 @@ fn css_serialization_forms() {
         .to_css(),
         "50%"
     );
-    // dart-sass preserves a color's representation *origin*: a function-built
+    // the goldens preserve a color's representation *origin*: a function-built
     // color serializes as `rgb(…)`, while one parsed from a `#rrggbb` literal
     // round-trips back to hex.
     assert_eq!(Color::rgb(13, 110, 253).to_css(), "rgb(13, 110, 253)");
@@ -155,7 +156,10 @@ fn css_serialization_forms() {
             b: 253.0,
             a: 1.0,
             hex: true,
-            c4: None
+            c4: None,
+            name: None,
+            legacy: None,
+            legacy_hsl: None
         }
         .to_css(),
         "#0d6efd"
@@ -167,7 +171,10 @@ fn css_serialization_forms() {
             b: 253.0,
             a: 0.5,
             hex: true,
-            c4: None
+            c4: None,
+            name: None,
+            legacy: None,
+            legacy_hsl: None
         }
         .to_css(),
         "rgba(13, 110, 253, 0.5)"
@@ -205,8 +212,18 @@ fn list_and_map_serialization() {
             },
         ],
         sep: ListSep::Comma,
+        bracketed: false,
     };
     assert_eq!(list.to_css(), "1, 2");
+    let bracketed = SassValue::List {
+        items: vec![SassValue::Number {
+            value: 1.0,
+            unit: None,
+        }],
+        sep: ListSep::Space,
+        bracketed: true,
+    };
+    assert_eq!(bracketed.to_css(), "[1]");
     let map = SassValue::Map {
         entries: vec![(
             SassValue::Str {

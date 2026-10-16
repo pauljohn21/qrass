@@ -1,8 +1,8 @@
 //! Golden CSS comparison helpers (task 10.4). The element-plus output and the
-//! dart-sass baseline are both re-serialized through the same deterministic CSS
+//! spec baseline are both re-serialized through the same deterministic CSS
 //! serializer ([`lightningcss`]) before a line-by-line whitespace-normalized
 //! comparison. Canonicalizing both sides on the identical printer removes
-//! purely-cosmetic differences — most notably dart-sass expanded's irregular
+//! purely-cosmetic differences — most notably the spec's expanded-mode irregular
 //! selector line-breaking (some selector lists joined, others split) — while
 //! still catching any real divergence in rule order, selectors, declarations or
 //! values. [`first_diff`] reports the first divergent normalized line with

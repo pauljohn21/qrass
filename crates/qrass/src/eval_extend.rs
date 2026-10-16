@@ -47,7 +47,7 @@ impl EvalState {
     /// Global resolution pass: for every held-back placeholder rule, substitute
     /// its in-stream source-position marker with a *single grouped rule* whose
     /// selector list is every concrete selector that extends it — in reverse
-    /// source order, matching dart-sass's `@extend` output. Placeholders nothing
+    /// source order, matching the goldens' `@extend` output. Placeholders nothing
     /// extends (or with empty declarations) have their marker dropped. Errors on a
     /// non-`!optional` extend whose target was never defined.
     pub(crate) fn extend_pass(&mut self, chunks: &mut Vec<String>) -> Ev<()> {
@@ -70,7 +70,7 @@ impl EvalState {
         }
 
         // Placeholder token -> concrete selectors that extend it, in reverse
-        // source-of-extend order (dedup first, then reverse) to match dart-sass.
+        // source-of-extend order (dedup first, then reverse) to match the goldens.
         let mut by_target: HashMap<String, Vec<String>> = HashMap::new();
         for (target, concrete, _optional) in &self.extends {
             let list = by_target.entry(target.clone()).or_default();
@@ -84,7 +84,7 @@ impl EvalState {
 
         // Aggregate placeholder rules by selector. The same placeholder can be
         // defined more than once (e.g. a share-rule `@include`d inside a mixin that
-        // iterates over a state list); dart-sass emits a single grouped rule per
+        // iterates over a state list); the goldens emit a single grouped rule per
         // unique selector, at the *first* definition site, carrying the merged
         // declarations of every duplicate. Extra markers are dropped.
         struct Group {

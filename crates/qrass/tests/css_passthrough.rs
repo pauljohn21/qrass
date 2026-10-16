@@ -1,5 +1,5 @@
 //! Plain-CSS function passthrough (task 10): calls Sass doesn't define (`var`,
-//! `calc`, transforms, gradients, …) are emitted verbatim, matching dart-sass, so
+//! `calc`, transforms, gradients, …) are emitted verbatim, matching the goldens, so
 //! element-plus's CSS-variable usage survives. Inside a passthrough call Sass math
 //! is *disabled* — binary/unary operators stay literal — while interpolation
 //! (`#{…}`), variables and Sass function calls are still resolved.
@@ -79,7 +79,7 @@ fn space_separated_transform_list_passes_through() {
 
 #[test]
 fn rgb_space_alpha_syntax_is_computed_not_passed_through() {
-    // Modern CSS color syntax: dart-sass evaluates it to a Sass color and
+    // Modern CSS color syntax: the goldens evaluate it to a Sass color and
     // serializes the alpha, rather than emitting `rgb(… / …%)` verbatim.
     assert_eq!(value("rgb(0 0 0 / 15%)"), "rgba(0, 0, 0, 0.15)");
     assert_eq!(value("rgb(0 0 0 / 6%)"), "rgba(0, 0, 0, 0.06)");

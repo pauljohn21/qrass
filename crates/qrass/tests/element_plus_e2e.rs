@@ -9,7 +9,7 @@
 //! * `element_plus_component_coverage` — every `.el-*` class selector present
 //!   in the golden baseline must also appear in our output;
 //! * `element_plus_matches_golden` — whitespace-normalized line-for-line
-//!   equality against the dart-sass `index.css` baseline.
+//!   equality against the official `index.css` baseline.
 //!
 //! All four are named `element_plus*` so `cargo test -p qrass element_plus`
 //! selects exactly this suite.

@@ -9,9 +9,11 @@ use crate::ast_expr::ListSep;
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("selector", "parse", 1, Some(1), parse);
+    r.nsp("selector", "parse", 1, Some(1), &["selector"], parse);
+    // `nest`/`append` take a rest parameter (`$selectors...`); the goldens forbid
+    // naming a rest argument, so they stay positional-only.
     r.ns("selector", "nest", 1, None, nest);
-    r.ns("selector", "simple-selectors", 1, Some(1), simple_selectors);
+    r.nsp("selector", "simple-selectors", 1, Some(1), &["selector"], simple_selectors);
     r.def("selector-nest", 1, None, nest);
     r.def("selector-append", 2, None, append);
     r.def("selector-parse", 1, Some(1), parse);
@@ -40,6 +42,7 @@ fn comma(items: Vec<SassValue>) -> SassValue {
     SassValue::List {
         items,
         sep: ListSep::Comma,
+        bracketed: false,
     }
 }
 

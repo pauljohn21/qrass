@@ -8,14 +8,14 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("map", "get", 1, None, get);
-    r.ns("map", "has-key", 1, None, has_key);
-    r.ns("map", "keys", 1, Some(1), keys);
-    r.ns("map", "values", 1, Some(1), values);
-    r.ns("map", "merge", 2, Some(2), merge);
-    r.ns("map", "deep-merge", 1, None, deep_merge_n);
-    r.ns("map", "set", 3, Some(3), set_call);
-    r.ns("map", "remove", 1, None, remove);
+    r.nsp("map", "get", 1, None, &["map", "key"], get);
+    r.nsp("map", "has-key", 1, None, &["map", "key"], has_key);
+    r.nsp("map", "keys", 1, Some(1), &["map"], keys);
+    r.nsp("map", "values", 1, Some(1), &["map"], values);
+    r.nsp("map", "merge", 2, Some(2), &["map1", "map2"], merge);
+    r.nsp("map", "deep-merge", 1, None, &["map1", "map2"], deep_merge_n);
+    r.nsp("map", "set", 3, Some(3), &["map", "key", "value"], set_call);
+    r.nsp("map", "remove", 1, None, &["map", "key"], remove);
     // Legacy global spellings.
     r.def("map-get", 1, None, get);
     r.def("map-merge", 2, Some(2), merge);
@@ -45,6 +45,7 @@ fn comma(items: Vec<SassValue>) -> SassValue {
     SassValue::List {
         items,
         sep: ListSep::Comma,
+        bracketed: false,
     }
 }
 

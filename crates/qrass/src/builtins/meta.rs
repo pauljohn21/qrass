@@ -10,8 +10,8 @@ use super::{Or, Registry};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("meta", "type-of", 1, Some(1), type_of);
-    r.ns("meta", "inspect", 1, Some(1), inspect);
+    r.nsp("meta", "type-of", 1, Some(1), &["value"], type_of);
+    r.nsp("meta", "inspect", 1, Some(1), &["value"], inspect);
     r.ns("meta", "keywords", 1, Some(1), keywords);
     r.ns("meta", "keyword-get", 2, Some(2), keyword_get);
     // Legacy global spellings.
@@ -26,7 +26,7 @@ fn type_of(c: &super::Call) -> Or<SassValue> {
 }
 
 /// `inspect` yields the value's source text, unquoted (a string arg prints its
-/// CSS form, including its own quotes, exactly like dart-sass).
+/// CSS form, including its own quotes, exactly like the goldens).
 fn inspect(c: &super::Call) -> Or<SassValue> {
     Ok(unquoted(c.positional[0].to_css()))
 }

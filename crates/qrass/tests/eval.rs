@@ -44,7 +44,7 @@ fn nested_scope_shadows_outer() {
 #[test]
 fn loop_accumulator_updates_enclosing_local_scope() {
     // A plain `$n: $n + …` inside `@each`/`@for` must update the function-local `$n`
-    // (dart-sass propagates within the local scope chain), not shadow it per-iteration.
+    // (per the goldens, updates propagate within the local scope chain), not shadow it per-iteration.
     let out = css(
         "@function j($list) { $n: x; @each $i in $list { $n: $n + '-' + $i; } @return $n; } \
          .a { p: j((a, b, c)); }",
@@ -187,4 +187,78 @@ fn undefined_variable_errors() {
         msg.contains("Undefined variable"),
         "expected undefined-variable, got {msg}"
     );
+}
+
+// ─── Modern `if()` clause syntax (expressions/if/*.hrx goldens) ──────────────
+
+#[test]
+fn modern_if_css_clauses_render_back() {
+    let out = css("a {b: if(css(1) and css(2): c; else: d)}");
+    assert!(
+        out.contains("b: if(css(1) and css(2): c; else: d);"),
+        "css clauses must re-render\n---\n{out}"
+    );
+    // Structural whitespace normalizes (`;else` -> `; else`).
+    let out = css("a {b: if(css(): c ;else: d)}");
+    assert!(
+        out.contains("b: if(css(): c; else: d);"),
+        "whitespace normalized\n---\n{out}"
+    );
+}
+
+#[test]
+fn modern_if_sass_evaluates_with_short_circuit() {
+    let out = css("a {b: if(sass(true): c; else: d)}");
+    assert!(out.contains("b: c;"), "true arm\n---\n{out}");
+    let out = css("a {b: if(sass(false): c; else: d)}");
+    assert!(out.contains("b: d;"), "false falls to else\n---\n{out}");
+    // A definitely-true first arm never evaluates later clauses.
+    let out = css("a {b: if(sass(true): c; sass($undefined): d)}");
+    assert!(out.contains("b: c;"), "later clause skipped\n---\n{out}");
+    // No matching arm and no else: the declaration drops (null value).
+    let out = css("a {b: if(sass(false): c); d: 1px}");
+    assert!(
+        !out.contains("b:") && out.contains("d: 1px;"),
+        "null if() drops the declaration\n---\n{out}"
+    );
+}
+
+#[test]
+fn modern_if_mixed_simplification_drops_true_terms() {
+    // sass(true) vanishes from the and-chain, css terms stay symbolic.
+    let out = css("a {b: if(css(1) and sass(true) and css(2): c; else: d)}");
+    assert!(
+        out.contains("b: if(css(1) and css(2): c; else: d);"),
+        "true term dropped\n---\n{out}"
+    );
+    // A false term decides the clause: fall through to the Sass else arm.
+    let out = css("a {b: if(css(1) and sass(false) and css(2): c; else: d)}");
+    assert!(out.contains("b: d;"), "false kills clause\n---\n{out}");
+}
+
+#[test]
+fn modern_if_adjacent_var_terms_survive_verbatim() {
+    let out = css("a {b: if(css(1) var(--and) css(2): c)}");
+    assert!(
+        out.contains("b: if(css(1) var(--and) css(2): c);"),
+        "adjacency preserved\n---\n{out}"
+    );
+}
+
+#[test]
+fn modern_if_interpolates_only_hash_runs() {
+    let out = css("a {b: if(css(#{1 + 2}px): c)}");
+    assert!(
+        out.contains("b: if(css(3px): c);"),
+        "interpolation evaluated, text verbatim\n---\n{out}"
+    );
+}
+
+#[test]
+fn legacy_if_builtin_still_works() {
+    // A top-level comma keeps the three-argument builtin call intact.
+    let out = css("a {b: if(true, 1px, 2px)}");
+    assert!(out.contains("b: 1px;"), "legacy if()\n---\n{out}");
+    let out = css("a {b: if(false, 1px, 2px)}");
+    assert!(out.contains("b: 2px;"), "legacy else arg\n---\n{out}");
 }

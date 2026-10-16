@@ -29,9 +29,12 @@ pub enum SassValue {
     },
     Color(Color),
     /// A list with a separator; a map is represented by [`SassValue::Map`].
+    /// `bracketed` marks a CSS-`[]` bracketed list literal (`[a b c]`), which
+    /// round-trips through serialization and drives `list.is-bracketed`.
     List {
         items: Vec<SassValue>,
         sep: ListSep,
+        bracketed: bool,
     },
     /// An ordered key/value map (insertion order preserved for output).
     Map {
@@ -64,10 +67,12 @@ impl PartialEq for SassValue {
                 Self::List {
                     items: a,
                     sep: sa,
+                    ..
                 },
                 Self::List {
                     items: b,
                     sep: sb,
+                    ..
                 },
             ) => sa == sb && a == b,
             (Self::Map { entries: a }, Self::Map { entries: b }) => a == b,
@@ -80,7 +85,7 @@ impl PartialEq for SassValue {
 /// alpha in `0.0..=1.0`. `hex` records the color's *origin*: a color parsed from
 /// a `#rrggbb` literal serializes back to hex, while one produced by a function
 /// (`rgb()`/`rgba()`/`mix()`/…) serializes as `rgb()`/`rgba()` — matching how
-/// dart-sass preserves the representation form. `hex` is ignored by equality.
+/// the goldens preserve the representation form. `hex` is ignored by equality.
 /// Colors parsed from CSS Color 4 literals carry their space and components in
 /// `c4`; the RGBA fields then hold the converted sRGB value and `c4` drives
 /// both equality and serialization.
@@ -92,6 +97,25 @@ pub struct Color {
     pub a: f64,
     pub hex: bool,
     pub c4: Option<Box<crate::color4::Color4>>,
+    /// Present only for a color parsed from a CSS keyword (`red`, `pink`, …): the
+    /// name round-trips on serialization until an operation drops it. Excluded
+    /// from equality so a named color still compares equal to its hex form.
+    pub name: Option<&'static str>,
+    /// Marks a color produced by `color.to-space($c, rgb|hsl|hwb)`: it still
+    /// carries `c4` (so `.space`/`.channel` report the modern space) but must
+    /// serialize with the goldens' **legacy** CSS form (keyword / `#hex` /
+    /// `hsl()` / `rgb(%)` / out-of-gamut `hsl()` fallback) rather than the
+    /// `color(...)` wrapper. Holds the requested target name (`rgb`/`hsl`/`hwb`),
+    /// which drives the format selection; every other path leaves it `None` so
+    /// existing serialization is unchanged.
+    pub legacy: Option<&'static str>,
+    /// Exact, *unclamped* HSL channels carried alongside a `to-space($c, rgb|hsl|hwb)`
+    /// result whose source was `hsl`/`hwb`. the goldens compute those legacy colors
+    /// through the HSL formula and keeps the channels verbatim (an out-of-gamut
+    /// `hwb(20deg 200% -125%)` → `hsl(200, 11.1111111111%, 212.5%)`), which the
+    /// RGB round trip cannot recover. Read only by the legacy `hsl()` fallback in
+    /// serialization; excluded from equality.
+    pub legacy_hsl: Option<Hsl>,
 }
 
 impl PartialEq for Color {
@@ -152,10 +176,7 @@ impl SassValue {
         match self {
             SassValue::Null => "null".into(),
             SassValue::Bool(b) => b.to_string(),
-            SassValue::Number { value, unit } => match unit {
-                Some(u) => format!("{}{u}", format_number(*value)),
-                None => format_number(*value),
-            },
+            SassValue::Number { value, unit } => number_to_css(*value, unit.as_deref()),
             SassValue::Str { text, quoted } => {
                 if *quoted {
                     format!("\"{}\"", text.replace('"', "\\\""))
@@ -164,17 +185,22 @@ impl SassValue {
                 }
             }
             SassValue::Color(c) => c.to_css(),
-            SassValue::List { items, sep } => {
+            SassValue::List { items, sep, bracketed } => {
                 let join = match sep {
                     ListSep::Comma => ", ",
                     ListSep::Slash => " / ",
                     ListSep::Space => " ",
                 };
-                items
+                let inner = items
                     .iter()
                     .map(|v| v.to_css())
                     .collect::<Vec<_>>()
-                    .join(join)
+                    .join(join);
+                if *bracketed {
+                    format!("[{inner}]")
+                } else {
+                    inner
+                }
             }
             SassValue::Map { entries } => {
                 let inner = entries
@@ -188,24 +214,29 @@ impl SassValue {
     }
 
     /// Serialize for a `#{…}` interpolation slot. Unlike [`SassValue::to_css`],
-    /// quoted strings are emitted **unquoted** (dart-sass drops the quotes when a
+    /// quoted strings are emitted **unquoted** (the goldens drop the quotes when a
     /// string is interpolated), and list/map elements recurse through the same
     /// unquoting rule so `#{$a}` where `$a: 'el'` yields `el`, not `"el"`.
     pub fn interp_text(&self) -> String {
         match self {
             SassValue::Null => String::new(),
             SassValue::Str { text, .. } => text.clone(),
-            SassValue::List { items, sep } => {
+            SassValue::List { items, sep, bracketed } => {
                 let join = match sep {
                     ListSep::Comma => ", ",
                     ListSep::Slash => " / ",
                     ListSep::Space => " ",
                 };
-                items
+                let inner = items
                     .iter()
                     .map(|v| v.interp_text())
                     .collect::<Vec<_>>()
-                    .join(join)
+                    .join(join);
+                if *bracketed {
+                    format!("[{inner}]")
+                } else {
+                    inner
+                }
             }
             SassValue::Map { entries } => {
                 let inner = entries
@@ -229,6 +260,9 @@ impl Color {
             a: 1.0,
             hex: false,
             c4: None,
+            name: None,
+            legacy: None,
+            legacy_hsl: None,
         }
     }
 
@@ -240,6 +274,27 @@ impl Color {
             a,
             hex: false,
             c4: None,
+            name: None,
+            legacy: None,
+            legacy_hsl: None,
+        }
+    }
+
+    /// A color parsed from a CSS keyword: carries its `#rrggbb` value plus the
+    /// source `name` so serialization round-trips the keyword (golden behavior).
+    pub fn named(hex: &str, name: &'static str) -> Self {
+        let h = hex.trim_start_matches('#');
+        let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0) as f64;
+        Self {
+            r: byte(0),
+            g: byte(2),
+            b: byte(4),
+            a: 1.0,
+            hex: true,
+            c4: None,
+            name: Some(name),
+            legacy: None,
+            legacy_hsl: None,
         }
     }
 
@@ -273,6 +328,9 @@ impl Color {
             a,
             hex: false,
             c4: None,
+            name: None,
+            legacy: None,
+            legacy_hsl: None,
         }
     }
 
@@ -305,25 +363,8 @@ impl Color {
         }
     }
 
-    /// CSS serialization honoring origin: opaque colors from a hex literal print
-    /// as `#rrggbb`, while function-produced colors print as `rgb(r, g, b)`; any
-    /// color with alpha `< 1.0` prints as `rgba(r, g, b, a)`.
-    pub fn to_css(&self) -> String {
-        if let Some(c4) = &self.c4 {
-            return c4.to_css();
-        }
-        let clamp = |v: f64| (v.round().clamp(0.0, 255.0)) as u8;
-        let (r, g, b) = (clamp(self.r), clamp(self.g), clamp(self.b));
-        if self.a >= 1.0 {
-            if self.hex {
-                format!("#{:02x}{:02x}{:02x}", r, g, b)
-            } else {
-                format!("rgb({r}, {g}, {b})")
-            }
-        } else {
-            format!("rgba({r}, {g}, {b}, {})", format_number(self.a))
-        }
-    }
+    // CSS serialization (to_css / legacy_to_css) lives in the sibling
+    // `crate::color_css` module to keep this file within the size budget.
 }
 
 /// Serialize a number the way sass does: integral values print without a
@@ -349,7 +390,37 @@ pub fn format_number(v: f64) -> String {
     if s.ends_with('.') {
         s.pop();
     }
+    // A channel like an hwb whiteness can carry a -0.0 / sub-resolution negative
+    // residue from the RGB round trip; its trimmed text would read "-0", but
+    // the goldens always emit a plain "0". Normalize the signed-zero artifact.
+    if s == "-0" {
+        return "0".into();
+    }
     s
+}
+
+/// Serialize a Sass number to CSS. A non-finite value (`NaN`/`±Infinity`) is not
+/// representable as a bare CSS number, so the goldens emit it inside `calc()`: a
+/// unitless infinity reads `calc(infinity)`, and a unit-carrying one
+/// `calc(infinity * 1<unit>)` (the golden multiplies the unit form explicitly).
+pub fn number_to_css(value: f64, unit: Option<&str>) -> String {
+    if value.is_nan() {
+        return match unit {
+            Some(u) => format!("calc(NaN * 1{u})"),
+            None => "calc(NaN)".into(),
+        };
+    }
+    if value.is_infinite() {
+        let sign = if value > 0.0 { "infinity" } else { "-infinity" };
+        return match unit {
+            Some(u) => format!("calc({sign} * 1{u})"),
+            None => format!("calc({sign})"),
+        };
+    }
+    match unit {
+        Some(u) => format!("{}{u}", format_number(value)),
+        None => format_number(value),
+    }
 }
 
 /// Unit conversion table (design D2): map a number in `from` to `to`, following

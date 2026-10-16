@@ -343,3 +343,92 @@ fn error_at_for_missing_bounds() {
         "@for without from/to errors"
     );
 }
+
+#[test]
+fn final_at_rule_may_omit_semicolon_at_eof() {
+    // the goldens treat EOF like a `}` boundary: a trailing `@use`/`@forward`/
+    // `@warn` without `;` must still fold into a statement, not error.
+    match only("@use \"a\"") {
+        Stmt::Use(u) => assert_eq!(u.url, "a", "@use url without trailing `;`"),
+        other => panic!("expected Use, got {other:?}"),
+    }
+    match only("@forward \"b\"") {
+        Stmt::Forward(f) => assert_eq!(f.url, "b", "@forward url without trailing `;`"),
+        other => panic!("expected Forward, got {other:?}"),
+    }
+    assert!(
+        program("@warn \"x\"").len() == 1,
+        "@warn without trailing `;` folds to one statement"
+    );
+}
+
+#[test]
+fn loud_comment_between_use_and_url_is_whitespace() {
+    // `@use /**/ "m"`: the loud comment carries no meaning in a module head and
+    // must not be mistaken for the URL argument.
+    match only("@use /**/ \"m\"") {
+        Stmt::Use(u) => assert_eq!(u.url, "m", "loud comment skipped before url"),
+        other => panic!("expected Use, got {other:?}"),
+    }
+}
+
+#[test]
+fn unbalanced_paren_at_eof_still_errors() {
+    // Permissive EOF flush must NOT swallow a genuinely unterminated `(` run.
+    assert!(
+        parse_err("@use (\"a\"").contains("unexpected end of input"),
+        "open paren at EOF stays an error"
+    );
+}
+
+// ─── Argument lists: splats and trailing commas (Round 16) ───────────────────
+
+/// Parse `a {b: f(…)}` and return the argument list of the call `f`.
+fn call_args(src: &str) -> Vec<qrass::ast_expr::Arg> {
+    let prog = program(src);
+    let Stmt::Ruleset(rs) = &prog[0] else {
+        panic!("expected ruleset");
+    };
+    let Stmt::Declaration(d) = &rs.body[0] else {
+        panic!("expected declaration");
+    };
+    let qrass::ast_expr::Expr::FunctionCall(c) = &d.value else {
+        panic!("expected function call, got {:?}", d.value);
+    };
+    c.args.clone()
+}
+
+#[test]
+fn consecutive_splat_arguments_all_promote() {
+    // The old helper fell through to positional re-parsing after the first
+    // splat, so only the *second* slot ever reached the splat branch.
+    use qrass::ast_expr::{Arg, Expr};
+    let args = call_args("a {b: f($x..., $y...)}");
+    assert_eq!(args.len(), 2);
+    assert!(
+        args.iter().all(|a| matches!(a, Arg::Splat(Expr::Variable(_, _)))),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn literal_splat_and_trailing_comma() {
+    use qrass::ast_expr::{Arg, Expr};
+    let args = call_args("a {b: f(1...,)}");
+    assert_eq!(args.len(), 1, "trailing comma after a splat is legal");
+    assert!(
+        matches!(&args[0], Arg::Splat(Expr::Literal(_))),
+        "a literal may splat too: {args:?}"
+    );
+}
+
+#[test]
+fn trailing_comma_after_positional_is_legal() {
+    use qrass::ast_expr::Arg;
+    let args = call_args("a {b: max(1px, 2px,)}");
+    assert_eq!(args.len(), 2);
+    assert!(
+        args.iter().all(|a| matches!(a, Arg::Positional(_))),
+        "{args:?}"
+    );
+}

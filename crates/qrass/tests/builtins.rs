@@ -56,7 +56,7 @@ fn undefined_namespaced_function_names_the_module() {
 
 #[test]
 fn undefined_bare_function_passes_through_as_plain_css() {
-    // dart-sass emits calls it doesn't recognize as plain CSS (so browser-native
+    // the goldens emit calls it doesn't recognize as plain CSS (so browser-native
     // functions like `var`/`calc` work untouched); a bare unknown call is kept
     // verbatim rather than raising. Only *namespaced* unknowns error (see above).
     assert_eq!(value("totally_made_up(1)"), "totally_made_up(1)");
@@ -167,18 +167,78 @@ fn math_constants_resolve_without_use() {
     );
 }
 
+#[test]
+fn math_trig_direct_returns_unitless_ratio() {
+    // Angles accept a unit (deg/grad/rad/turn) or a unitless radian measure.
+    assert_eq!(value("math.sin(1deg)"), "0.0174524064");
+    assert_eq!(value("math.sin(1rad)"), "0.8414709848");
+    assert_eq!(value("math.sin(1)"), "0.8414709848");
+    assert_eq!(value("math.sin(1turn)"), "0");
+    assert_eq!(value("math.cos(1rad)"), "0.5403023059");
+    assert_eq!(value("math.tan(1rad)"), "1.5574077247");
+}
+
+#[test]
+fn math_inverse_trig_returns_degrees() {
+    assert_eq!(value("math.asin(0.5)"), "30deg");
+    assert_eq!(value("math.asin(1)"), "90deg");
+    assert_eq!(value("math.atan(1)"), "45deg");
+    assert_eq!(value("math.atan2(1, 1)"), "45deg");
+}
+
+#[test]
+fn math_non_finite_wraps_in_calc() {
+    // A non-finite number is not a legal bare CSS number: the goldens emit it in
+    // `calc()`. `math.div(1, 0)` is infinity, not an error.
+    assert_eq!(value("math.div(1, 0)"), "calc(infinity)");
+    assert_eq!(value("math.sin(math.div(1, 0))"), "calc(NaN)");
+    assert_eq!(value("math.asin(2)"), "calc(NaN * 1deg)");
+}
+
+#[test]
+fn math_hypot_unit_clamp_and_predicates() {
+    assert_eq!(value("math.hypot(3, 4)"), "5");
+    assert_eq!(value("math.hypot(3cm, 4mm * 10)"), "5cm");
+    assert_eq!(value("math.clamp(0, 2, 1)"), "1");
+    assert_eq!(value("math.is-unitless(1px)"), "false");
+    assert_eq!(value("math.unit(1px)"), "\"px\"");
+    assert_eq!(value("math.unit(1)"), "\"\"");
+    assert_eq!(value("math.compatible(1px, 1in)"), "true");
+    assert_eq!(value("math.compatible(1px, 1s)"), "false");
+}
+
 // ─── 8.2 color.* ──────────────────────────────────────────────────────────────
 
 #[test]
 fn color_channel_reads_rgb() {
-    assert_eq!(value("color.channel(#ff8000, red)"), "255");
-    assert_eq!(value("color.channel(#ff8000, green)"), "128");
-    assert_eq!(value("color.channel(#ff8000, blue)"), "0");
+    assert_eq!(value("color.channel(#ff8000, \"red\")"), "255");
+    assert_eq!(value("color.channel(#ff8000, \"green\")"), "128");
+    assert_eq!(value("color.channel(#ff8000, \"blue\")"), "0");
+}
+
+/// The deprecated single-channel accessors (`color.red` …) are shims over
+/// `color.channel` reading one channel in its natural space; `whiteness`/
+/// `blackness` recover exactly from the RGB extremes.
+#[test]
+fn color_channel_accessors() {
+    assert_eq!(value("color.red(#ff8000)"), "255");
+    assert_eq!(value("color.green(#ff8000)"), "128");
+    assert_eq!(value("color.blue(#ff8000)"), "0");
+    assert_eq!(value("color.hue(#ff0000)"), "0deg");
+    assert_eq!(value("color.saturation(#ff0000)"), "100%");
+    assert_eq!(value("color.lightness(#ff0000)"), "50%");
+    // black = hwb(_, 0%, 100%), white = hwb(_, 0%, 0%); gray 50/50.
+    assert_eq!(value("color.blackness(black)"), "100%");
+    assert_eq!(value("color.blackness(white)"), "0%");
+    assert_eq!(value("color.whiteness(black)"), "0%");
+    assert_eq!(value("color.whiteness(#808080)"), "50.1960784314%");
+    // Named-argument form folds `$color` into slot 0 like every other builtin.
+    assert_eq!(value("color.red($color: #ed0000)"), "237");
 }
 
 #[test]
 fn color_constructors() {
-    // Explicit rgb()/hsl() constructors serialize in the functional form (dart-sass
+    // Explicit rgb()/hsl() constructors serialize in the functional form (the goldens
     // preserves representation origin: only a `#rrggbb` literal emits hex).
     assert_eq!(value("color.rgb(255, 0, 0)"), "rgb(255, 0, 0)");
     assert_eq!(value("color.hsl(0, 100%, 50%)"), "rgb(255, 0, 0)");
@@ -214,6 +274,23 @@ fn string_case_and_quotes() {
     assert_eq!(value("string.unquote(\"hi\")"), "hi");
 }
 
+/// `string.insert` clamps out-of-range indices to the nearest edge and indexes by
+/// Unicode codepoint (an astral emoji is one char). The result mirrors `$string`'s
+/// quoting, so quoted inputs yield a quoted output.
+#[test]
+fn string_insert_indexing() {
+    assert_eq!(value("string.insert(\"cde\", \"f\", 0)"), "\"fcde\"");
+    assert_eq!(value("string.insert(\"cde\", \"f\", 2)"), "\"cfde\"");
+    assert_eq!(value("string.insert(\"cde\", \"f\", -2)"), "\"cdfe\"");
+    assert_eq!(value("string.insert(\"cde\", \"f\", 100)"), "\"cdef\"");
+    assert_eq!(value("string.insert(\"cde\", \"f\", -100)"), "\"fcde\"");
+    // Named arguments fold into positional slots.
+    assert_eq!(
+        value("string.insert($string: \"cde\", $insert: \"f\", $index: 2)"),
+        "\"cfde\""
+    );
+}
+
 // ─── 8.3 list.* ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -222,6 +299,28 @@ fn list_length_nth_index() {
     assert_eq!(value("list.nth(a b c, 2)"), "b");
     assert_eq!(value("list.nth(a b c, -1)"), "c");
     assert_eq!(value("list.index(a b c, b)"), "2");
+}
+
+/// Bracketed (`[…]`) list literals round-trip through serialization and drive
+/// `list.is-bracketed`; `join`/`append` propagate `list1`'s bracketedness (join
+/// gated by `$bracketed`, default true), and a single-element space `list1`
+/// defers its separator to `list2`.
+#[test]
+fn list_bracketed_lists() {
+    // Literal round-trip.
+    assert_eq!(value("[1 2 3]"), "[1 2 3]");
+    assert_eq!(value("[1, 2]"), "[1, 2]");
+    // Predicate reads the bracket flag; unbracketed forms are false.
+    assert_eq!(value("list.is-bracketed([1])"), "true");
+    assert_eq!(value("list.is-bracketed([])"), "true");
+    assert_eq!(value("list.is-bracketed(1 2 3)"), "false");
+    assert_eq!(value("list.is-bracketed((1,))"), "false");
+    // Propagation: result bracketed iff list1 is (and $bracketed holds).
+    assert_eq!(value("list.join([1], [2])"), "[1 2]");
+    assert_eq!(value("list.join((1,), [2])"), "1, 2");
+    assert_eq!(value("list.join([1], (2,))"), "[1, 2]");
+    assert_eq!(value("list.join([1], [2], $bracketed: false)"), "1 2");
+    assert_eq!(value("list.append([1 2], 3)"), "[1 2 3]");
 }
 
 #[test]
@@ -325,4 +424,36 @@ fn mixin_and_function_exist() {
 #[test]
 fn content_exists_is_false_outside_include() {
     assert_eq!(val_prog(".a { p: meta.content-exists(); }"), "false");
+}
+
+/// The named-argument dispatcher folds `$name:`-style arguments into the
+/// positional slot each registered parameter declares, so every namespace
+/// reads its inputs positionally regardless of how the caller spelled them.
+#[test]
+fn named_arguments_fold_into_positional_slots() {
+    // `math` declares ($number) / ($min,$number,$max) …
+    assert_eq!(value("math.abs($number: -3)"), "3");
+    assert_eq!(value("math.clamp($min: 0, $number: 5, $max: 10)"), "5");
+    // `color` — $color folds to slot 0; channel kwargs stay in the named map.
+    assert_eq!(value("color.channel($color: red, $channel: \"red\")"), "255");
+    assert_eq!(value("color.alpha($color: rgba(0, 0, 0, 0.5))"), "0.5");
+    assert_eq!(value("color.opacity($color: rgba(0, 0, 0, 0.5))"), "0.5");
+    assert_eq!(value("color.ie-hex-str($color: red)"), "#FFFF0000");
+    // `selector` / `map` / `list` / `string` all reach the same impl by name.
+    assert_eq!(value("selector.parse($selector: \"a > b\")"), "a > b");
+    assert_eq!(value("map.get($map: (a: 1), $key: a)"), "1");
+    assert_eq!(value("list.nth($list: (10 20 30), $n: 2)"), "20");
+    assert_eq!(value("string.to-upper-case($string: \"hi\")"), "HI");
+}
+
+/// A named argument mixed with a positional one into the *same* slot is a call
+/// error (golden: "was passed both positionally and by name"), and an unknown
+/// name on a fixed-arity builtin is rejected — but a variadic builtin leaves
+/// undeclared names in the named map instead of erroring.
+#[test]
+fn named_argument_conflicts_and_unknowns() {
+    let err = eval_err(".a { p: math.abs(-3, $number: 3); }");
+    assert!(err.contains("both positionally and by name"), "{err}");
+    let err = eval_err(".a { p: math.abs($number: 3, $bogus: 1); }");
+    assert!(err.contains("No such argument"), "{err}");
 }

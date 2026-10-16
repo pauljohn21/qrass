@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+mod diag;
 pub mod error;
 pub mod lexer;
 pub mod loader;
@@ -19,11 +20,14 @@ pub mod ast;
 pub mod ast_expr;
 mod builtins;
 pub mod color4;
+mod color4_convert;
+mod color_css;
 mod css;
 pub mod env;
 pub mod eval;
 pub mod module;
 pub mod parser;
+mod plain_css;
 pub mod value;
 
 use error::SassError;

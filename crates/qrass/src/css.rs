@@ -25,7 +25,7 @@ pub(crate) enum Item {
 /// Format one qualified rule (`selectors { items }`). Callers are responsible for
 /// dropping empty rules; a rule whose only content is comments still renders.
 pub(crate) fn render_rule(selectors: &[String], items: &[Item]) -> String {
-    // dart-sass expanded puts each comma-separated selector on its own line, the
+    // the goldens' expanded output puts each comma-separated selector on its own line, the
     // `{` trailing the last one; the shared body indent keeps continuation lines
     // aligned, and a wrapping `@media`/`@supports` shifts them uniformly.
     let sel = selectors
@@ -44,7 +44,7 @@ pub(crate) fn render_rule(selectors: &[String], items: &[Item]) -> String {
     format!("{sel} {{\n{body}\n}}")
 }
 
-/// Normalize one selector to dart-sass output form. Attribute-selector values
+/// Normalize one selector to the goldens output form. Attribute-selector values
 /// that are valid CSS identifiers are emitted unquoted (`[a^='top']` → `[a^=top]`);
 /// quoted values that need quoting and bare values pass through unchanged. Only
 /// the contents of `[…]` blocks are rewritten so pseudo-class parentheses etc.
@@ -76,7 +76,7 @@ fn normalize_selector(sel: &str) -> String {
 }
 
 /// Within one `[ … ]` body, drop the quotes around an `=` value when that value
-/// is a valid CSS identifier (matching dart-sass selector serialization).
+/// is a valid CSS identifier (matching the goldens selector serialization).
 fn normalize_attr(body: &str) -> String {
     let Some(eq) = body.find('=') else {
         return body.to_string();

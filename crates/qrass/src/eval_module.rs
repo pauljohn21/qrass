@@ -67,7 +67,7 @@ impl EvalState {
         // and their constants (`math.$pi`, …) through the `module_const` fallback, so
         // `@use`/`@forward` of a `sass:` URL is a no-op that binds nothing.
         if url.starts_with("sass:") {
-            return Ok((Module { css: Vec::new(), vars: Vec::new() }, false));
+            return Ok((Module { css: Vec::new(), vars: Vec::new(), ..Default::default() }, false));
         }
         let base = parent_dir(&self.name);
         let resolved = canonicalize_with(url, &base, &self.load_paths)?;
@@ -89,9 +89,20 @@ impl EvalState {
 
         let module = if resolved.kind == SourceKind::Css {
             let css = read_to_string(&resolved.path, &key)?;
+            // Plain-CSS mode: the `.css` payload is passed through verbatim, but
+            // SCSS-only constructs inside it must still be rejected the way
+            // the goldens would. Parse for validation only; when the content does
+            // not even parse (an exotic CSS feature the SCSS parser cannot read)
+            // keep the prior passthrough instead of reporting a spurious error.
+            if let Ok(program) = crate::lexer::lex(0, key.clone(), css.clone()).and_then(|tokens| {
+                crate::parser::parse(0, key.clone(), css.clone(), tokens)
+            }) {
+                crate::plain_css::validate(&program)?;
+            }
             Module {
                 css: vec![css],
                 vars: Vec::new(),
+                ..Default::default()
             }
         } else {
             let content = read_to_string(&resolved.path, &key)?;
@@ -111,12 +122,46 @@ impl EvalState {
                     self.env.define(name, value.clone(), AssignFlags::default());
                 }
             }
-            UseAlias::Named(ns) => self.env.bind_namespace(ns, module.vars.clone()),
+            UseAlias::Named(ns) => {
+                self.env.bind_namespace(ns, module.vars.clone());
+                self.bind_members(ns, module);
+            }
             UseAlias::Default => {
                 let ns = default_namespace(url);
                 if !ns.is_empty() {
                     self.env.bind_namespace(&ns, module.vars.clone());
+                    self.bind_members(&ns, module);
                 }
+            }
+        }
+    }
+
+    /// Mirror a module's public mixins/functions under `{ns}.{name}` keys, copying
+    /// the lexical env/module snapshots registered at definition time so namespaced
+    /// bodies still resolve against the defining module's environment.
+    fn bind_members(&mut self, ns: &str, module: &Module) {
+        for name in &module.mixins {
+            let key = format!("{ns}.{name}");
+            if let Some(d) = self.mixins.get(name) {
+                self.mixins.insert(key.clone(), d.clone());
+            }
+            if let Some(e) = self.mixin_env.get(name) {
+                self.mixin_env.insert(key.clone(), e.clone());
+            }
+            if let Some(o) = self.mixin_module.get(name) {
+                self.mixin_module.insert(key, o.clone());
+            }
+        }
+        for name in &module.functions {
+            let key = format!("{ns}.{name}");
+            if let Some(d) = self.functions.get(name) {
+                self.functions.insert(key.clone(), d.clone());
+            }
+            if let Some(e) = self.function_env.get(name) {
+                self.function_env.insert(key.clone(), e.clone());
+            }
+            if let Some(o) = self.function_module.get(name) {
+                self.function_module.insert(key, o.clone());
             }
         }
     }
@@ -168,7 +213,28 @@ impl EvalState {
             let forwarded = st.forward_buf.last().cloned().unwrap_or_default();
             let mut vars = export_vars(st.env.global_bindings());
             vars.extend(forwarded);
-            Ok(Module { css, vars })
+            // Public mixin/function members: collect the top-level declarations so
+            // `bind_alias` can register `{ns}.{name}` aliases over the live registry
+            // entries (bare-name definitions + their lexical env snapshots remain).
+            let mut mixins = Vec::new();
+            let mut functions = Vec::new();
+            for stmt in &program {
+                match stmt {
+                    crate::ast::Stmt::Mixin(m) => {
+                        let n = st.render_interp(&m.name)?;
+                        if !crate::module::is_private(&n) {
+                            mixins.push(n);
+                        }
+                    }
+                    crate::ast::Stmt::Function(f) => {
+                        if !crate::module::is_private(&f.name) {
+                            functions.push(f.name.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Module { css, vars, mixins, functions })
         })(self);
 
         self.pending_config.pop();

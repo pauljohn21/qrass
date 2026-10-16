@@ -19,6 +19,7 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) mod color;
+pub(crate) mod color_ops;
 pub(crate) mod global;
 pub(crate) mod list;
 pub(crate) mod map;
@@ -40,12 +41,16 @@ pub(crate) struct Call<'a> {
 type BuiltinFn = fn(&Call) -> Or<SassValue>;
 
 /// One registered function: its implementation plus positional arity bounds
-/// (`max == None` means variadic, e.g. `math.min($numbers...)`).
+/// (`max == None` means variadic, e.g. `math.min($numbers...)`) and the ordered
+/// parameter names. `params` lets the dispatcher fold named arguments into the
+/// positional slot each name declares (`math.clamp($min: 0, …)`); an empty
+/// `params` means the function is invoked positionally only.
 #[derive(Clone, Copy)]
 struct Builtin {
     min: usize,
     max: Option<usize>,
     call: BuiltinFn,
+    params: &'static [&'static str],
 }
 
 /// The double dispatch tables (D6).
@@ -59,7 +64,7 @@ impl Registry {
     /// Register a global/legacy function (also reachable by its bare name).
     fn def(&mut self, name: &str, min: usize, max: Option<usize>, call: BuiltinFn) {
         self.global
-            .insert(name.to_string(), Builtin { min, max, call });
+            .insert(name.to_string(), Builtin { min, max, call, params: &[] });
     }
 
     /// Register a namespaced function `ns.name`, additionally exposing the
@@ -72,7 +77,26 @@ impl Registry {
         max: Option<usize>,
         call: BuiltinFn,
     ) {
-        let b = Builtin { min, max, call };
+        let b = Builtin { min, max, call, params: &[] };
+        self.namespaces
+            .entry(namespace)
+            .or_default()
+            .insert(name.to_string(), b);
+        self.global.insert(format!("{namespace}-{name}"), b);
+    }
+
+    /// Like [`Registry::ns`], declaring the parameter names for named-argument
+    /// folding on both the `ns.name` and `ns-name` entries.
+    fn nsp(
+        &mut self,
+        namespace: &'static str,
+        name: &str,
+        min: usize,
+        max: Option<usize>,
+        params: &'static [&'static str],
+        call: BuiltinFn,
+    ) {
+        let b = Builtin { min, max, call, params };
         self.namespaces
             .entry(namespace)
             .or_default()
@@ -147,6 +171,19 @@ pub(crate) fn call(
         None => name.to_string(),
     };
     let b = lookup(namespace, name)?;
+    // Fold named arguments into their declared positional slots when the
+    // function declares parameter names. This is skipped entirely when no named
+    // arguments are passed (or the function is positional-only), so the common
+    // path — and its arity semantics — is unchanged.
+    let folded: Vec<SassValue> = if !b.params.is_empty() && !named.is_empty() {
+        match fold_named(b, positional, named, &display) {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        }
+    } else {
+        Vec::new()
+    };
+    let positional: &[SassValue] = if folded.is_empty() { positional } else { &folded };
     if positional.len() < b.min {
         return Some(Err(arity(&display, positional.len(), b.min, b.max)));
     }
@@ -156,6 +193,74 @@ pub(crate) fn call(
         }
     }
     Some((b.call)(&Call { positional, named }))
+}
+
+/// Fold named arguments into the positional slot each declared parameter name
+/// occupies, so a call like `math.clamp($min: 0, $number: 5, $max: 10)` reaches
+/// the implementation through `positional[0..3]` in *declaration* order.
+///
+/// Leading positional arguments fill slots first; a named argument that targets
+/// an already-filled slot (or an unknown parameter) is a call error. Folding
+/// stops at the first empty slot — a missing argument — leaving the downstream
+/// arity check to report the shortfall.
+fn fold_named(
+    b: &Builtin,
+    positional: &[SassValue],
+    named: &HashMap<String, SassValue>,
+    display: &str,
+) -> Or<Vec<SassValue>> {
+    let np = b.params.len();
+    let mut slots: Vec<Option<SassValue>> = vec![None; np];
+    // Arguments past the declared parameters are the variadic tail (only
+    // reachable when `max == None`; the arity check catches the non-variadic
+    // over-application later).
+    let mut tail: Vec<SassValue> = Vec::new();
+    for (i, v) in positional.iter().enumerate() {
+        if i < np {
+            slots[i] = Some(v.clone());
+        } else {
+            tail.push(v.clone());
+        }
+    }
+    for (key, val) in named {
+        match b.params.iter().position(|p| *p == key) {
+            Some(idx) => {
+                if slots[idx].is_some() {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        format!("\"{display}\": ${key} was passed both positionally and by name"),
+                    ));
+                }
+                slots[idx] = Some(val.clone());
+            }
+            None => {
+                // A variadic function (`max == None`) accepts named arguments
+                // beyond its declared parameters — the golden's `@kwargs...` channel
+                // setters, e.g. `color.scale($lightness: 10%)`. Leave those for
+                // the implementation to read from `Call::named`; only a
+                // fixed-arity function rejects an unknown argument name.
+                if b.max.is_none() {
+                    continue;
+                }
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!("\"{display}\": No such argument \"${key}\""),
+                ));
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(np + tail.len());
+    // Keep positional slots index-aligned for implementations that read by
+    // index: fill interior gaps left by a named argument that targets a later
+    // slot (e.g. `join($list1, $list2, $bracketed: false)` skips `$separator`)
+    // with `Null` rather than truncating and dropping the trailing value.
+    if let Some(last) = slots.iter().rposition(|s| s.is_some()) {
+        for slot in slots.into_iter().take(last + 1) {
+            out.push(slot.unwrap_or(SassValue::Null));
+        }
+    }
+    out.extend(tail);
+    Ok(out)
 }
 
 /// Build the sass-shaped "wrong number of arguments" message.

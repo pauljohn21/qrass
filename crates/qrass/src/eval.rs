@@ -26,12 +26,16 @@ use crate::token::Piece;
 
 #[path = "eval_control.rs"]
 mod eval_control;
+#[path = "eval_color4.rs"]
+mod eval_color4;
 #[path = "eval_expr.rs"]
 mod eval_expr;
 #[path = "eval_extend.rs"]
 mod eval_extend;
 #[path = "eval_function.rs"]
 mod eval_function;
+#[path = "eval_if.rs"]
+mod eval_if;
 #[path = "eval_mixin.rs"]
 mod eval_mixin;
 #[path = "eval_module.rs"]
@@ -48,7 +52,7 @@ pub(crate) struct PlaceholderRule {
     pub decls: Vec<(String, String)>,
     /// Index of the in-stream marker chunk this placeholder was emitted at, so
     /// the `@extend` pass can substitute the grouped extended rule back into its
-    /// original *source position* (matching dart-sass) instead of appending it.
+    /// original *source position* (matching the goldens) instead of appending it.
     pub slot: usize,
 }
 
@@ -90,7 +94,7 @@ pub struct EvalState {
     pub functions: HashMap<String, FunctionDecl>,
     /// Defining-module environment snapshot per closure: a `@function`/`@mixin`
     /// body resolves its free variables and `ns.$var` namespace bindings against
-    /// the module it was **declared** in (dart-sass lexical scoping), not the
+    /// the module it was **declared** in (the goldens' lexical scoping), not the
     /// caller's — so each module's private vars survive its `instantiate`.
     pub(crate) mixin_env: HashMap<String, Env>,
     pub(crate) function_env: HashMap<String, Env>,
@@ -128,7 +132,7 @@ pub struct EvalState {
     /// any `@content` replayed into it) is evaluated. `&` inside a `#{…}`
     /// *expression* (e.g. `$arrow-selector: #{& + '__arrow'}`) resolves to these,
     /// so the value is baked at definition time rather than re-interpolated at
-    /// each use site — matching dart-sass. Bare `&` combinators in a selector
+    /// each use site — matching the goldens. Bare `&` combinators in a selector
     /// remain literal `Piece::Text` and are still handled by `combine_selectors`.
     pub(crate) current_parents: Vec<String>,
     /// Sass `--load-path` roots consulted (after the importer-relative search)

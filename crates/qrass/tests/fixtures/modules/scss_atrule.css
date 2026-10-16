@@ -1,0 +1,4 @@
+/* SCSS-only at-rules must be rejected in plain CSS. */
+@mixin boxed {
+  a { value: 1; }
+}

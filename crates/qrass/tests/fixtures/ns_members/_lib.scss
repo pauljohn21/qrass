@@ -1,0 +1,13 @@
+@function dbl($x) {
+  @return $x * 2;
+}
+
+@function -hidden($x) {
+  @return $x;
+}
+
+@mixin boxed($v) {
+  a {
+    value: $v;
+  }
+}

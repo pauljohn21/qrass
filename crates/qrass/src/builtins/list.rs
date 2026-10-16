@@ -9,15 +9,23 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("list", "append", 2, Some(3), append);
-    r.ns("list", "join", 2, Some(3), join);
-    r.ns("list", "length", 1, Some(1), length);
-    r.ns("list", "nth", 2, Some(2), nth);
-    r.ns("list", "set-nth", 3, Some(3), set_nth);
-    r.ns("list", "index", 2, Some(2), index);
-    r.ns("list", "separator", 1, Some(1), separator);
-    r.ns("list", "is-bracketed", 1, Some(1), is_bracketed);
+    r.nsp("list", "append", 2, Some(3), &["list", "val", "separator"], append);
+    r.nsp(
+        "list",
+        "join",
+        2,
+        Some(4),
+        &["list1", "list2", "separator", "bracketed"],
+        join,
+    );
+    r.nsp("list", "length", 1, Some(1), &["list"], length);
+    r.nsp("list", "nth", 2, Some(2), &["list", "n"], nth);
+    r.nsp("list", "set-nth", 3, Some(3), &["list", "n", "value"], set_nth);
+    r.nsp("list", "index", 2, Some(2), &["list", "value"], index);
+    r.nsp("list", "separator", 1, Some(1), &["list"], separator);
+    r.nsp("list", "is-bracketed", 1, Some(1), &["list"], is_bracketed);
     r.ns("list", "zip", 1, None, zip);
+    r.ns("list", "slash", 0, None, slash);
     // Legacy global spellings (bare names used across many stylesheets).
     r.def("append", 2, Some(3), append);
     r.def("join", 2, Some(3), join);
@@ -36,6 +44,7 @@ fn items_of(v: &SassValue) -> Vec<SassValue> {
             .map(|(k, val)| SassValue::List {
                 items: vec![k.clone(), val.clone()],
                 sep: ListSep::Space,
+                bracketed: false,
             })
             .collect(),
         SassValue::Null => Vec::new(),
@@ -67,22 +76,62 @@ fn effective_sep(c: &super::Call, primary: ListSep) -> ListSep {
     primary
 }
 
+/// Is this argument a bracketed (`[…]`) list?
+fn bracketed_of(v: &SassValue) -> bool {
+    matches!(v, SassValue::List { bracketed: true, .. })
+}
+
 fn list(items: Vec<SassValue>, sep: ListSep) -> SassValue {
-    SassValue::List { items, sep }
+    SassValue::List {
+        items,
+        sep,
+        bracketed: false,
+    }
+}
+
+fn list_br(items: Vec<SassValue>, sep: ListSep, bracketed: bool) -> SassValue {
+    SassValue::List {
+        items,
+        sep,
+        bracketed,
+    }
 }
 
 fn append(c: &super::Call) -> Or<SassValue> {
     let mut items = items_of(&c.positional[0]);
     let sep = effective_sep(c, sep_of(&c.positional[0]));
     items.push(c.positional[1].clone());
-    Ok(list(items, sep))
+    // `append` preserves the first list's bracketedness.
+    Ok(list_br(items, sep, bracketed_of(&c.positional[0])))
 }
 
 fn join(c: &super::Call) -> Or<SassValue> {
-    let mut items = items_of(&c.positional[0]);
-    let sep = effective_sep(c, sep_of(&c.positional[0]));
-    items.extend(items_of(&c.positional[1]));
-    Ok(list(items, sep))
+    let l1 = &c.positional[0];
+    let l2 = &c.positional[1];
+    let mut items = items_of(l1);
+    // Separator: an explicit `$separator` string wins; otherwise `list1`'s, except
+    // that a single-element `list1` with an undetermined (space) separator defers
+    // to `list2`'s determined separator — so `join([1], (2,))` is `1, 2`.
+    let mut sep = sep_of(l1);
+    if !matches!(c.positional.get(2), Some(SassValue::Str { .. }))
+        && items.len() <= 1
+        && sep == ListSep::Space
+    {
+        let s2 = sep_of(l2);
+        if s2 != ListSep::Space {
+            sep = s2;
+        }
+    } else {
+        sep = effective_sep(c, sep);
+    }
+    items.extend(items_of(l2));
+    // golden: the result is bracketed iff `$bracketed` (default true) holds *and*
+    // `list1` was bracketed. `list2`'s bracketedness never carries over.
+    let want = match c.positional.get(3) {
+        Some(SassValue::Bool(b)) => *b,
+        _ => true,
+    };
+    Ok(list_br(items, sep, want && bracketed_of(l1)))
 }
 
 fn length(c: &super::Call) -> Or<SassValue> {
@@ -128,11 +177,12 @@ fn nth(c: &super::Call) -> Or<SassValue> {
 fn set_nth(c: &super::Call) -> Or<SassValue> {
     let mut items = items_of(&c.positional[0]);
     let sep = sep_of(&c.positional[0]);
+    let bracketed = bracketed_of(&c.positional[0]);
     let (n, _) = num(c, 1)?;
     if let Some(i) = resolve_index(items.len(), n) {
         items[i] = c.positional[2].clone();
     }
-    Ok(list(items, sep))
+    Ok(list_br(items, sep, bracketed))
 }
 
 fn index(c: &super::Call) -> Or<SassValue> {
@@ -157,9 +207,16 @@ fn separator(c: &super::Call) -> Or<SassValue> {
 }
 
 fn is_bracketed(c: &super::Call) -> Or<SassValue> {
-    let _ = c;
-    // Bracketed lists are not modeled distinctly in the value type → always false.
-    Ok(SassValue::Bool(false))
+    Ok(SassValue::Bool(bracketed_of(&c.positional[0])))
+}
+
+/// `list.slash($elements...)`: a slash-separated list of its arguments.
+fn slash(c: &super::Call) -> Or<SassValue> {
+    Ok(SassValue::List {
+        items: c.positional.to_vec(),
+        sep: ListSep::Slash,
+        bracketed: false,
+    })
 }
 
 /// `list.zip($lists...)`: element-wise grouping into an outer comma list.
@@ -170,6 +227,7 @@ fn zip(c: &super::Call) -> Or<SassValue> {
         .map(|i| SassValue::List {
             items: lists.iter().map(|l| l[i].clone()).collect(),
             sep: ListSep::Comma,
+            bracketed: false,
         })
         .collect();
     Ok(list(out, ListSep::Comma))

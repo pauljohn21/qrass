@@ -10,16 +10,18 @@ use crate::ast::Param;
 use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep, Literal, UnaryOp};
 use crate::error::SassError;
 use crate::span::{BytePos, Span};
-use crate::token::{Piece, Punct, Quote, Spanned, Token};
+use crate::token::{Punct, Spanned, Token};
 
 use super::Parser;
 
 /// Recursive-descent over an owned token iterator. It borrows the parser only to
 /// read source text for error locations — it never mutates shared parse state.
-struct E<'a> {
-    it: Peekable<IntoIter<Spanned>>,
-    last: Span,
-    p: &'a Parser,
+/// The argument / parameter tables (`args` / `params`) fold lives in the sibling
+/// `parser_args` module as a second `impl` block on this cursor.
+pub(crate) struct E<'a> {
+    pub(crate) it: Peekable<IntoIter<Spanned>>,
+    pub(crate) last: Span,
+    pub(crate) p: &'a Parser,
 }
 
 type Ex<T> = Result<T, SassError>;
@@ -54,15 +56,15 @@ impl<'a> E<'a> {
 
     // ─── Cursor primitives (peek/bump over owned tokens) ───────────────────
 
-    fn pk(&mut self) -> Option<&Token> {
+    pub(crate) fn pk(&mut self) -> Option<&Token> {
         self.it.peek().map(|s| &s.token)
     }
 
-    fn is(&mut self, x: Punct) -> bool {
+    pub(crate) fn is(&mut self, x: Punct) -> bool {
         matches!(self.pk(), Some(Token::Punct(q)) if *q == x)
     }
 
-    fn bump(&mut self) -> Option<Spanned> {
+    pub(crate) fn bump(&mut self) -> Option<Spanned> {
         let t = self.it.next();
         if let Some(s) = &t {
             self.last = s.span;
@@ -70,7 +72,7 @@ impl<'a> E<'a> {
         t
     }
 
-    fn eat(&mut self, x: Punct) -> bool {
+    pub(crate) fn eat(&mut self, x: Punct) -> bool {
         if self.is(x) {
             self.bump();
             true
@@ -79,7 +81,7 @@ impl<'a> E<'a> {
         }
     }
 
-    fn expect(&mut self, x: Punct, msg: &str) -> Ex<()> {
+    pub(crate) fn expect(&mut self, x: Punct, msg: &str) -> Ex<()> {
         if self.eat(x) {
             Ok(())
         } else {
@@ -88,7 +90,8 @@ impl<'a> E<'a> {
     }
 
     fn starts_value(&mut self) -> bool {
-        match self.pk() {
+        matches!(
+            self.pk(),
             Some(
                 Token::Number { .. }
                 | Token::Str { .. }
@@ -98,14 +101,13 @@ impl<'a> E<'a> {
                 | Token::Variable(_)
                 | Token::Ident(_)
                 | Token::Placeholder(_)
-                | Token::Ampersand,
-            ) => true,
-            Some(Token::Punct(Punct::LParen | Punct::Minus | Punct::Plus)) => true,
-            _ => false,
-        }
+                | Token::Ampersand
+                    | Token::Punct(Punct::LParen | Punct::LBracket | Punct::Minus | Punct::Plus)
+            )
+        )
     }
 
-    fn span(&self, start: BytePos) -> Span {
+    pub(crate) fn span(&self, start: BytePos) -> Span {
         Span {
             file: self.p.file,
             start,
@@ -134,12 +136,13 @@ impl<'a> E<'a> {
             Expr::List {
                 items,
                 sep: ListSep::Comma,
+                bracketed: false,
                 span: self.span(start),
             }
         })
     }
 
-    fn pk_start(&mut self) -> BytePos {
+    pub(crate) fn pk_start(&mut self) -> BytePos {
         self.it
             .peek()
             .map(|s| s.span.start)
@@ -147,7 +150,7 @@ impl<'a> E<'a> {
     }
 
     /// A whitespace-separated operand run (`margin: 0 auto`).
-    fn space_list(&mut self) -> Ex<Expr> {
+    pub(crate) fn space_list(&mut self) -> Ex<Expr> {
         let start = self.pk_start();
         let mut items = vec![self.binary(0)?];
         while self.starts_value() && !self.is(Punct::Comma) {
@@ -159,6 +162,7 @@ impl<'a> E<'a> {
             Expr::List {
                 items,
                 sep: ListSep::Space,
+                bracketed: false,
                 span: self.span(start),
             }
         })
@@ -262,6 +266,7 @@ impl<'a> E<'a> {
             Token::Variable(name) => Ok(Expr::Variable(name, self.span(start))),
             Token::Ident(name) => self.ident_value(name, start),
             Token::Punct(Punct::LParen) => self.paren_group(start),
+            Token::Punct(Punct::LBracket) => self.bracket_group(start),
             other => Err(self
                 .p
                 .err(format!("unexpected token in value: {other:?}"), start)),
@@ -302,6 +307,11 @@ impl<'a> E<'a> {
         }
         // Bare call `fn(...)`.
         if self.is(Punct::LParen) {
+            // Modern `if(…)` clause syntax (per `expressions/if/*.hrx`); the legacy 3-arg builtin shape
+            // (a top-level comma first) still falls through to `args()` below.
+            if name == "if" && self.looks_like_modern_if() {
+                return self.modern_if(start);
+            }
             let args = self.args()?;
             return Ok(Expr::FunctionCall(FunctionCall {
                 namespace: None,
@@ -309,6 +319,12 @@ impl<'a> E<'a> {
                 args,
                 span: self.span(start),
             }));
+        }
+        // CSS color keywords become color values (per the goldens); `transparent`
+        // is not in the table and stays an unquoted identifier.
+        let lower = name.to_ascii_lowercase();
+        if let Some((cname, hex)) = crate::parser::named_colors::named_color(&lower) {
+            return Ok(Expr::Literal(Literal::NamedColor { hex, name: cname }));
         }
         Ok(match name.as_str() {
             "true" => Expr::Literal(Literal::Bool(true)),
@@ -337,6 +353,7 @@ impl<'a> E<'a> {
             return Ok(Expr::List {
                 items: Vec::new(),
                 sep: ListSep::Comma,
+                bracketed: false,
                 span: self.span(start),
             });
         }
@@ -363,6 +380,7 @@ impl<'a> E<'a> {
             return Ok(Expr::List {
                 items,
                 sep: ListSep::Comma,
+                bracketed: false,
                 span: self.span(start),
             });
         }
@@ -370,97 +388,42 @@ impl<'a> E<'a> {
         Ok(Expr::Paren(Box::new(first), self.span(start)))
     }
 
-    // ─── Argument / parameter tables ───────────────────────────────────────
-
-    fn args(&mut self) -> Ex<Vec<Arg>> {
-        self.expect(Punct::LParen, "expected '(' for arguments")?;
-        let mut args = Vec::new();
-        if self.eat(Punct::RParen) {
-            return Ok(args);
-        }
-        loop {
-            if let Some(Token::Variable(n)) = self.pk().cloned() {
-                if matches!(
-                    self.it.clone().nth(1).map(|s| s.token),
-                    Some(Token::Punct(Punct::Colon))
-                ) {
-                    self.bump();
-                    self.bump();
-                    let value = self.space_list()?;
-                    args.push(Arg::Named { name: n, value });
-                    if !self.eat_named_comma(&mut args)? {
-                        break;
-                    }
-                    continue;
-                }
-                if self.eat_var_ellipsis(&mut args, n)? {
-                    break;
-                }
-            }
-            let value = self.space_list()?;
-            args.push(Arg::Positional(value));
-            if !(self.eat(Punct::Comma) && !self.is(Punct::RParen)) {
-                break;
-            }
-        }
-        self.expect(Punct::RParen, "expected ')' after arguments")?;
-        Ok(args)
-    }
-
-    /// Helper: consume `,` and continue unless a `)` follows.
-    fn eat_named_comma(&mut self, _acc: &mut Vec<Arg>) -> Ex<bool> {
-        Ok(self.eat(Punct::Comma) && !self.is(Punct::RParen))
-    }
-
-    /// Helper: `$rest...` splat → push and signal break; `$plain,` → false (continue
-    /// as positional handled by caller).
-    fn eat_var_ellipsis(&mut self, args: &mut Vec<Arg>, n: String) -> Ex<bool> {
-        if matches!(
-            self.it.clone().nth(1).map(|s| s.token),
-            Some(Token::Punct(Punct::Ellipsis))
-        ) {
-            let start = self.pk_start();
-            self.bump();
-            self.bump();
-            args.push(Arg::Splat(Expr::Variable(n, self.span(start))));
-            return Ok(!(self.eat(Punct::Comma) && !self.is(Punct::RParen)));
-        }
-        Ok(false)
-    }
-
-    fn params(&mut self) -> Ex<Vec<Param>> {
-        self.expect(Punct::LParen, "expected '(' for parameters")?;
-        let mut params = Vec::new();
-        if self.eat(Punct::RParen) {
-            return Ok(params);
-        }
-        loop {
-            let start = self.pk_start();
-            let name = match self.pk().cloned() {
-                Some(Token::Variable(n)) => n,
-                _ => return Err(self.p.err("expected parameter name", start)),
-            };
-            self.bump();
-            let default = if self.eat(Punct::Colon) {
-                Some(self.space_list()?)
-            } else {
-                None
-            };
-            let rest = self.eat(Punct::Ellipsis);
-            params.push(Param {
-                name,
-                default,
-                rest,
+    /// A CSS-`[]` bracketed list literal (`[a b c]`, `[1, 2]`, `[]`). Unlike a
+    /// parenthesized group, a single element stays a one-item list and no map is
+    /// possible; the `bracketed` flag round-trips through serialization and drives
+    /// `list.is-bracketed`.
+    fn bracket_group(&mut self, start: BytePos) -> Ex<Expr> {
+        if self.eat(Punct::RBracket) {
+            return Ok(Expr::List {
+                items: Vec::new(),
+                sep: ListSep::Comma,
+                bracketed: true,
                 span: self.span(start),
             });
-            if !(self.eat(Punct::Comma) && !self.is(Punct::RParen)) {
-                break;
-            }
         }
-        self.expect(Punct::RParen, "expected ')' after parameters")?;
-        Ok(params)
+        let first = self.space_list()?;
+        if self.is(Punct::Comma) {
+            let mut items = vec![first];
+            while self.eat(Punct::Comma) && !self.is(Punct::RBracket) {
+                items.push(self.space_list()?);
+            }
+            self.expect(Punct::RBracket, "expected ']' to close bracketed list")?;
+            return Ok(Expr::List {
+                items,
+                sep: ListSep::Comma,
+                bracketed: true,
+                span: self.span(start),
+            });
+        }
+        self.expect(Punct::RBracket, "expected ']' to close bracketed list")?;
+        Ok(Expr::List {
+            items: vec![first],
+            sep: ListSep::Space,
+            bracketed: true,
+            span: self.span(start),
+        })
     }
-}
 
-// Keep imports that document the interpolation shape referenced above.
-const _: Option<(Piece, Quote)> = None;
+    // Argument / parameter table folding (`args` / `params`) lives in the sibling
+    // `parser_args` module as a second `impl` block on this cursor.
+}

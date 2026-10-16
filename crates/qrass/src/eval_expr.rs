@@ -49,7 +49,7 @@ impl EvalState {
                     )
                 }),
             Expr::Paren(inner, _) => self.eval_expr(inner),
-            Expr::List { items, sep, .. } => {
+            Expr::List { items, sep, bracketed, .. } => {
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
                     out.push(self.eval_expr(item)?);
@@ -57,6 +57,7 @@ impl EvalState {
                 Ok(SassValue::List {
                     items: out,
                     sep: *sep,
+                    bracketed: *bracketed,
                 })
             }
             Expr::Map { pairs, .. } => {
@@ -78,7 +79,7 @@ impl EvalState {
                 }
                 Ok(SassValue::Str {
                     text,
-                    quoted: matches!(quote, Some(_)),
+                    quoted: quote.is_some(),
                 })
             }
             Expr::Unary { op, operand, .. } => {
@@ -93,6 +94,7 @@ impl EvalState {
                 op, left, right, ..
             } => self.eval_binary(*op, left, right),
             Expr::FunctionCall(call) => self.eval_call(call),
+            Expr::IfCall(call) => self.eval_if(call),
         }
     }
 
@@ -168,22 +170,21 @@ impl EvalState {
             Expr::Binary {
                 op, left, right, ..
             } => {
-                // Inside a passthrough call dart-sass keeps `+`/`-` (and any
+                // Inside a passthrough call the goldens keep `+`/`-` (and any
                 // operand touching a `var()`/function) as literal CSS, but it
                 // *does* run Sass arithmetic for `*`/`/` when both sides are
                 // plain Sass numbers — e.g. `calc(… - $border-width * 2)` →
                 // `calc(… - 2px)`. Detect that narrow case and fold it.
-                if matches!(op, BinOp::Mul | BinOp::Div) {
-                    if let (Some(lv), Some(rv)) = (self.try_number(left)?, self.try_number(right)?) {
-                        if let (SassValue::Number { .. }, SassValue::Number { .. }) = (&lv, &rv) {
-                            return Ok(arith(*op, lv, rv)?.to_css());
-                        }
-                    }
+                if matches!(op, BinOp::Mul | BinOp::Div)
+                    && let (Some(lv), Some(rv)) = (self.try_number(left)?, self.try_number(right)?)
+                    && let (SassValue::Number { .. }, SassValue::Number { .. }) = (&lv, &rv)
+                {
+                    return Ok(arith(*op, lv, rv)?.to_css());
                 }
                 let l = self.render_css(left)?;
                 let r = self.render_css(right)?;
                 let sym = op_symbol(*op);
-                // Sass math keeps dart-sass's spaced form (`100% - 32px`); an
+                // Sass math keeps the goldens' spaced form (`100% - 32px`); an
                 // `=`/comparison inside a plain-CSS body stays tight (`opacity=0`).
                 Ok(if spaced_op(*op) {
                     format!("{l} {sym} {r}")
@@ -200,7 +201,7 @@ impl EvalState {
                     UnaryOp::Not => format!("not {inner}"),
                 })
             }
-            Expr::List { items, sep, .. } => {
+            Expr::List { items, sep, bracketed, .. } => {
                 let join = match sep {
                     ListSep::Comma => ", ",
                     ListSep::Space => " ",
@@ -210,7 +211,12 @@ impl EvalState {
                     .iter()
                     .map(|i| self.render_css(i))
                     .collect::<Ev<Vec<_>>>()?;
-                Ok(parts.join(join))
+                let inner = parts.join(join);
+                Ok(if *bracketed {
+                    format!("[{inner}]")
+                } else {
+                    inner
+                })
             }
             Expr::FunctionCall(call) => {
                 let passthrough = call.namespace.is_none()
@@ -360,7 +366,7 @@ fn negate(v: SassValue) -> Ee<SassValue> {
 // ─── Literals & interpolation helpers ────────────────────────────────────────
 
 /// Serialize a value appearing as an argument inside a plain-CSS passthrough
-/// call (`calc`/`var`/…). A Sass `null` renders as the empty string (dart-sass
+/// call (`calc`/`var`/…). A Sass `null` renders as the empty string (the goldens
 /// drops it, e.g. an absent `map.get` fallback in `var(--x, )`); every other
 /// value keeps its normal CSS form, so quoted strings stay quoted for `url(…)`.
 fn css_arg(v: SassValue) -> String {
@@ -381,6 +387,7 @@ fn eval_literal(l: &Literal) -> SassValue {
             quoted: matches!(quote, Quote::Double | Quote::Single),
         },
         Literal::Color(raw) => SassValue::Color(parse_hex(raw)),
+        Literal::NamedColor { hex, name } => SassValue::Color(Color::named(hex, name)),
         Literal::Url(raw) => SassValue::Str {
             text: raw.clone(),
             quoted: false,
@@ -409,6 +416,9 @@ fn parse_hex(raw: &str) -> Color {
                 a: 1.0,
                 hex: true,
                 c4: None,
+                name: None,
+                legacy: None,
+                legacy_hsl: None,
             }
         }
         6 => {
@@ -420,6 +430,9 @@ fn parse_hex(raw: &str) -> Color {
                 a: 1.0,
                 hex: true,
                 c4: None,
+                name: None,
+                legacy: None,
+                legacy_hsl: None,
             }
         }
         8 => {
@@ -431,6 +444,9 @@ fn parse_hex(raw: &str) -> Color {
                 a: at(6) / 255.0,
                 hex: true,
                 c4: None,
+                name: None,
+                legacy: None,
+                legacy_hsl: None,
             }
         }
         _ => Color::rgb(0, 0, 0),

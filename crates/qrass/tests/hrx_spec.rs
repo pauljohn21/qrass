@@ -81,7 +81,7 @@ fn read_floor(path: &Path) -> Option<f64> {
 }
 
 /// Outdated libsass-era / non-conformant suites (`libsass*`, `non_conformant`
-/// directories at any depth). They test legacy behavior dart-sass itself has
+/// directories at any depth). They test legacy behavior the spec itself has
 /// dropped, so the runner skips them unconditionally — a hard guarantee that
 /// holds even if [`TARGETS`] is ever widened.
 fn is_outdated_dir(name: &str) -> bool {
@@ -171,18 +171,33 @@ struct Tally {
 
 /// Run one case: compile and check against its expected member.
 fn run_case(case: &hrx::Case, key: &str, scratch: &Path, tally: &mut Tally) {
-    let dir = scratch.join(key.replace(['/', ' '], "_"));
+    // Materialize under a *virtual spec root* so URLs relative to the spec
+    // directory (`@use "callable/arguments/mixin/utils"` — a fixture file that
+    // lives inside this very hrx) resolve through the load path exactly like
+    // the goldens' own reference harness. `<key without #n and .hrx>` is the case's
+    // spec-relative directory; each case gets a private scratch vroot.
+    let dir = scratch.join(format!("vroot_{}", key.replace(['/', ' ', '.'], "_")));
     let _ = std::fs::remove_dir_all(&dir);
-    let Some(input_path) = materialize(case, &dir) else {
+    let case_rel = key
+        .split('#')
+        .next()
+        .and_then(|k| k.strip_suffix(".hrx"))
+        .unwrap_or("case");
+    let case_dir = dir.join(case_rel);
+    let Some(input_path) = materialize(case, &case_dir) else {
         tally.skipped_none += 1;
         tally.rows.push(format!("SKIP\t{key}\tmissing input member"));
         return;
     };
 
-    let mut opts = Options::default();
-    // sass-spec resolves spec-root-relative `@use` (e.g. "core_functions/color/utils")
-    // through a load path at the spec directory; mirror that for fidelity.
-    opts.load_paths = vec![common::sass_spec_dir()];
+    let opts = Options {
+        // sass-spec resolves spec-root-relative `@use` (e.g. "core_functions/color/utils")
+        // through a load path at the spec directory; mirror that for fidelity. The
+        // per-case vroot goes first so in-hrx fixtures win, then the on-disk spec for
+        // real shared support files.
+        load_paths: vec![dir.clone(), common::sass_spec_dir()],
+        ..Default::default()
+    };
     let result = compile(&input_path, &opts);
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -337,10 +352,17 @@ fn sass_spec_hrx_runner() {
     // Full failure list for offline clustering (one `key: reason-head` per line),
     // written under the scratch dir so convergence rounds can bucket by cause.
     if !tally.failed.is_empty() {
+        let full = std::env::var("QRASS_HRX_FAILDIFF").is_ok();
         let dump: String = tally
             .failed
             .iter()
-            .map(|f| f.lines().next().unwrap_or("").to_string())
+            .map(|f| {
+                if full {
+                    f.clone()
+                } else {
+                    f.lines().next().unwrap_or("").to_string()
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
         let _ = std::fs::write(scratch_root().join("failures.txt"), dump);

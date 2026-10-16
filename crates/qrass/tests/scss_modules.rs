@@ -265,3 +265,108 @@ fn css_import_passes_through() {
         "CSS @import passthrough\n---\n{out}"
     );
 }
+
+#[test]
+fn css_import_with_support_condition_passes_through() {
+    // A quoted URL followed by a support condition is a plain-CSS @import that
+    // the goldens emit verbatim (it is unambiguously CSS, not an SCSS module ref).
+    let out = css("@import \"a\" b();");
+    assert!(
+        out.contains("@import \"a\" b();"),
+        "`@import \"a\" b();` must pass through verbatim\n---\n{out}"
+    );
+}
+
+#[test]
+fn css_import_with_media_condition_passes_through() {
+    let out = css("@import \"a\" screen;");
+    assert!(
+        out.contains("@import \"a\" screen;"),
+        "media-query condition must pass through\n---\n{out}"
+    );
+}
+
+#[test]
+fn css_import_with_supports_condition_passes_through() {
+    let out = css("@import \"a\" supports(b: c);");
+    assert!(
+        out.contains("supports(b: c)"),
+        "supports() condition must pass through\n---\n{out}"
+    );
+}
+
+#[test]
+fn scss_bare_import_list_still_rejected() {
+    // A comma list of *bare* quoted URLs has no condition / `.css` / `url()`, so
+    // it stays an SCSS module import and must still be rejected (guards against
+    // the condition-detection over-matching).
+    let msg = eval_err("@import \"a\", \"b\";");
+    assert!(
+        msg.contains("not supported"),
+        "bare SCSS @import list must be rejected\n---\n{msg}"
+    );
+}
+
+// ─── Namespaced module mixins / functions (utils.inspect family) ─────────────
+
+fn ns_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ns_members")
+}
+
+/// Compile a virtual entry inside the ns_members fixture dir so relative
+/// `@use 'lib'` resolves against `_lib.scss` there.
+fn ns_css(src: &str) -> String {
+    let name = ns_dir()
+        .join("virtual.scss")
+        .to_string_lossy()
+        .into_owned();
+    let tokens = lex(0, name.clone(), src.to_string()).expect("lex ok");
+    let program = parse(0, name.clone(), src.to_string(), tokens).expect("parse ok");
+    match eval_all(0, name, src.to_string(), program) {
+        Ok(chunks) => chunks.join("\n"),
+        Err(e) => panic!("eval ok for {src:?}, got {e}"),
+    }
+}
+
+#[test]
+fn module_function_callable_via_namespace() {
+    let out = ns_css("@use \"lib\";\n.a { width: lib.dbl(21); }");
+    assert!(
+        out.contains(".a {\n  width: 42;\n}"),
+        "namespaced `lib.dbl`\n---\n{out}"
+    );
+}
+
+#[test]
+fn module_mixin_includable_via_namespace() {
+    let out = ns_css("@use \"lib\";\n@include lib.boxed(lib.dbl(21));");
+    assert!(
+        out.contains("a {\n  value: 42;\n}"),
+        "namespaced `lib.boxed` consuming `lib.dbl`\n---\n{out}"
+    );
+}
+
+#[test]
+fn private_module_members_stay_hidden() {
+    let name = ns_dir()
+        .join("virtual.scss")
+        .to_string_lossy()
+        .into_owned();
+    let src = "@use \"lib\";\n.a { width: lib.-hidden(1); }".to_string();
+    let tokens = lex(0, name.clone(), src.clone()).expect("lex ok");
+    let program = parse(0, name.clone(), src.clone(), tokens).expect("parse ok");
+    match eval_all(0, name, src, program) {
+        Ok(out) => panic!("private `-hidden` must not bind: {}", out.join("\n")),
+        Err(e) => assert!(e.to_string().contains("Undefined"), "got {e}"),
+    }
+}
+
+#[test]
+fn aliased_namespace_also_binds_members() {
+    let out = ns_css("@use \"lib\" as l2;\n.a { width: l2.dbl(5); }");
+    assert!(
+        out.contains(".a {\n  width: 10;\n}"),
+        "alias `l2.dbl`\n---\n{out}"
+    );
+}
+

@@ -7,24 +7,45 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::{SassValue, convert_number};
 
 pub(crate) fn register(r: &mut Registry) {
-    r.ns("math", "div", 2, Some(2), div);
-    r.ns("math", "round", 1, Some(1), round);
-    r.ns("math", "ceil", 1, Some(1), ceil);
-    r.ns("math", "floor", 1, Some(1), floor);
-    r.ns("math", "abs", 1, Some(1), abs);
-    r.ns("math", "percentage", 1, Some(1), percentage);
-    r.ns("math", "pow", 2, Some(2), pow);
-    r.ns("math", "sqrt", 1, Some(1), sqrt);
-    r.ns("math", "log", 1, Some(2), log);
+    // `nsp` declares the golden-declared parameter names so named-argument calls
+    // (`math.abs($number: 1)`, `math.clamp($min: 0, $number: 1, $max: 2)`) fold
+    // into the right positional slots in `builtins::call`. Variadic `min`/`max`/
+    // `hypot` keep `ns`: the goldens forbid naming a `…` parameter, so there is nothing
+    // to fold.
+    r.nsp("math", "div", 2, Some(2), &["number1", "number2"], div);
+    r.nsp("math", "round", 1, Some(1), &["number"], round);
+    r.nsp("math", "ceil", 1, Some(1), &["number"], ceil);
+    r.nsp("math", "floor", 1, Some(1), &["number"], floor);
+    r.nsp("math", "abs", 1, Some(1), &["number"], abs);
+    r.nsp("math", "percentage", 1, Some(1), &["number"], percentage);
+    r.nsp("math", "pow", 2, Some(2), &["base", "exponent"], pow);
+    r.nsp("math", "sqrt", 1, Some(1), &["number"], sqrt);
+    r.nsp("math", "log", 1, Some(2), &["number", "base"], log);
     r.ns("math", "min", 1, None, min);
     r.ns("math", "max", 1, None, max);
+    // Trig: `sin`/`cos`/`tan` take an angle (unitless = radians, or a
+    // deg/grad/turn unit) and return a unitless ratio; the inverse family takes a
+    // unitless ratio and returns an angle in `deg` (the golden's convention). The rest
+    // are unit helpers plus `clamp`/`hypot`.
+    r.nsp("math", "sin", 1, Some(1), &["number"], sin);
+    r.nsp("math", "cos", 1, Some(1), &["number"], cos);
+    r.nsp("math", "tan", 1, Some(1), &["number"], tan);
+    r.nsp("math", "asin", 1, Some(1), &["number"], asin);
+    r.nsp("math", "acos", 1, Some(1), &["number"], acos);
+    r.nsp("math", "atan", 1, Some(1), &["number"], atan);
+    r.nsp("math", "atan2", 2, Some(2), &["y", "x"], atan2);
+    r.ns("math", "hypot", 1, None, hypot);
+    r.nsp("math", "clamp", 3, Some(3), &["min", "number", "max"], clamp);
+    r.nsp("math", "unit", 1, Some(1), &["number"], unit);
+    r.nsp("math", "is-unitless", 1, Some(1), &["number"], is_unitless);
+    r.nsp("math", "compatible", 2, Some(2), &["number1", "number2"], compatible);
     // Legacy global spellings used by older stylesheets.
     r.def("round", 1, Some(1), round);
     r.def("ceil", 1, Some(1), ceil);
     r.def("floor", 1, Some(1), floor);
     r.def("abs", 1, Some(1), abs);
     // Bare `min(…)`/`max(…)` (and `clamp(…)`) are *plain-CSS* math functions: a
-    // literal call like `min(23px, 100%)` must stay verbatim (dart-sass only
+    // literal call like `min(23px, 100%)` must stay verbatim (the goldens only
     // computes Sass math via the namespaced `math.min`), so they are NOT
     // registered globally — the evaluator routes them through CSS passthrough.
     r.def("percentage", 1, Some(1), percentage);
@@ -49,9 +70,9 @@ fn unitless(value: f64) -> SassValue {
 fn div(c: &super::Call) -> Or<SassValue> {
     let (a, ua) = num(c, 0)?;
     let (b, ub) = num(c, 1)?;
-    if b == 0.0 {
-        return Err(SassError::new(ErrorKind::Builtins, "division by zero"));
-    }
+    // the goldens follow IEEE-754 here: `math.div(1, 0)` is `infinity` (rendered
+    // `calc(infinity)`), `math.div(0, 0)` is `NaN` — it does NOT raise on a zero
+    // divisor, and the spec builds infinity via `math.div(1, 0)`.
     let b2 = match convert_number(b, ub.as_deref(), ua.as_deref()) {
         Some(v) => v,
         None => b,
@@ -118,6 +139,122 @@ fn log(c: &super::Call) -> Or<SassValue> {
         Err(_) => v.ln(),
     };
     Ok(unitless(value))
+}
+
+/// Resolve an angle argument to radians: unitless means radians; `deg`/`grad`/
+/// `rad`/`turn` are converted through the degree base.
+fn angle_rad(c: &super::Call, i: usize) -> Or<f64> {
+    let (v, u) = num(c, i)?;
+    match u.as_deref() {
+        None => Ok(v),
+        Some(u @ ("deg" | "grad" | "rad" | "turn")) => {
+            let deg = convert_number(v, Some(u), Some("deg")).expect("angle group");
+            Ok(deg * std::f64::consts::PI / 180.0)
+        }
+        Some(_) => Err(SassError::new(
+            ErrorKind::Builtins,
+            "$number: expected an angle unit (deg, grad, rad, turn) or no units".to_string(),
+        )),
+    }
+}
+
+/// A ratio argument that must carry no units (inverse trig / atan2).
+fn unitless_arg(c: &super::Call, i: usize) -> Or<f64> {
+    let (v, u) = num(c, i)?;
+    if u.is_some() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "$number: expected a unitless number".to_string(),
+        ));
+    }
+    Ok(v)
+}
+
+/// Wrap a radian result as the golden's `deg`-unit angle; `NaN` propagates so an
+/// out-of-domain inverse reads `calc(NaN * 1deg)`.
+fn from_rad(rad: f64) -> SassValue {
+    SassValue::Number {
+        value: rad * 180.0 / std::f64::consts::PI,
+        unit: Some("deg".into()),
+    }
+}
+
+fn sin(c: &super::Call) -> Or<SassValue> {
+    Ok(unitless(angle_rad(c, 0)?.sin()))
+}
+fn cos(c: &super::Call) -> Or<SassValue> {
+    Ok(unitless(angle_rad(c, 0)?.cos()))
+}
+fn tan(c: &super::Call) -> Or<SassValue> {
+    Ok(unitless(angle_rad(c, 0)?.tan()))
+}
+fn asin(c: &super::Call) -> Or<SassValue> {
+    Ok(from_rad(unitless_arg(c, 0)?.asin()))
+}
+fn acos(c: &super::Call) -> Or<SassValue> {
+    Ok(from_rad(unitless_arg(c, 0)?.acos()))
+}
+fn atan(c: &super::Call) -> Or<SassValue> {
+    Ok(from_rad(unitless_arg(c, 0)?.atan()))
+}
+fn atan2(c: &super::Call) -> Or<SassValue> {
+    let y = unitless_arg(c, 0)?;
+    let x = unitless_arg(c, 1)?;
+    Ok(from_rad(y.atan2(x)))
+}
+
+/// `math.hypot($numbers...)`: square root of the sum of squares, normalizing
+/// every argument into the first argument's unit.
+fn hypot(c: &super::Call) -> Or<SassValue> {
+    let (v0, u0) = num(c, 0)?;
+    let mut sum = v0 * v0;
+    for i in 1..c.positional.len() {
+        let (v, u) = num(c, i)?;
+        let v = convert_number(v, u.as_deref(), u0.as_deref()).ok_or_else(|| {
+            SassError::new(ErrorKind::Builtins, "$numbers: incompatible units")
+        })?;
+        sum += v * v;
+    }
+    Ok(SassValue::Number {
+        value: sum.sqrt(),
+        unit: u0,
+    })
+}
+
+/// `math.clamp($min, $number, $max)` — the golden's parameter order is (min, number,
+/// max). It is equivalent to `math.max($min, math.min($number, $max))`: the
+/// number is capped at `$max` (keeping the lower operand's unit) then raised to
+/// `$min`, so a value sitting on a boundary serializes in that bound's unit.
+fn clamp(c: &super::Call) -> Or<SassValue> {
+    let (mn, umn) = num(c, 0)?;
+    let (val, uv) = num(c, 1)?;
+    let (mx, umx) = num(c, 2)?;
+    let num_lt_max = convert_number(val, uv.as_deref(), umx.as_deref()).is_some_and(|x| x < mx);
+    let (tv, tu) = if num_lt_max { (val, uv) } else { (mx, umx.clone()) };
+    let t_gt_min = convert_number(tv, tu.as_deref(), umn.as_deref()).is_some_and(|x| x > mn);
+    let (rv, ru) = if t_gt_min { (tv, tu) } else { (mn, umn) };
+    Ok(SassValue::Number { value: rv, unit: ru })
+}
+
+fn unit(c: &super::Call) -> Or<SassValue> {
+    let (_, u) = num(c, 0)?;
+    Ok(SassValue::Str {
+        text: u.unwrap_or_default(),
+        quoted: true,
+    })
+}
+
+fn is_unitless(c: &super::Call) -> Or<SassValue> {
+    let (_, u) = num(c, 0)?;
+    Ok(SassValue::Bool(u.is_none()))
+}
+
+fn compatible(c: &super::Call) -> Or<SassValue> {
+    let (_, ua) = num(c, 0)?;
+    let (_, ub) = num(c, 1)?;
+    let ok = ua == ub
+        || convert_number(1.0, ua.as_deref(), ub.as_deref()).is_some();
+    Ok(SassValue::Bool(ok))
 }
 
 fn min(c: &super::Call) -> Or<SassValue> {

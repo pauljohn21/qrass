@@ -171,6 +171,18 @@ impl EvalState {
                 }
                 Arg::Splat(e) => match self.eval_expr(e)? {
                     SassValue::List { items, .. } => positional.extend(items),
+                    // `$named...` where the value is a map feeds the *named* pool
+                    // (keys must be strings; a non-string key is a golden error we
+                    // surface as a stringified key).
+                    SassValue::Map { entries } => {
+                        for (k, v) in entries {
+                            let name = match k {
+                                SassValue::Str { text, .. } => text,
+                                other => other.to_css(),
+                            };
+                            named.insert(name.trim_start_matches('$').to_string(), v);
+                        }
+                    }
                     other => positional.push(other),
                 },
             }
@@ -191,6 +203,7 @@ impl EvalState {
                 SassValue::List {
                     items: rest,
                     sep: ListSep::Comma,
+                    bracketed: false,
                 }
             } else if pi < raw.positional.len() {
                 let v = raw.positional[pi].clone();
