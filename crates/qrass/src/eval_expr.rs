@@ -30,10 +30,10 @@ impl EvalState {
             }),
             Expr::Literal(l) => Ok(eval_literal(l)),
             Expr::Variable(name, _) => self.env.get(name).cloned().ok_or_else(|| {
-                err(
-                    ErrorKind::UndefinedVariable,
-                    format!("Undefined variable \"${name}\""),
-                )
+                // Every golden spells this message bare — `Error: Undefined
+                // variable.` — the name being carried by the annotated source
+                // line rather than the sentence.
+                err(ErrorKind::UndefinedVariable, "Undefined variable.")
             }),
             Expr::Member {
                 namespace, name, ..
@@ -259,10 +259,7 @@ impl EvalState {
             Expr::Variable(name, _) => match self.env.get(name) {
                 Some(v @ SassValue::Number { .. }) => Ok(Some(v.clone())),
                 Some(_) => Ok(None),
-                None => Err(err(
-                    ErrorKind::UndefinedVariable,
-                    format!("Undefined variable ${name}."),
-                )),
+                None => Err(err(ErrorKind::UndefinedVariable, "Undefined variable.")),
             },
             _ => Ok(None),
         }

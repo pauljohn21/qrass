@@ -35,7 +35,7 @@ impl EvalState {
         out: &mut Vec<String>,
     ) -> Ev<()> {
         match stmt {
-            Stmt::Variable(v) => self.bind_variable(v),
+            Stmt::Variable(v) => self.bind_variable(v, sel_ctx.is_empty()),
             Stmt::Declaration(d) => {
                 if let Some((prop, value)) = self.render_declaration(d)? {
                     decls.push(Item::Decl { prop, value });
@@ -115,11 +115,20 @@ impl EvalState {
     /// a plain assignment *updates the existing binding where it was declared* (so a
     /// loop accumulator like `$n: $n + …` persists across iterations) and only binds
     /// locally when the name is new.
-    pub(super) fn bind_variable(&mut self, v: &VariableDecl) -> Ev<()> {
-        let value = self.eval_expr(&v.value)?;
-        if v.default {
-            self.mark_default_used(&v.name);
-        }
+    ///
+    /// `root` marks a declaration at the running module's top level, which is the
+    /// only place a `with (…)` configuration can land.
+    pub(super) fn bind_variable(&mut self, v: &VariableDecl, root: bool) -> Ev<()> {
+        // A `!default` at module root answers the matching offer: the offered value
+        // is bound and the declaration's own right-hand side is never evaluated
+        // (`with/doesnt_run_default.hrx`), except for a `null` offer, which the
+        // default still wins (`with/null.hrx`). Any other declaration leaves the
+        // configuration alone.
+        let configured = if v.default && root { self.take_config(&v.name) } else { None };
+        let value = match configured {
+            Some(value) => value,
+            None => self.eval_expr(&v.value)?,
+        };
         if v.global || v.default {
             self.env.define(
                 &v.name,

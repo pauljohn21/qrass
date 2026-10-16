@@ -40,6 +40,7 @@ mod parser_module;
 #[path = "parser_text.rs"]
 mod parser_text;
 pub(crate) use parser_text::token_to_pieces;
+pub(crate) use parser_module::config_key;
 #[path = "named_colors.rs"]
 pub(crate) mod named_colors;
 

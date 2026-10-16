@@ -186,8 +186,25 @@ pub struct Use {
     /// `as <name>`; `Some(None)` means `as *`; `None` = default (path basename).
     pub alias: UseAlias,
     /// `with ($k: v, …)` configuration.
-    pub config: Vec<(String, Expr)>,
+    pub config: Vec<ConfigEntry>,
     pub span: Span,
+}
+
+/// One `with (…)` entry. `default` is only meaningful on a `@forward` clause
+/// (it marks the entry as pass-through: the importer's value wins when present
+/// and non-null, otherwise this one is handed down). `entry` is the span of the
+/// `$name: value` text *in the importing file*, so a rejected configuration is
+/// underlined where it was written — the `directives/use/error/with` goldens
+/// anchor there even when the module that failed to consume it is another file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConfigEntry {
+    pub name: String,
+    pub value: Expr,
+    pub default: bool,
+    pub entry: Span,
+    /// Span of the value expression text alone (`1px + 1em`), which is what an
+    /// expression failure underlines (`error/with/invalid_expression.hrx`).
+    pub value_span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,7 +225,7 @@ pub struct Forward {
     /// `show` list (names) — mutually exclusive with `hide`.
     pub shown: Vec<String>,
     pub hidden: Vec<String>,
-    pub config: Vec<(String, Expr)>,
+    pub config: Vec<ConfigEntry>,
     pub span: Span,
 }
 

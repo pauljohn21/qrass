@@ -206,4 +206,43 @@
 # declaration snippet plus an `if-function` deprecation warning. A/B: 0
 # regressions, expressions/if 145 -> 207 PASS.
 # 5974 -> 6037 passed (+63, ~55.08%).
-55.0
+# Round 19: `with (…)` configuration propagation. The goldens under
+# directives/use/with, directives/use/error/with and directives/forward/with
+# define the contract, read off no implementation but those files: a config
+# entry is never a pre-bound variable (with/variable_exists.hrx demands
+# meta.variable-exists() be false before the declaration), a top-level
+# `$x: e !default` that finds an offer skips `e` entirely (with/doesnt_run_
+# default.hrx keeps `1px + 1em` from ever being evaluated) unless the offered
+# value is null, which still evaluates the default (with/null.hrx emits
+# `original`); names match dash/underscore-insensitively (with/dash_
+# insensitive.hrx, error/with/private.hrx) and bind under the declared
+# spelling; `@forward … with ($x: V !default)` is a pass-through that consumes
+# an incoming x whatever its value and forwards null-as-V (with/through_forward,
+# with/null), while a clause without `!default` is a hard value the outer name
+# can never reach (error/with/through_forward); show/hide/`as p-*` rename offers
+# on their way down (success/as strips only the matched prefix), and unrelated
+# incoming entries keep travelling (with/unconfigured). Offers live in one arena
+# keyed by index, so a value configured at one `@use` site can be consumed by
+# any depth or by several forwards (with/distributed_vars, with/multiple).
+# Settlement is only ever done by a direct `@use` load — a cached module reached
+# through `@forward` must leave the upstream offer alive (error/with/
+# missing_distributed_vars). Unconsumed entries are reported after all forwards
+# ran, marker over the *import-side* entry text, at `input.scss L:C` (the `$a: b`
+# width, the 4th-row `$missing: 'c'` offset). Only a module-top-level, flag-free
+# `!default` consumes (forward/error/with/nested, not_default). The clause
+# grammar is enforced at parse time with the golden's five verbatim messages
+# (`expected "(".` / `"$".` / `":".` / `")".` / `";".`; a trailing comma is legal,
+# a doubled one is not; `The same variable may only be configured once.`; and
+# `Built-in modules can't be configured.` underlining the statement text without
+# its `;`, exactly as error/with/core_module.hrx spells it). Aligned to the same
+# verbatim standard: every one of the 23 `Error: Undefined variable.` blocks in
+# the spec is name-free (the annotated source line carries the name), so the
+# bare message replaced our named form. tests/use_with.rs now compares whole
+# blocks and output members for 94 with cases, 14 recorded as debt (multi-frame
+# locations, `@import`-carried config, `Expected identifier.` lexical form,
+# incompatible-units/no-namespace wordings). A/B: 0 regressions, 6037 -> 6100
+# PASS (directives/use/with 13 -> 31, directives/forward/with 14 -> 30,
+# directives/use/error/with 3 -> 16, use/error/syntax/with.hrx 3 -> 8,
+# forward/error/syntax.hrx 2 -> 9).
+# 6037 -> 6100 passed (+63, 6100/10961 = 55.65%).
+55.6

@@ -230,7 +230,7 @@ impl EvalState {
         match s {
             Stmt::Return(r) => self.eval_return(r),
             Stmt::Variable(v) => {
-                self.bind_variable(v)?;
+                self.bind_variable(v, false)?;
                 Ok(None)
             }
             Stmt::If(i) => self.eval_fn_if(i),

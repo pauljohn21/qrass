@@ -228,7 +228,7 @@ fn use_with_config_consumes_default() {
 fn use_with_unconsumed_config_errors() {
     let msg = eval_err("@use \"config\" with ($nope: 5);");
     assert!(
-        msg.contains("did not declare"),
+        msg.contains("This variable was not declared with !default in the @used module."),
         "unconsumed config is an error\n---\n{msg}"
     );
 }

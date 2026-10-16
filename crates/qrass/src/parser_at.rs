@@ -445,7 +445,7 @@ pub(crate) fn split_paren(run: &[Spanned]) -> (&[Spanned], Option<Vec<Spanned>>)
 }
 
 /// Peel trailing `!flag` pairs (Bang + Ident) off a value run.
-fn split_flags(run: &[Spanned]) -> (&[Spanned], Vec<String>) {
+pub(crate) fn split_flags(run: &[Spanned]) -> (&[Spanned], Vec<String>) {
     let mut flags = Vec::new();
     let mut end = run.len();
     while end >= 2 {

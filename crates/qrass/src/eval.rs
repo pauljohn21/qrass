@@ -28,6 +28,8 @@ use crate::token::Piece;
 mod eval_control;
 #[path = "eval_color4.rs"]
 mod eval_color4;
+#[path = "eval_config.rs"]
+mod eval_config;
 #[path = "eval_expr.rs"]
 mod eval_expr;
 #[path = "eval_extend.rs"]
@@ -42,6 +44,19 @@ mod eval_mixin;
 mod eval_module;
 #[path = "eval_stmt.rs"]
 mod eval_stmt;
+
+/// One `with (…)` value on offer. A `@use … with` entry also gets recorded under
+/// its site (see [`EvalState::config_sites`]) so the statement can check it was
+/// claimed; a `@forward … with` value the forwarder supplied itself belongs to no
+/// upstream declaration and is never checked. `consumed` flips the moment a
+/// `!default` declaration anywhere down the `@forward` chain claims it — the
+/// check that decides `directives/use/error/with/undefined.hrx`.
+pub(crate) struct ConfigOffer {
+    pub(crate) value: crate::value::SassValue,
+    pub(crate) consumed: bool,
+    /// Where the entry was written, for the golden's marker run.
+    pub(crate) entry: crate::span::Span,
+}
 
 /// A rule whose selector is (or contains) a placeholder `%name`, collected
 /// structurally so the global `@extend` pass (task 7.5) can re-emit it for every
@@ -85,9 +100,16 @@ pub struct EvalState {
     pub stack: Vec<String>,
     /// Per-instantiation-frame buffer of `@forward`ed exports (task 6.3).
     pub forward_buf: Vec<Vec<(String, crate::value::SassValue)>>,
-    /// Per-instantiation-frame set of `@use … with` config names still awaiting
-    /// a matching `!default` declaration (unconsumed ⇒ error).
-    pub pending_config: Vec<std::collections::HashSet<String>>,
+    /// Per-instantiation-frame view of the `with (…)` configuration visible to
+    /// the module being run: `(normalized name, offer index)` pairs.
+    pub(crate) config_stack: Vec<Vec<(String, usize)>>,
+    /// Every `with (…)` value offered during the run, shared by index so one
+    /// `!default` declaration anywhere down the `@forward` chain marks the
+    /// original `@use` entry consumed (`with/distributed_vars.hrx`).
+    pub(crate) config_offers: Vec<ConfigOffer>,
+    /// Offer indices created by each `@use … with` site, keyed by site id, so
+    /// the site can report exactly which entry no module declared.
+    pub(crate) config_sites: Vec<Vec<usize>>,
     /// Mixin registry keyed by name (module mixins are rebound per namespace).
     pub mixins: HashMap<String, MixinDecl>,
     /// Function registry keyed by name (task 7.2).
@@ -155,7 +177,9 @@ impl EvalState {
             modules: HashMap::new(),
             stack: Vec::new(),
             forward_buf: Vec::new(),
-            pending_config: Vec::new(),
+            config_stack: Vec::new(),
+            config_offers: Vec::new(),
+            config_sites: Vec::new(),
             mixins: HashMap::new(),
             functions: HashMap::new(),
             mixin_env: HashMap::new(),

@@ -10,7 +10,7 @@
 
 use crate::error::{Located, Marker, SassError};
 use crate::parser::Parser;
-use crate::span::BytePos;
+use crate::span::{BytePos, excerpt_line, line_col};
 
 impl Parser {
     /// A snippet marker spanning `start..end`; `label` captions the run the way
@@ -52,6 +52,33 @@ impl Parser {
         markers: Vec<Marker>,
     ) -> SassError {
         self.err(msg, at).with_markers(markers)
+    }
+}
+
+/// Eval-side marker: line, 1-based column and run length resolved straight from
+/// the importing file's text, so a configuration error raised while a module
+/// was instantiating still points back at the `@use … with` entry.
+pub(crate) fn marker_in(source: &str, marker: char, start: BytePos, end: BytePos) -> Marker {
+    let lc = line_col(source, start);
+    let from = start.0.min(source.len());
+    let to = end.0.clamp(from, source.len());
+    Marker {
+        marker,
+        line: lc.line,
+        col: lc.col,
+        len: source[from..to].chars().count() as u32,
+        label: None,
+    }
+}
+
+/// Eval-side location for the golden's trailing `<file> <line>:<col>` line.
+pub(crate) fn located_in(file: &str, source: &str, at: BytePos) -> Located {
+    let lc = line_col(source, at);
+    Located {
+        file: file.to_owned(),
+        line: lc.line,
+        col: lc.col,
+        excerpt: excerpt_line(source, lc),
     }
 }
 

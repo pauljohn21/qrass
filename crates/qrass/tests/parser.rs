@@ -204,14 +204,17 @@ fn keyframes_block() {
 
 #[test]
 fn use_with_alias_and_config() {
-    match only("@use \"sass:math\" as m with ($precision: 10);") {
+    match only("@use \"other\" as m with ($precision: 10);") {
         Stmt::Use(u) => {
-            assert_eq!(u.url, "sass:math");
+            assert_eq!(u.url, "other");
             assert!(
                 matches!(&u.alias, UseAlias::Named(n) if n == "m"),
                 "named alias 'm'"
             );
-            assert_eq!(u.config.len(), 1, "one @use config pair");
+            assert_eq!(u.config.len(), 1, "one @use config entry");
+            let entry = &u.config[0];
+            assert_eq!(entry.name, "precision", "entry name without '$'");
+            assert!(!entry.default, "only a @forward clause may carry !default");
         }
         other => panic!("expected Use, got {other:?}"),
     }
