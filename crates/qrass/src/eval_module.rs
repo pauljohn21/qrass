@@ -13,13 +13,13 @@ use std::time::Instant;
 
 use tracing::{Level, span};
 
-use crate::ast::{Forward, Use, UseAlias};
-use crate::env::AssignFlags;
+use crate::ast::{Forward, Use};
 use crate::error::{ErrorKind, Frame, SassError};
 use crate::loader::{SourceKind, canonicalize_with};
-use crate::module::{Module, default_namespace, export_vars};
+use crate::module::{Module, export_vars};
 use crate::span::{BytePos, Span, line_col};
-use crate::value::SassValue;
+use super::branch_fanout::{Prepared, acquire, branch_key};
+use super::eval_bind::filter_forwarded;
 
 use super::{Ev, EvalState, LoadLink};
 
@@ -183,8 +183,22 @@ impl EvalState {
             return Ok((Arc::new(Module::default()), false));
         }
         let base = parent_dir(&self.name);
-        let resolved = canonicalize_with(url, &base, &self.load_paths)?;
-        let key = resolved.path.display().to_string();
+        // The fan-out stage may already have acquired this branch. Reuse its
+        // canonical path so the cycle and singleton checks below see exactly what
+        // the sequential walk computed.
+        let key = match self.prepared.get(&branch_key(&base, url)) {
+            Some(Ok(prepared)) => prepared.key.clone(),
+            // The fan-out's canonicalize failed: raise it here, which is where
+            // `canonicalize_with` used to fail — before any check has a path to
+            // test against.
+            Some(Err(err)) => return Err(err.clone()),
+            None => {
+                canonicalize_with(url, &base, &self.load_paths)?
+                    .path
+                    .display()
+                    .to_string()
+            }
+        };
         span.record("id", key.as_str());
 
         if self.stack.contains(&key) {
@@ -233,30 +247,35 @@ impl EvalState {
         // flight" half of the singleton contract).
         self.bus.open(&key);
 
-        let ran = resolved.kind != SourceKind::Css;
+        // Consume the acquisition. A fan-out hit arrives already read and parsed;
+        // a miss (a branch the fan-out skipped, or a repeated URL) acquires it now
+        // through the *same* unit, so a miss cannot differ from a hit.
+        let prepared = match self.prepared.remove(&branch_key(&base, url)) {
+            Some(Ok(prepared)) => prepared,
+            Some(Err(err)) => return Err(err),
+            None => acquire(url, &base, &self.load_paths)?,
+        };
+        let ran = prepared.resolved.kind != SourceKind::Css;
         let module = if !ran {
-            let css = read_to_string(&resolved.path, &key)?;
             // Plain-CSS mode: the `.css` payload is passed through verbatim, but
             // SCSS-only constructs inside it must still be rejected the way
-            // the goldens would. Parse for validation only; when the content does
-            // not even parse (an exotic CSS feature the SCSS parser cannot read)
-            // keep the prior passthrough instead of reporting a spurious error.
-            if let Ok(program) = crate::lexer::lex(0, key.clone(), css.clone()).and_then(|tokens| {
-                crate::parser::parse(0, key.clone(), css.clone(), tokens)
-            }) {
-                crate::plain_css::validate(&program)?;
+            // the goldens would. When the content does not even parse (an exotic
+            // CSS feature the SCSS parser cannot read) keep the prior passthrough
+            // instead of reporting a spurious error.
+            if let Ok(program) = &prepared.program {
+                crate::plain_css::validate(program)?;
             }
             if direct {
                 self.settle_offers(&view);
             }
             Module {
-                css: vec![css],
+                css: vec![prepared.content],
                 vars: Vec::new(),
                 ..Default::default()
             }
         } else {
-            let content = read_to_string(&resolved.path, &key)?;
-            self.with_link(link, |st| st.instantiate(&key, &content, &view))?
+            let Prepared { content, program, .. } = prepared;
+            self.with_link(link, |st| st.instantiate(&key, &content, program, &view))?
         };
 
         let module = Arc::new(module);
@@ -277,67 +296,19 @@ impl EvalState {
         Ok((module, ran))
     }
 
-    /// Bind a module's exports under the `@use` alias.
-    fn bind_alias(&mut self, u: &Use, module: &Module, url: &str) {
-        match &u.alias {
-            UseAlias::Wildcard => {
-                for (name, value) in &module.vars {
-                    self.env.define(name, value.clone(), AssignFlags::default());
-                }
-            }
-            UseAlias::Named(ns) => {
-                self.env.bind_namespace(ns, module.vars.clone());
-                self.bind_members(ns, module);
-            }
-            UseAlias::Default => {
-                let ns = default_namespace(url);
-                if !ns.is_empty() {
-                    self.env.bind_namespace(&ns, module.vars.clone());
-                    self.bind_members(&ns, module);
-                }
-            }
-        }
-    }
-
-    /// Mirror a module's public mixins/functions under `{ns}.{name}` keys, copying
-    /// the lexical env/module snapshots registered at definition time so namespaced
-    /// bodies still resolve against the defining module's environment.
-    fn bind_members(&mut self, ns: &str, module: &Module) {
-        for name in &module.mixins {
-            let key = format!("{ns}.{name}");
-            if let Some(d) = self.mixins.get(name) {
-                self.mixins.insert(key.clone(), d.clone());
-            }
-            if let Some(e) = self.mixin_env.get(name) {
-                self.mixin_env.insert(key.clone(), e.clone());
-            }
-            if let Some(o) = self.mixin_module.get(name) {
-                self.mixin_module.insert(key, o.clone());
-            }
-        }
-        for name in &module.functions {
-            let key = format!("{ns}.{name}");
-            if let Some(d) = self.functions.get(name) {
-                self.functions.insert(key.clone(), d.clone());
-            }
-            if let Some(e) = self.function_env.get(name) {
-                self.function_env.insert(key.clone(), e.clone());
-            }
-            if let Some(o) = self.function_module.get(name) {
-                self.function_module.insert(key, o.clone());
-            }
-        }
-    }
-
     /// Run a module body in a fresh global scope, returning its CSS + exports.
     /// Nested `@use`/`@forward` share `self.bus`/`self.stack`, so a diamond
     /// loads once. The incoming configuration is *not* pre-bound: the body sees it
     /// only through its own `!default` declarations (`with/variable_exists.hrx`
     /// wants `meta.variable-exists` false before the first one).
+    ///
+    /// `program` is the body's front-end output as acquired by the fan-out stage
+    /// (or inline at the load site) — never parsed here.
     fn instantiate(
         &mut self,
         key: &str,
         content: &str,
+        program: Result<Vec<crate::ast::Stmt>, SassError>,
         view: &[(String, usize)],
     ) -> Ev<Module> {
         // One span per module body, nested inside its `module_load` parent, so a
@@ -352,10 +323,9 @@ impl EvalState {
         );
         let _guard = span.enter();
         let started = Instant::now();
-        let program =
-            crate::lexer::lex(0, key.to_string(), content.to_string()).and_then(|tokens| {
-                crate::parser::parse(0, key.to_string(), content.to_string(), tokens)
-            })?;
+        // A parse failure surfaces here — the same point as the old inline parse,
+        // before any arena state is touched.
+        let program = program?;
         span.record("stmts", program.len());
 
         let outer_env = std::mem::take(&mut self.env);
@@ -366,6 +336,13 @@ impl EvalState {
         self.stack.push(key.to_string());
         self.forward_buf.push(Vec::new());
         self.config_stack.push(view.to_vec());
+
+        // This body's own `@use`/`@forward` statements are independent branches:
+        // fan their source acquisition out over the `Shared` stage before any of
+        // them mutates the arena (design D1, manual §2). It runs inside the frame
+        // so the base directory is *this* module's and the singleton/cycle filter
+        // sees the stack entry just pushed.
+        self.prefetch_branches(&program);
 
         let ran = (|st: &mut EvalState| -> Ev<Module> {
             let mut css = Vec::new();
@@ -434,31 +411,6 @@ impl EvalState {
     }
 }
 
-/// Apply `@forward` `show`/`hide`/`as prefix*` to a module's public members.
-fn filter_forwarded(
-    members: Vec<(String, SassValue)>,
-    shown: &[String],
-    hidden: &[String],
-    prefix: &str,
-) -> Vec<(String, SassValue)> {
-    let norm = |s: &str| s.trim_start_matches(['$', '-']).to_string();
-    let mut out = members;
-    if !shown.is_empty() {
-        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| keep.contains(n));
-    }
-    if !hidden.is_empty() {
-        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| !drop.contains(n));
-    }
-    if !prefix.is_empty() {
-        for (name, _) in &mut out {
-            *name = format!("{prefix}{name}");
-        }
-    }
-    out
-}
-
 /// The underlineable text of a `@use`/`@forward` statement: from its keyword to
 /// just before the terminating `;`, which the goldens never mark
 /// (`multi_configuration/one_file` underlines 31 of the 32 characters of
@@ -470,15 +422,11 @@ fn underline(content: &str, span: Span) -> (BytePos, BytePos) {
     (span.start, BytePos(start + text.trim_end_matches([';', ' ', '\t', '\n', '\r']).len()))
 }
 
-/// Directory containing `path` (empty for a bare relative name).
-fn parent_dir(path: &str) -> PathBuf {
+/// Directory containing `path` (empty for a bare relative name) — the base a
+/// relative `@use`/`@forward` URL resolves against.
+pub(crate) fn parent_dir(path: &str) -> PathBuf {
     Path::new(path)
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_default()
-}
-
-/// Read a resolved module from disk, mapping IO failure to a load error.
-fn read_to_string(path: &Path, name: &str) -> Result<String, SassError> {
-    std::fs::read_to_string(path).map_err(|err| SassError::io(err, name))
 }

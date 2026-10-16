@@ -19,6 +19,7 @@ use rxrust::prelude::*;
 
 use crate::ast::Stmt;
 use crate::ast::{FunctionDecl, MixinDecl};
+use self::branch_fanout::{BranchKey, Prepared};
 use crate::env::{Env, ScopeId};
 use crate::error::SassError;
 use crate::module_bus::ModuleBus;
@@ -32,6 +33,10 @@ mod eval_arith;
 mod eval_control;
 #[path = "eval_color4.rs"]
 mod eval_color4;
+#[path = "branch_fanout.rs"]
+mod branch_fanout;
+#[path = "eval_bind.rs"]
+mod eval_bind;
 #[path = "eval_config.rs"]
 mod eval_config;
 #[path = "eval_expr.rs"]
@@ -118,6 +123,11 @@ pub struct EvalState {
     /// canonical path, so a diamond `@use` broadcasts the *same* `Arc<Module>` to
     /// every parent instead of copying — or re-running — the instantiation.
     pub(crate) bus: ModuleBus,
+    /// The L2 branch fan-out's memoized sources (design D1, manual §2): what the
+    /// `Shared` `flat_map` over a body's `@use`/`@forward` branches acquired.
+    /// Purely a cache — a missing entry makes `load_module` acquire the source
+    /// inline through the same unit, so behaviour never depends on this map.
+    pub(crate) prepared: HashMap<BranchKey, Result<Prepared, SassError>>,
     /// Canonical paths on the current `@use` chain, for cycle detection.
     pub stack: Vec<String>,
     /// The live `@use`/`@forward` chain, innermost last, behind an error's
@@ -200,6 +210,7 @@ impl EvalState {
             name,
             content,
             bus: ModuleBus::new(),
+            prepared: HashMap::new(),
             stack: Vec::new(),
             links: Vec::new(),
             forward_buf: Vec::new(),
@@ -383,6 +394,9 @@ pub fn eval_stream(
 ) -> LocalBoxedObservable<'static, Ev<String>, Infallible> {
     let mut st = EvalState::new(file, name, content);
     st.load_paths = load_paths;
+    // The entry stylesheet is a body like any other: fan out its top-level
+    // `@use`/`@forward` branches before its statements run (manual §2).
+    st.prefetch_branches(&program);
     Local::from_iter(program)
         .reduce_initial(
             EvalFold {

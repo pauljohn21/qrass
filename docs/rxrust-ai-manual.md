@@ -105,7 +105,11 @@ Observable              用户 API：blanket impl
      Connectable 的多播定义；多播载体 `Local::subject`（单线程扇出）/ `Shared::subject`
      （跨线程，内部即 `Arc`）。
   2. **@use 闭包互不相交的独立分支并发实例化**：`Shared::flat_map`（inner 并发
-     `usize::MAX`）+ `merge_observables` 是响应式并发的标准形态。
+     `usize::MAX`）+ `merge_observables` 是响应式并发的标准形态。qrass 已按该**结构形态**落地
+     （`src/branch_fanout.rs`：resolve / acquire 两段 `Shared` 管道 + `mpsc` 终端 + 批次索引重排），
+     但**不开真线程**——红线 6 禁用 `observe_on`/`subscribe_on`，且实测该段仅占模块编排 ~5%
+     （directives 子集 6.95 ms / 32.96 ms / 60.80 ms），线程化收益上限即此。取源工作无重复可摊销
+     （607 次 fan-out 对应 607 次实例化，无重复分支），故此层的价值的架构一致性而非性能。
 - **`Arc<Mutex>` 仅允许多播/缓存协调的框架管线，禁止作业务数据载体**（§11 红线）。
 - 缓存共享用 `Arc<不可变 Module>` 只读多播。
 - 切换上下文：`ctx.into_shared()` / `ctx.into_local()`（`context.rs` L450/462，
@@ -253,6 +257,19 @@ concat_all()     = merge_all(1) 顺序展平
 
 flat_map 要求 inner 与 outer **同 Err**——两条分支（正常流 / 错误短路流）必须同 Item 同
 Err，这正是把"阶段输出"统一为 `Result<T, E>` 数据项 + `Err = Infallible` 协议的动机（§8）。
+
+**高阶（flat_map 之后）的三条源码事实**（rc.5 实测，qrass `src/branch_fanout.rs` 踩坑记录）：
+
+1. **`.into_local()` 不能接在 `flat_map` 之后**。`into_local` 只改写**外层**上下文的作用域，
+   inner 流仍是 `Shared`，合并机随即要求 `MutRc<MergeAllState<..>>: Observer<SharedCtx<..>, _>`
+   → E0277。故 `Shared` 高阶段的终端只能是 `Shared` 全程 + `Send` 闭包 subscribe（配 `mpsc`），
+   **不能**复用 `into_local().box_it()` 那套 Local 终端。反过来 Local 段接 `into_shared` 同理要谨慎。
+2. **`Of<T>::Err` 硬编码 `Infallible`**（`observable/of.rs`：`impl<T> ObservableType for Of<T> { type Err = Infallible; }`）。
+   所以 `Shared::of(v)` 作 inner 时，闭包 subscribe 是**安全**的——没有 error 通道可被静默丢弃，
+   所有失败必须以 `Result` 走值通道（与 §8 协议天然吻合）。
+3. **inner 为同步源时，`Shared` 合并顺序 = 外层顺序**（rxrust 自带 `flat_map_merges_inner_observables`
+   钉 `vec![1, 11, 2, 12, 3, 13]`）。但这是"当前实现恰好内联"的副产品，**并发形态的消费者不得依赖**：
+   结果自带批次索引 + 消费前排序，才是可移植契约。
 
 ### 5.4 过滤/截断/生命周期
 
