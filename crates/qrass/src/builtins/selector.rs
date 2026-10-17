@@ -6,10 +6,40 @@
 
 use super::{Or, Registry};
 use crate::ast_expr::ListSep;
+use crate::error::{ErrorKind, SassError};
+use crate::selector_ast::SelectorList;
+use crate::selector_parse::{self, SelParseError};
+use crate::selector_super;
+use crate::selector_unify_complex;
+use crate::selector_extend;
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
     r.nsp("selector", "parse", 1, Some(1), &["selector"], parse);
+    r.nsp(
+        "selector",
+        "is-superselector",
+        2,
+        Some(2),
+        &["super", "sub"],
+        is_superselector,
+    );
+    r.nsp(
+        "selector",
+        "unify",
+        2,
+        Some(2),
+        &["selector1", "selector2"],
+        unify,
+    );
+    r.nsp(
+        "selector",
+        "extend",
+        3,
+        Some(3),
+        &["selector", "extendee", "extender"],
+        extend,
+    );
     // `nest`/`append` take a rest parameter (`$selectors...`); the goldens forbid
     // naming a rest argument, so they stay positional-only.
     r.ns("selector", "nest", 1, None, nest);
@@ -184,4 +214,89 @@ fn simple_selectors(c: &super::Call) -> Or<SassValue> {
         }
     }
     Ok(comma(out.into_iter().map(unquoted).collect()))
+}
+
+/// Render a selector argument value to its source text, or `None` when it holds
+/// any non-string / non-list leaf (a number, color, …). A comma list joins its
+/// members with `, `; a space list (a compound) joins with a single space; a
+/// slash list with ` / `. This mirrors the grammar sass accepts for selector
+/// arguments: "a string, a list of strings, or a list of lists of strings".
+fn sel_source(v: &SassValue) -> Option<String> {
+    match v {
+        // Selectors ignore their source quoting: `.a` and `".a"` are the same.
+        SassValue::Str { text, .. } => Some(text.clone()),
+        SassValue::List { items, sep, .. } => {
+            let join = match sep {
+                ListSep::Comma => ", ",
+                ListSep::Slash => " / ",
+                ListSep::Space => " ",
+            };
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(sel_source(item)?);
+            }
+            Some(parts.join(join))
+        }
+        _ => None,
+    }
+}
+
+/// Coerce one argument into a parsed [`SelectorList`], raising the exact
+/// sass-shaped error prefixed with `$<name>:` for an invalid type, a truncated
+/// input, or a stray parent selector.
+fn sel_arg(v: &SassValue, name: &str) -> Or<SelectorList> {
+    let src = sel_source(v).ok_or_else(|| {
+        SassError::new(
+            ErrorKind::Builtins,
+            format!(
+                "${name}: {} is not a valid selector: it must be a string,\na list of strings, or a list of lists of strings.",
+                v.to_css()
+            ),
+        )
+    })?;
+    selector_parse::parse_list(&src).map_err(|e| {
+        let reason = match e {
+            SelParseError::Truncated => "expected more input.",
+            SelParseError::Parent => "Parent selectors aren't allowed here.",
+        };
+        SassError::new(ErrorKind::Builtins, format!("${name}: {reason}"))
+    })
+}
+
+/// `selector.is-superselector($super, $sub)`: does `$super` subsume every
+/// selector in `$sub`?
+fn is_superselector(c: &super::Call) -> Or<SassValue> {
+    let sup = sel_arg(&c.positional[0], "super")?;
+    let sub = sel_arg(&c.positional[1], "sub")?;
+    Ok(SassValue::Bool(selector_super::list_is_super(&sup, &sub)))
+}
+
+/// `selector.unify($selector1, $selector2)`: the selector matching only elements
+/// matched by both inputs, or `null` when no element can match.
+fn unify(c: &super::Call) -> Or<SassValue> {
+    let first = sel_arg(&c.positional[0], "selector1")?;
+    let second = sel_arg(&c.positional[1], "selector2")?;
+    Ok(match selector_unify_complex::unify_lists(&[first, second]) {
+        Some(list) => unquoted(list.to_string()),
+        None => SassValue::Null,
+    })
+}
+
+/// `selector.extend($selectors, $extendee, $extender)`: every selector in
+/// `$selectors` with each occurrence of `$extendee` replaced by `$extender`.
+fn extend(c: &super::Call) -> Or<SassValue> {
+    let selectors = sel_arg(&c.positional[0], "selector")?;
+    let extendee = sel_arg(&c.positional[1], "extendee")?;
+    let extender = sel_arg(&c.positional[2], "extender")?;
+    // `$extendee` must be compound-only; a complex selector has no single slot to
+    // splice the extender into.
+    if let Some(complex) = extendee.complexes.iter().find(|c| c.components.len() > 1) {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("Can't extend complex selector {complex}."),
+        ));
+    }
+    Ok(unquoted(
+        selector_extend::extend_list(&selectors, &extendee, &extender).to_string(),
+    ))
 }

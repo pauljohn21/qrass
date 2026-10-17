@@ -36,6 +36,15 @@ pub mod module;
 mod module_bus;
 pub mod parser;
 mod plain_css;
+pub mod selector_ast;
+pub mod selector_attr;
+pub mod selector_parse;
+pub mod selector_super;
+pub mod selector_unify;
+pub mod selector_unify_complex;
+pub mod selector_extend;
+pub mod selector_extend_pseudo;
+pub mod selector_extend_weave;
 pub mod value;
 
 use error::SassError;

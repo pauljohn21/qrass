@@ -185,11 +185,23 @@ pub(crate) fn call(
     };
     let positional: &[SassValue] = if folded.is_empty() { positional } else { &folded };
     if positional.len() < b.min {
-        return Some(Err(arity(&display, positional.len(), b.min, b.max)));
+        return Some(Err(arity(
+            &display,
+            positional.len(),
+            b.min,
+            b.max,
+            b.params,
+        )));
     }
     if let Some(max) = b.max {
         if positional.len() > max {
-            return Some(Err(arity(&display, positional.len(), b.min, b.max)));
+            return Some(Err(arity(
+                &display,
+                positional.len(),
+                b.min,
+                b.max,
+                b.params,
+            )));
         }
     }
     Some((b.call)(&Call { positional, named }))
@@ -263,8 +275,35 @@ fn fold_named(
     Ok(out)
 }
 
-/// Build the sass-shaped "wrong number of arguments" message.
-fn arity(name: &str, given: usize, min: usize, max: Option<usize>) -> SassError {
+/// Build the sass-shaped arity error. When the shortfall/overflow names a
+/// declared parameter it mirrors dart-sass exactly (`Missing argument $x.` /
+/// `Only N arguments allowed, but M were passed.`); a positional-only builtin
+/// (no parameter names) keeps the generic `(given for expected)` wording.
+fn arity(
+    name: &str,
+    given: usize,
+    min: usize,
+    max: Option<usize>,
+    params: &[&'static str],
+) -> SassError {
+    if given < min
+        && let Some(missing) = params.get(given) {
+            return SassError::new(
+                ErrorKind::Builtins,
+                format!("Missing argument ${missing}."),
+            );
+        }
+    if let Some(max) = max
+        && given > max {
+            let arg_word = if max == 1 { "argument" } else { "arguments" };
+            let pass_word = if given == 1 { "was" } else { "were" };
+            return SassError::new(
+                ErrorKind::Builtins,
+                format!(
+                    "Only {max} {arg_word} allowed, but {given} {pass_word} passed.",
+                ),
+            );
+        }
     let expected = match max {
         None => format!("{min} or more"),
         Some(max) if max == min => format!("{max}"),

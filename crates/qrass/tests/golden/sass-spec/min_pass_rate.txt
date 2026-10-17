@@ -278,4 +278,18 @@
 # tests/use_with.rs walks forward/error/with.hrx verbatim too: 112 whole blocks
 # and output members compared, 17 recorded as debt.
 # 6100 -> 6124 passed (+24, 6124/10961 = 55.87%).
-55.8
+# Round 23: the `selector.*` algebra rebuilt on an owned AST (selector_ast /
+# selector_parse / selector_attr) — `is-superselector`, `.unify`, `.extend` — all
+# read off the `core_functions/selector/**` goldens alone. `extend` converged this
+# session from 148 to 241/243 PASS: a rebuilt engine (top-level union subtraction,
+# pseudo in-place growth, `:not` sibling splitting, descendant float interleave),
+# the extendee-must-be-compound guard, a canonical `<an+b>` normalisation, the
+# dart-shaped builtin arity messages (`Missing argument $x.` / `Only N arguments
+# allowed, but M were passed.`), and bogus-combinator support (trailing / multiple
+# / combinator-only chains now parse, re-render verbatim, and take part in
+# extension only as a single token — a doubled chain drops the reading). The 2
+# remaining `extend` cases (`format#1/#7`) plus 8 `unify` need a parsed
+# selector-list value model (nested list-of-lists in/out + structural `==`). A/B:
+# 0 regressions across the suite.
+# 6124 -> 6972 passed (+848, 6972/10961 = 63.61%).
+63.6
