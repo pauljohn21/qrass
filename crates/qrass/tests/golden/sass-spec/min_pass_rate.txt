@@ -292,4 +292,17 @@
 # selector-list value model (nested list-of-lists in/out + structural `==`). A/B:
 # 0 regressions across the suite.
 # 6124 -> 6972 passed (+848, 6972/10961 = 63.61%).
-63.6
+# Round 24: the `selector.*` three families fully converged (is-superselector /
+# unify / extend all at 0 failures). A bogus-combinator chain (doubled edge or
+# dangling trailing) now unifies to `null` and is rejected as a superselector
+# (repairing the is-super row the AST/parser change had regressed). `unify` and
+# `extend` return the *parsed selector-list value* — a comma list of space lists
+# of unquoted compound strings, combinators (`>`/`+`/`~`) interleaved as their own
+# elements and a carried trailing combinator preserved — so it round-trips through
+# structural `==` against a decomposed literal like `("c" "d.g", "e" "f.g")`
+# while serializing to the same CSS text (no output regressions). `extend`'s
+# subsumption trim was scoped to generated results only: the caller's own
+# selectors are additive and always survive (fixing `format#1` dropping a verbatim
+# `d c` subsumed by `c`). A/B: 0 regressions.
+# 6972 -> 6983 passed (+11, 6983/10961 = 63.71%).
+63.7

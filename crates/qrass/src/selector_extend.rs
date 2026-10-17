@@ -29,22 +29,39 @@ pub fn extend_list(
     extender: &SelectorList,
 ) -> SelectorList {
     let mut out: Vec<Complex> = Vec::new();
+    // Parallel flag: `true` marks a verbatim selector from the caller's input.
+    // `extend` is additive, so those always survive the subsumption trim; only
+    // extension / pseudo-growth results may be absorbed by a broader selector.
+    let mut verbatim: Vec<bool> = Vec::new();
     for sel in &selectors.complexes {
         let adds = top_level(sel, extendee, extender);
         let repl = pseudo_replace(sel, extendee, extender);
         // A pure in-place pseudo growth supersedes the verbatim selector.
         if repl.is_none() || !adds.is_empty() {
-            push_unique(&mut out, sel.clone());
+            push_marked(&mut out, &mut verbatim, sel.clone(), true);
         }
         for add in adds {
-            push_unique(&mut out, add);
+            push_marked(&mut out, &mut verbatim, add, false);
         }
         if let Some(r) = repl {
-            push_unique(&mut out, r);
+            push_marked(&mut out, &mut verbatim, r, false);
         }
     }
-    trim_subsumed(&mut out);
+    trim_subsumed(&mut out, &mut verbatim);
     SelectorList::new(out)
+}
+
+/// Append `c` unless an identical complex already precedes it, tracking whether
+/// the entry is a verbatim input selector (a duplicate keeps the verbatim mark).
+fn push_marked(out: &mut Vec<Complex>, verbatim: &mut Vec<bool>, c: Complex, is_verbatim: bool) {
+    if let Some(pos) = out.iter().position(|x| x == &c) {
+        if is_verbatim {
+            verbatim[pos] = true;
+        }
+        return;
+    }
+    out.push(c);
+    verbatim.push(is_verbatim);
 }
 
 /// Additive selectors from a compound (top-level) match of `extendee` in `sel`.
@@ -136,16 +153,32 @@ fn is_bogus(c: &Complex) -> bool {
     c.trailing.len() >= 2 || c.components.iter().any(|x| !x.extras.is_empty())
 }
 
-/// Drop selectors strictly subsumed by another result — e.g. `c` absorbs the
-/// more specific `d c` variant a self-referential extender would have produced.
-/// Bogus-combinator results are exempt (their edge structure is not comparable).
-fn trim_subsumed(out: &mut Vec<Complex>) {
+/// Drop *generated* selectors (extensions / pseudo growth) strictly subsumed by
+/// another result — e.g. `c` absorbs the more specific `d c` variant a
+/// self-referential extender would have produced. Verbatim input selectors are
+/// never dropped (`extend` is additive), and bogus-combinator results are exempt
+/// (their edge structure is not comparable).
+fn trim_subsumed(out: &mut Vec<Complex>, verbatim: &mut Vec<bool>) {
     let snapshot = out.clone();
-    out.retain(|c| {
-        !snapshot.iter().any(|d| {
-            d != c && !has_dangling(d) && !has_dangling(c) && covers_complex(d, c) && !covers_complex(c, d)
+    let dropped: Vec<usize> = (0..out.len())
+        .filter(|&i| {
+            if verbatim[i] {
+                return false;
+            }
+            let c = &out[i];
+            snapshot.iter().enumerate().any(|(j, d)| {
+                i != j
+                    && !has_dangling(d)
+                    && !has_dangling(c)
+                    && covers_complex(d, c)
+                    && !covers_complex(c, d)
+            })
         })
-    });
+        .collect();
+    for i in dropped.into_iter().rev() {
+        out.remove(i);
+        verbatim.remove(i);
+    }
 }
 
 /// Any dangling or doubled combinator structure.

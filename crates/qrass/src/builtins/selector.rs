@@ -7,7 +7,7 @@
 use super::{Or, Registry};
 use crate::ast_expr::ListSep;
 use crate::error::{ErrorKind, SassError};
-use crate::selector_ast::SelectorList;
+use crate::selector_ast::{Combinator, Complex, SelectorList};
 use crate::selector_parse::{self, SelParseError};
 use crate::selector_super;
 use crate::selector_unify_complex;
@@ -80,6 +80,60 @@ fn unquoted(s: String) -> SassValue {
     SassValue::Str {
         text: s,
         quoted: false,
+    }
+}
+
+/// Build the **parsed selector-list value** sass's `selector.*` functions return:
+/// a comma list whose elements are the *space lists* of each complex selector —
+/// every compound an unquoted string, explicit combinators (`>`, `+`, `~`)
+/// interleaved as their own elements, descendant expressed by plain adjacency.
+/// This shape round-trips through `==` against a decomposed literal such as
+/// `("c" "d.g", "e" "f.g")`, and serializes back to the same CSS text as the
+/// flat string form (`c d.g, e f.g`), so string-output cases are unaffected.
+fn parsed_sel_list(list: &SelectorList) -> SassValue {
+    comma(list.complexes.iter().map(parsed_complex).collect())
+}
+
+/// The list element a combinator edge contributes: a descendant is the implicit
+/// space between items (empty → no element), while `>`/`+`/`~` become their own.
+fn comb_symbol(combinator: Option<Combinator>) -> &'static str {
+    match combinator {
+        Some(Combinator::Child) => ">",
+        Some(Combinator::NextSibling) => "+",
+        Some(Combinator::Sibling) => "~",
+        _ => "",
+    }
+}
+
+fn parsed_complex(c: &Complex) -> SassValue {
+    let mut items: Vec<SassValue> = Vec::new();
+    for comp in &c.components {
+        // A combinator edge sits before its compound; a leading one on the first
+        // component (`> .c`) is retained front-pinned, exactly as `Display` does.
+        let primary = comb_symbol(comp.combinator);
+        if !primary.is_empty() {
+            items.push(unquoted(primary.to_string()));
+        }
+        // A bogus doubled-combinator chain (`.c ~ ~ .d`) carries the extra edges.
+        for extra in &comp.extras {
+            let sym = comb_symbol(Some(*extra));
+            if !sym.is_empty() {
+                items.push(unquoted(sym.to_string()));
+            }
+        }
+        items.push(unquoted(comp.compound.to_string()));
+    }
+    // A carried trailing combinator (e.g. an extend `carry` yielding `.d +`).
+    for comb in &c.trailing {
+        let sym = comb_symbol(Some(*comb));
+        if !sym.is_empty() {
+            items.push(unquoted(sym.to_string()));
+        }
+    }
+    SassValue::List {
+        items,
+        sep: ListSep::Space,
+        bracketed: false,
     }
 }
 
@@ -277,7 +331,7 @@ fn unify(c: &super::Call) -> Or<SassValue> {
     let first = sel_arg(&c.positional[0], "selector1")?;
     let second = sel_arg(&c.positional[1], "selector2")?;
     Ok(match selector_unify_complex::unify_lists(&[first, second]) {
-        Some(list) => unquoted(list.to_string()),
+        Some(list) => parsed_sel_list(&list),
         None => SassValue::Null,
     })
 }
@@ -296,7 +350,9 @@ fn extend(c: &super::Call) -> Or<SassValue> {
             format!("Can't extend complex selector {complex}."),
         ));
     }
-    Ok(unquoted(
-        selector_extend::extend_list(&selectors, &extendee, &extender).to_string(),
-    ))
+    Ok(parsed_sel_list(&selector_extend::extend_list(
+        &selectors,
+        &extendee,
+        &extender,
+    )))
 }

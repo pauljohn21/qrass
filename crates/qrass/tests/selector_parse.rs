@@ -63,16 +63,16 @@ fn functional_pseudos_classify_their_argument() {
     rt(":hover", ":hover");
     rt(":not(.a)", ":not(.a)");
     rt(":is(.a, .b)", ":is(.a, .b)");
-    rt(":has(> .a)", ":has(.a)"); // leading relative combinator is dropped (known gap)
+    rt(":has(> .a)", ":has(> .a)"); // leading relative combinator is retained (front-pinned)
     rt(":lang(en)", ":lang(en)");
-    rt(":nth-child(2n + 1)", ":nth-child(2n + 1)");
+    rt(":nth-child(2n + 1)", ":nth-child(2n+1)"); // <an+b> canonicalizes whitespace away
 }
 
 #[test]
 fn the_of_keyword_only_splits_between_whitespace() {
     // `offset` must not be treated as an `of` clause; the arg parses as a selector.
     rt(":not(offset)", ":not(offset)");
-    rt(":nth-child(2n + 1 of .a)", ":nth-child(2n + 1 of .a)");
+    rt(":nth-child(2n + 1 of .a)", ":nth-child(2n+1 of .a)");
     let list = parse_list(":nth-child(3n of .a, .b)").unwrap();
     let Simple::PseudoClass { arg, .. } = &list.complexes[0].components[0].compound.simples[0]
     else {
@@ -143,9 +143,10 @@ fn a_parent_selector_is_rejected_wherever_it_appears() {
 
 #[test]
 fn truncated_input_is_rejected() {
-    // A dangling combinator is truncated, not silently downgraded to `a`.
-    err("a >", SelParseError::Truncated);
-    err("a +", SelParseError::Truncated);
+    // A *dangling* combinator is legal input (the golden parses `b +` into the
+    // structural value `(b "+",)`), so only genuinely incomplete input errors.
+    rt("a >", "a >");
+    rt("a +", "a +");
     err("", SelParseError::Truncated);
     err("a,", SelParseError::Truncated);
     err("[c", SelParseError::Truncated);

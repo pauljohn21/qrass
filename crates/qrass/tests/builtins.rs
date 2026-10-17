@@ -64,8 +64,15 @@ fn undefined_bare_function_passes_through_as_plain_css() {
 
 #[test]
 fn wrong_arity_is_reported() {
+    // dart-shaped shortfall wording: the missing slot is named (round 23).
     let msg = eval_err(".a { p: math.div(1); }");
-    assert!(msg.contains("wrong number of arguments"), "{msg}");
+    assert!(msg.contains("Missing argument $number2."), "{msg}");
+    // dart-shaped overflow wording when past the fixed maximum.
+    let msg = eval_err(".a { p: math.div(1, 2, 3); }");
+    assert!(
+        msg.contains("Only 2 arguments allowed, but 3 were passed."),
+        "{msg}"
+    );
 }
 
 #[test]
