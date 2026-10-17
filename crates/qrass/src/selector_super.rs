@@ -31,14 +31,22 @@ pub fn list_is_super(super_list: &SelectorList, sub_list: &SelectorList) -> bool
         .all(|sub| super_list.complexes.iter().any(|sup| complex_is_super(sup, sub)))
 }
 
+/// A complex with a leading combinator, a doubled combinator edge (`extras`), or
+/// a dangling trailing combinator — all invalid CSS that cannot subsume or be
+/// subsumed.
+fn has_bogus_chain(c: &Complex) -> bool {
+    !c.trailing.is_empty()
+        || c.components.iter().any(|x| !x.extras.is_empty())
+        || c.components.first().and_then(|x| x.combinator).is_some()
+}
+
 fn complex_is_super(super_complex: &Complex, sub_complex: &Complex) -> bool {
     let sup = &super_complex.components;
     let sub = &sub_complex.components;
-    // A bogus chain (leading or doubled combinator) is invalid CSS that can never
-    // take part in a subsumption relation (`bogus.hrx`).
-    if sup.first().and_then(|c| c.combinator).is_some()
-        || sub.first().and_then(|c| c.combinator).is_some()
-    {
+    // A bogus chain (a leading combinator, a doubled combinator edge, or a
+    // dangling trailing combinator) is invalid CSS that can never take part in a
+    // subsumption relation (`bogus.hrx`).
+    if has_bogus_chain(super_complex) || has_bogus_chain(sub_complex) {
         return false;
     }
     if sup.is_empty() {

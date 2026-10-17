@@ -24,6 +24,13 @@ type Node = (Compound, Option<Combinator>);
 /// Cross-product unify of several selector lists. Returns `None` when no pair of
 /// complexes can unify (the builtin renders that as `null`).
 pub fn unify_lists(lists: &[SelectorList]) -> Option<SelectorList> {
+    // A bogus combinator chain (two or more combinators in a row, e.g. `.c + ~ > .d`,
+    // or a dangling trailing combinator) has no well-defined unification: the
+    // `unify/complex/combinators/{initial,multiple}` goldens demand `null` for any
+    // such input, while a *single* combinator still unifies normally.
+    if lists.iter().flat_map(|l| l.complexes.iter()).any(has_bogus_chain) {
+        return None;
+    }
     let mut acc: Vec<Complex> = lists.first().map(|l| l.complexes.clone()).unwrap_or_default();
     for list in lists.iter().skip(1) {
         let mut next: Vec<Complex> = Vec::new();
@@ -38,6 +45,12 @@ pub fn unify_lists(lists: &[SelectorList]) -> Option<SelectorList> {
         return None;
     }
     Some(SelectorList::new(acc))
+}
+
+/// A complex carrying a doubled combinator edge (`Component.extras`) or a
+/// dangling trailing combinator.
+fn has_bogus_chain(c: &Complex) -> bool {
+    !c.trailing.is_empty() || c.components.iter().any(|x| !x.extras.is_empty())
 }
 
 /// Merge the two relations a shared compound bears to its inner neighbour. The
