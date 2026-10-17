@@ -305,4 +305,18 @@
 # selectors are additive and always survive (fixing `format#1` dropping a verbatim
 # `d c` subsumed by `c`). A/B: 0 regressions.
 # 6972 -> 6983 passed (+11, 6983/10961 = 63.71%).
-63.7
+# Round 25: register the legacy `color.complement / grayscale / invert` builtins
+# (new `src/builtins/color_legacy.rs`), implemented purely in the HSL/sRGB legacy
+# model (hue +180 / saturation -> 0 / per-channel 255-c blended by `$weight`).
+# Results are tagged `legacy = "rgb"` so serialization reproduces the goldens'
+# exact keyword / `#hex` / `rgb(%…)` form (complement(red)→aqua, grayscale(red)→
+# rgb(50%,50%,50%), invert(#abcdef)→#543210). A Color 4 (c4-carrying) input is
+# rejected cleanly rather than guessed — its cross-space goldens need the per-space
+# dependency model, still out of scope. CRITICAL: the *bare* globals `invert`/
+# `grayscale`/`complement` are NOT registered; they double as CSS filter functions
+# and the goldens depend on an unregistered bare call passing through verbatim as
+# plain CSS (`invert(10%)`, `invert(var(--c))`). Registering them regressed 12
+# passthrough cases (A/B caught it) — only the `color.` namespace is claimed.
+# A/B: 0 regressions.
+# 6983 -> 7019 passed (+36, 7019/10961 = 64.04%).
+64.0

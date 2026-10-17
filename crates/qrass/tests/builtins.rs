@@ -464,3 +464,26 @@ fn named_argument_conflicts_and_unknowns() {
     let err = eval_err(".a { p: math.abs($number: 3, $bogus: 1); }");
     assert!(err.contains("No such argument"), "{err}");
 }
+
+// ─── 8.4 legacy color ops (round 25): color.complement / grayscale / invert ──────
+
+#[test]
+fn legacy_color_ops_match_golden_form() {
+    // Hue rotation renders back to a CSS keyword when the channels hit one.
+    assert_eq!(value("color.complement(red)"), "aqua");
+    // Desaturation of a saturated color lands on a half-byte gray → `rgb(%)` form.
+    assert_eq!(value("color.grayscale(red)"), "rgb(50%, 50%, 50%)");
+    // A full-channel invert of a hex literal round-trips as hex.
+    assert_eq!(value("color.invert(#abcdef)"), "#543210");
+    // Weight scales the inversion (50% blends toward the complement).
+    assert_eq!(value("color.invert(black, 50%)"), "rgb(50%, 50%, 50%)");
+}
+
+#[test]
+fn bare_filter_functions_are_not_shadowed() {
+    // `invert`/`grayscale` are also CSS filter functions: the *bare* names stay
+    // unregistered so a non-color call passes through verbatim as plain CSS
+    // (registering them as builtins regressed the goldens' passthrough cases).
+    assert_eq!(value("invert(var(--c))"), "invert(var(--c))");
+    assert_eq!(value("grayscale(0.5)"), "grayscale(0.5)");
+}

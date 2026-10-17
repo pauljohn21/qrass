@@ -19,6 +19,7 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) mod color;
+pub(crate) mod color_legacy;
 pub(crate) mod color_ops;
 pub(crate) mod global;
 pub(crate) mod list;
@@ -114,6 +115,7 @@ fn registry() -> &'static Registry {
         map::register(&mut r);
         math::register(&mut r);
         color::register(&mut r);
+        color_legacy::register(&mut r);
         string::register(&mut r);
         list::register(&mut r);
         selector::register(&mut r);
