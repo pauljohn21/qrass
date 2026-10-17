@@ -29,6 +29,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use rxrust::prelude::*;
+use rxrust::rc::MutArc;
 use rxrust::subject::behavior_subject::BehaviorSubject;
 use tracing::{Level, span};
 
@@ -46,7 +47,11 @@ type HubItem = Option<Arc<Module>>;
 /// spelling — which is why a hub can be a struct field instead of an unnameable chain.
 type Hub = Shared<
     BehaviorSubject<
-        HubItem,
+        // rc.6 wraps the subject payload in the context's `RcDeref` pointer
+        // (`MutArc` = `Arc<Mutex<_>>` for `Shared`); this is the framework's own
+        // multicast plumbing, not a business carrier — the value we share stays the
+        // read-only `Option<Arc<Module>>`.
+        MutArc<HubItem>,
         SubjectPtr<'static, SharedCtx<(), SharedScheduler>, HubItem, Infallible>,
     >,
 >;
@@ -84,8 +89,10 @@ impl ModuleBus {
         // `next` then `complete` are plain `Observer` calls on the carrier, made
         // outside any subscription callback — the Subject re-entrancy panic cannot
         // be reached from here.
-        <Hub as Observer<HubItem, Infallible>>::next(hub, Some(module));
-        <Hub as Observer<HubItem, Infallible>>::complete(hub.clone());
+        // rc.6: `Observer::next` takes `&mut self` and the payload is handed to
+        // subscribers as an owned clone of the `RcDeref` target.
+        hub.next(Some(module));
+        hub.clone().complete();
         Ok(())
     }
 
