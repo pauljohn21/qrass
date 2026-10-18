@@ -26,9 +26,22 @@ fn type_of(c: &super::Call) -> Or<SassValue> {
 }
 
 /// `inspect` yields the value's source text, unquoted (a string arg prints its
-/// CSS form, including its own quotes, exactly like the goldens).
+/// CSS form, including its own quotes, exactly like the goldens). An
+/// unbracketed empty list carries no separator text, so dart's source form is
+/// the empty paren `()` — the shared `to_css` would otherwise collapse it to "".
 fn inspect(c: &super::Call) -> Or<SassValue> {
-    Ok(unquoted(c.positional[0].to_css()))
+    let text = match &c.positional[0] {
+        SassValue::List {
+            items,
+            bracketed: false,
+            ..
+        } if items.is_empty() =>
+        {
+            "()".to_string()
+        }
+        other => other.to_css(),
+    };
+    Ok(unquoted(text))
 }
 
 /// `keywords($args)`: the rest-argument map, returned unchanged.

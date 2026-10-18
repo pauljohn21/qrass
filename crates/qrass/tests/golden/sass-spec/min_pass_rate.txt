@@ -377,4 +377,18 @@
 # Vec<char>), so a combining base+mark is two chars and an astral emoji one.
 # All 41 core_functions/string/slice cases pass (was 4). A/B: 0 regressions.
 # 7214 -> 7252 passed (+38, 7252/10961 = 66.16%).
-66.1
+# Round 31: list.zip separator + zero-arity, and meta.inspect of the empty list.
+# zip's inner element lists were hardcoded comma; dart always zips into SPACE-
+# separated inner lists (zip(1 2 3, c d) -> `1 c, 2 d`) regardless of the inputs'
+# own separators, and zip() with zero args yields the empty comma list (arity
+# lowered 1 -> 0). Separately, meta.inspect routed through the shared to_css,
+# which collapses an unbracketed EMPTY list to ""; dart's source form is the
+# empty paren (). Special-cased inspect (not to_css, so ordinary declaration
+# serialization is untouched) to print () for an empty unbracketed list. The
+# inspect fix is cross-cutting: it also flipped join/empty, meta/keywords,
+# map/keys, map/values and global/meta. 10/14 zip cases pass; the residual 4
+# (one_list/*, map/non_empty) hinge on a bracketed-list items_of length bug and
+# nested-property (element-type/…) serialization — a separate, riskier track,
+# deferred. A/B: 0 regressions.
+# 7252 -> 7270 passed (+18, 7270/10961 = 66.33%).
+66.3

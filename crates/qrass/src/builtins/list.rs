@@ -24,7 +24,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("list", "index", 2, Some(2), &["list", "value"], index);
     r.nsp("list", "separator", 1, Some(1), &["list"], separator);
     r.nsp("list", "is-bracketed", 1, Some(1), &["list"], is_bracketed);
-    r.ns("list", "zip", 1, None, zip);
+    r.ns("list", "zip", 0, None, zip);
     r.ns("list", "slash", 0, None, slash);
     // Legacy global spellings (bare names used across many stylesheets).
     r.def("append", 2, Some(3), append);
@@ -219,14 +219,17 @@ fn slash(c: &super::Call) -> Or<SassValue> {
     })
 }
 
-/// `list.zip($lists...)`: element-wise grouping into an outer comma list.
+/// `list.zip($lists...)`: element-wise grouping into an outer comma list whose
+/// inner element lists are **space**-separated (dart renders `zip(1 2 3 4, c d)`
+/// as `1 c, 2 d`), regardless of the inputs' own separators; they are never
+/// bracketed. `zip()` with no arguments yields the empty comma list.
 fn zip(c: &super::Call) -> Or<SassValue> {
     let lists: Vec<Vec<SassValue>> = c.positional.iter().map(items_of).collect();
     let shortest = lists.iter().map(|l| l.len()).min().unwrap_or(0);
     let out = (0..shortest)
         .map(|i| SassValue::List {
             items: lists.iter().map(|l| l[i].clone()).collect(),
-            sep: ListSep::Comma,
+            sep: ListSep::Space,
             bracketed: false,
         })
         .collect();
