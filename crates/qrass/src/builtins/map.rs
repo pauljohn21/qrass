@@ -14,7 +14,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("map", "values", 1, Some(1), &["map"], values);
     r.nsp("map", "merge", 1, None, &["map1", "map2"], merge);
     r.nsp("map", "deep-merge", 1, None, &["map1", "map2"], deep_merge_n);
-    r.nsp("map", "set", 3, Some(3), &["map", "key", "value"], set_call);
+    r.nsp("map", "set", 1, None, &["map", "key", "value"], set_call);
     r.nsp("map", "remove", 1, None, &["map", "key"], remove);
     r.nsp("map", "deep-remove", 2, None, &["map", "key"], deep_remove);
     // Legacy global spellings.
@@ -101,22 +101,56 @@ fn values(c: &super::Call) -> Or<SassValue> {
     Ok(comma(entries.into_iter().map(|(_, v)| v).collect()))
 }
 
-fn set(entries: Vec<(SassValue, SassValue)>, key: SassValue, value: SassValue) -> SassValue {
-    let mut entries = entries;
-    match entries.iter_mut().find(|(k, _)| *k == key) {
-        Some(slot) => slot.1 = value,
-        None => entries.push((key, value)),
+/// `map.set($map, $keys…, $value)`: descend `$map` along `$keys…` (fabricating
+/// intermediate maps for any missing or non-map step) and set `$value` (the final
+/// argument) at the leaf. With a single key it is the plain `set($map, $key,
+/// $value)`. Fewer than three arguments raise the goldens' `$args` key/value
+/// errors; a non-map `$map` names the offending argument.
+fn set_call(c: &super::Call) -> Or<SassValue> {
+    let args = &c.positional;
+    if args.len() < 3 {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            if args.len() == 1 {
+                "Expected $args to contain a key."
+            } else {
+                "Expected $args to contain a value."
+            },
+        ));
     }
-    map_value(entries)
+    let map = coerce_map(&args[0], "map")?;
+    let value = args[args.len() - 1].clone();
+    Ok(map_value(set_at(map, &args[1..args.len() - 1], value)))
 }
 
-fn set_call(c: &super::Call) -> Or<SassValue> {
-    let entries = as_map(c, 0)?;
-    Ok(set(
-        entries,
-        c.positional[1].clone(),
-        c.positional[2].clone(),
-    ))
+/// Descend `entries` along `keys`, setting `value` at the leaf key.
+fn set_at(
+    mut entries: Vec<(SassValue, SassValue)>,
+    keys: &[SassValue],
+    value: SassValue,
+) -> Vec<(SassValue, SassValue)> {
+    let key = &keys[0];
+    let idx = entries.iter().position(|(k, _)| k == key);
+    if keys.len() == 1 {
+        match idx {
+            Some(i) => entries[i].1 = value,
+            None => entries.push((key.clone(), value)),
+        }
+        return entries;
+    }
+    let child = match idx {
+        Some(i) => match &entries[i].1 {
+            SassValue::Map { entries } => entries.clone(),
+            _ => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+    let new_child = map_value(set_at(child, &keys[1..], value));
+    match idx {
+        Some(i) => entries[i].1 = new_child,
+        None => entries.push((key.clone(), new_child)),
+    }
+    entries
 }
 
 /// Shallow merge: `right` overrides `left` on key collisions.
@@ -223,7 +257,7 @@ fn deep_merge(
     left
 }
 
-/// `map.set($map, $key, $value)` registered through the shared helper.
+/// `map.remove($map, $keys…)`.
 fn remove(c: &super::Call) -> Or<SassValue> {
     let entries = as_map(c, 0)?;
     let keys: Vec<SassValue> = c.positional[1..].to_vec();

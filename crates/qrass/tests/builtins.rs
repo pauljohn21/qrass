@@ -163,6 +163,33 @@ fn map_set_and_remove() {
     assert_eq!(value("map.remove((a: 1, b: 2), a)"), "(b: 2)");
 }
 
+#[test]
+fn map_set_nested_keypath() {
+    // `$map, $keys…, $value`: set the final argument at the nested leaf,
+    // fabricating intermediate maps for a missing or non-map step.
+    assert_eq!(
+        value("map.set((c: ()), c, d, e, f)"),
+        "(c: (d: (e: f)))"
+    );
+    assert_eq!(value("map.set((c: (d: e)), c, d, f)"), "(c: (d: f))");
+    assert_eq!(
+        value("map.set((c: (d: e)), c, f, g)"),
+        "(c: (d: e, f: g))"
+    );
+    assert_eq!(value("map.set((c: 1), c, d, f)"), "(c: (d: f))");
+    // named form still binds map/key/value to the first, second, last slots.
+    assert_eq!(
+        value("map.set($map: (c: d), $key: c, $value: e)"),
+        "(c: e)"
+    );
+    let msg = eval_err(".a { p: map.set(1, c, d); }");
+    assert!(msg.contains("$map: 1 is not a map."), "{msg}");
+    let msg = eval_err(".a { p: map.set((c: d)); }");
+    assert!(msg.contains("Expected $args to contain a key."), "{msg}");
+    let msg = eval_err(".a { p: map.set((c: d), e); }");
+    assert!(msg.contains("Expected $args to contain a value."), "{msg}");
+}
+
 // ─── 8.2 math.* ───────────────────────────────────────────────────────────────
 
 #[test]

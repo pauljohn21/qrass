@@ -509,4 +509,15 @@
 #     instead of the generic arity wording.
 # sass-spec 7473 -> 7487 (+14: all math/hypot cases now 19/19), 0 regressions,
 # full test suite green.
+#
+# Round 41: `map.set($map, $keys…, $value)` variadic key path (round-39 merge
+#     family). The namespace form was registered as a fixed 3-arity set, so
+#     `map.set((c: ()), c, d, e, f)` errored "Only 3 arguments allowed" while the
+#     goldens expect a nested set (set the FINAL argument at the map reached by
+#     descending $map along $keys…, fabricating intermediate maps for a missing or
+#     non-map step). min lowered to 1 / variadic; the two sub-3-arg calls now raise
+#     `Expected $args to contain a key.` / `... a value.` and a non-map $map reads
+#     `$map: <value> is not a map.`
+# sass-spec 7487 -> 7495 (+8: all map/set cases now 13/13), 0 regressions, full
+# test suite green (358 passed).
 68.3
