@@ -3,11 +3,13 @@
 //!
 //! The manual prescribes that a module imported by several parents is *instantiated
 //! once and broadcast*, not looked up and copied. The carrier is a `Shared`
-//! [`BehaviorSubject`] keyed by canonical path: `BehaviorSubject::subscribe` emits
-//! its current value **before** attaching to later emissions, so a parent that joins
-//! after the body ran still receives that one instantiation, and because the payload
-//! is `Arc<Module>` the sharing stays read-only (manual §2 "缓存共享用
-//! `Arc<不可变 Module>` 只读多播").
+//! [`BehaviorSubject`] keyed by canonical path. Because the pipeline is synchronous
+//! and single-threaded, a second parent only ever joins after the first has settled
+//! the hub, so `share` reads that one instantiation with `Behavior::peek` — no
+//! observer attaches and no per-parent subscription is retained. The payload stays
+//! `Arc<Module>`, so the sharing is read-only (manual §2 "缓存共享用 `Arc<不可变
+//! Module>` 只读多播"); the `BehaviorSubject` remains a multicast carrier (not a
+//! bare lookup map) so the D1 concurrent-branch path can still attach real subscribers.
 //!
 //! `Shared` rather than `Local` is deliberate: the hub is `Send + Sync`, so
 //! [`crate::eval::EvalState`] keeps the capability the *next* step of D1 needs
@@ -15,22 +17,23 @@
 //! stay `Local` — the manual's other half of the rule — because a hub carries one
 //! coarse value per module, so the `Arc`/`Mutex` plumbing is not a hot path.
 //!
-//! Why this file owns its own terminal instead of calling [`crate::drain::drain`]:
-//! `Subject::subscribe` registers the observer in the subscriber list and a *late*
-//! subscriber is never notified by an earlier `complete()` (`Subject::is_closed`
-//! only tests emptiness). A closure `subscribe` would therefore keep the channel's
-//! `Sender` alive inside the hub forever and `rx.iter()` would block. The terminal
-//! below takes the single emission and then unsubscribes, which drops the observer
-//! — and its `Sender` — deterministically.
+//! Reading the singleton goes through rc.6's `Behavior::peek` rather than a
+//! subscription: `share` takes the current value synchronously, registering no
+//! observer. This is why the file needs neither [`crate::drain::drain`] nor an
+//! `mpsc` terminal — the rc.5 late-subscriber deadlock (`Subject::is_closed` only
+//! testing emptiness, so a subscriber attaching after `complete` never fired and
+//! its `Sender` leaked) cannot arise when nothing subscribes. `peek` is only
+//! exposed for a `BehaviorSubject` whose error channel is `()`, which is why the
+//! hub is parameterized with `()` rather than `Infallible` (the payload itself
+//! already carries the `None` "not settled yet" state).
 
 use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::Instant;
 
 use rxrust::prelude::*;
 use rxrust::rc::MutArc;
-use rxrust::subject::behavior_subject::BehaviorSubject;
+use rxrust::subject::behavior_subject::{Behavior, BehaviorSubject};
 use tracing::{Level, span};
 
 use crate::error::{ErrorKind, SassError};
@@ -45,6 +48,8 @@ type HubItem = Option<Arc<Module>>;
 /// The `Shared` carrier for one canonical module path. `ObservableFactory` is bound
 /// to `Context<Inner = ()>`, so `Shared::behavior_subject` produces exactly this
 /// spelling — which is why a hub can be a struct field instead of an unnameable chain.
+/// The error channel is `()` (not `Infallible`) so the `Behavior` trait — and its
+/// synchronous `peek` reader — is exposed for this carrier.
 type Hub = Shared<
     BehaviorSubject<
         // rc.6 wraps the subject payload in the context's `RcDeref` pointer
@@ -52,7 +57,7 @@ type Hub = Shared<
         // multicast plumbing, not a business carrier — the value we share stays the
         // read-only `Option<Arc<Module>>`.
         MutArc<HubItem>,
-        SubjectPtr<'static, SharedCtx<(), SharedScheduler>, HubItem, Infallible>,
+        SubjectPtr<'static, SharedCtx<(), SharedScheduler>, HubItem, ()>,
     >,
 >;
 
@@ -77,7 +82,7 @@ impl ModuleBus {
     pub(crate) fn open(&mut self, key: &str) {
         self.hubs
             .entry(key.to_string())
-            .or_insert_with(|| Shared::behavior_subject::<HubItem, Infallible>(None));
+            .or_insert_with(|| Shared::behavior_subject::<HubItem, ()>(None));
     }
 
     /// Broadcast the finished singleton and close the carrier. Called once, by the
@@ -113,20 +118,12 @@ impl ModuleBus {
         let started = Instant::now();
         let hub = self.hubs.get(key).ok_or_else(|| unsettled(key))?;
 
-        let (tx, rx) = mpsc::channel::<HubItem>();
-        // `into_local` only re-wraps the context (it changes no execution model, per
-        // the manual), which is what lets a closure `subscribe` apply: the error
-        // channel is `Infallible` because nothing here fails out-of-band.
-        let subscription = hub
-            .clone()
-            .into_local()
-            .subscribe(move |item| {
-                tx.send(item).ok();
-            });
-        let item = rx.recv().map_err(|_| unsettled(key))?;
-        // Release the observer we just registered, dropping its `Sender`; without
-        // this the hub would accumulate one leaked subscriber per parent.
-        subscription.unsubscribe();
+        // rc.6 exposes the current value synchronously through `Behavior::peek`, so
+        // the singleton is read directly — no observer is registered, no `mpsc`
+        // channel is needed, and there is no late-subscriber / `recv()` hang surface
+        // (the rc.5 workaround this replaces). The carrier stays a `Shared`
+        // `BehaviorSubject` (multicast structure preserved), not a bare lookup map.
+        let item = hub.peek();
 
         span.record(
             "elapsed_ms",
