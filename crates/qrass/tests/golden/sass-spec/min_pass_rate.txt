@@ -412,4 +412,22 @@
 # previously-silent error goldens (& / `[c`) into real errors. 18 selector/parse
 # cases flip (9 selector, 6 structure, 3 error). A/B: 0 regressions.
 # 7280 -> 7298 passed (+18, 7298/10961 = 66.58%).
-66.5
+# Round 34: selector.append (namespace form was never registered — 24 goldens
+# errored "Undefined function"). Rewrote append off the naive string concat onto
+# the selector AST: parse every arg (sel_source + parse_list, prefix-free errors
+# like `1 is not a valid selector…` / `expected more input.` / `Parent selectors
+# aren't allowed here.`), then fold left by splicing each list onto the previous
+# result at the compound junction (parent's LAST compound concatenates the child's
+# FIRST, the child's remaining complexes cross-multiply, leading/trailing/extras
+# combinators preserved), returning the parsed selector-list value like
+# unify/extend (so `$result == (c dg, e fg)` holds). dart validity checks: a
+# parent may not end in a dangling combinator, and the child's first compound may
+# not open with a combinator chain / universal / namespaced type into a non-empty
+# parent. min lowered to 0 so `append()` raises "At least one selector must be
+# passed." itself. 23/24 flip; #20 (error/namespace) stays debt — its golden needs
+# a caret span annotation, a cross-cutting builtins-diagnostic concern, not append
+# logic (a lone `>` arg also parses to Truncated here, so `append(.c,>,.d)` gives
+# `expected more input.` vs the golden `Can't append > to .c.` — parser edge).
+# A/B: 0 regressions.
+# 7298 -> 7321 passed (+23, 7321/10961 = 66.79%).
+66.7

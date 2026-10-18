@@ -7,7 +7,7 @@
 use super::{Or, Registry};
 use crate::ast_expr::ListSep;
 use crate::error::{ErrorKind, SassError};
-use crate::selector_ast::{Combinator, Complex, SelectorList};
+use crate::selector_ast::{Complex, Component, Compound, Combinator, Ns, SelectorList, Simple};
 use crate::selector_parse::{self, SelParseError};
 use crate::selector_super;
 use crate::selector_unify_complex;
@@ -41,11 +41,13 @@ pub(crate) fn register(r: &mut Registry) {
         extend,
     );
     // `nest`/`append` take a rest parameter (`$selectors...`); the goldens forbid
-    // naming a rest argument, so they stay positional-only.
+    // naming a rest argument, so they stay positional-only. `append` accepts zero
+    // args and raises "At least one selector must be passed." itself, so min is 0.
     r.ns("selector", "nest", 1, None, nest);
+    r.ns("selector", "append", 0, None, append);
     r.nsp("selector", "simple-selectors", 1, Some(1), &["selector"], simple_selectors);
     r.def("selector-nest", 1, None, nest);
-    r.def("selector-append", 2, None, append);
+    r.def("selector-append", 0, None, append);
     r.def("selector-parse", 1, Some(1), parse);
 }
 
@@ -200,19 +202,119 @@ fn nest(c: &super::Call) -> Or<SassValue> {
     Ok(comma(acc.into_iter().map(unquoted).collect()))
 }
 
-/// `selector-append($selectors...)`: concatenate compound selectors directly,
-/// substituting `&` in the last with the joined prefix.
+/// `selector.append($selectors...)` / legacy `selector-append`: parse every
+/// argument into a selector list, then fold left, splicing each list onto the
+/// previous result at the *compound junction* — the parent's last compound
+/// concatenates the child's first compound, the child's remaining components
+/// follow with their combinators, and each child complex cross-multiplies with
+/// each parent complex. Returns the parsed selector-list value (like unify /
+/// extend), so `$result == ("c" "de" "f",)`-style structure holds.
 fn append(c: &super::Call) -> Or<SassValue> {
-    let mut out = String::new();
+    if c.positional.is_empty() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "$selectors: At least one selector must be passed.",
+        ));
+    }
+    let mut lists = Vec::with_capacity(c.positional.len());
     for arg in c.positional {
-        let s = text(arg);
-        if s.contains('&') {
-            out = s.replace('&', out.trim());
-        } else {
-            out.push_str(s.trim());
+        lists.push(append_sel_list(arg)?);
+    }
+    let mut result = lists.remove(0);
+    for next in lists {
+        result = append_lists(result, next)?;
+    }
+    Ok(parsed_sel_list(&result))
+}
+
+/// Parse one `append` argument into a [`SelectorList`]. Unlike `sel_arg`, append
+/// raises its errors *without* a `$name:` prefix, matching the goldens
+/// (`1 is not a valid selector…`, `expected more input.`, `Parent selectors
+/// aren't allowed here.`).
+fn append_sel_list(v: &SassValue) -> Or<SelectorList> {
+    let src = sel_source(v).ok_or_else(|| {
+        SassError::new(
+            ErrorKind::Builtins,
+            format!(
+                "{} is not a valid selector: it must be a string,\na list of strings, or a list of lists of strings.",
+                v.to_css()
+            ),
+        )
+    })?;
+    selector_parse::parse_list(&src).map_err(|e| {
+        let reason = match e {
+            SelParseError::Truncated => "expected more input.",
+            SelParseError::Parent => "Parent selectors aren't allowed here.",
+        };
+        SassError::new(ErrorKind::Builtins, reason.to_string())
+    })
+}
+
+/// Cross-product two selector lists by appending every `child` complex onto
+/// every `parent` complex (parent-major order, matching the goldens).
+fn append_lists(parent: SelectorList, child: SelectorList) -> Or<SelectorList> {
+    let mut out = Vec::new();
+    for p in &parent.complexes {
+        for ch in &child.complexes {
+            out.push(append_complex(p, ch)?);
         }
     }
-    Ok(comma(vec![unquoted(out)]))
+    Ok(SelectorList::new(out))
+}
+
+/// Append one complex onto another at the compound junction, enforcing dart's
+/// validity checks: the parent may not end in a dangling combinator, and the
+/// child's first compound — being spliced into the parent — may not open with a
+/// combinator chain, nor (into a non-empty compound) with a universal or a
+/// namespaced type.
+fn append_complex(parent: &Complex, child: &Complex) -> Or<Complex> {
+    if !parent.trailing.is_empty() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("Selector \"{parent}\" can't be used as a parent in a compound selector."),
+        ));
+    }
+    let first = child
+        .components
+        .first()
+        .ok_or_else(|| SassError::new(ErrorKind::Builtins, "expected more input.".to_string()))?;
+    let parent_last = parent.components.last();
+    let opens_with_combinator = first.combinator.is_some() || !first.extras.is_empty();
+    let unappendable_base = parent_last
+        .map(|l| !l.compound.simples.is_empty())
+        .unwrap_or(false)
+        && match first.compound.simples.first() {
+            Some(Simple::Universal { .. }) => true,
+            Some(Simple::Type { ns, .. }) => !matches!(ns, Ns::Bare),
+            _ => false,
+        };
+    if opens_with_combinator || unappendable_base {
+        let child_first = Complex {
+            components: child.components[..1].to_vec(),
+            trailing: Vec::new(),
+        };
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("Can't append {} to {parent}.", child_first.to_string().trim()),
+        ));
+    }
+    let last = parent
+        .components
+        .last()
+        .expect("a parsed complex always has a component");
+    let mut merged = last.compound.simples.clone();
+    merged.extend(first.compound.simples.iter().cloned());
+    let mut components: Vec<Component> = parent.components[..parent.components.len() - 1].to_vec();
+    components.push(Component {
+        combinator: last.combinator,
+        extras: last.extras.clone(),
+        compound: Compound::new(merged),
+    });
+    components.extend(child.components[1..].iter().cloned());
+    Ok(Complex {
+        components,
+        trailing: child.trailing.clone(),
+    })
 }
 
 /// Break one compound selector into its simple selectors (`.a`, `#b`, `:hover`,
