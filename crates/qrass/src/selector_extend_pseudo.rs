@@ -226,3 +226,75 @@ fn is_idempotent_pseudo(name: &str) -> bool {
         .iter()
         .any(|p| name == *p || name.ends_with(&format!("-{p}")))
 }
+
+/// `sel` with every selector-list pseudo argument *substituted* in place for
+/// `selector.replace` — `extendee` replaced by `extender` inside the argument
+/// list, NOT grown the way [`pseudo_replace`] does (`:is(c)` + `c`→`d` =
+/// `:is(d)`). Returns `None` when no pseudo argument changes.
+pub(super) fn pseudo_substitute(
+    sel: &Complex,
+    extendee: &SelectorList,
+    extender: &SelectorList,
+) -> Option<Complex> {
+    let mut new_comps = sel.components.clone();
+    let mut changed = false;
+    for comp in new_comps.iter_mut() {
+        if let Some(m) = sub_pseudo_compound(&comp.compound, extendee, extender) {
+            comp.compound = m;
+            changed = true;
+        }
+    }
+    if changed {
+        Some(Complex::new(new_comps))
+    } else {
+        None
+    }
+}
+
+/// Rebuild a compound whose selector-list pseudo arguments have `extendee`
+/// substituted (recursing through [`crate::selector_extend::replace_list`]); an
+/// `nth-*`'s `<an+b>` wrapper shape is preserved.
+fn sub_pseudo_compound(
+    c: &Compound,
+    extendee: &SelectorList,
+    extender: &SelectorList,
+) -> Option<Compound> {
+    let mut simples = c.simples.clone();
+    let mut changed = false;
+    for simple in simples.iter_mut() {
+        let (name, anbn, list) = match simple {
+            Simple::PseudoClass { name, arg }
+            | Simple::PseudoElement { name, arg, .. } => match arg {
+                PseudoArg::Selectors(l) => (name.clone(), None, l.clone()),
+                PseudoArg::Nth {
+                    anbn,
+                    of: Some(l),
+                } => (name.clone(), Some(anbn.clone()), l.clone()),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        if !is_selector_pseudo(&name) {
+            continue;
+        }
+        let replaced = crate::selector_extend::replace_list(&list, extendee, extender);
+        if replaced.complexes == list.complexes {
+            continue;
+        }
+        let arg = match anbn {
+            Some(anbn) => PseudoArg::Nth {
+                anbn,
+                of: Some(replaced),
+            },
+            None => PseudoArg::Selectors(replaced),
+        };
+        match simple {
+            Simple::PseudoClass { arg: slot, .. } | Simple::PseudoElement { arg: slot, .. } => {
+                *slot = arg
+            }
+            _ => {}
+        }
+        changed = true;
+    }
+    if changed { Some(Compound::new(simples)) } else { None }
+}

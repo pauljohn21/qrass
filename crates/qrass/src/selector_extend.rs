@@ -16,7 +16,7 @@
 //!   compounds may float outward — see [`crate::selector_extend_weave`].
 
 use crate::selector_ast::{Complex, Compound, SelectorList};
-use crate::selector_extend_pseudo::pseudo_replace;
+use crate::selector_extend_pseudo::{pseudo_replace, pseudo_substitute};
 use crate::selector_extend_weave::weave_all;
 use crate::selector_super::list_is_super;
 
@@ -48,6 +48,42 @@ pub fn extend_list(
         }
     }
     trim_subsumed(&mut out, &mut verbatim);
+    SelectorList::new(out)
+}
+
+/// `selector.replace($selectors, $original, $replacement)` — the non-addive
+/// sibling of [`extend_list`], derived from the `selector/replace.hrx` goldens:
+///
+/// * a selector whose `$original` matches at the top level is replaced by the
+///   extension(s) `top_level` yields (a complex replacement still weaves into the
+///   descendant position, e.g. `c d` + `d`→`e f` = `c e f, e c f`);
+/// * a selector carrying `$original` inside a selector-list pseudo (`:is`/`:where`/
+///   `:matches`/`:not`/…) substitutes it in place (`:is(c)` + `c`→`d` = `:is(d)`),
+///   rather than growing the argument list the way `extend` does;
+/// * a selector that matches nothing survives verbatim (`no_op`);
+/// * unlike `extend`, results are NEVER subsumption-trimmed across inputs, so a
+///   broad replacement cannot absorb a narrower one from a sibling selector
+///   (`replace((c, d c), c, e)` = `e, d e`, not `e`).
+pub fn replace_list(
+    selectors: &SelectorList,
+    extendee: &SelectorList,
+    extender: &SelectorList,
+) -> SelectorList {
+    let mut out: Vec<Complex> = Vec::new();
+    for sel in &selectors.complexes {
+        let adds = top_level(sel, extendee, extender);
+        let sub = pseudo_substitute(sel, extendee, extender);
+        if adds.is_empty() && sub.is_none() {
+            push_unique(&mut out, sel.clone());
+        } else {
+            for add in adds {
+                push_unique(&mut out, add);
+            }
+            if let Some(s) = sub {
+                push_unique(&mut out, s);
+            }
+        }
+    }
     SelectorList::new(out)
 }
 

@@ -254,6 +254,79 @@ fn append_rejects_universal_namespaced_and_parent_bases() {
     }
 }
 
+// ─── selector.replace: non-additive extension (round 35) ──────────────────────
+// replace shares `extend`'s engine but drops the verbatim original whenever a
+// selector actually matched, substitutes inside selector-list pseudos instead of
+// growing them, and never trims results across sibling selectors.
+
+#[test]
+fn replace_substitutes_top_level_and_keeps_unmatched() {
+    let out = compile(
+        "@use \"sass:selector\";\n\
+         a { a: selector.replace(\"c\", \"c\", \"d\"); b: selector.replace(\"c.d\", \"c\", \"e\"); c: selector.replace(\"c\", \"d\", \"e\"); }",
+    );
+    assert!(out.contains("a: d"), "{out}");
+    assert!(out.contains("b: e.d"), "{out}");
+    // `no_op`: `c` never matches `d`, so it survives verbatim.
+    assert!(out.contains("c: c"), "{out}");
+}
+
+#[test]
+fn replace_weaves_a_complex_replacement() {
+    let out = compile(
+        "@use \"sass:selector\";\n\
+         a { a: selector.replace(\"c d\", \"d\", \"e f\"); }",
+    );
+    assert!(out.contains("a: c e f, e c f"), "{out}");
+}
+
+#[test]
+fn replace_substitutes_inside_selector_list_pseudos() {
+    // Unlike `extend` (which grows the argument list), `replace` swaps the match
+    // in place: `:is(c)` -> `:is(d)` and `:not(c)` -> `:not(d)`.
+    let out = compile(
+        "@use \"sass:selector\";\n\
+         a { a: selector.replace(\":is(c)\", \"c\", \"d\"); b: selector.replace(\":where(c)\", \"c\", \"d\"); c: selector.replace(\":not(c)\", \"c\", \"d\"); }",
+    );
+    assert!(out.contains("a: :is(d)"), "{out}");
+    assert!(out.contains("b: :where(d)"), "{out}");
+    assert!(out.contains("c: :not(d)"), "{out}");
+}
+
+#[test]
+fn replace_is_not_additive_and_never_trims_siblings() {
+    // `d c` extends to `d e`, which a broad `e` from the sibling `c` must NOT
+    // absorb (extend would trim it; replace keeps both).
+    let out = compile(
+        "@use \"sass:selector\";\n\
+         $r: selector.replace((c, d c), \"c\", \"e\");\n\
+         a { v: $r; }",
+    );
+    assert!(out.contains("v: e, d e"), "{out}");
+}
+
+#[test]
+fn replace_rejects_complex_original_and_parent_selector() {
+    for (src, want) in [
+        (
+            "selector.replace(\"c\", \"d e\", \"f\")",
+            "Can't extend complex selector d e.",
+        ),
+        (
+            "selector.replace(\"&\", \"c\", \"d\")",
+            "$selector: Parent selectors aren't allowed here.",
+        ),
+        (
+            "selector.replace(\"c\", \"[d\", \"e\")",
+            "$original: expected more input.",
+        ),
+    ] {
+        let scss = format!("@use \"sass:selector\";\na {{ b: {src}; }}");
+        let msg = eval_err(&scss);
+        assert!(msg.contains(want), "{src}: expected {want:?}, got {msg}");
+    }
+}
+
 /// Compile `src` and return the eval error's message (panics if it succeeds).
 fn eval_err(src: &str) -> String {
     use qrass::eval::eval_all;

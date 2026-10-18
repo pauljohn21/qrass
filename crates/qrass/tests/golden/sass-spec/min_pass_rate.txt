@@ -430,4 +430,17 @@
 # `expected more input.` vs the golden `Can't append > to .c.` — parser edge).
 # A/B: 0 regressions.
 # 7298 -> 7321 passed (+23, 7321/10961 = 66.79%).
-66.7
+# 66.7
+#
+# Round 35: `selector.replace($selector, $original, $replacement)` — the namespace
+# form was never registered (only a legacy global existed), so all 24 ns goldens
+# reported "Undefined function". Implemented as a NON-ADDITIVE sibling of extend
+# (new `replace_list` in selector_extend.rs + `pseudo_substitute` in
+# selector_extend_pseudo.rs): drop the verbatim original when a selector matched,
+# SUBSTITUTE inside selector-list pseudos (`:is(c)`+c->d = `:is(d)`, not extend's
+# grow `:is(c, d)`), and never subsumption-trim across siblings so `replace((c,
+# d c), c, e)` keeps both `e, d e`. Errors reuse `sel_arg` ($selector/$original/
+# $replacement) + the extend complex-original guard. All 30 replace.hrx cases flip
+# (16 output + arity/type/parent/complex errors), +1 global/selector. A/B: 0
+# regressions. 7321 -> 7352 passed (+31, 7352/10961 = 67.07%).
+66.9

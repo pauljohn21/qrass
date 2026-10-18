@@ -40,6 +40,14 @@ pub(crate) fn register(r: &mut Registry) {
         &["selector", "extendee", "extender"],
         extend,
     );
+    r.nsp(
+        "selector",
+        "replace",
+        3,
+        Some(3),
+        &["selector", "original", "replacement"],
+        replace,
+    );
     // `nest`/`append` take a rest parameter (`$selectors...`); the goldens forbid
     // naming a rest argument, so they stay positional-only. `append` accepts zero
     // args and raises "At least one selector must be passed." itself, so min is 0.
@@ -457,5 +465,28 @@ fn extend(c: &super::Call) -> Or<SassValue> {
         &selectors,
         &extendee,
         &extender,
+    )))
+}
+
+/// `selector.replace($selectors, $original, $replacement)`: like `extend`, but
+/// non-additive — each selector that actually matches `$original` has that match
+/// replaced by `$replacement` (the untouched form is dropped), while a selector
+/// with no match is left as-is.
+fn replace(c: &super::Call) -> Or<SassValue> {
+    let selectors = sel_arg(&c.positional[0], "selector")?;
+    let original = sel_arg(&c.positional[1], "original")?;
+    let replacement = sel_arg(&c.positional[2], "replacement")?;
+    // `$original` must be compound-only; a complex selector has no single slot to
+    // splice the replacement into (same guard, wording and reason as `extend`).
+    if let Some(complex) = original.complexes.iter().find(|c| c.components.len() > 1) {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("Can't extend complex selector {complex}."),
+        ));
+    }
+    Ok(parsed_sel_list(&selector_extend::replace_list(
+        &selectors,
+        &original,
+        &replacement,
     )))
 }
