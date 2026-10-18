@@ -65,6 +65,7 @@ impl EvalState {
             Stmt::Use(u) => self.handle_use(u, out),
             Stmt::Forward(f) => self.handle_forward(f, out),
             Stmt::AtRule(a) if a.name == "import" => self.run_import(a, out),
+            Stmt::AtRule(a) => self.run_unknown_atrule(a, sel_ctx, decls, out),
             Stmt::If(i) => self.run_if(i, sel_ctx, decls, out),
             Stmt::Each(e) => self.run_each(e, sel_ctx, decls, out),
             Stmt::For(f) => self.run_for(f, sel_ctx, decls, out),
@@ -205,7 +206,7 @@ impl EvalState {
                 .iter()
                 .filter_map(|it| match it {
                     Item::Decl { prop, value } => Some((prop.clone(), value.clone())),
-                    Item::Comment(_) => None,
+                    Item::Comment(_) | Item::Raw(_) => None,
                 })
                 .collect();
             // Reserve a slot in the emitted stream at this placeholder's own
@@ -291,6 +292,48 @@ impl EvalState {
         self.at_root = saved;
         self.env.leave();
         Ok(())
+    }
+
+    /// Unknown at-rule fallback (`@name value;` / `@name value { … }`): echo the
+    /// directive verbatim, evaluating any `#{…}` in the value but passing every
+    /// other token through unchanged. A block body is rendered like a container so
+    /// nested rules stay grouped; a body-less directive becomes one output line
+    /// (or, when nested inside a rule, an interleaved raw item).
+    fn run_unknown_atrule(
+        &mut self,
+        a: &crate::ast::AtRule,
+        sel_ctx: &[String],
+        decls: &mut Vec<Item>,
+        out: &mut Vec<String>,
+    ) -> Ev<()> {
+        let value = self.render_interp(&a.value)?;
+        let header = if value.trim().is_empty() {
+            format!("@{}", a.name)
+        } else {
+            format!("@{} {}", a.name, value)
+        };
+        match &a.body {
+            None => {
+                let line = format!("{header};");
+                if sel_ctx.is_empty() {
+                    out.push(line);
+                } else {
+                    decls.push(Item::Raw(line));
+                }
+                Ok(())
+            }
+            Some(body) => {
+                self.flush_decls(sel_ctx, decls, out);
+                self.env.enter();
+                let mut inner: Vec<String> = Vec::new();
+                for s in body {
+                    self.collect_stmt(s, sel_ctx, &mut Vec::new(), &mut inner)?;
+                }
+                self.env.leave();
+                out.push(css::render_at_block(&header, &inner));
+                Ok(())
+            }
+        }
     }
 
     /// Render a declaration to `(property, value)`, or `None` when its value is

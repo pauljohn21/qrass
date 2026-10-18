@@ -460,4 +460,14 @@
 #     list/join + nested #6/#20 (5 regressions); the parser fix drove it to 0.
 # sass-spec 7352 -> 7369 (+17: 15 meta/inspect/list/nested + 1 list/zip + 1
 # list/join/multi), 0 regressions, full test suite green.
-67.1
+#
+# Round 37: unknown at-rule passthrough. Any `@name` Sass does not recognize
+#     (previously dropped silently by the eval catch-all) is now echoed verbatim:
+#     value tokens pass through untouched, only `#{…}` evaluates, a block body is
+#     grouped like a container (render_at_block), and a body-less nested directive
+#     interleaves as a new Item::Raw line. This also unblocks the whole
+#     css/supports/syntax/* family (@supports treated as an unknown directive).
+# sass-spec 7369 -> 7434 (+65: 32 css/supports/syntax/*, 17 unknown_directive/*,
+# + misc style_rule/parent/moz_document/font-face/empty_block/directive whitespace),
+# 0 regressions, full test suite green.
+67.8

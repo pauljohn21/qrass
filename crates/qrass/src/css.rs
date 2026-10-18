@@ -20,6 +20,8 @@ pub(crate) enum Item {
     Decl { prop: String, value: String },
     /// A loud `/* … */` comment. Silent `//` comments never reach this layer.
     Comment(String),
+    /// A verbatim line (e.g. a nested unknown at-rule like `@b c;`) kept as-is.
+    Raw(String),
 }
 
 /// Format one qualified rule (`selectors { items }`). Callers are responsible for
@@ -38,6 +40,7 @@ pub(crate) fn render_rule(selectors: &[String], items: &[Item]) -> String {
         .map(|it| match it {
             Item::Decl { prop, value } => format!("  {prop}: {value};"),
             Item::Comment(text) => format!("  {}", text.trim()),
+            Item::Raw(line) => format!("  {line}"),
         })
         .collect::<Vec<_>>()
         .join("\n");

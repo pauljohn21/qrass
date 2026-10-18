@@ -120,3 +120,44 @@ fn non_special_call_keeps_source_spelling() {
     // Unknown functions are not in the special set: name stays exactly as typed.
     assert_eq!(value("-A-FOO(1 + 1)"), "-A-FOO(1 + 1)");
 }
+
+// ─── Unknown at-rule passthrough (round 37) ───────────────────────────────────
+// Any `@name` Sass does not recognize is echoed verbatim (`css/unknown_directive`,
+// `css/supports/syntax/*`): the value's tokens pass through untouched, only `#{…}`
+// is evaluated, and a block body is grouped like a container.
+
+/// Compile a whole sheet and return the trimmed CSS output.
+fn sheet(src: &str) -> String {
+    let tokens = lex(0, "t.scss".into(), src.into()).expect("lex ok");
+    let program = parse(0, "t.scss".into(), src.into(), tokens).expect("parse ok");
+    eval_all(0, "t.scss".into(), src.into(), program)
+        .expect("eval ok")
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn unknown_atrule_top_level_is_echoed_verbatim() {
+    assert_eq!(sheet("@a b"), "@a b;");
+    assert_eq!(sheet("@a b;"), "@a b;");
+    // An empty-value directive emits just `@name;`.
+    assert_eq!(sheet("@a;"), "@a;");
+}
+
+#[test]
+fn unknown_atrule_nested_in_rule_interleaves() {
+    assert_eq!(sheet("a { @b c; }"), "a {\n  @b c;\n}");
+}
+
+#[test]
+fn unknown_atrule_block_body_is_grouped() {
+    assert_eq!(sheet("@a { b { color: red } }"), "@a {\n  b {\n    color: red;\n  }\n}");
+}
+
+#[test]
+fn unknown_atrule_value_evaluates_only_interpolation() {
+    let src = "$x: Z; @a foo-#{$x} bar;";
+    assert_eq!(sheet(src), "@a foo-Z bar;");
+}
+
