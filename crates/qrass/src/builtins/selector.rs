@@ -176,10 +176,11 @@ fn combine(parent: &str, child: &str) -> String {
 }
 
 fn parse(c: &super::Call) -> Or<SassValue> {
-    let sel = text(&c.positional[0]);
-    Ok(comma(
-        split_commas(&sel).into_iter().map(unquoted).collect(),
-    ))
+    // Parse into the real AST and rebuild the *parsed selector-list value*
+    // (comma list of space lists, combinators as their own elements) — the same
+    // shape `unify`/`extend` return — so `$result == (b c d,)`-style structural
+    // comparisons hold, while serializing to the identical CSS text as before.
+    Ok(parsed_sel_list(&sel_arg(&c.positional[0], "selector")?))
 }
 
 /// `selector.nest($selectors...)`: fold left, each later selector nested into the

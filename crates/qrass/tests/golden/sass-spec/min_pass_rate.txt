@@ -401,4 +401,15 @@
 # golden -E-URL($a) -> -E-URL(b) keeps the name verbatim (url_is_call guard).
 # Non-special unknown calls (-A-FOO) keep their source spelling. A/B: 0 regressions.
 # 7270 -> 7280 passed (+10, 7280/10961 = 66.42%).
-66.4
+# Round 33: selector.parse returns the parsed selector-list *value*. It had
+# flattened the input on top-level commas into a comma list of *flat strings*, so
+# the serialized text was right but a structural compare like
+# `$result == (b c d,)` was false. It now parses to the AST (sel_arg) and rebuilds
+# the same nested value unify/extend return (comma list of space lists,
+# combinators as their own elements) via the round-24 parsed_sel_list — text
+# serialization is unchanged (the 9 simple/pseudo cases that already passed stay
+# byte-identical), and sel_arg's Parent/Truncated coercion also turns the
+# previously-silent error goldens (& / `[c`) into real errors. 18 selector/parse
+# cases flip (9 selector, 6 structure, 3 error). A/B: 0 regressions.
+# 7280 -> 7298 passed (+18, 7298/10961 = 66.58%).
+66.5

@@ -159,3 +159,42 @@ fn escapes_and_vendor_prefixes_round_trip() {
     rt(":-moz-any-link", ":-moz-any-link");
     rt(".\\@class", ".\\@class");
 }
+
+// ─── selector.parse builtins: the returned *value*, not just its text ────────
+// `selector.parse` must hand back the parsed selector-list value (comma list of
+// space lists with combinators as their own elements), the same shape unify /
+// extend return — so `$result == (decomposed literal,)` holds while the value
+// still serializes to the identical CSS text.
+
+/// Compile `src` and return the joined CSS output.
+fn compile(src: &str) -> String {
+    use qrass::eval::eval_all;
+    use qrass::lexer::lex;
+    use qrass::parser::parse;
+    let tokens = lex(0, "t.scss".into(), src.to_string()).expect("lex ok");
+    let program = parse(0, "t.scss".into(), src.to_string(), tokens).expect("parse ok");
+    eval_all(0, "t.scss".into(), src.to_string(), program)
+        .expect("eval ok")
+        .join("\n")
+}
+
+#[test]
+fn parse_result_equals_the_decomposed_selector_literal() {
+    // descendant / child / leading-bogus-combinator structures compare true.
+    let out = compile(
+        "@use \"sass:selector\";\n\
+         $d: selector.parse(\"b c d\");\n\
+         $c: selector.parse(\"b > c > d\");\n\
+         $l: selector.parse(\"> b\");\n\
+         a { d: $d == (b c d,); c: $c == (b \">\" c \">\" d,); l: $l == (\">\" b,); }",
+    );
+    assert!(out.contains("d: true"), "{out}");
+    assert!(out.contains("c: true"), "{out}");
+    assert!(out.contains("l: true"), "{out}");
+}
+
+#[test]
+fn parse_result_still_serializes_as_the_selector() {
+    let out = compile("@use \"sass:selector\";\n@use \"sass:meta\";\na { b: selector.parse(\"a, c > d\"); }");
+    assert!(out.contains("b: a, c > d"), "{out}");
+}
