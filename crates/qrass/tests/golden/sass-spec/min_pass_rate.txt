@@ -653,4 +653,17 @@
 #     are a later round. Tests in selector_parse.rs.
 # sass-spec 7589 -> 7594 (+5: selector/nest/error #4-#8), 0 regressions, full
 # test suite green (382 passed).
-69.2
+#
+# Round 52: single-element-list separator is not meaningful for `==`. dart treats
+#     `list.append((), x)` (a one-element comma list) as equal to a one-element
+#     space list of `x`; qrass's `SassValue` equality required `sa == sb` always,
+#     so `selector.parse(":is(b, c)")` (comma list of one complex = a one-element
+#     space list of the compound) failed `$result == (list.append((), ":is(b, c)"),)`.
+#     Relaxed `PartialEq` for `List` to `a == b && (a.len() <= 1 || sa == sb)` —
+#     multi-element lists still discriminate on separator. Collapses the whole
+#     selector/parse/selector pseudo-arg structural cluster at once (the same
+#     insight serves `:where`/`:matches`/`:nth-* of`). Cross-cutting `==` change,
+#     A/B confirmed 0 regressions.
+# sass-spec 7594 -> 7601 (+7: selector/parse/selector #8/#9/#10/#11/#14/#15/#24),
+# 0 regressions, full test suite green (383 passed).
+69.3

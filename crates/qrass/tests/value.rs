@@ -44,6 +44,41 @@ fn zero_and_empty_are_truthy() {
     );
 }
 
+/// A one-element list's separator is not meaningful (dart treats `list.append((),
+/// x)` == a one-element space list of `x`), so `selector.parse(":is(b, c)")`
+/// (comma-list of one complex, which is a one-element *space* list of the
+/// compound) compares equal to `(list.append((), ":is(b, c)"),)`. Multi-element
+/// lists still discriminate on separator.
+#[test]
+fn single_element_list_separator_is_insensitive() {
+    use qrass::ast_expr::ListSep;
+    let s = |sep| {
+        SassValue::List {
+            items: vec![SassValue::Str {
+                text: "x".into(),
+                quoted: false,
+            }],
+            sep,
+            bracketed: false,
+            keywords: None,
+        }
+    };
+    assert_eq!(s(ListSep::Comma), s(ListSep::Space));
+    // Two elements: the separator matters again.
+    let two = |sep| {
+        SassValue::List {
+            items: vec![
+                SassValue::Str { text: "a".into(), quoted: false },
+                SassValue::Str { text: "b".into(), quoted: false },
+            ],
+            sep,
+            bracketed: false,
+            keywords: None,
+        }
+    };
+    assert_ne!(two(ListSep::Comma), two(ListSep::Space));
+}
+
 #[test]
 fn type_names() {
     assert_eq!(SassValue::Null.type_name(), "null");

@@ -86,7 +86,7 @@ impl PartialEq for SassValue {
                     sep: sb,
                     ..
                 },
-            ) => sa == sb && a == b,
+            ) => a == b && (a.len() <= 1 || sa == sb),
             (Self::Map { entries: a }, Self::Map { entries: b }) => a == b,
             _ => false,
         }
