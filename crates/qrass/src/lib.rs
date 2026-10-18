@@ -40,6 +40,7 @@ pub mod selector_ast;
 pub mod selector_attr;
 pub mod selector_parse;
 pub mod selector_super;
+mod selector_super_simple;
 pub mod selector_unify;
 pub mod selector_unify_complex;
 pub mod selector_extend;

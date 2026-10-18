@@ -615,4 +615,15 @@
 #     unchanged. `value.rs` now 444 lines. hrx byte-identical 7581/3380/445, 0
 #     regressions. (selector_super.rs 505 and tests/builtins.rs 700 remain over
 #     budget for follow-up splits.)
+#
+# Round 49 (compliance refactor, no rate change): cleared the last two over-budget
+#     files. tests/builtins.rs (700) split map/math/color suites into per-namespace
+#     tests/builtins_map.rs / _math.rs / _color.rs (builtins.rs now 431). The
+#     selector is-superselector engine (505) split at its natural seam into
+#     selector_super.rs (list/complex/compound structural walk, now 195) and
+#     selector_super_simple.rs (simple/pseudo-class/element rules, 324); the two
+#     mutually-recursive halves cross via `pub(crate)` complex_is_super /
+#     list_is_super / simples_are_super / pseudo_element_is_super. No qrass source
+#     behavior changed — hrx byte-identical 7581/3380/445, 0 regressions, and every
+#     src/test file is now <= 500 lines.
 69.1
