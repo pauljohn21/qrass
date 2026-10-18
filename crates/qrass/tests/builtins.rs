@@ -512,3 +512,26 @@ fn map_deep_remove_walks_the_key_path() {
     assert_eq!(value("map.deep-remove((c: (d: e)), c, e)"), "(c: (d: e))");
     assert_eq!(value("map.deep-remove((c: d), c)"), "()");
 }
+
+// ─── round 27: color.hwb (3-arg legacy constructor) ──────────────────────────
+
+#[test]
+fn color_hwb_builds_a_legacy_color() {
+    // integer-byte results serialize as keyword/#hex, fractional ones as hsl —
+    // the same legacy form the goldens use, reproduced via legacy="hwb" + the
+    // verbatim HSL triple. Hue units convert to degrees.
+    assert_eq!(value("color.hwb(60, 0%, 0%)"), "yellow");
+    assert_eq!(value("color.hwb(60, 0%, 20%)"), "#cccc00");
+    assert_eq!(value("color.hwb(0deg, 30%, 40%)"), "hsl(0, 33.3333333333%, 45%)");
+    // alpha drives the hsla() form.
+    assert_eq!(value("color.hwb(180, 30%, 40%, 0.5)"), "hsla(180, 33.3333333333%, 45%, 0.5)");
+}
+
+#[test]
+fn bare_hwb_is_not_claimed_as_a_builtin() {
+    // The bare global `hwb()` must stay unregistered so a modern `hwb(…)` literal
+    // is left to the existing Color-4 literal path (which normalizes the hue to
+    // `180deg`) rather than the `color.hwb` builtin's legacy-hsl serialization.
+    // Registering a bare `hwb` builtin would shadow the literal (round-25 lesson).
+    assert_eq!(value("hwb(180 30% 40% / 0.5)"), "hwb(180deg 30% 40% / 0.5)");
+}

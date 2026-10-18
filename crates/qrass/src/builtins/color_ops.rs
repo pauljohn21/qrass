@@ -133,6 +133,66 @@ fn hsl(c: &super::Call) -> Or<SassValue> {
     Ok(make(Color::from_hsl(h, s, l)))
 }
 
+/// `color.hwb($hue, $whiteness, $blackness, $alpha)`: construct a **legacy** color
+/// from HWB channels. The math is the pure W3C HWB→HSL inversion (normalize when
+/// `w + b > 100`), so the result carries `legacy = "hwb"` plus the verbatim HSL
+/// triple; `legacy_to_css` renders integer-byte results as keyword/`#hex` and
+/// fractional ones as `hsl(…)`, exactly like the goldens. In-gamut only — no XYZ
+/// (a `var()`/symbolic hue fails `hue_deg` and stays an unresolved call, which is
+/// the pre-round behavior, so it cannot regress). The bare global `hwb()` is NOT
+/// registered: it is a CSS color function whose plain-CSS passthrough must hold.
+fn hwb(c: &super::Call) -> Or<SassValue> {
+    let h = hue_deg(c, 0)?;
+    let w = number_arg(c, 1)?;
+    let b = number_arg(c, 2)?;
+    let a = if c.positional.len() >= 4 {
+        alpha_arg(c, 3)?
+    } else {
+        1.0
+    };
+    let total = w + b;
+    let (w, b) = if total > 100.0 {
+        (w / total * 100.0, b / total * 100.0)
+    } else {
+        (w, b)
+    };
+    let num = 100.0 - b - w;
+    let l = w + num / 2.0;
+    let den = 100.0 - (2.0 * l - 100.0).abs();
+    let s = if num == 0.0 || den == 0.0 {
+        0.0
+    } else {
+        num / den * 100.0
+    };
+    let rgb = Color::from_hsla(h, s, l, a);
+    Ok(make(Color {
+        legacy: Some("hwb"),
+        legacy_hsl: Some(Hsl {
+            h: ((h % 360.0) + 360.0) % 360.0,
+            s,
+            l,
+        }),
+        ..rgb
+    }))
+}
+
+/// The hue argument in **degrees**: `rad`/`grad`/`turn` are converted, `deg` and
+/// a bare number pass through, and any other unit (e.g. `1in`) is treated as its
+/// magnitude — matching the `hwb` units goldens (`1rad` → 57.295…, `1in` → 1).
+fn hue_deg(c: &super::Call, i: usize) -> Or<f64> {
+    let (v, unit) = c
+        .positional
+        .get(i)
+        .and_then(|a| a.as_number())
+        .ok_or_else(|| err("expected a number for $hue"))?;
+    Ok(match unit {
+        Some("rad") => v.to_degrees(),
+        Some("grad") => v * 0.9,
+        Some("turn") => v * 360.0,
+        _ => v,
+    })
+}
+
 fn channel_byte(c: &super::Call, i: usize) -> Or<u8> {
     Ok(number_arg(c, i)?.round().clamp(0.0, 255.0) as u8)
 }
@@ -189,6 +249,14 @@ pub(crate) fn register(r: &mut super::Registry) {
     r.nsp("color", "ie-hex-str", 1, Some(1), &["color"], ie_hex_str);
     r.ns("color", "rgb", 1, Some(3), rgb);
     r.ns("color", "hsl", 1, Some(3), hsl);
+    r.nsp(
+        "color",
+        "hwb",
+        3,
+        Some(4),
+        &["hue", "whiteness", "blackness", "alpha"],
+        hwb,
+    );
     // Legacy global spellings.
     r.def("ie-hex-str", 1, Some(1), ie_hex_str);
     // Legacy global color constructors element-plus leans on (`rgba($c, $a)`,

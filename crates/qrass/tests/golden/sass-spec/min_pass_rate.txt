@@ -330,4 +330,17 @@
 # cross-space / none-before-convert / epsilon cases need the XYZ gamut model.
 # A/B: 0 regressions.
 # 7019 -> 7048 passed (+29, 7048/10961 = 64.30%).
-64.2
+# Round 27: register `color.hwb($hue, $whiteness, $blackness, $alpha)` as a
+# legacy color constructor — the pure W3C HWB->HSL inversion (normalize when
+# w + b > 100), tagged legacy="hwb" + a verbatim HSL triple so legacy_to_css
+# emits integer-byte results as keyword/#hex and fractional ones as hsl(),
+# matching the goldens (color.hwb(60,0%,0%)->yellow, (60,0%,20%)->#cccc00,
+# (0deg,30%,40%)->hsl(0, 33.3333333333%, 45%)). Only the 3/4-arg numeric form is
+# claimed; the bare global `hwb()` stays unregistered (a modern `hwb(…)` literal
+# belongs to the Color-4 literal path — round-25 passthrough lesson). The
+# remaining hwb failures are the CSS Color 4 modern 1-arg `hwb(h w b / a)`
+# literal syntax, out-of-range bounds, symbolic var() channels, and arity/type
+# error text — all needing the Color-4 literal/symbolic surface (deferred).
+# A/B: 0 regressions.
+# 7048 -> 7077 passed (+29, 7077/10961 = 64.57%).
+64.5
