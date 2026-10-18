@@ -111,6 +111,27 @@ fn append(c: &super::Call) -> Or<SassValue> {
 fn join(c: &super::Call) -> Or<SassValue> {
     let l1 = &c.positional[0];
     let l2 = &c.positional[1];
+    // dart validates the explicit `$separator`: it must be a string, and one of
+    // the four recognised keywords. An unquoted bareword is a (string) value, so
+    // `e` fails the keyword set rather than the type check. A `Null` here is the
+    // `fold_named` interior-gap filler (only `$bracketed` was passed) or an
+    // explicit null — dart's "auto", so it is not validated.
+    if let Some(sep) = c.positional.get(2)
+        && !matches!(sep, SassValue::Null)
+    {
+        let SassValue::Str { text, .. } = sep else {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("$separator: {} is not a string.", sep.to_css()),
+            ));
+        };
+        if !matches!(text.as_str(), "space" | "comma" | "slash" | "auto") {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                "$separator: Must be \"space\", \"comma\", \"slash\", or \"auto\".",
+            ));
+        }
+    }
     let mut items = items_of(l1);
     // Separator: an explicit `$separator` string wins; otherwise `list1`'s, except
     // that a single-element `list1` with an undetermined (space) separator defers

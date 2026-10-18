@@ -678,4 +678,16 @@
 #     Tests in tests/list_index.rs.
 # sass-spec 7601 -> 7609 (+8: list/nth #13-16 + list/set_nth #13-16), 0
 # regressions, full test suite green (385 passed), clippy -D warnings green.
+#
+# Round 54: `list.join` `$separator` validation. An explicit `$separator` must be
+#     a string and one of the four keywords — added the dart `$separator:`-prefixed
+#     type error (`<v> is not a string.`) and value error (`Must be "space",
+#     "comma", "slash", or "auto".`). A `Null` at that slot is the `fold_named`
+#     interior-gap filler (when only `$bracketed` is passed) — must be skipped as
+#     dart's "auto", or valid calls regress (caught by A/B). Uses an edition-2024
+#     let-chain to stay clippy-clean. Tests in tests/list_join_separator.rs.
+#     The remaining join/error arity cases (`Only 4 positional arguments allowed`)
+#     need an arity() wording change (cross-cutting) and stay for a later round.
+# sass-spec 7609 -> 7611 (+2: join/error $separator type+value), 0 regressions,
+# full test suite green (387 passed), clippy -D warnings green.
 69.4
