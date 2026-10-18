@@ -36,6 +36,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("math", "atan2", 2, Some(2), &["y", "x"], atan2);
     r.ns("math", "hypot", 0, None, hypot);
     r.nsp("math", "clamp", 3, Some(3), &["min", "number", "max"], clamp);
+    r.nsp("math", "random", 0, Some(1), &["limit"], random);
     r.nsp("math", "unit", 1, Some(1), &["number"], unit);
     r.nsp("math", "is-unitless", 1, Some(1), &["number"], is_unitless);
     r.nsp("math", "compatible", 2, Some(2), &["number1", "number2"], compatible);
@@ -365,6 +366,53 @@ fn unit_clash(
             base_value.to_css()
         ),
     )
+}
+
+/// `math.random($limit: null)`. dart's *seeded* PRNG is not reproduced here (the
+/// exact random-value goldens are out of scope), but the `$limit` validation is
+/// golden-accurate and runs before any value is produced: a non-number, a
+/// non-integer (beyond float tolerance), or a limit that is not greater than zero
+/// raise dart's messages. No argument / null yields a unitless fraction; a
+/// positive integer limit yields an integer in `[1, $limit]` (so `random(1)`
+/// deterministically returns `1`).
+fn random(c: &super::Call) -> Or<SassValue> {
+    if c.positional.is_empty() || matches!(&c.positional[0], SassValue::Null) {
+        return Ok(unitless(rand_u64() as f64 / u64::MAX as f64));
+    }
+    let (v, _u) = num_as(c, 0, "limit")?;
+    let r = v.round();
+    if (v - r).abs() > 1e-9 {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("$limit: {} is not an int.", c.positional[0].to_css()),
+        ));
+    }
+    if r < 1.0 {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!(
+                "$limit: Must be greater than 0, was {}.",
+                c.positional[0].to_css()
+            ),
+        ));
+    }
+    let n = r as u64;
+    Ok(unitless(1.0 + (rand_u64() % n) as f64))
+}
+
+/// A time-seeded xorshift64* step — genuinely non-deterministic (as `math.random`
+/// should be), with no shared mutable state.
+fn rand_u64() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15);
+    let mut x = nanos ^ 0x2545_F491_4F6C_DD1D;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x
 }
 
 fn unit(c: &super::Call) -> Or<SassValue> {

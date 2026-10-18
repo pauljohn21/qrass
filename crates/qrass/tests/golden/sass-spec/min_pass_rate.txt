@@ -626,4 +626,18 @@
 #     list_is_super / simples_are_super / pseudo_element_is_super. No qrass source
 #     behavior changed — hrx byte-identical 7581/3380/445, 0 regressions, and every
 #     src/test file is now <= 500 lines.
-69.1
+#
+# Round 50: register `math.random($limit: null)` with golden-accurate $limit
+#     validation. It was not registered at all, so every call errored "Undefined
+#     function". Added the deterministic checks that run before any value is
+#     produced — non-number (`$limit: <v> is not a number.` via num_as),
+#     non-integer (`$limit: <v> is not an int.` beyond float tolerance), and
+#     out-of-range (`$limit: Must be greater than 0, was <v>.`). The value itself
+#     comes from a time-seeded xorshift (no shared state); dart's *seeded* PRNG is
+#     not reproduced, so the arbitrary-magnitude success cases stay out of scope,
+#     but a limit of 1 deterministically returns 1. Verified stable across 3
+#     reruns (no flakiness). Tests in math_errors.rs; the remaining random failures
+#     (#1/#2/#4/#5) need meta.get-function (unimplemented module introspection).
+# sass-spec 7581 -> 7589 (+8: 4 $limit validation errors + 4 deterministic
+# limit=1 success), 0 regressions, full test suite green (381 passed).
+69.2

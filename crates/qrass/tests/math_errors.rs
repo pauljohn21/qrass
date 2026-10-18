@@ -150,6 +150,22 @@ fn atan2_errors() {
     );
 }
 
+// ─── math.random($limit): deterministic validation (not the PRNG) ───────────────
+
+#[test]
+fn random_limit_validation() {
+    let msg = eval_err(".a { p: math.random(c); }");
+    assert!(msg.contains("$limit: c is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.random(1.5); }");
+    assert!(msg.contains("$limit: 1.5 is not an int."), "{msg}");
+    let msg = eval_err(".a { p: math.random(0); }");
+    assert!(msg.contains("$limit: Must be greater than 0, was 0."), "{msg}");
+    let msg = eval_err(".a { p: math.random(-1); }");
+    assert!(msg.contains("$limit: Must be greater than 0, was -1."), "{msg}");
+    // A limit of 1 deterministically yields 1 (dart range is [1, $limit]).
+    assert_eq!(value("math.random(1)"), "1");
+}
+
 // ─── math.min/max($numbers…): coerced comparison + bare-value errors ───────────
 
 #[test]
