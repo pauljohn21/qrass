@@ -84,3 +84,39 @@ fn rgb_space_alpha_syntax_is_computed_not_passed_through() {
     assert_eq!(value("rgb(0 0 0 / 15%)"), "rgba(0, 0, 0, 0.15)");
     assert_eq!(value("rgb(0 0 0 / 6%)"), "rgba(0, 0, 0, 0.06)");
 }
+
+// ─── Special-function name normalization (round 32) ───────────────────────────
+// dart lowercases every *special* plain-CSS function name and, only for `url`,
+// also strips the leading vendor prefix. A `url($var)` argument instead makes
+// dart treat it as an ordinary function: the name stays verbatim.
+
+#[test]
+fn special_calc_lowercases_and_keeps_vendor_prefix() {
+    assert_eq!(value("-A-CALC(0)"), "-a-calc(0)");
+    assert_eq!(value("-WEBKIT-CALC(1px + 2px)"), "-webkit-calc(1px + 2px)");
+}
+
+#[test]
+fn special_url_lowercases_and_strips_vendor_prefix() {
+    assert_eq!(value("-C-URL(0)"), "url(0)");
+    assert_eq!(value("-WEBKIT-URL(x)"), "url(x)");
+}
+
+#[test]
+fn url_with_variable_arg_stays_verbatim() {
+    // A `$var` argument demotes `url` to an ordinary call: name kept verbatim,
+    // argument resolved.
+    let src = "$a: b; .a { p: -E-URL($a); }";
+    let tokens = lex(0, "t.scss".into(), src.into()).expect("lex ok");
+    let program = parse(0, "t.scss".into(), src.into(), tokens).expect("parse ok");
+    let out = eval_all(0, "t.scss".into(), src.into(), program)
+        .expect("eval ok")
+        .join("\n");
+    assert!(out.contains("p: -E-URL(b)"), "{out}");
+}
+
+#[test]
+fn non_special_call_keeps_source_spelling() {
+    // Unknown functions are not in the special set: name stays exactly as typed.
+    assert_eq!(value("-A-FOO(1 + 1)"), "-A-FOO(1 + 1)");
+}

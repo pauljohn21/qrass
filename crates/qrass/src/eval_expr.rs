@@ -245,6 +245,13 @@ impl EvalState {
 
     /// Render a whole passthrough call `name(arg, …)` from its argument AST.
     pub(crate) fn render_css_call(&mut self, call: &FunctionCall) -> Ev<String> {
+        // A `url($var)` argument makes dart parse the call as an *ordinary* Sass
+        // function (resolving the variable and keeping the name verbatim, e.g.
+        // `-E-URL($a)` → `-E-URL(b)`) rather than a raw url. A literal or
+        // `#{…}`-interpolated argument keeps the special `url` form.
+        let url_is_call = call.args.iter().any(|arg| {
+            matches!(arg, Arg::Positional(Expr::Variable(..)) | Arg::Splat(Expr::Variable(..)))
+        });
         let mut parts = Vec::with_capacity(call.args.len());
         for arg in &call.args {
             let text = match arg {
@@ -253,7 +260,11 @@ impl EvalState {
             };
             parts.push(text);
         }
-        Ok(format!("{}({})", call.name, parts.join(", ")))
+        Ok(format!(
+            "{}({})",
+            normalize_special_name(&call.name, url_is_call),
+            parts.join(", ")
+        ))
     }
 
     /// Resolve `expr` to a Sass number only when it is a *pure numeric leaf* — a
@@ -277,6 +288,42 @@ impl EvalState {
 }
 
 // ─── Literals & interpolation helpers ────────────────────────────────────────
+
+/// dart lowercases the emitted name of every *special* plain-CSS function
+/// (`calc`/`url`/`element`/`expression`/`progid:…`, optionally vendor-prefixed
+/// and in any case) and, uniquely for `url`, also strips the vendor prefix
+/// (`-C-URL(…)` → `url(…)`). `url` is skipped (name kept verbatim) when
+/// `url_is_call` marks a variable argument, which makes dart treat it as an
+/// ordinary function. Any other passthrough call name is left verbatim, so
+/// non-special unknown functions keep their source spelling.
+fn normalize_special_name(name: &str, url_is_call: bool) -> String {
+    let lower = name.to_ascii_lowercase();
+    // A leading vendor prefix is `[-_a-zA-Z0-9]+-`; the base word follows the
+    // last `-` of that run. Names without a vendor dash use the whole string.
+    let (prefix_len, base) = match lower.rfind('-') {
+        Some(dash) if dash + 1 < lower.len() => (dash + 1, &lower[dash + 1..]),
+        _ => (0, lower.as_str()),
+    };
+    // Only treat it as a known special function when the prefix is a clean
+    // vendor run (all word/dash chars) so e.g. `data-url` is not mis-normalized.
+    let vendor_ok = lower[..prefix_len]
+        .bytes()
+        .all(|b| b == b'-' || b == b'_' || (b as char).is_ascii_alphanumeric());
+    if !vendor_ok {
+        return name.to_string();
+    }
+    if base == "url" {
+        if url_is_call {
+            name.to_string()
+        } else {
+            "url".to_string()
+        }
+    } else if matches!(base, "calc" | "element" | "expression") || base.starts_with("progid:") {
+        lower
+    } else {
+        name.to_string()
+    }
+}
 
 /// Serialize a value appearing as an argument inside a plain-CSS passthrough
 /// call (`calc`/`var`/…). A Sass `null` renders as the empty string (the goldens

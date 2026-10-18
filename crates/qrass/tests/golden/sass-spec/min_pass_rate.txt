@@ -391,4 +391,14 @@
 # nested-property (element-type/…) serialization — a separate, riskier track,
 # deferred. A/B: 0 regressions.
 # 7252 -> 7270 passed (+18, 7270/10961 = 66.33%).
-66.3
+# Round 32: special plain-CSS function *name* normalization in the passthrough
+# emitter (render_css_call). dart lowercases the emitted name of every *special*
+# function (calc/element/expression/progid:…, optionally vendor-prefixed, any
+# case) and, uniquely for url, also strips the vendor prefix (-C-URL(…) -> url(…)).
+# Only the name is touched — argument rendering (raw passthrough, interpolation
+# resolution) is unchanged, so the fragile round-25 passthrough stays intact. A
+# url demotes to an *ordinary* call when an argument is a bare $variable: the
+# golden -E-URL($a) -> -E-URL(b) keeps the name verbatim (url_is_call guard).
+# Non-special unknown calls (-A-FOO) keep their source spelling. A/B: 0 regressions.
+# 7270 -> 7280 passed (+10, 7280/10961 = 66.42%).
+66.4
