@@ -180,3 +180,60 @@ fn min_max_errors() {
         "{msg}"
     );
 }
+
+// ─── numeric builtins: named type / no-units / angle-unit error wording ────────
+
+#[test]
+fn numeric_type_errors_name_the_parameter() {
+    let msg = eval_err(".a { p: math.abs(c); }");
+    assert!(msg.contains("$number: c is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.round(\"0\"); }");
+    assert!(msg.contains("$number: \"0\" is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.compatible(c, 1); }");
+    assert!(msg.contains("$number1: c is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.compatible(1, c); }");
+    assert!(msg.contains("$number2: c is not a number."), "{msg}");
+}
+
+#[test]
+fn unitless_parameter_errors() {
+    // Inverse trig / sqrt / percentage / pow require a unitless number.
+    let msg = eval_err(".a { p: math.asin(1px); }");
+    assert!(msg.contains("$number: Expected 1px to have no units."), "{msg}");
+    let msg = eval_err(".a { p: math.percentage(1%); }");
+    assert!(
+        msg.contains("$number: Expected 1% to have no units."),
+        "{msg}"
+    );
+    // pow names $base / $exponent.
+    let msg = eval_err(".a { p: math.pow(1px, 0); }");
+    assert!(msg.contains("$base: Expected 1px to have no units."), "{msg}");
+    let msg = eval_err(".a { p: math.pow(0, 1px); }");
+    assert!(
+        msg.contains("$exponent: Expected 1px to have no units."),
+        "{msg}"
+    );
+    // log names its optional $base.
+    let msg = eval_err(".a { p: math.log(1, 1px); }");
+    assert!(msg.contains("$base: Expected 1px to have no units."), "{msg}");
+}
+
+#[test]
+fn angle_parameter_error() {
+    let msg = eval_err(".a { p: math.sin(1px); }");
+    assert!(
+        msg.contains("$number: Expected 1px to have an angle unit (deg, grad, rad, turn)."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn numeric_success_paths_unchanged() {
+    // Guard: the wording refactor must not disturb the accepted-value behaviour,
+    // including `log(2, null)` where a null base means the natural log.
+    assert_eq!(value("math.sqrt(4)"), "2");
+    assert_eq!(value("math.percentage(0.5)"), "50%");
+    assert_eq!(value("math.pow(2, 3)"), "8");
+    assert_eq!(value("math.log(2, null)"), "0.6931471806");
+    assert_eq!(value("math.abs(-3px)"), "3px");
+}

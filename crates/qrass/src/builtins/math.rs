@@ -91,22 +91,22 @@ fn div(c: &super::Call) -> Or<SassValue> {
 }
 
 fn round(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
+    let (v, _) = num_as(c, 0, "number")?;
     Ok(unitless((v + 0.5).floor()))
 }
 
 fn ceil(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
+    let (v, _) = num_as(c, 0, "number")?;
     Ok(unitless(v.ceil()))
 }
 
 fn floor(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
+    let (v, _) = num_as(c, 0, "number")?;
     Ok(unitless(v.floor()))
 }
 
 fn abs(c: &super::Call) -> Or<SassValue> {
-    let (v, unit) = num(c, 0)?;
+    let (v, unit) = num_as(c, 0, "number")?;
     Ok(SassValue::Number {
         value: v.abs(),
         unit,
@@ -114,7 +114,7 @@ fn abs(c: &super::Call) -> Or<SassValue> {
 }
 
 fn percentage(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
+    let v = unitless_num(c, 0, "number")?;
     Ok(SassValue::Number {
         value: v * 100.0,
         unit: Some("%".into()),
@@ -122,29 +122,35 @@ fn percentage(c: &super::Call) -> Or<SassValue> {
 }
 
 fn pow(c: &super::Call) -> Or<SassValue> {
-    let (a, _) = num(c, 0)?;
-    let (b, _) = num(c, 1)?;
+    let a = unitless_num(c, 0, "base")?;
+    let b = unitless_num(c, 1, "exponent")?;
     Ok(unitless(a.powf(b)))
 }
 
 fn sqrt(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
+    let v = unitless_num(c, 0, "number")?;
     Ok(unitless(v.sqrt()))
 }
 
 fn log(c: &super::Call) -> Or<SassValue> {
-    let (v, _) = num(c, 0)?;
-    let value = match num(c, 1) {
-        Ok((base, _)) => v.log(base),
-        Err(_) => v.ln(),
+    let v = unitless_num(c, 0, "number")?;
+    let value = match c.positional.get(1) {
+        // A missing or `null` base means the natural log (dart treats `null` as
+        // "no base"), so it never reaches the `$base` unit check.
+        None | Some(SassValue::Null) => v.ln(),
+        Some(_) => {
+            let base = unitless_num(c, 1, "base")?;
+            v.log(base)
+        }
     };
     Ok(unitless(value))
 }
 
 /// Resolve an angle argument to radians: unitless means radians; `deg`/`grad`/
-/// `rad`/`turn` are converted through the degree base.
+/// `rad`/`turn` are converted through the degree base. A non-angle unit reads
+/// dart's `$number: Expected <value> to have an angle unit (deg, grad, rad, turn).`
 fn angle_rad(c: &super::Call, i: usize) -> Or<f64> {
-    let (v, u) = num(c, i)?;
+    let (v, u) = num_as(c, i, "number")?;
     match u.as_deref() {
         None => Ok(v),
         Some(u @ ("deg" | "grad" | "rad" | "turn")) => {
@@ -153,18 +159,26 @@ fn angle_rad(c: &super::Call, i: usize) -> Or<f64> {
         }
         Some(_) => Err(SassError::new(
             ErrorKind::Builtins,
-            "$number: expected an angle unit (deg, grad, rad, turn) or no units".to_string(),
+            format!(
+                "$number: Expected {} to have an angle unit (deg, grad, rad, turn).",
+                c.positional[i].to_css()
+            ),
         )),
     }
 }
 
-/// A ratio argument that must carry no units (inverse trig / atan2).
-fn unitless_arg(c: &super::Call, i: usize) -> Or<f64> {
-    let (v, u) = num(c, i)?;
+/// A named argument that must be a unitless number: a non-number reads
+/// `$<name>: <value> is not a number.` (via `num_as`) and a dimensioned one
+/// `$<name>: Expected <value> to have no units.`.
+fn unitless_num(c: &super::Call, i: usize, name: &str) -> Or<f64> {
+    let (v, u) = num_as(c, i, name)?;
     if u.is_some() {
         return Err(SassError::new(
             ErrorKind::Builtins,
-            "$number: expected a unitless number".to_string(),
+            format!(
+                "${name}: Expected {} to have no units.",
+                c.positional[i].to_css()
+            ),
         ));
     }
     Ok(v)
@@ -189,13 +203,13 @@ fn tan(c: &super::Call) -> Or<SassValue> {
     Ok(unitless(angle_rad(c, 0)?.tan()))
 }
 fn asin(c: &super::Call) -> Or<SassValue> {
-    Ok(from_rad(unitless_arg(c, 0)?.asin()))
+    Ok(from_rad(unitless_num(c, 0, "number")?.asin()))
 }
 fn acos(c: &super::Call) -> Or<SassValue> {
-    Ok(from_rad(unitless_arg(c, 0)?.acos()))
+    Ok(from_rad(unitless_num(c, 0, "number")?.acos()))
 }
 fn atan(c: &super::Call) -> Or<SassValue> {
-    Ok(from_rad(unitless_arg(c, 0)?.atan()))
+    Ok(from_rad(unitless_num(c, 0, "number")?.atan()))
 }
 fn atan2(c: &super::Call) -> Or<SassValue> {
     // `atan2($y, $x)`: both must be numbers of *compatible* units — dart reduces
@@ -354,7 +368,7 @@ fn unit_clash(
 }
 
 fn unit(c: &super::Call) -> Or<SassValue> {
-    let (_, u) = num(c, 0)?;
+    let (_, u) = num_as(c, 0, "number")?;
     Ok(SassValue::Str {
         text: u.unwrap_or_default(),
         quoted: true,
@@ -362,13 +376,13 @@ fn unit(c: &super::Call) -> Or<SassValue> {
 }
 
 fn is_unitless(c: &super::Call) -> Or<SassValue> {
-    let (_, u) = num(c, 0)?;
+    let (_, u) = num_as(c, 0, "number")?;
     Ok(SassValue::Bool(u.is_none()))
 }
 
 fn compatible(c: &super::Call) -> Or<SassValue> {
-    let (_, ua) = num(c, 0)?;
-    let (_, ub) = num(c, 1)?;
+    let (_, ua) = num_as(c, 0, "number1")?;
+    let (_, ub) = num_as(c, 1, "number2")?;
     let ok = ua == ub
         || convert_number(1.0, ua.as_deref(), ub.as_deref()).is_some();
     Ok(SassValue::Bool(ok))

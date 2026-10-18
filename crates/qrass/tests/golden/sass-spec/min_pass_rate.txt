@@ -579,4 +579,21 @@
 #     (a separate subsystem, pre-existing), untouched. Tests appended to math_errors.rs.
 # sass-spec 7528 -> 7539 (+11: namespace min/max values + all 10 error cases),
 # 0 regressions, full test suite green (373 passed).
-68.7
+#
+# Round 46: systematic `math.*` numeric error wording (the round-40/43/44 num_as
+#     pattern across the whole family). These builtins used the generic `num`
+#     (`expected a number, given T`) and `unitless_arg` (`$number: expected a
+#     unitless number`), so their type / no-units / angle-unit goldens all
+#     mismatched. Introduced `unitless_num(c, i, name)` (`$<name>: Expected <v> to
+#     have no units.`), rewired `angle_rad` (`$number: Expected <v> to have an angle
+#     unit (deg, grad, rad, turn).`), and routed round/ceil/floor/abs/percentage/
+#     pow/sqrt/log/asin/acos/atan/unit/is-unitless/compatible through `num_as`/
+#     `unitless_num` (parameter names base/exponent/number1/number2 as the goldens
+#     require). One A/B regression — `log(2, null)` (a `null` base means the natural
+#     log) — was caught and fixed before landing. Success paths untouched (Ok
+#     behaviour identical to `num`). Tests appended to math_errors.rs incl. a
+#     success-path guard.
+# sass-spec 7539 -> 7570 (+31 across abs/asin/acos/atan/cos/sin/tan/sqrt/log/pow/
+# percentage/round/ceil/floor/percentage/unit/unitless/comparable), 0 regressions,
+# full test suite green (377 passed).
+69.0
