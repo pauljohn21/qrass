@@ -16,6 +16,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("map", "deep-merge", 1, None, &["map1", "map2"], deep_merge_n);
     r.nsp("map", "set", 3, Some(3), &["map", "key", "value"], set_call);
     r.nsp("map", "remove", 1, None, &["map", "key"], remove);
+    r.nsp("map", "deep-remove", 2, None, &["map", "key"], deep_remove);
     // Legacy global spellings.
     r.def("map-get", 1, None, get);
     r.def("map-merge", 2, Some(2), merge);
@@ -170,4 +171,42 @@ fn remove(c: &super::Call) -> Or<SassValue> {
             .filter(|(k, _)| !keys.contains(k))
             .collect(),
     ))
+}
+
+/// `map.deep-remove($map, $keys…)`: remove the value at a nested key *path*.
+/// Any step that misses (`key` absent, or an intermediate value that is not a
+/// map) leaves the whole `$map` unchanged — matching the goldens' `not_found/*`
+/// cases. A found nested key replaces its child in place, preserving order
+/// (so `deep-remove((c: (d: e)), c, d)` yields `(c: ())`, not `()`).
+fn deep_remove(c: &super::Call) -> Or<SassValue> {
+    let entries = as_map(c, 0)?;
+    let keys: Vec<SassValue> = c.positional[1..].to_vec();
+    Ok(map_value(deep_remove_entries(entries, &keys)))
+}
+
+fn deep_remove_entries(
+    mut entries: Vec<(SassValue, SassValue)>,
+    keys: &[SassValue],
+) -> Vec<(SassValue, SassValue)> {
+    let Some(key) = keys.first() else {
+        return entries;
+    };
+    // Key not present at this level → nothing to remove; return untouched.
+    let Some(idx) = entries.iter().position(|(k, _)| k == key) else {
+        return entries;
+    };
+    // Last key in the path: drop the entry.
+    if keys.len() == 1 {
+        entries.remove(idx);
+        return entries;
+    }
+    // Descend only when the child is itself a map; a non-map stops the walk with
+    // the map left as-is.
+    let child = match &entries[idx].1 {
+        SassValue::Map { entries } => entries.clone(),
+        SassValue::List { items, .. } if items.is_empty() => Vec::new(),
+        _ => return entries,
+    };
+    entries[idx].1 = map_value(deep_remove_entries(child, &keys[1..]));
+    entries
 }

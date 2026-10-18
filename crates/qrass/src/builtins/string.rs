@@ -3,6 +3,8 @@
 //! by their CSS text, so non-string arguments are coerced via `to_css`.
 
 use super::{Or, Registry};
+use crate::ast_expr::ListSep;
+use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
@@ -10,7 +12,17 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("string", "quote", 1, Some(1), &["string"], quote);
     r.nsp("string", "length", 1, Some(1), &["string"], length);
     r.nsp("string", "slice", 2, Some(3), &["string", "start-at", "end-at"], slice);
+    r.nsp(
+        "string",
+        "split",
+        2,
+        Some(3),
+        &["string", "separator", "limit"],
+        split,
+    );
     r.nsp("string", "index", 2, Some(2), &["string", "substring"], index);
+    // `split` is a newer module-only function with no legacy global spelling; only
+    // the `string.` namespace is claimed (see the round-25 CSS-filter lesson).
     r.nsp("string", "insert", 3, Some(3), &["string", "insert", "index"], insert);
     r.nsp("string", "to-upper-case", 1, Some(1), &["string"], upper);
     r.nsp("string", "to-lower-case", 1, Some(1), &["string"], lower);
@@ -29,6 +41,81 @@ fn text(c: &super::Call, i: usize) -> String {
         Some(SassValue::Str { text, .. }) => text.clone(),
         Some(v) => v.to_css(),
         None => String::new(),
+    }
+}
+
+/// `string.split($string, $separator, $limit: null)`: a **bracketed comma list**
+/// of substrings that inherit the source string's quote style. An empty
+/// `$separator` splits on Unicode codepoints; a `$limit` caps the number of
+/// splits (so the remainder stays whole). An empty `$string` yields the empty
+/// list, and a separator that never matches yields a one-element list holding
+/// the whole string. Arguments are strictly typed to the goldens' dart-shaped
+/// errors (`$string: … is not a string.`, `$limit: … is not an int.`, etc.).
+fn split(c: &super::Call) -> Or<SassValue> {
+    let (hay, quoted) = match c.positional.first() {
+        Some(SassValue::Str { text, quoted }) => (text.clone(), *quoted),
+        Some(other) => return Err(not_a("string", other, "a string")),
+        None => return Err(not_a("string", &SassValue::Null, "a string")),
+    };
+    let sep = match c.positional.get(1) {
+        Some(SassValue::Str { text, .. }) => text.clone(),
+        Some(other) => return Err(not_a("separator", other, "a string")),
+        None => return Err(not_a("separator", &SassValue::Null, "a string")),
+    };
+    // `$limit` is optional; a present value must be a unitless integer >= 1.
+    let limit: Option<usize> = match c.positional.get(2) {
+        None | Some(SassValue::Null) => None,
+        Some(v @ SassValue::Number { value, unit: None }) => {
+            if value.fract() != 0.0 {
+                return Err(not_a("limit", v, "an int"));
+            }
+            if *value < 1.0 {
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!("$limit: Must be 1 or greater, was {}.", trim_int(*value)),
+                ));
+            }
+            Some(*value as usize)
+        }
+        Some(other) => return Err(not_a("limit", other, "a number")),
+    };
+
+    let parts: Vec<String> = if hay.is_empty() {
+        Vec::new()
+    } else if sep.is_empty() {
+        hay.chars().map(|ch| ch.to_string()).collect()
+    } else {
+        match limit {
+            // `$limit` counts separator matches consumed, so `k` splits → `k + 1`
+            // pieces: `splitn(k + 1)` keeps the remainder whole.
+            Some(k) => hay.splitn(k + 1, sep.as_str()).map(str::to_string).collect(),
+            None => hay.split(sep.as_str()).map(str::to_string).collect(),
+        }
+    };
+    Ok(SassValue::List {
+        items: parts
+            .into_iter()
+            .map(|t| SassValue::Str { text: t, quoted })
+            .collect(),
+        sep: ListSep::Comma,
+        bracketed: true,
+    })
+}
+
+/// A dart-shaped `${name}: {value} is not {ty}.` argument-type error.
+fn not_a(name: &str, value: &SassValue, ty: &str) -> SassError {
+    SassError::new(
+        ErrorKind::Builtins,
+        format!("${name}: {} is not {ty}.", value.to_css()),
+    )
+}
+
+/// Render a whole float without a trailing `.0` (Sass prints `0`, not `0.0`).
+fn trim_int(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
     }
 }
 

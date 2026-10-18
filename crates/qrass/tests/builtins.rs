@@ -487,3 +487,28 @@ fn bare_filter_functions_are_not_shadowed() {
     assert_eq!(value("invert(var(--c))"), "invert(var(--c))");
     assert_eq!(value("grayscale(0.5)"), "grayscale(0.5)");
 }
+
+// ─── round 26: string.split / map.deep-remove ────────────────────────────────
+
+#[test]
+fn string_split_forms_a_bracketed_list() {
+    // substring separator, codepoint (empty) separator, limit, and quote-style
+    // inheritance from the source string.
+    assert_eq!(value(r#"string.split("a, b, c", ", ")"#), r#"["a", "b", "c"]"#);
+    assert_eq!(value(r#"string.split("a/b/c", "/", 1)"#), r#"["a", "b/c"]"#);
+    assert_eq!(value(r#"string.split("Helvetica", "")"#), r#"["H", "e", "l", "v", "e", "t", "i", "c", "a"]"#);
+    // separator never matches → one-element list holding the whole string.
+    assert_eq!(value(r#"string.split("a, b, c", "&")"#), r#"["a, b, c"]"#);
+    // an unquoted source yields unquoted elements.
+    assert_eq!(value("string.split(abc, \"\")"), "[a, b, c]");
+}
+
+#[test]
+fn map_deep_remove_walks_the_key_path() {
+    // found nested key empties the child but keeps the parent; a miss anywhere
+    // on the path leaves the map untouched.
+    assert_eq!(value("map.deep-remove((c: (d: e)), c, d)"), "(c: ())");
+    assert_eq!(value("map.deep-remove((c: (d: e, f: g)), c, d)"), "(c: (f: g))");
+    assert_eq!(value("map.deep-remove((c: (d: e)), c, e)"), "(c: (d: e))");
+    assert_eq!(value("map.deep-remove((c: d), c)"), "()");
+}

@@ -319,4 +319,15 @@
 # passthrough cases (A/B caught it) — only the `color.` namespace is claimed.
 # A/B: 0 regressions.
 # 6983 -> 7019 passed (+36, 7019/10961 = 64.04%).
-64.0
+# Round 26: register two pure-data builtins with zero color-space dependency.
+# `map.deep-remove($map, $keys...)` walks a nested key path (a miss at any step
+# leaves the map untouched; a found nested key empties the child in place).
+# `string.split($string, $separator, $limit)` returns a bracketed comma list that
+# inherits the source string's quote style; empty separator splits on codepoints;
+# strict arg typing reproduces the goldens' dart-shaped errors. The remaining
+# split failures (#2 inspect trailing comma, #9 \e000 escape) are serialization-
+# layer concerns, not split logic. `color.same` was evaluated and deferred: its
+# cross-space / none-before-convert / epsilon cases need the XYZ gamut model.
+# A/B: 0 regressions.
+# 7019 -> 7048 passed (+29, 7048/10961 = 64.30%).
+64.2
