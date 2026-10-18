@@ -51,7 +51,7 @@ pub(crate) fn register(r: &mut Registry) {
     // `nest`/`append` take a rest parameter (`$selectors...`); the goldens forbid
     // naming a rest argument, so they stay positional-only. `append` accepts zero
     // args and raises "At least one selector must be passed." itself, so min is 0.
-    r.ns("selector", "nest", 1, None, nest);
+    r.ns("selector", "nest", 0, None, nest);
     r.ns("selector", "append", 0, None, append);
     r.nsp("selector", "simple-selectors", 1, Some(1), &["selector"], simple_selectors);
     r.def("selector-nest", 1, None, nest);
@@ -196,8 +196,36 @@ fn parse(c: &super::Call) -> Or<SassValue> {
 }
 
 /// `selector.nest($selectors...)`: fold left, each later selector nested into the
-/// accumulated parents via `&`.
+/// accumulated parents via `&`. Each argument is validated as a selector first
+/// (a non-string raises the prefix-less `… is not a valid selector…`, and an
+/// argument with no `&` must parse, surfacing `expected more input.`); arguments
+/// that use `&` skip the parse step so the combine below keeps working, since the
+/// shared selector parser rejects a bare parent selector. A call with no argument
+/// raises dart's own `$selectors:`-prefixed message (min lowered to 0).
 fn nest(c: &super::Call) -> Or<SassValue> {
+    if c.positional.is_empty() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "$selectors: At least one selector must be passed.",
+        ));
+    }
+    for arg in c.positional.iter() {
+        let src = sel_source(arg).ok_or_else(|| {
+            SassError::new(
+                ErrorKind::Builtins,
+                format!(
+                    "{} is not a valid selector: it must be a string,\na list of strings, or a list of lists of strings.",
+                    arg.to_css()
+                ),
+            )
+        })?;
+        // The `&`-bearing arguments are legitimate nesting parents the shared
+        // parser refuses, so only validate truncation on `&`-free arguments.
+        if !src.contains('&') {
+            selector_parse::parse_list(&src)
+                .map_err(|_| SassError::new(ErrorKind::Builtins, "expected more input."))?;
+        }
+    }
     let mut acc: Vec<String> = split_commas(&text(&c.positional[0]));
     for arg in &c.positional[1..] {
         let children = split_commas(&text(arg));

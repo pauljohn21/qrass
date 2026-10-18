@@ -339,3 +339,24 @@ fn eval_err(src: &str) -> String {
         Err(e) => e.to_string(),
     }
 }
+
+/// `selector.nest` validates each argument as a selector: a non-string raises the
+/// prefix-less `… is not a valid selector…`; a `&`-free malformed argument
+/// surfaces `expected more input.`; no argument raises `$selectors: At least one
+/// selector must be passed.`. (The `&`-position parent rules are a later round.)
+#[test]
+fn selector_nest_argument_errors() {
+    let msg = eval_err(r##"a {b: selector.nest(1)}"##);
+    assert!(msg.contains("1 is not a valid selector"), "{msg}");
+    let msg = eval_err(r##"a {b: selector.nest("c", 1)}"##);
+    assert!(msg.contains("1 is not a valid selector"), "{msg}");
+    let msg = eval_err(r##"a {b: selector.nest("[c")}"##);
+    assert!(msg.contains("expected more input."), "{msg}");
+    let msg = eval_err(r##"a {b: selector.nest("c", "[d")}"##);
+    assert!(msg.contains("expected more input."), "{msg}");
+    let msg = eval_err(r##"a {b: selector.nest()}"##);
+    assert!(
+        msg.contains("$selectors: At least one selector must be passed."),
+        "{msg}"
+    );
+}

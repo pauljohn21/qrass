@@ -640,4 +640,17 @@
 #     (#1/#2/#4/#5) need meta.get-function (unimplemented module introspection).
 # sass-spec 7581 -> 7589 (+8: 4 $limit validation errors + 4 deterministic
 # limit=1 success), 0 regressions, full test suite green (381 passed).
+#
+# Round 51: `selector.nest` argument validation. It combined selector strings with
+#     no checks, so `nest(1)` / `nest("[c")` / `nest()` wrongly succeeded. Added
+#     per-argument validation that leaves the combine output untouched: a
+#     non-string raises the prefix-less `… is not a valid selector…`, a `&`-free
+#     malformed argument runs `parse_list` and surfaces `expected more input.`, and
+#     a zero-argument call (min lowered to 0) raises `$selectors: At least one
+#     selector must be passed.`. `&`-bearing arguments skip the parse step because
+#     the shared parser rejects a bare parent selector (nest legitimately uses `&`).
+#     The `&`-position parent rules (nest/error #1/#2/#3) need `&`-aware parsing and
+#     are a later round. Tests in selector_parse.rs.
+# sass-spec 7589 -> 7594 (+5: selector/nest/error #4-#8), 0 regressions, full
+# test suite green (382 passed).
 69.2
