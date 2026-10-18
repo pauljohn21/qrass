@@ -103,6 +103,26 @@ fn rgb(c: &super::Call) -> Or<SassValue> {
         col.a = alpha_arg(c, 1)?;
         return Ok(make(col));
     }
+    // Legacy `rgb()` special-function passthrough: if a channel/alpha argument
+    // is an *unresolvable* value (a `calc()`/`var()`/`env()`/`attr()` or an
+    // unquoted string) dart does NOT build a Color — it returns the `rgb(…)`
+    // call verbatim (comma-joined, keeping the `rgb(` name even with an alpha).
+    // `none` is NOT such a value: it resolves to 0 and produces a concrete color
+    // (channel_byte maps it), so it must stay on the numeric path or it would
+    // regress `rgb(none …)` cases. Currently the unresolvable calls error, so
+    // emitting the literal is a pure gain; all-numeric runs the Color path.
+    if c.positional.iter().any(|v| !is_channel_value(v)) {
+        let inner = c
+            .positional
+            .iter()
+            .map(|v| v.to_css())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Ok(SassValue::Str {
+            text: format!("rgb({inner})"),
+            quoted: false,
+        });
+    }
     let r = channel_byte(c, 0)?;
     let g = channel_byte(c, 1)?;
     let b = channel_byte(c, 2)?;
@@ -204,6 +224,18 @@ fn channel_byte(c: &super::Call, i: usize) -> Or<u8> {
 fn is_legacy(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
     Ok(SassValue::Bool(col.c4.is_none()))
+}
+
+/// A channel argument that resolves to a concrete byte: a number, or the
+/// keyword `none` (which the legacy `rgb()` treats as 0). Anything else — a
+/// `calc()`/`var()`/`env()`/`attr()` string — is unresolvable and drives the
+/// `rgb(…)` passthrough.
+fn is_channel_value(v: &SassValue) -> bool {
+    match v {
+        SassValue::Number { .. } => true,
+        SassValue::Str { text, .. } => text == "none",
+        _ => false,
+    }
 }
 
 fn number_arg(c: &super::Call, i: usize) -> Or<f64> {

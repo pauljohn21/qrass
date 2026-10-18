@@ -535,3 +535,23 @@ fn bare_hwb_is_not_claimed_as_a_builtin() {
     // Registering a bare `hwb` builtin would shadow the literal (round-25 lesson).
     assert_eq!(value("hwb(180 30% 40% / 0.5)"), "hwb(180deg 30% 40% / 0.5)");
 }
+
+// ─── round 28: legacy rgb() special-function passthrough ─────────────────────
+
+#[test]
+fn rgb_passes_unresolvable_channels_through_verbatim() {
+    // A calc()/var()/env()/attr() channel is not resolvable to a byte, so the
+    // legacy rgb() returns the rgb(…) call as a literal (comma-joined, keeping
+    // the `rgb(` name even when an alpha is present) rather than a Color.
+    assert_eq!(value(r#"rgb(string.unquote("calc(1)"), 2, 3)"#), "rgb(calc(1), 2, 3)");
+    assert_eq!(value("rgb(var(--foo), 2, 3)"), "rgb(var(--foo), 2, 3)");
+    assert_eq!(value("rgb(1, 2, 3, var(--a))"), "rgb(1, 2, 3, var(--a))");
+}
+
+#[test]
+fn rgb_none_channel_computes_not_passes_through() {
+    // `none` is NOT an unresolvable special function — it resolves to 0 and
+    // builds a concrete color (this regressed when none was misclassified).
+    assert_eq!(value("rgb(255, none, 255)"), "rgb(255, 0, 255)");
+    assert_eq!(value("rgb(none, none, none)"), "rgb(0, 0, 0)");
+}

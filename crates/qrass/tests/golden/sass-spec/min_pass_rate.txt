@@ -343,4 +343,15 @@
 # error text — all needing the Color-4 literal/symbolic surface (deferred).
 # A/B: 0 regressions.
 # 7048 -> 7077 passed (+29, 7077/10961 = 64.57%).
-64.5
+# Round 28: legacy rgb() special-function passthrough. When a channel/alpha
+# argument is an unresolvable value (calc()/var()/env()/attr()/unquoted string)
+# dart does NOT build a Color - it returns the rgb(...) call verbatim (comma-
+# joined, keeping the `rgb(` name even with an alpha). qrass previously errored
+# ("expected a number, given string"), so emitting the literal converts ~100
+# failing cases to passes. CRITICAL distinction: `none` is NOT unresolvable - it
+# resolves to 0 and builds a concrete color; misclassifying it as passthrough
+# regressed 34 cases (rgb(255 none 255), color.adjust(rgb(none none none)))
+# that the A/B diff caught. Guarded by is_channel_value (Number | none => compute).
+# A/B: 0 regressions.
+# 7077 -> 7184 passed (+107, 7184/10961 = 65.54%).
+65.5
