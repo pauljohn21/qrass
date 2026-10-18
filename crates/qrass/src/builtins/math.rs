@@ -265,14 +265,62 @@ fn hypot(c: &super::Call) -> Or<SassValue> {
 /// number is capped at `$max` (keeping the lower operand's unit) then raised to
 /// `$min`, so a value sitting on a boundary serializes in that bound's unit.
 fn clamp(c: &super::Call) -> Or<SassValue> {
-    let (mn, umn) = num(c, 0)?;
-    let (val, uv) = num(c, 1)?;
-    let (mx, umx) = num(c, 2)?;
+    // Validation first, in dart's order: $min, then $number, then $max each must
+    // be a number (a non-number names the argument), and only then are the unit
+    // compatibilities checked — $number vs $min before $max vs $min.
+    let (mn, umn) = num_as(c, 0, "min")?;
+    let (val, uv) = num_as(c, 1, "number")?;
+    let (mx, umx) = num_as(c, 2, "max")?;
+    if uv != umn && convert_number(1.0, uv.as_deref(), umn.as_deref()).is_none() {
+        return Err(unit_clash("number", &c.positional[1], &uv, &c.positional[0], &umn));
+    }
+    if umx != umn && convert_number(1.0, umx.as_deref(), umn.as_deref()).is_none() {
+        return Err(unit_clash("max", &c.positional[2], &umx, &c.positional[0], &umn));
+    }
     let num_lt_max = convert_number(val, uv.as_deref(), umx.as_deref()).is_some_and(|x| x < mx);
     let (tv, tu) = if num_lt_max { (val, uv) } else { (mx, umx.clone()) };
     let t_gt_min = convert_number(tv, tu.as_deref(), umn.as_deref()).is_some_and(|x| x > mn);
     let (rv, ru) = if t_gt_min { (tv, tu) } else { (mn, umn) };
     Ok(SassValue::Number { value: rv, unit: ru })
+}
+
+/// Positional argument `i` as a `(value, unit)` pair, or a `$name: <value> is not
+/// a number.` error naming the offending argument (a quoted string keeps its
+/// quotes through `to_css`).
+fn num_as(c: &super::Call, i: usize, name: &str) -> Or<(f64, Option<String>)> {
+    match &c.positional[i] {
+        SassValue::Number { value, unit } => Ok((*value, unit.clone())),
+        other => Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("${name}: {} is not a number.", other.to_css()),
+        )),
+    }
+}
+
+/// The golden's incompatible-units message for `clamp`: `$<name>: <value> and
+/// $min: <min> have incompatible units`, with a `(one has units and the other
+/// doesn't)` suffix when exactly one side is unitless. The reference is always
+/// `$min` (dart reduces both operands to the minimum's unit).
+fn unit_clash(
+    name: &str,
+    value: &SassValue,
+    unit: &Option<String>,
+    min: &SassValue,
+    min_unit: &Option<String>,
+) -> SassError {
+    let suffix = if unit.is_some() != min_unit.is_some() {
+        " (one has units and the other doesn't)"
+    } else {
+        ""
+    };
+    SassError::new(
+        ErrorKind::Builtins,
+        format!(
+            "${name}: {} and $min: {} have incompatible units{suffix}.",
+            value.to_css(),
+            min.to_css()
+        ),
+    )
 }
 
 fn unit(c: &super::Call) -> Or<SassValue> {

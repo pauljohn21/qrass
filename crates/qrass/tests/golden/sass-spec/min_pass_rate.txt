@@ -540,4 +540,17 @@
 #     already-over-budget builtins.rs).
 # sass-spec 7495 -> 7509 (+14: all core_functions/map/* cases now green),
 # 0 regressions, full test suite green (364 passed).
-68.5
+#
+# Round 43: `math.clamp($min, $number, $max)` argument-validation contract (the
+#     round-40 hypot pattern, name-based variant). clamp computed straight through
+#     `num` (generic `expected a number, given T`) with no unit validation, so 13
+#     error goldens matched "expected error, got success" or mismatched text. Added
+#     `num_as` (`$min/$number/$max: <value> is not a number.`) and `unit_clash`
+#     (`$<operand>: <value> and $min: <min> have incompatible units[. (one has
+#     units and the other doesn't)]`), validating types then $number-vs-$min before
+#     $max-vs-$min (the base is always $min). Arity already came from the 3/Some(3)
+#     registration. Tests in tests/math_errors.rs (kept out of the over-budget
+#     builtins.rs).
+# sass-spec 7509 -> 7522 (+13: all math/clamp cases now 26/26), 0 regressions,
+# full test suite green (369 passed).
+68.6
