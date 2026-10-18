@@ -565,4 +565,18 @@
 #     tests/math_errors.rs.
 # sass-spec 7522 -> 7528 (+6: all math/atan2/arguments cases now 10/10),
 # 0 regressions, full test suite green (371 passed).
-68.6
+#
+# Round 45: `math.min/max($numbers…)` namespace contract. `extremum` reduced on raw
+#     magnitudes ignoring units (so `max(1px, 1in, 1cm)` took the first, not the
+#     coerced-largest) and used the generic `num` type error, with no incompatible-
+#     unit check. Rewrote to: validate every arg as a number (`<value> is not a
+#     number.`), lower arity min 1 -> 0 so an empty call self-reports "At least one
+#     argument must be passed.", compare each candidate after reducing it into the
+#     current best's unit (equal units / both unitless / exactly-one-unitless compare
+#     raw magnitude — the unit-bearing side is larger), and two non-convertible
+#     dimensioned operands raise `<a> and <b> have incompatible units.`. The residual
+#     math/min|max#8/9/10 are the *global* bare `min(...)` CSS-calc passthrough
+#     (a separate subsystem, pre-existing), untouched. Tests appended to math_errors.rs.
+# sass-spec 7528 -> 7539 (+11: namespace min/max values + all 10 error cases),
+# 0 regressions, full test suite green (373 passed).
+68.7

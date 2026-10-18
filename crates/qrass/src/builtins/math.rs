@@ -21,8 +21,8 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("math", "pow", 2, Some(2), &["base", "exponent"], pow);
     r.nsp("math", "sqrt", 1, Some(1), &["number"], sqrt);
     r.nsp("math", "log", 1, Some(2), &["number", "base"], log);
-    r.ns("math", "min", 1, None, min);
-    r.ns("math", "max", 1, None, max);
+    r.ns("math", "min", 0, None, min);
+    r.ns("math", "max", 0, None, max);
     // Trig: `sin`/`cos`/`tan` take an angle (unitless = radians, or a
     // deg/grad/turn unit) and return a unitless ratio; the inverse family takes a
     // unitless ratio and returns an angle in `deg` (the golden's convention). The rest
@@ -383,17 +383,54 @@ fn max(c: &super::Call) -> Or<SassValue> {
 }
 
 fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
-    let mut best: Option<(f64, SassValue)> = None;
-    for i in 0..c.positional.len() {
-        let (v, _) = num(c, i)?;
-        let better = match &best {
-            None => true,
-            Some((b, _)) => (want_min && v < *b) || (!want_min && v > *b),
+    // `min/max($numbers…)`: dart-shaped errors — a non-number reads the bare
+    // `<value> is not a number.`, no arguments reads "At least one argument must
+    // be passed." (arity min lowered to 0 so this fires, as for `hypot`), and two
+    // dimensioned operands of different, non-convertible units read
+    // `<a> and <b> have incompatible units.`.
+    if c.positional.is_empty() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "At least one argument must be passed.",
+        ));
+    }
+    let mut nums: Vec<(f64, Option<String>)> = Vec::with_capacity(c.positional.len());
+    for arg in c.positional.iter() {
+        let SassValue::Number { value, unit } = arg else {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("{} is not a number.", arg.to_css()),
+            ));
         };
+        nums.push((*value, unit.clone()));
+    }
+    // Reduce by comparing each candidate expressed in the current best's unit.
+    let mut best = 0usize;
+    for i in 1..nums.len() {
+        let (bv, bu) = &nums[best];
+        let (cv, cu) = &nums[i];
+        // Equal units, both unitless, or exactly one unitless: compare raw
+        // magnitudes (dart's min/max keeps the unit-bearing value as the larger).
+        // Two different dimensioned units must be convertible or it is an error.
+        let cand_eff = match (bu, cu) {
+            (x, y) if x != y && x.is_some() && y.is_some() => {
+                convert_number(*cv, cu.as_deref(), bu.as_deref()).ok_or_else(|| {
+                    SassError::new(
+                        ErrorKind::Builtins,
+                        format!(
+                            "{} and {} have incompatible units.",
+                            c.positional[best].to_css(),
+                            c.positional[i].to_css()
+                        ),
+                    )
+                })?
+            }
+            _ => *cv,
+        };
+        let better = (want_min && cand_eff < *bv) || (!want_min && cand_eff > *bv);
         if better {
-            best = Some((v, c.positional[i].clone()));
+            best = i;
         }
     }
-    best.map(|(_, v)| v)
-        .ok_or_else(|| SassError::new(ErrorKind::Builtins, "expected at least one number"))
+    Ok(c.positional[best].clone())
 }

@@ -149,3 +149,34 @@ fn atan2_errors() {
         "{msg}"
     );
 }
+
+// ─── math.min/max($numbers…): coerced comparison + bare-value errors ───────────
+
+#[test]
+fn min_max_compare_in_coerced_units() {
+    // Same magnitude, different length units — the winner is decided after
+    // reducing to a common unit, not on the raw magnitude.
+    assert_eq!(value("math.min(1px, 1in, 1cm)"), "1px");
+    assert_eq!(value("math.max(1px, 1in, 1cm)"), "1in");
+    assert_eq!(value("math.max(6px, 2px, 10px)"), "10px");
+    // Exactly one side unitless: the unit-bearing value is the larger.
+    assert_eq!(value("math.min(2px, 1)"), "1");
+    assert_eq!(value("math.max(2px, 1)"), "2px");
+}
+
+#[test]
+fn min_max_errors() {
+    let msg = eval_err(".a { p: math.min(c); }");
+    assert!(msg.contains("c is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.max(1, 2, c); }");
+    assert!(msg.contains("c is not a number."), "{msg}");
+    // Zero arguments self-report (arity min lowered to 0).
+    let msg = eval_err(".a { p: math.min(); }");
+    assert!(msg.contains("At least one argument must be passed."), "{msg}");
+    // Two incompatible dimensioned operands error with the bare operand form.
+    let msg = eval_err(".a { p: math.max(1px, 2s); }");
+    assert!(
+        msg.contains("1px and 2s have incompatible units."),
+        "{msg}"
+    );
+}
