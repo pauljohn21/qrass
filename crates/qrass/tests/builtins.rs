@@ -270,7 +270,7 @@ fn color_mix_and_meta() {
 #[test]
 fn string_length_slice_index() {
     assert_eq!(value("string.length(\"hello\")"), "5");
-    assert_eq!(value("string.slice(\"hello\", 2, 4)"), "ell");
+    assert_eq!(value("string.slice(\"hello\", 2, 4)"), "\"ell\"");
     assert_eq!(value("string.index(\"hello\", \"ll\")"), "3");
 }
 

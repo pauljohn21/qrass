@@ -144,35 +144,74 @@ fn length(c: &super::Call) -> Or<SassValue> {
     })
 }
 
-/// `str-slice($string, $start-at, $end-at: -1)`: 1-based inclusive, negatives
-/// count from the end.
+/// `string.slice($string, $start-at, $end-at: -1)` / legacy `str-slice`: Sass
+/// indexes by Unicode **codepoint** (a `Vec<char>` matches exactly — a combining
+/// base+mark is two chars, an astral emoji is one), 1-based and **inclusive** at
+/// both ends. `$start-at`/`$end-at` of 0 or a negative value count from the start
+/// /end respectively; out-of-range bounds clamp, and an `end` that lands before
+/// `start` (notably the default `end-at` of -1 against an empty string, or an
+/// explicit `end-at: 0`) yields the empty string. The result inherits `$string`'s
+/// quote style (a quoted input slices to a quoted output). Arguments are strictly
+/// typed to the goldens' dart-shaped errors.
 fn slice(c: &super::Call) -> Or<SassValue> {
-    let chars: Vec<char> = text(c, 0).chars().collect();
-    let n = chars.len() as i64;
-    let idx = |v: Option<usize>, default: i64| -> i64 {
-        match v
-            .and_then(|i| c.positional.get(i))
-            .and_then(|a| a.as_number())
-        {
-            Some((x, _)) => {
-                let x = x as i64;
-                if x == 0 {
-                    1
-                } else if x > 0 {
-                    x
-                } else {
-                    n + x + 1
-                }
-            }
-            None => default,
-        }
+    let (src, quoted) = match c.positional.first() {
+        Some(SassValue::Str { text, quoted }) => (text.clone(), *quoted),
+        Some(other) => return Err(not_a("string", other, "a string")),
+        None => return Err(not_a("string", &SassValue::Null, "a string")),
     };
-    let start = idx(Some(1), 1);
-    let end = idx(Some(2), -1);
-    let lo = start.max(1).min(n + 1) as usize - 1;
-    let hi = if end < 0 { n } else { end.min(n) } as usize;
-    let out: String = chars[lo..hi.max(lo)].iter().collect();
-    Ok(unquoted(out))
+    let chars: Vec<char> = src.chars().collect();
+    let n = chars.len() as i64;
+    let start = coord(c, 1, "start-at")?;
+    // `$end-at` defaults to -1 (the last codepoint).
+    let end = if c.positional.len() >= 3 {
+        coord(c, 2, "end-at")?
+    } else {
+        -1
+    };
+    // Map the 1-based Sass indices to inclusive 0-based bounds, clamped to range.
+    let lo = if start > 0 {
+        (start - 1).min(n)
+    } else if start < 0 {
+        (n + start).max(0)
+    } else {
+        0
+    };
+    let hi = if end > 0 {
+        (end - 1).min(n - 1)
+    } else if end < 0 {
+        n + end // negative counts back from the last codepoint
+    } else {
+        -1 // end == 0 lands before the first codepoint → empty
+    };
+    let out: String = if hi < lo {
+        String::new()
+    } else {
+        chars[lo as usize..=hi as usize].iter().collect()
+    };
+    Ok(SassValue::Str { text: out, quoted })
+}
+
+/// Read arg `i` as a required unitless integer index, producing the goldens'
+/// dart-shaped errors for a non-number, a value carrying units, or a decimal.
+fn coord(c: &super::Call, i: usize, name: &str) -> Or<i64> {
+    match &c.positional[i] {
+        SassValue::Number { value, unit } => {
+            if unit.is_some() {
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!("${name}: Expected {} to have no units.", c.positional[i].to_css()),
+                ));
+            }
+            if value.fract() != 0.0 {
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!("{} is not an int.", trim_int(*value)),
+                ));
+            }
+            Ok(*value as i64)
+        }
+        other => Err(not_a(name, other, "a number")),
+    }
 }
 
 fn index(c: &super::Call) -> Or<SassValue> {

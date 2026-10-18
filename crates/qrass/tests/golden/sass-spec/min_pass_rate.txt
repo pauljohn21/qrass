@@ -365,4 +365,16 @@
 # round-28 rgb() passthrough, `rgb(attr(c, %), 2, 3)` now emits verbatim.
 # A/B: 0 regressions.
 # 7184 -> 7214 passed (+30, 7214/10961 = 65.82%).
-65.8
+# Round 30: string.slice / str-slice convergence. The prior impl always emitted
+# an unquoted result, mishandled `end-at: 0` (mapped to index 1) and a far
+# negative `end-at` (wrapped to the whole string), and silently accepted
+# non-string / non-number / unit-bearing / decimal indices instead of erroring.
+# Rewritten to: inherit the source string's quote style (the round-26 split
+# lesson), map 1-based inclusive codepoint bounds with clamping and an
+# end-before-start empty result, and validate arguments to the goldens'
+# dart-shaped errors ($string/…/is not a string, …is not a number, …is not an
+# int, Expected … to have no units). Indexing stays by Unicode codepoint (a
+# Vec<char>), so a combining base+mark is two chars and an astral emoji one.
+# All 41 core_functions/string/slice cases pass (was 4). A/B: 0 regressions.
+# 7214 -> 7252 passed (+38, 7252/10961 = 66.16%).
+66.1
