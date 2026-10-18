@@ -173,6 +173,20 @@ impl SassValue {
     /// Coerce to a display string (used by interpolation and `quote()`/`inspect`).
     /// Colors serialize as their CSS form; numbers carry their unit.
     pub fn to_css(&self) -> String {
+        self.render(None, false)
+    }
+
+    /// Serialize the way `meta.inspect` (dart's `toSource`) does: identical to
+    /// [`SassValue::to_css`] except that a nested unbracketed list is wrapped in
+    /// parens whenever it would otherwise merge into its parent, so the value's
+    /// list structure round-trips (`(1 2) (3 4)` instead of the flat CSS `1 2 3 4`).
+    pub fn to_source(&self) -> String {
+        self.render(None, true)
+    }
+
+    /// Serialize to text. `parent` is the separator of the enclosing list (if any)
+    /// and `source` selects the inspect disambiguation above; scalars ignore both.
+    fn render(&self, parent: Option<ListSep>, source: bool) -> String {
         match self {
             SassValue::Null => "null".into(),
             SassValue::Bool(b) => b.to_string(),
@@ -193,11 +207,13 @@ impl SassValue {
                 };
                 let inner = items
                     .iter()
-                    .map(|v| v.to_css())
+                    .map(|v| v.render(Some(*sep), source))
                     .collect::<Vec<_>>()
                     .join(join);
                 if *bracketed {
                     format!("[{inner}]")
+                } else if source && list_needs_parens(*sep, items.is_empty(), parent) {
+                    format!("({inner})")
                 } else {
                     inner
                 }
@@ -249,6 +265,18 @@ impl SassValue {
             other => other.to_css(),
         }
     }
+}
+
+/// Whether an unbracketed nested list of separator `sep` sitting inside a parent
+/// list of `parent` must be parenthesized so the structure round-trips.
+/// A top-level list (`parent == None`) is never wrapped. A nested list is grouped
+/// when it is empty, shares the parent separator, or the parent is a non-comma
+/// list holding a comma child (a space/slash run would otherwise absorb it).
+fn list_needs_parens(sep: ListSep, empty: bool, parent: Option<ListSep>) -> bool {
+    let Some(p) = parent else {
+        return false;
+    };
+    empty || sep == p || (p != ListSep::Comma && sep == ListSep::Comma)
 }
 
 impl Color {

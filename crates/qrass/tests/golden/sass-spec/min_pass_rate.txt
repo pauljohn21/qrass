@@ -443,4 +443,21 @@
 # $replacement) + the extend complex-original guard. All 30 replace.hrx cases flip
 # (16 output + arity/type/parent/complex errors), +1 global/selector. A/B: 0
 # regressions. 7321 -> 7352 passed (+31, 7352/10961 = 67.07%).
-66.9
+# 66.9
+#
+# Round 36: `meta.inspect` source form for nested lists + a latent bracketed-list
+# parser bug. Two parts:
+# (1) `to_css` flattened nested lists (fine for CSS output, which needs no
+#     round-trip), but `inspect`/`toSource` must parenthesize a nested unbracketed
+#     list when it would merge into its parent (`(1 2) (3 4)` not `1 2 3 4`). Added
+#     a shared `render(parent, source)` + `list_needs_parens` (empty child, or
+#     child.sep == parent.sep, or a comma child under a space/slash parent) and a
+#     `to_source()` used ONLY by `meta.inspect`, leaving flat `to_css` for CSS.
+# (2) `bracket_group` built `[1 2]` as a ONE-element list wrapping a nested space
+#     list (so `list.length([1 2])` read 1 and the redundant level leaked as `[(1
+#     2)]` once (1) added parens). Fixed to adopt the space run's items directly ->
+#     a real 2-item bracketed list. A/B caught the (1)-only version regressing
+#     list/join + nested #6/#20 (5 regressions); the parser fix drove it to 0.
+# sass-spec 7352 -> 7369 (+17: 15 meta/inspect/list/nested + 1 list/zip + 1
+# list/join/multi), 0 regressions, full test suite green.
+67.1

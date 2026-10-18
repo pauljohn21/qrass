@@ -328,6 +328,24 @@ fn list_bracketed_lists() {
     assert_eq!(value("list.join([1], (2,))"), "[1, 2]");
     assert_eq!(value("list.join([1], [2], $bracketed: false)"), "1 2");
     assert_eq!(value("list.append([1 2], 3)"), "[1 2 3]");
+    // A bracketed *space* run `[1 2]` is a flat 2-item list, not a one-element
+    // list wrapping a nested space list (parser fix): length / nth read the run.
+    assert_eq!(value("list.length([1 2])"), "2");
+    assert_eq!(value("list.length([1 2 3])"), "3");
+    assert_eq!(value("list.nth([10 20 30], 2)"), "20");
+    assert_eq!(value("list.length([1, 2])"), "2");
+}
+
+#[test]
+fn inspect_parenthesizes_nested_lists() {
+    // `inspect` (source form) keeps a nested list's structure by parenthesizing it
+    // when it would otherwise merge into the parent, unlike flat CSS output.
+    assert_eq!(value("meta.inspect((1 2, 3 4))"), "1 2, 3 4"); // comma parent, space child: flat
+    assert_eq!(value("meta.inspect(((1 2) (3 4)))"), "(1 2) (3 4)"); // space parent, space child: parens
+    assert_eq!(value("meta.inspect(((1, 2) (3, 4)))"), "(1, 2) (3, 4)"); // comma child in space parent: parens
+    assert_eq!(value("meta.inspect(((), ()))"), "(), ()"); // empty children: `()`
+    assert_eq!(value("meta.inspect([1 2])"), "[1 2]"); // a bracketed run stays bracketed
+    assert_eq!(value("meta.inspect(([1, 2] [3, 4]))"), "[1, 2] [3, 4]");
 }
 
 #[test]

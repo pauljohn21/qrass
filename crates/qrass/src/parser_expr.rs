@@ -426,9 +426,22 @@ impl<'a> E<'a> {
             });
         }
         self.expect(Punct::RBracket, "expected ']' to close bracketed list")?;
+        // A space run like `[1 2]` is a bracketed list of the run's items, NOT a
+        // one-element list wrapping a nested space list. `space_list()` already
+        // grouped the run into a flat (unbracketed) space list, so adopt its items
+        // under the bracket flag directly — otherwise `list.length([1 2])` reads 1.
+        let (items, sep) = match first {
+            Expr::List {
+                items,
+                sep,
+                bracketed: false,
+                ..
+            } => (items, sep),
+            other => (vec![other], ListSep::Space),
+        };
         Ok(Expr::List {
-            items: vec![first],
-            sep: ListSep::Space,
+            items,
+            sep,
             bracketed: true,
             span: self.span(start),
         })
