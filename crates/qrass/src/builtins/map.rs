@@ -12,7 +12,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("map", "has-key", 1, None, &["map", "key"], has_key);
     r.nsp("map", "keys", 1, Some(1), &["map"], keys);
     r.nsp("map", "values", 1, Some(1), &["map"], values);
-    r.nsp("map", "merge", 2, Some(2), &["map1", "map2"], merge);
+    r.nsp("map", "merge", 1, None, &["map1", "map2"], merge);
     r.nsp("map", "deep-merge", 1, None, &["map1", "map2"], deep_merge_n);
     r.nsp("map", "set", 3, Some(3), &["map", "key", "value"], set_call);
     r.nsp("map", "remove", 1, None, &["map", "key"], remove);
@@ -120,16 +120,77 @@ fn set_call(c: &super::Call) -> Or<SassValue> {
 }
 
 /// Shallow merge: `right` overrides `left` on key collisions.
-fn merge(c: &super::Call) -> Or<SassValue> {
-    let mut left = as_map(c, 0)?;
-    let right = as_map(c, 1)?;
+fn shallow_merge(
+    mut left: Vec<(SassValue, SassValue)>,
+    right: Vec<(SassValue, SassValue)>,
+) -> Vec<(SassValue, SassValue)> {
     for (k, v) in right {
         match left.iter_mut().find(|(lk, _)| *lk == k) {
             Some(slot) => slot.1 = v,
             None => left.push((k, v)),
         }
     }
-    Ok(map_value(left))
+    left
+}
+
+/// `map.merge($map1, $keys…, $map2)`: merge `$map2` (the final argument) into the
+/// map reached by descending `$map1` along `$keys…`, fabricating intermediate
+/// maps for any missing or non-map step. With no keys it is the plain two-map
+/// shallow merge; `$map1`/`$map2` type errors and the single-arg `$args` error
+/// mirror the goldens.
+fn merge(c: &super::Call) -> Or<SassValue> {
+    let args = &c.positional;
+    if args.len() < 2 {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "Expected $args to contain a key.",
+        ));
+    }
+    let map1 = coerce_map(&args[0], "map1")?;
+    let map2 = coerce_map(args.last().unwrap(), "map2")?;
+    Ok(map_value(merge_at(
+        map1,
+        &args[1..args.len() - 1],
+        map2,
+    )))
+}
+
+/// A map's entries (empty list counts as empty), or a `$name: <value> is not a
+/// map.` error naming the offending argument.
+fn coerce_map(v: &SassValue, name: &str) -> Or<Vec<(SassValue, SassValue)>> {
+    match v {
+        SassValue::Map { entries } => Ok(entries.clone()),
+        SassValue::List { items, .. } if items.is_empty() => Ok(Vec::new()),
+        other => Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("${name}: {} is not a map.", other.to_css()),
+        )),
+    }
+}
+
+/// Descend `entries` along `keys`, shallow-merging `map2` at the leaf.
+fn merge_at(
+    mut entries: Vec<(SassValue, SassValue)>,
+    keys: &[SassValue],
+    map2: Vec<(SassValue, SassValue)>,
+) -> Vec<(SassValue, SassValue)> {
+    let Some(key) = keys.first() else {
+        return shallow_merge(entries, map2);
+    };
+    let idx = entries.iter().position(|(k, _)| k == key);
+    let child = match idx {
+        Some(i) => match &entries[i].1 {
+            SassValue::Map { entries } => entries.clone(),
+            _ => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+    let merged = map_value(merge_at(child, &keys[1..], map2));
+    match idx {
+        Some(i) => entries[i].1 = merged,
+        None => entries.push((key.clone(), merged)),
+    }
+    entries
 }
 
 /// Recursive merge of any number of maps (`map.deep-merge($maps...)`).

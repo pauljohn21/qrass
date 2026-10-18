@@ -484,4 +484,16 @@
 # meta/inspect/map + list/single + global/meta from the toSource refinements),
 # 0 regressions (one transient inspect/map regression from over-wrapping space-list
 # values was caught by A/B and narrowed to comma-only), full test suite green.
-68.0
+#
+# Round 39: `map.merge($map1, $keys…, $map2)` variadic key path. The namespace
+#     form was registered as a fixed 2-arity shallow merge, so `map.merge((c: ()),
+#     c, (d: e))` errored "Only 2 arguments allowed" while the goldens expect a
+#     nested merge (merge $map2, the FINAL argument, into the map reached by
+#     descending $map1 along $keys…, fabricating intermediate maps for any missing
+#     or non-map step). Registration lowered to min 1 / variadic and the impl
+#     rewritten to descend-then-shallow-merge at the leaf; the two map arguments
+#     now validate with the golden's `$map1/$map2: <value> is not a map.` wording
+#     and a lone argument raises "Expected $args to contain a key."
+# sass-spec 7459 -> 7473 (+14: all previously-failing core_functions/map/merge
+# cases now 23/23), 0 regressions, full test suite green.
+68.1

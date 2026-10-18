@@ -117,6 +117,40 @@ fn map_merge_shallow() {
 }
 
 #[test]
+fn map_merge_nested_keypath() {
+    // `$map1, $keys…, $map2`: shallow-merge `$map2` at the nested key path.
+    assert_eq!(
+        value("map.merge((c: (d: e, f: g)), c, (1: 2))"),
+        "(c: (d: e, f: g, 1: 2))"
+    );
+    // Overriding collisions keep the leaf's order.
+    assert_eq!(
+        value("map.merge((c: (d: e, f: g)), c, (d: 1, f: 2))"),
+        "(c: (d: 1, f: 2))"
+    );
+    // A missing or non-map step fabricates the intermediate map.
+    assert_eq!(
+        value("map.merge((c: 1), c, d, (e: f))"),
+        "(c: (d: (e: f)))"
+    );
+    assert_eq!(value("map.merge((c: 1), c, (d: e))"), "(c: (d: e))");
+}
+
+#[test]
+fn map_merge_named_and_errors() {
+    assert_eq!(
+        value("map.merge($map1: (c: d), $map2: (1: 2))"),
+        "(c: d, 1: 2)"
+    );
+    let msg = eval_err(".a { p: map.merge(1, (c: d)); }");
+    assert!(msg.contains("$map1: 1 is not a map."), "{msg}");
+    let msg = eval_err(".a { p: map.merge((c: d), e, 1); }");
+    assert!(msg.contains("$map2: 1 is not a map."), "{msg}");
+    let msg = eval_err(".a { p: map.merge((c: d)); }");
+    assert!(msg.contains("Expected $args to contain a key."), "{msg}");
+}
+
+#[test]
 fn map_deep_merge_recursive() {
     let out = value("map.deep-merge((a: (x: 1, y: 2)), (a: (y: 3, z: 4)))");
     assert_eq!(out, "(a: (x: 1, y: 3, z: 4))");
