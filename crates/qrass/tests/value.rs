@@ -38,6 +38,7 @@ fn zero_and_empty_are_truthy() {
             items: vec![],
             sep: qrass::ast_expr::ListSep::Comma,
             bracketed: false,
+            keywords: None,
         }
         .is_truthy()
     );
@@ -213,6 +214,7 @@ fn list_and_map_serialization() {
         ],
         sep: ListSep::Comma,
         bracketed: false,
+        keywords: None,
     };
     assert_eq!(list.to_css(), "1, 2");
     let bracketed = SassValue::List {
@@ -222,6 +224,7 @@ fn list_and_map_serialization() {
         }],
         sep: ListSep::Space,
         bracketed: true,
+        keywords: None,
     };
     assert_eq!(bracketed.to_css(), "[1]");
     let map = SassValue::Map {

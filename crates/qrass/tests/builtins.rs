@@ -381,8 +381,24 @@ fn meta_type_of_and_inspect() {
 
 #[test]
 fn meta_keywords_and_get() {
+    // keyword-get still reads a plain map (legacy spelling).
     assert_eq!(value("meta.keyword-get((a: 1, b: 2), b)"), "2");
-    assert_eq!(value("meta.type-of(meta.keywords((a: 1)))"), "map");
+    // meta.keywords requires a real rest-argument ArgList: it returns the named
+    // part as a map, and a caller-supplied named arg reaches it via `$args...`.
+    let src = "@use 'sass:meta';\n@function kw($args...) { @return meta.keywords($args); }\n\
+               a { x: meta.inspect(kw($c: d, $e: f)); y: meta.inspect(kw(1, 2)); }";
+    let out = css(src);
+    assert!(out.contains("x: (c: d, e: f)"), "{out}");
+    // A positional-only call yields an empty keyword map.
+    assert!(out.contains("y: ()"), "{out}");
+    // keyword-get reads a name out of the ArgList's keyword part.
+    let src2 = "@use 'sass:meta';\n@function kg($args...) { @return meta.keyword-get($args, c); }\n\
+                a { v: kg($c: 7); }";
+    let out2 = css(src2);
+    assert!(out2.contains("v: 7"), "{out2}");
+    // Passing a non-ArgList (a plain list) to meta.keywords is a golden error.
+    let err = eval_err("a { b: meta.keywords(1 2 3); }");
+    assert!(err.contains("is not an argument list"), "{err}");
 }
 
 // ─── 8.3 global.* ─────────────────────────────────────────────────────────────

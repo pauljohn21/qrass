@@ -31,10 +31,16 @@ pub enum SassValue {
     /// A list with a separator; a map is represented by [`SassValue::Map`].
     /// `bracketed` marks a CSS-`[]` bracketed list literal (`[a b c]`), which
     /// round-trips through serialization and drives `list.is-bracketed`.
+    /// `keywords` carries the named part of a rest-parameter (`$args...`) ArgList:
+    /// `None` for ordinary lists; `Some(_)` (possibly empty) after `bind_params`
+    /// has bound a rest parameter so `meta.keywords`/`keyword-get` can read the
+    /// caller-supplied named arguments and `meta.keywords` can tell a real ArgList
+    /// apart from a plain list.
     List {
         items: Vec<SassValue>,
         sep: ListSep,
         bracketed: bool,
+        keywords: Option<Vec<(String, SassValue)>>,
     },
     /// An ordered key/value map (insertion order preserved for output).
     Map {
@@ -199,7 +205,7 @@ impl SassValue {
                 }
             }
             SassValue::Color(c) => c.to_css(),
-            SassValue::List { items, sep, bracketed } => {
+            SassValue::List { items, sep, bracketed, .. } => {
                 let join = match sep {
                     ListSep::Comma => ", ",
                     ListSep::Slash => " / ",
@@ -212,6 +218,14 @@ impl SassValue {
                     .join(join);
                 if *bracketed {
                     format!("[{inner}]")
+                } else if source && items.is_empty() {
+                    // An empty unbracketed list has no flat form; `toSource` emits
+                    // `()` so it stays distinguishable from null/empty string.
+                    "()".to_string()
+                } else if source && *sep == ListSep::Comma && items.len() == 1 {
+                    // A lone comma element is indistinguishable from a scalar once
+                    // flattened, so `toSource` keeps it a round-trippable `(x,)`.
+                    format!("({inner},)")
                 } else if source && list_needs_parens(*sep, items.is_empty(), parent) {
                     format!("({inner})")
                 } else {
@@ -219,9 +233,28 @@ impl SassValue {
                 }
             }
             SassValue::Map { entries } => {
+                // A map behaves like a comma-separated list of pairs. In `toSource`
+                // a *comma-separated, unbracketed* list value is wrapped in an extra
+                // paren layer so its commas cannot merge with the map's: empty `()`
+                // -> `(())`, lone comma `(1,)` -> `((1,))`, multi `1, 2` -> `(1, 2)`.
+                // Space/slash/bracketed lists are unambiguous and stay as-is; Map and
+                // scalar values and CSS mode (source = false) render plainly.
                 let inner = entries
                     .iter()
-                    .map(|(k, v)| format!("{}: {}", k.to_css(), v.to_css()))
+                    .map(|(k, v)| {
+                        let value = match v {
+                            SassValue::List {
+                                sep: ListSep::Comma,
+                                bracketed: false,
+                                ..
+                            } if source =>
+                            {
+                                format!("({})", v.render(None, true))
+                            }
+                            other => other.render(None, source),
+                        };
+                        format!("{}: {}", k.to_css(), value)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("({inner})")
@@ -237,7 +270,7 @@ impl SassValue {
         match self {
             SassValue::Null => String::new(),
             SassValue::Str { text, .. } => text.clone(),
-            SassValue::List { items, sep, bracketed } => {
+            SassValue::List { items, sep, bracketed, .. } => {
                 let join = match sep {
                     ListSep::Comma => ", ",
                     ListSep::Slash => " / ",

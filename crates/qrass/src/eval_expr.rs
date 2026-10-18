@@ -68,6 +68,7 @@ impl EvalState {
                     items: out,
                     sep: *sep,
                     bracketed: *bracketed,
+                    keywords: None,
                 })
             }
             Expr::Map { pairs, .. } => {

@@ -83,6 +83,7 @@ fn comma(items: Vec<SassValue>) -> SassValue {
         items,
         sep: ListSep::Comma,
         bracketed: false,
+        keywords: None,
     }
 }
 
@@ -144,6 +145,7 @@ fn parsed_complex(c: &Complex) -> SassValue {
         items,
         sep: ListSep::Space,
         bracketed: false,
+        keywords: None,
     }
 }
 

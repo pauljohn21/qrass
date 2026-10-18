@@ -7,6 +7,7 @@
 //! stay env-free.
 
 use super::{Or, Registry};
+use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
@@ -46,9 +47,36 @@ fn inspect(c: &super::Call) -> Or<SassValue> {
     Ok(unquoted(text))
 }
 
-/// `keywords($args)`: the rest-argument map, returned unchanged.
+/// `keywords($args)`: the named part of a rest-argument ArgList, as a map. A value
+/// that is not an ArgList (`keywords == None`) is a golden error we surface as-is.
 fn keywords(c: &super::Call) -> Or<SassValue> {
-    Ok(c.positional[0].clone())
+    match &c.positional[0] {
+        SassValue::List {
+            keywords: Some(kw),
+            ..
+        } => {
+            let entries = kw
+                .iter()
+                .map(|(k, v)| (unquoted(k.clone()), v.clone()))
+                .collect();
+            Ok(SassValue::Map { entries })
+        }
+        other => Err(SassError::new(
+            ErrorKind::Eval,
+            format!("$args: {} is not an argument list.", arg_repr(other)),
+        )),
+    }
+}
+
+/// Render an argument value the way the goldens' `… is not an argument list.`
+/// message spells it: an unbracketed list is parenthesized, other values use CSS.
+fn arg_repr(v: &SassValue) -> String {
+    match v {
+        SassValue::List {
+            bracketed: false, ..
+        } => format!("({})", v.to_css()),
+        other => other.to_css(),
+    }
 }
 
 fn keyword_get(c: &super::Call) -> Or<SassValue> {
@@ -56,11 +84,20 @@ fn keyword_get(c: &super::Call) -> Or<SassValue> {
         SassValue::Str { text, .. } => text.clone(),
         other => other.to_css(),
     };
-    let key = name.trim_start_matches('$');
+    let key = name.trim_start_matches('$').replace('_', "-");
     match &c.positional[0] {
+        // An ArgList: look the name up in its keyword part.
+        SassValue::List {
+            keywords: Some(kw), ..
+        } => Ok(kw
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or(SassValue::Null)),
+        // Legacy map spelling still supported.
         SassValue::Map { entries } => Ok(entries
             .iter()
-            .find(|(k, _)| matches!(k, SassValue::Str { text, .. } if text == key))
+            .find(|(k, _)| matches!(k, SassValue::Str { text, .. } if text == &key))
             .map(|(_, v)| v.clone())
             .unwrap_or(SassValue::Null)),
         _ => Ok(SassValue::Null),

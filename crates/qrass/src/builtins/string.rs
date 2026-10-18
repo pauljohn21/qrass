@@ -99,6 +99,7 @@ fn split(c: &super::Call) -> Or<SassValue> {
             .collect(),
         sep: ListSep::Comma,
         bracketed: true,
+        keywords: None,
     })
 }
 

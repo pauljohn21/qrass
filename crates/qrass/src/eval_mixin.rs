@@ -194,17 +194,20 @@ impl EvalState {
     /// current (callee) scope so later defaults can read earlier parameters.
     pub(super) fn bind_params(&mut self, params: &[Param], mut raw: RawArgs) -> Ev<()> {
         let mut pi = 0usize;
+        // A rest parameter (`$args...`) is bound *after* the loop: it absorbs every
+        // leftover positional value and, crucially, every named argument that no
+        // earlier parameter consumed. Those named args become the ArgList's keyword
+        // part, read back by `meta.keywords` / `keyword-get`. Deferring the define
+        // lets ordinary named parameters claim their values from `raw.named` first.
+        let mut rest: Option<(String, Vec<SassValue>)> = None;
         for p in params {
-            let value = if let Some(v) = raw.named.remove(&p.name) {
-                v
-            } else if p.rest {
-                let rest: Vec<SassValue> = raw.positional[pi..].to_vec();
+            let value = if p.rest {
+                let leftover = raw.positional[pi..].to_vec();
                 pi = raw.positional.len();
-                SassValue::List {
-                    items: rest,
-                    sep: ListSep::Comma,
-                    bracketed: false,
-                }
+                rest = Some((p.name.clone(), leftover));
+                continue;
+            } else if let Some(v) = raw.named.remove(&p.name) {
+                v
             } else if pi < raw.positional.len() {
                 let v = raw.positional[pi].clone();
                 pi += 1;
@@ -220,17 +223,43 @@ impl EvalState {
             self.env.define(&p.name, value, AssignFlags::default());
         }
 
-        if pi < raw.positional.len() {
-            return Err(SassError::new(
-                ErrorKind::Eval,
-                "Too many positional arguments",
-            ));
-        }
-        if let Some(extra) = raw.named.keys().next() {
-            return Err(SassError::new(
-                ErrorKind::Eval,
-                format!("Unknown argument `${extra}`"),
-            ));
+        match rest {
+            Some((name, positional)) => {
+                // Unmatched named args fold into the rest ArgList's keyword part,
+                // sorted by name for deterministic serialization. Sass treats `_`
+                // and `-` in identifiers as interchangeable; the canonical spelling
+                // uses dashes, so normalize each key.
+                let mut keywords: Vec<(String, SassValue)> = raw
+                    .named
+                    .into_iter()
+                    .map(|(k, v)| (k.replace('_', "-"), v))
+                    .collect();
+                keywords.sort_by(|a, b| a.0.cmp(&b.0));
+                self.env.define(
+                    &name,
+                    SassValue::List {
+                        items: positional,
+                        sep: ListSep::Comma,
+                        bracketed: false,
+                        keywords: Some(keywords),
+                    },
+                    AssignFlags::default(),
+                );
+            }
+            None => {
+                if pi < raw.positional.len() {
+                    return Err(SassError::new(
+                        ErrorKind::Eval,
+                        "Too many positional arguments",
+                    ));
+                }
+                if let Some(extra) = raw.named.keys().min() {
+                    return Err(SassError::new(
+                        ErrorKind::Eval,
+                        format!("Unknown argument `${extra}`"),
+                    ));
+                }
+            }
         }
         Ok(())
     }

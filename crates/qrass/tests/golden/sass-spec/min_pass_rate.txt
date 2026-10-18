@@ -470,4 +470,18 @@
 # sass-spec 7369 -> 7434 (+65: 32 css/supports/syntax/*, 17 unknown_directive/*,
 # + misc style_rule/parent/moz_document/font-face/empty_block/directive whitespace),
 # 0 regressions, full test suite green.
-67.8
+#
+# Round 38: rest-parameter ArgList keywords + toSource map-value disambiguation.
+#     SassValue::List gains `keywords: Option<Vec<(String, SassValue)>>` (None for
+#     ordinary lists; Some after bind_params binds a `$args...` rest param). A rest
+#     param now absorbs every named argument no earlier parameter consumed, so
+#     `@include a($c: 1)` / `meta.keywords` / `meta.keyword-get` work (previously
+#     "Unknown argument"). Keyword names normalize `_`->`-` (dash-insensitive).
+#     toSource additionally renders an empty list as `()`, a lone comma element as
+#     `(x,)`, and wraps a comma/unbracketed *map value* in a paren layer so it does
+#     not merge with the map's commas (`(())`, `((1,))`) — matching dart inspect.
+# sass-spec 7434 -> 7459 (+25: 16 callable/arguments, 6 meta/keywords, plus bonus
+# meta/inspect/map + list/single + global/meta from the toSource refinements),
+# 0 regressions (one transient inspect/map regression from over-wrapping space-list
+# values was caught by A/B and narrowed to comma-only), full test suite green.
+68.0

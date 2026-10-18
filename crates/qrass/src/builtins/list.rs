@@ -45,6 +45,7 @@ fn items_of(v: &SassValue) -> Vec<SassValue> {
                 items: vec![k.clone(), val.clone()],
                 sep: ListSep::Space,
                 bracketed: false,
+                keywords: None,
             })
             .collect(),
         SassValue::Null => Vec::new(),
@@ -86,6 +87,7 @@ fn list(items: Vec<SassValue>, sep: ListSep) -> SassValue {
         items,
         sep,
         bracketed: false,
+        keywords: None,
     }
 }
 
@@ -94,6 +96,7 @@ fn list_br(items: Vec<SassValue>, sep: ListSep, bracketed: bool) -> SassValue {
         items,
         sep,
         bracketed,
+        keywords: None,
     }
 }
 
@@ -216,6 +219,7 @@ fn slash(c: &super::Call) -> Or<SassValue> {
         items: c.positional.to_vec(),
         sep: ListSep::Slash,
         bracketed: false,
+        keywords: None,
     })
 }
 
@@ -231,6 +235,7 @@ fn zip(c: &super::Call) -> Or<SassValue> {
             items: lists.iter().map(|l| l[i].clone()).collect(),
             sep: ListSep::Space,
             bracketed: false,
+            keywords: None,
         })
         .collect();
     Ok(list(out, ListSep::Comma))

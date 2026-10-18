@@ -47,6 +47,7 @@ fn comma(items: Vec<SassValue>) -> SassValue {
         items,
         sep: ListSep::Comma,
         bracketed: false,
+        keywords: None,
     }
 }
 
