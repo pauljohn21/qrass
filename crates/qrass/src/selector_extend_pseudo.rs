@@ -112,9 +112,9 @@ fn extend_pseudo_compound(
 /// inner selector; a bare `:not` extender is ignored; anything else becomes a
 /// single `:not(<variant>)`.
 fn expand_not(v: &Complex, out: &mut Vec<Simple>) {
-    if let [comp] = v.components.as_slice() {
-        if comp.combinator.is_none() {
-            if let [Simple::PseudoClass {
+    if let [comp] = v.components.as_slice()
+        && comp.combinator.is_none()
+            && let [Simple::PseudoClass {
                 name,
                 arg: PseudoArg::Selectors(inner),
             }] = comp.compound.simples.as_slice()
@@ -129,8 +129,6 @@ fn expand_not(v: &Complex, out: &mut Vec<Simple>) {
                     return;
                 }
             }
-        }
-    }
     out.push(not_of(v));
 }
 

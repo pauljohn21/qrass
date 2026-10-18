@@ -195,8 +195,8 @@ pub(crate) fn call(
             b.params,
         )));
     }
-    if let Some(max) = b.max {
-        if positional.len() > max {
+    if let Some(max) = b.max
+        && positional.len() > max {
             return Some(Err(arity(
                 &display,
                 positional.len(),
@@ -205,7 +205,6 @@ pub(crate) fn call(
                 b.params,
             )));
         }
-    }
     Some((b.call)(&Call { positional, named }))
 }
 

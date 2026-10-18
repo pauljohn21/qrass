@@ -48,7 +48,7 @@ impl Color {
         // fractional channels such as a 50% gray (127.5, half a byte off).
         let int_of = |v: f64| -> Option<u8> {
             let r = v.round();
-            if (v - r).abs() < 1e-4 && (r >= 0.0) && (r <= 255.0) {
+            if (v - r).abs() < 1e-4 && (0.0..=255.0).contains(&r) {
                 Some(r as u8)
             } else {
                 None

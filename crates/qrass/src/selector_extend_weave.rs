@@ -69,7 +69,7 @@ pub(super) fn weave_all(
         && is_descendant_run(&comps[..start])
         && prefix
             .iter()
-            .all(|c| c.combinator.map_or(true, |x| x == Combinator::Descendant));
+            .all(|c| c.combinator.is_none_or(|x| x == Combinator::Descendant));
 
     if !floatable {
         let mut pieces: Vec<Component> = comps[..start].to_vec();
@@ -149,7 +149,7 @@ fn combine_leading(a: Option<Combinator>, b: Option<Combinator>) -> Option<Optio
 /// A run that floats freely: every (non-leading) edge is a descendant.
 fn is_descendant_run(run: &[Component]) -> bool {
     run.iter()
-        .all(|c| c.combinator.map_or(true, |x| x == Combinator::Descendant))
+        .all(|c| c.combinator.is_none_or(|x| x == Combinator::Descendant))
 }
 
 /// Every order-preserving merge of two compound sequences.

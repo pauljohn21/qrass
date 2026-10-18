@@ -49,7 +49,7 @@ pub fn compound_unify(a: &Compound, b: &Compound) -> Option<Compound> {
 /// universal, attribute, or an ordinary pseudo-class (`:hover`) — such a pair
 /// unifies to nothing.
 fn host_compatible(c: &Compound) -> bool {
-    let has_host = c.simples.iter().any(|s| is_host_pseudo(s));
+    let has_host = c.simples.iter().any(is_host_pseudo);
     if !has_host {
         return true;
     }

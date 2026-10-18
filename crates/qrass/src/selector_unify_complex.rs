@@ -116,12 +116,11 @@ pub fn complex_unify(a: &Complex, b: &Complex) -> Vec<Complex> {
             // A subject-only pair (`> .c` + `.d`) has no lead chain to carry a
             // front-pinned combinator, so re-attach the merged leading combinator
             // the parser retained on the input's first component.
-            if subject_only {
-                if let Some(first) = c.components.first_mut() {
+            if subject_only
+                && let Some(first) = c.components.first_mut() {
                     first.combinator =
                         combine_leading(as_[0].combinator, bs[0].combinator);
                 }
-            }
             c
         })
         .collect()
@@ -437,11 +436,10 @@ fn should_align(a: &Compound, b: &Compound) -> bool {
 }
 
 fn shares_identity(a: &Compound, b: &Compound) -> bool {
-    if let (Some(x), Some(y)) = (find_id(a), find_id(b)) {
-        if x == y {
+    if let (Some(x), Some(y)) = (find_id(a), find_id(b))
+        && x == y {
             return true;
         }
-    }
     if shares_pseudo_element(a, b) {
         return true;
     }

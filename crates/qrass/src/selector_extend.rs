@@ -118,16 +118,16 @@ pub(super) fn top_level(
         }
     }
     // Single-compound extendees: subtract the union of all alternatives a slot covers.
-    for i in 0..comps.len() {
+    for (i, comp) in comps.iter().enumerate() {
         let matched: Vec<&Compound> = singles
             .iter()
             .copied()
-            .filter(|n| covers(&comps[i].compound, n))
+            .filter(|n| covers(&comp.compound, n))
             .collect();
         if matched.is_empty() {
             continue;
         }
-        let residual = subtract_many(&comps[i].compound, &matched);
+        let residual = subtract_many(&comp.compound, &matched);
         for ext_with in &extender.complexes {
             results.extend(extend_slot(sel, i, i, &residual, ext_with));
         }

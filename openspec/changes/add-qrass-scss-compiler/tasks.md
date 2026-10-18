@@ -71,5 +71,5 @@
 
 ## 12. 集成门禁
 
-- [ ] 12.1 全量回归：`cargo test -p qrass`（离线、无外部工具）+ `cargo clippy -- -D warnings` 通过，验证：CI 等价命令本机全绿
-- [ ] 12.2 项目规范审计：src/ 与 tests/ 无 `println!`/`eprintln!`/内联 `mod tests`、全部源文件 ≤500 行，验证：grep 与 `wc -l` 脚本化检查记录于 PR 描述
+- [x] 12.1 全量回归：`cargo test -p qrass`（离线、无外部工具）+ `cargo clippy -- -D warnings` 通过，验证：CI 等价命令本机全绿
+- [x] 12.2 项目规范审计：src/ 与 tests/ 无 `println!`/`eprintln!`/内联 `mod tests`、全部源文件 ≤500 行，验证：grep 与 `wc -l` 脚本化检查记录于 PR 描述

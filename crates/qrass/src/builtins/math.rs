@@ -78,11 +78,9 @@ fn div(c: &super::Call) -> Or<SassValue> {
         Some(v) => v,
         None => b,
     };
-    let unit = if ua.is_none() || ub.is_none() || ua == ub {
-        ua.clone()
-    } else {
-        ua.clone()
-    };
+    // The numerator's unit carries into the result, unless the two units are
+    // equal (then they cancel to unitless), handled below.
+    let unit = ua.clone();
     // Dividing equal units cancels; keep the numerator unit otherwise.
     let unit = if ua == ub { None } else { unit };
     Ok(SassValue::Number {

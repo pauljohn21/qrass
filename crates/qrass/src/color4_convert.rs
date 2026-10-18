@@ -331,8 +331,8 @@ impl Color4 {
                 | "prophoto-rgb" | "xyz" | "xyz-d50"
         );
         if src_tristimulus && dst_tristimulus {
-            for i in 0..3 {
-                if self.comps[i].is_none() {
+            for (i, comp) in self.comps.iter().enumerate() {
+                if comp.is_none() {
                     out[i] = None;
                 }
             }

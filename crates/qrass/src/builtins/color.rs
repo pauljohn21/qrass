@@ -132,7 +132,7 @@ fn to_space(c: &super::Call) -> Or<SassValue> {
         // out-of-gamut `hsl()` fallback emits the golden's exact channels.
         let converted = src.convert(crate::color4::lookup("srgb").expect("srgb space"));
         let rgb = converted.to_rgb();
-        let legacy_hsl = if hsl_like { hsl_from_legacy_src(&src).map(|h| wrap_hue(h)) } else { None };
+        let legacy_hsl = if hsl_like { hsl_from_legacy_src(&src).map(wrap_hue) } else { None };
         return Ok(make(Color {
             r: rgb[0],
             g: rgb[1],

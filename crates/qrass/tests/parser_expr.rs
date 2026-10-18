@@ -12,8 +12,8 @@ use qrass::parser::parse;
 /// Parse `$v: <expr>;` and return the folded value expression.
 fn expr_of(src: &str) -> Expr {
     let full = format!("$v: {src};");
-    let tokens = lex(0, "t.scss".into(), full.clone().into()).expect("lex ok");
-    let prog = parse(0, "t.scss".into(), full.into(), tokens).expect("parse ok");
+    let tokens = lex(0, "t.scss".into(), full.clone()).expect("lex ok");
+    let prog = parse(0, "t.scss".into(), full, tokens).expect("parse ok");
     match &prog[0] {
         Stmt::Variable(v) => v.value.clone(),
         other => panic!("expected Variable, got {other:?}"),
@@ -23,8 +23,8 @@ fn expr_of(src: &str) -> Expr {
 /// Parse and expect an error from the value of `$v: <expr>;`.
 fn expr_err(src: &str) -> String {
     let full = format!("$v: {src};");
-    let tokens = lex(0, "t.scss".into(), full.clone().into()).expect("lex ok");
-    match parse(0, "t.scss".into(), full.into(), tokens) {
+    let tokens = lex(0, "t.scss".into(), full.clone()).expect("lex ok");
+    match parse(0, "t.scss".into(), full, tokens) {
         Ok(p) => panic!("expected error for {src:?}, got {p:?}"),
         Err(e) => e.to_string(),
     }

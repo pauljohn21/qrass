@@ -67,7 +67,8 @@ pub fn derive_lex_punct(input: TokenStream) -> TokenStream {
     }
 
     // Group by first character, preserving source order inside each group.
-    let mut groups: Vec<(char, Vec<(Vec<char>, syn::Ident)>)> = Vec::new();
+    type PunctGroups = Vec<(char, Vec<(Vec<char>, syn::Ident)>)>;
+    let mut groups: PunctGroups = Vec::new();
     for (seq, var) in entries {
         let first = seq[0];
         if let Some(g) = groups.iter_mut().find(|(c, _)| *c == first) {

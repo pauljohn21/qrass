@@ -126,20 +126,18 @@ fn pseudo_is_super(
     // Absent from the sub. Only the positive list-folding pseudo-classes can
     // still be a super over a bare sub: their argument list must cover the whole
     // sub complex. `:not` requires disjointness; everything else is a hard miss.
-    if is_positive_bare(&name) {
-        if let Some(PseudoArg::Selectors(list)) = super_arg {
+    if is_positive_bare(&name)
+        && let Some(PseudoArg::Selectors(list)) = super_arg {
             // `:is(A)` is a super over the bare sub when some argument complex
             // is itself a super of the whole sub complex.
             return list.complexes.iter().any(|a| complex_is_super(a, sub_complex));
         }
-    }
-    if is_not(&name) {
-        if let Some(PseudoArg::Selectors(list)) = super_arg {
+    if is_not(&name)
+        && let Some(PseudoArg::Selectors(list)) = super_arg {
             // `:not(A)` is a super of the sub only if none of A's complexes
             // overlaps the sub (their subject compounds cannot unify).
             return list.complexes.iter().all(|a| !complex_overlaps(a, sub_complex));
         }
-    }
     false
 }
 
@@ -199,20 +197,18 @@ fn compounds_compatible(a: &Compound, b: &Compound) -> bool {
     if let (Some(Simple::Type { name: n1, .. }), Some(Simple::Type { name: n2, .. })) = (
         a.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
         b.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
-    ) {
-        if n1 != n2 {
+    )
+        && n1 != n2 {
             return false;
         }
-    }
     // Id conflict.
     if let (Some(Simple::Id(i1)), Some(Simple::Id(i2))) = (
         a.simples.iter().find(|s| matches!(s, Simple::Id(_))),
         b.simples.iter().find(|s| matches!(s, Simple::Id(_))),
-    ) {
-        if i1 != i2 {
+    )
+        && i1 != i2 {
             return false;
         }
-    }
     true
 }
 

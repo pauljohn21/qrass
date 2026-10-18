@@ -168,17 +168,11 @@ fn normalize_lexically(path: &Path) -> PathBuf {
 }
 
 /// Reads and registers sources, deduplicating by canonical path.
+#[derive(Default)]
 pub struct Loader {
     files: Files,
 }
 
-impl Default for Loader {
-    fn default() -> Self {
-        Self {
-            files: Files::default(),
-        }
-    }
-}
 
 impl Loader {
     pub fn files(&self) -> &Files {
