@@ -366,8 +366,9 @@ fn string_length_slice_index() {
 
 #[test]
 fn string_case_and_quotes() {
-    assert_eq!(value("string.to-upper-case(\"abc\")"), "ABC");
-    assert_eq!(value("string.to-lower-case(\"ABC\")"), "abc");
+    // to-upper/lower-case inherit the input's quoting (goldens: `"abc"` -> `"ABC"`).
+    assert_eq!(value("string.to-upper-case(\"abc\")"), "\"ABC\"");
+    assert_eq!(value("string.to-lower-case(\"ABC\")"), "\"abc\"");
     assert_eq!(value("string.unquote(\"hi\")"), "hi");
 }
 
@@ -574,7 +575,7 @@ fn named_arguments_fold_into_positional_slots() {
     assert_eq!(value("selector.parse($selector: \"a > b\")"), "a > b");
     assert_eq!(value("map.get($map: (a: 1), $key: a)"), "1");
     assert_eq!(value("list.nth($list: (10 20 30), $n: 2)"), "20");
-    assert_eq!(value("string.to-upper-case($string: \"hi\")"), "HI");
+    assert_eq!(value("string.to-upper-case($string: \"hi\")"), "\"HI\"");
 }
 
 /// A named argument mixed with a positional one into the *same* slot is a call

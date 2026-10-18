@@ -596,4 +596,15 @@
 # sass-spec 7539 -> 7570 (+31 across abs/asin/acos/atan/cos/sin/tan/sqrt/log/pow/
 # percentage/round/ceil/floor/percentage/unit/unitless/comparable), 0 regressions,
 # full test suite green (377 passed).
-69.0
+#
+# Round 47: `string.to-upper-case` / `to-lower-case` quote + ASCII contract. They
+#     forced `unquoted(text(...))`, so a quoted input lost its quotes and a
+#     non-string silently stringified. Rewired through `string_arg` (preserves the
+#     input's `quoted` flag — the round-26/30 split/slice inheritance rule — and
+#     raises `$string: <v> is not a string.`) and switched to `to_ascii_uppercase`/
+#     `to_ascii_lowercase` — the goldens note "Only ASCII characters have their case
+#     changed" (`"äçðøþ"` passes through). Fixed two builtins.rs assertions that had
+#     encoded the old unquoted result. Tests in tests/string_quote_case.rs.
+# sass-spec 7570 -> 7581 (+11: to-upper/lower-case 18/18 + a global/string bonus),
+# 0 regressions, full test suite green (380 passed).
+69.1

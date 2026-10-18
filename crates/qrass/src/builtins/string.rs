@@ -260,9 +260,30 @@ fn insert(c: &super::Call) -> Or<SassValue> {
 }
 
 fn upper(c: &super::Call) -> Or<SassValue> {
-    Ok(unquoted(text(c, 0).to_uppercase()))
+    let (s, quoted) = string_arg(c, 0)?;
+    Ok(SassValue::Str {
+        text: s.to_ascii_uppercase(),
+        quoted,
+    })
 }
 
 fn lower(c: &super::Call) -> Or<SassValue> {
-    Ok(unquoted(text(c, 0).to_lowercase()))
+    let (s, quoted) = string_arg(c, 0)?;
+    Ok(SassValue::Str {
+        text: s.to_ascii_lowercase(),
+        quoted,
+    })
+}
+
+/// The `$string` argument as `(text, quoted)`, preserving whether it came quoted,
+/// or dart's `$string: <value> is not a string.` error for a non-string (the same
+/// quote-inheritance contract `split`/`slice` follow).
+fn string_arg(c: &super::Call, i: usize) -> Or<(String, bool)> {
+    match &c.positional[i] {
+        SassValue::Str { text, quoted } => Ok((text.clone(), *quoted)),
+        other => Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("$string: {} is not a string.", other.to_css()),
+        )),
+    }
 }
