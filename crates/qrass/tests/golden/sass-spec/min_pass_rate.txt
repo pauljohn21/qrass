@@ -520,4 +520,24 @@
 #     `$map: <value> is not a map.`
 # sass-spec 7487 -> 7495 (+8: all map/set cases now 13/13), 0 regressions, full
 # test suite green (358 passed).
-68.3
+#
+# (refactor, no rate change): module_bus.share() reads the singleton via rc.6
+#     `Behavior::peek` instead of the rc.5 subscribe+mpsc+unsubscribe workaround;
+#     hub Err type Infallible -> (). hrx byte-identical 7495/3466/445, 0 regression.
+#
+# Round 42: `map.*` argument-count + type-error contract (get / has-key / keys /
+#     values / remove / deep-remove / deep-merge). The generic `as_map` helper
+#     emitted `expected a map, given T` and get/has-key were registered min 1, so
+#     14 goldens mismatched: get/has-key are `($map, $key, $keys…)` (min 2, a lone
+#     map -> "Missing argument $key.") and their `$map` must validate as a map
+#     (`$map: <value> is not a map.`); keys/values/remove/deep-remove switched to
+#     the shared `coerce_map`; deep-merge is fixed 2-arity (1 -> missing `$map2`,
+#     3 -> "Only 2 arguments allowed") and merges an empty `()` right value as an
+#     empty map so the left child survives. `fold_named`'s positional/named clash
+#     now reads dart's `Argument $x was passed both by position and by name.`
+#     (the one golden that tests it; a stale builtins.rs assertion of the old
+#     wording was corrected). New tests in tests/map_errors.rs (kept out of the
+#     already-over-budget builtins.rs).
+# sass-spec 7495 -> 7509 (+14: all core_functions/map/* cases now green),
+# 0 regressions, full test suite green (364 passed).
+68.5

@@ -8,12 +8,12 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) fn register(r: &mut Registry) {
-    r.nsp("map", "get", 1, None, &["map", "key"], get);
-    r.nsp("map", "has-key", 1, None, &["map", "key"], has_key);
+    r.nsp("map", "get", 2, None, &["map", "key"], get);
+    r.nsp("map", "has-key", 2, None, &["map", "key"], has_key);
     r.nsp("map", "keys", 1, Some(1), &["map"], keys);
     r.nsp("map", "values", 1, Some(1), &["map"], values);
     r.nsp("map", "merge", 1, None, &["map1", "map2"], merge);
-    r.nsp("map", "deep-merge", 1, None, &["map1", "map2"], deep_merge_n);
+    r.nsp("map", "deep-merge", 2, Some(2), &["map1", "map2"], deep_merge_n);
     r.nsp("map", "set", 1, None, &["map", "key", "value"], set_call);
     r.nsp("map", "remove", 1, None, &["map", "key"], remove);
     r.nsp("map", "deep-remove", 2, None, &["map", "key"], deep_remove);
@@ -25,19 +25,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.def("map-values", 1, Some(1), values);
 }
 
-/// The map at argument `i` (empty map tolerated), or a type error.
-fn as_map(c: &super::Call, i: usize) -> Or<Vec<(SassValue, SassValue)>> {
-    match c.positional.get(i) {
-        Some(SassValue::Map { entries }) => Ok(entries.clone()),
-        Some(SassValue::List { items, .. }) if items.is_empty() => Ok(Vec::new()),
-        Some(other) => Err(SassError::new(
-            ErrorKind::Builtins,
-            format!("expected a map, given {}", other.type_name()),
-        )),
-        None => Err(SassError::new(ErrorKind::Builtins, "expected a map")),
-    }
-}
-
+/// Wrap entries back into a map value.
 fn map_value(entries: Vec<(SassValue, SassValue)>) -> SassValue {
     SassValue::Map { entries }
 }
@@ -54,6 +42,9 @@ fn comma(items: Vec<SassValue>) -> SassValue {
 /// `map.get($map, $keys…)`: descend through nested keys; `null` when absent or a
 /// non-map is reached before the keys are exhausted.
 fn get(c: &super::Call) -> Or<SassValue> {
+    // `get($map, $key, $keys…)`: `$map` must itself be a map (a non-map is a
+    // type error naming `$map`), even though descent is lenient for a *miss*.
+    coerce_map(&c.positional[0], "map")?;
     descend(c, SassValue::Null)
 }
 
@@ -75,6 +66,8 @@ fn descend(c: &super::Call, on_missing: SassValue) -> Or<SassValue> {
 }
 
 fn has_key(c: &super::Call) -> Or<SassValue> {
+    // `has-key($map, $key, $keys…)`: `$map` must be a map (type error names it).
+    coerce_map(&c.positional[0], "map")?;
     // Walk the nested-key path; the key "exists" only if every step is found.
     let mut current = c.positional[0].clone();
     for key in &c.positional[1..] {
@@ -92,12 +85,12 @@ fn has_key(c: &super::Call) -> Or<SassValue> {
 }
 
 fn keys(c: &super::Call) -> Or<SassValue> {
-    let entries = as_map(c, 0)?;
+    let entries = coerce_map(&c.positional[0], "map")?;
     Ok(comma(entries.into_iter().map(|(k, _)| k).collect()))
 }
 
 fn values(c: &super::Call) -> Or<SassValue> {
-    let entries = as_map(c, 0)?;
+    let entries = coerce_map(&c.positional[0], "map")?;
     Ok(comma(entries.into_iter().map(|(_, v)| v).collect()))
 }
 
@@ -227,14 +220,24 @@ fn merge_at(
     entries
 }
 
-/// Recursive merge of any number of maps (`map.deep-merge($maps...)`).
+/// `map.deep-merge($map1, $map2)`: recursively merge two maps. The goldens fix
+/// the arity at exactly two arguments (1 → missing `$map2`, 3 → "Only 2
+/// arguments allowed").
 fn deep_merge_n(c: &super::Call) -> Or<SassValue> {
-    let mut acc = as_map(c, 0)?;
-    for i in 1..c.positional.len() {
-        let next = as_map(c, i)?;
-        acc = deep_merge(acc, next);
+    let acc = coerce_map(&c.positional[0], "map1")?;
+    let next = coerce_map(&c.positional[1], "map2")?;
+    Ok(map_value(deep_merge(acc, next)))
+}
+
+/// A map's entries, or the empty list `()` read as an empty map, or `None` for a
+/// genuine non-map. Reading `()` as an empty map is what makes
+/// `deep-merge((c: (d: e)), (c: ()))` keep the left `(d: e)`.
+fn as_map_or_empty(v: &SassValue) -> Option<Vec<(SassValue, SassValue)>> {
+    match v {
+        SassValue::Map { entries } => Some(entries.clone()),
+        SassValue::List { items, .. } if items.is_empty() => Some(Vec::new()),
+        _ => None,
     }
-    Ok(map_value(acc))
 }
 
 fn deep_merge(
@@ -244,12 +247,11 @@ fn deep_merge(
     for (k, v) in right {
         match left.iter_mut().find(|(lk, _)| *lk == k) {
             Some(slot) => {
-                slot.1 = match (slot.1.clone(), v) {
-                    (SassValue::Map { entries: a }, SassValue::Map { entries: b }) => {
-                        map_value(deep_merge(a, b))
-                    }
-                    (_, v) => v,
+                let merged = match (as_map_or_empty(&slot.1), as_map_or_empty(&v)) {
+                    (Some(a), Some(b)) => map_value(deep_merge(a, b)),
+                    _ => v.clone(),
                 };
+                slot.1 = merged;
             }
             None => left.push((k, v)),
         }
@@ -259,7 +261,7 @@ fn deep_merge(
 
 /// `map.remove($map, $keys…)`.
 fn remove(c: &super::Call) -> Or<SassValue> {
-    let entries = as_map(c, 0)?;
+    let entries = coerce_map(&c.positional[0], "map")?;
     let keys: Vec<SassValue> = c.positional[1..].to_vec();
     Ok(map_value(
         entries
@@ -275,7 +277,7 @@ fn remove(c: &super::Call) -> Or<SassValue> {
 /// cases. A found nested key replaces its child in place, preserving order
 /// (so `deep-remove((c: (d: e)), c, d)` yields `(c: ())`, not `()`).
 fn deep_remove(c: &super::Call) -> Or<SassValue> {
-    let entries = as_map(c, 0)?;
+    let entries = coerce_map(&c.positional[0], "map")?;
     let keys: Vec<SassValue> = c.positional[1..].to_vec();
     Ok(map_value(deep_remove_entries(entries, &keys)))
 }

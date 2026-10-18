@@ -242,7 +242,7 @@ fn fold_named(
                 if slots[idx].is_some() {
                     return Err(SassError::new(
                         ErrorKind::Builtins,
-                        format!("\"{display}\": ${key} was passed both positionally and by name"),
+                        format!("Argument ${key} was passed both by position and by name."),
                     ));
                 }
                 slots[idx] = Some(val.clone());

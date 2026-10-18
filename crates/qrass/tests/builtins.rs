@@ -578,13 +578,16 @@ fn named_arguments_fold_into_positional_slots() {
 }
 
 /// A named argument mixed with a positional one into the *same* slot is a call
-/// error (golden: "was passed both positionally and by name"), and an unknown
-/// name on a fixed-arity builtin is rejected — but a variadic builtin leaves
-/// undeclared names in the named map instead of erroring.
+/// error (golden: "Argument $x was passed both by position and by name."), and an
+/// unknown name on a fixed-arity builtin is rejected — but a variadic builtin
+/// leaves undeclared names in the named map instead of erroring.
 #[test]
 fn named_argument_conflicts_and_unknowns() {
     let err = eval_err(".a { p: math.abs(-3, $number: 3); }");
-    assert!(err.contains("both positionally and by name"), "{err}");
+    assert!(
+        err.contains("Argument $number was passed both by position and by name."),
+        "{err}"
+    );
     let err = eval_err(".a { p: math.abs($number: 3, $bogus: 1); }");
     assert!(err.contains("No such argument"), "{err}");
 }
