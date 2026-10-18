@@ -198,8 +198,23 @@ fn atan(c: &super::Call) -> Or<SassValue> {
     Ok(from_rad(unitless_arg(c, 0)?.atan()))
 }
 fn atan2(c: &super::Call) -> Or<SassValue> {
-    let y = unitless_arg(c, 0)?;
-    let x = unitless_arg(c, 1)?;
+    // `atan2($y, $x)`: both must be numbers of *compatible* units — dart reduces
+    // `$x` into `$y`'s unit before taking the ratio (so `atan2(1cm, -10mm)` works),
+    // and the result is a unitless angle regardless of the operands' unit. `$y` is
+    // the reference: an incompatible `$x` names `$x: <val> and $y: <minval>`.
+    let (y, uy) = num_as(c, 0, "y")?;
+    let (x, ux) = num_as(c, 1, "x")?;
+    if ux != uy && convert_number(1.0, ux.as_deref(), uy.as_deref()).is_none() {
+        return Err(unit_clash(
+            "x",
+            &c.positional[1],
+            &ux,
+            "y",
+            &c.positional[0],
+            &uy,
+        ));
+    }
+    let x = convert_number(x, ux.as_deref(), uy.as_deref()).unwrap_or(x);
     Ok(from_rad(y.atan2(x)))
 }
 
@@ -272,10 +287,24 @@ fn clamp(c: &super::Call) -> Or<SassValue> {
     let (val, uv) = num_as(c, 1, "number")?;
     let (mx, umx) = num_as(c, 2, "max")?;
     if uv != umn && convert_number(1.0, uv.as_deref(), umn.as_deref()).is_none() {
-        return Err(unit_clash("number", &c.positional[1], &uv, &c.positional[0], &umn));
+        return Err(unit_clash(
+            "number",
+            &c.positional[1],
+            &uv,
+            "min",
+            &c.positional[0],
+            &umn,
+        ));
     }
     if umx != umn && convert_number(1.0, umx.as_deref(), umn.as_deref()).is_none() {
-        return Err(unit_clash("max", &c.positional[2], &umx, &c.positional[0], &umn));
+        return Err(unit_clash(
+            "max",
+            &c.positional[2],
+            &umx,
+            "min",
+            &c.positional[0],
+            &umn,
+        ));
     }
     let num_lt_max = convert_number(val, uv.as_deref(), umx.as_deref()).is_some_and(|x| x < mx);
     let (tv, tu) = if num_lt_max { (val, uv) } else { (mx, umx.clone()) };
@@ -297,18 +326,19 @@ fn num_as(c: &super::Call, i: usize, name: &str) -> Or<(f64, Option<String>)> {
     }
 }
 
-/// The golden's incompatible-units message for `clamp`: `$<name>: <value> and
-/// $min: <min> have incompatible units`, with a `(one has units and the other
-/// doesn't)` suffix when exactly one side is unitless. The reference is always
-/// `$min` (dart reduces both operands to the minimum's unit).
+/// The golden's incompatible-units message: `$<operand>: <value> and $<base>: <base>
+/// have incompatible units`, with a `(one has units and the other doesn't)` suffix
+/// when exactly one side is unitless. `base` is the operand dart reduces to — `$min`
+/// for `clamp`, `$y` for `atan2`.
 fn unit_clash(
-    name: &str,
+    operand: &str,
     value: &SassValue,
     unit: &Option<String>,
-    min: &SassValue,
-    min_unit: &Option<String>,
+    base: &str,
+    base_value: &SassValue,
+    base_unit: &Option<String>,
 ) -> SassError {
-    let suffix = if unit.is_some() != min_unit.is_some() {
+    let suffix = if unit.is_some() != base_unit.is_some() {
         " (one has units and the other doesn't)"
     } else {
         ""
@@ -316,9 +346,9 @@ fn unit_clash(
     SassError::new(
         ErrorKind::Builtins,
         format!(
-            "${name}: {} and $min: {} have incompatible units{suffix}.",
+            "${operand}: {} and ${base}: {} have incompatible units{suffix}.",
             value.to_css(),
-            min.to_css()
+            base_value.to_css()
         ),
     )
 }

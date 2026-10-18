@@ -111,3 +111,41 @@ fn clamp_arity_from_registration() {
         "{msg}"
     );
 }
+
+// ─── math.atan2($y, $x): compatible-unit ratio + $y-referenced errors ──────────
+
+#[test]
+fn atan2_accepts_compatible_units() {
+    // The operands need not be unitless — they are reduced to $y's unit first.
+    assert_eq!(value("math.atan2(1cm, -10mm)"), "135deg");
+    assert_eq!(value("math.atan2($y: 1, $x: -1)"), "135deg");
+}
+
+#[test]
+fn atan2_errors() {
+    let msg = eval_err(".a { p: math.atan2(\"0\", 0); }");
+    assert!(msg.contains("$y: \"0\" is not a number."), "{msg}");
+    let msg = eval_err(".a { p: math.atan2(0, \"0\"); }");
+    assert!(msg.contains("$x: \"0\" is not a number."), "{msg}");
+    // $x is reported against the $y reference.
+    let msg = eval_err(".a { p: math.atan2(1px, 1deg); }");
+    assert!(
+        msg.contains("$x: 1deg and $y: 1px have incompatible units."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: math.atan2(1, 1px); }");
+    assert!(
+        msg.contains("$x: 1px and $y: 1 have incompatible units (one has units and the other doesn't)."),
+        "{msg}"
+    );
+    // Arity (from the 2/Some(2) registration).
+    let msg = eval_err(".a { p: math.atan2(); }");
+    assert!(msg.contains("Missing argument $y."), "{msg}");
+    let msg = eval_err(".a { p: math.atan2(0); }");
+    assert!(msg.contains("Missing argument $x."), "{msg}");
+    let msg = eval_err(".a { p: math.atan2(0, 0, 0); }");
+    assert!(
+        msg.contains("Only 2 arguments allowed, but 3 were passed."),
+        "{msg}"
+    );
+}

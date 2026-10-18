@@ -553,4 +553,16 @@
 #     builtins.rs).
 # sass-spec 7509 -> 7522 (+13: all math/clamp cases now 26/26), 0 regressions,
 # full test suite green (369 passed).
+#
+# Round 44: `math.atan2($y, $x)` argument contract. It had gone through
+#     `unitless_arg`, rejecting ANY unit, so `atan2(1cm, -10mm)` (a compatible-unit
+#     ratio the goldens expect → 135deg) errored and the 5 error-text cases mismatched.
+#     Rewrote to `num_as` type checks (`$y/$x: <value> is not a number.`) + a
+#     compatibility check with `$y` as the reference (`$x: <val> and $y: <val> have
+#     incompatible units[. clause]`), then reduces $x into $y's unit before the ratio.
+#     Generalized `unit_clash` to take a named base (`min` for clamp, `y` for atan2).
+#     Arity already came from the 2/Some(2) registration. Tests appended to
+#     tests/math_errors.rs.
+# sass-spec 7522 -> 7528 (+6: all math/atan2/arguments cases now 10/10),
+# 0 regressions, full test suite green (371 passed).
 68.6
