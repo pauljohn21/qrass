@@ -555,3 +555,17 @@ fn rgb_none_channel_computes_not_passes_through() {
     assert_eq!(value("rgb(255, none, 255)"), "rgb(255, 0, 255)");
     assert_eq!(value("rgb(none, none, none)"), "rgb(0, 0, 0)");
 }
+
+// ─── round 29: bare `%` parses as a value token ──────────────────────────────
+
+#[test]
+fn bare_percent_is_a_value_token() {
+    // A lone `%` is plain-CSS passthrough (the `attr(c, %)` type and `b: %`),
+    // distinct from a `50%` percentage (which lexes as a single Number-with-unit).
+    assert_eq!(value("%"), "%");
+    assert_eq!(value("c %"), "c %");
+    assert_eq!(value("% c"), "% c");
+    assert_eq!(value("c(%)"), "c(%)");
+    // combined with the round-28 rgb() passthrough: an unresolvable attr channel.
+    assert_eq!(value("rgb(attr(c, %), 2, 3)"), "rgb(attr(c, %), 2, 3)");
+}

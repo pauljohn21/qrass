@@ -102,7 +102,16 @@ impl<'a> E<'a> {
                 | Token::Ident(_)
                 | Token::Placeholder(_)
                 | Token::Ampersand
-                    | Token::Punct(Punct::LParen | Punct::LBracket | Punct::Minus | Punct::Plus)
+                    | Token::Punct(
+                        Punct::LParen
+                            | Punct::LBracket
+                            | Punct::Minus
+                            | Punct::Plus
+                            // A lone `%` is a value token (plain-CSS `attr(c, %)`
+                            // type, `b: %`); `%` is not an infix operator here (a
+                            // `50%` percentage lexes as a single Number-with-unit).
+                            | Punct::Percent,
+                    )
             )
         )
     }
@@ -263,6 +272,7 @@ impl<'a> E<'a> {
             }),
             Token::Ampersand => Ok(Expr::Literal(Literal::Ident("&".into()))),
             Token::Placeholder(p) => Ok(Expr::Literal(Literal::Ident(format!("%{p}")))),
+            Token::Punct(Punct::Percent) => Ok(Expr::Literal(Literal::Ident("%".into()))),
             Token::Variable(name) => Ok(Expr::Variable(name, self.span(start))),
             Token::Ident(name) => self.ident_value(name, start),
             Token::Punct(Punct::LParen) => self.paren_group(start),

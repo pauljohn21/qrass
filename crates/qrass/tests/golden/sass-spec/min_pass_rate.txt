@@ -354,4 +354,15 @@
 # that the A/B diff caught. Guarded by is_channel_value (Number | none => compute).
 # A/B: 0 regressions.
 # 7077 -> 7184 passed (+107, 7184/10961 = 65.54%).
-65.5
+# Round 29: parse a lone `%` as a value token. The expression parser rejected a
+# standalone Percent punctuator ("unexpected token in value: Punct(Percent)"),
+# breaking plain-CSS `b: %`, `% c`, `c %`, `c(%)` and the `attr(c, %)` type used
+# inside color constructors (rgb/hsl/lab). Added Punct::Percent to starts_value +
+# primary as Literal::Ident("%"), so it round-trips as an identifier. A `50%`
+# percentage already lexes as a single Number-with-unit (unaffected), and `%` is
+# not an infix operator in next_binop (Sass modulo comes only from math.modulo),
+# so this cannot shadow anything that previously parsed. Combined with the
+# round-28 rgb() passthrough, `rgb(attr(c, %), 2, 3)` now emits verbatim.
+# A/B: 0 regressions.
+# 7184 -> 7214 passed (+30, 7214/10961 = 65.82%).
+65.8
