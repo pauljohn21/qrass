@@ -607,4 +607,12 @@
 #     encoded the old unquoted result. Tests in tests/string_quote_case.rs.
 # sass-spec 7570 -> 7581 (+11: to-upper/lower-case 18/18 + a global/string bonus),
 # 0 regressions, full test suite green (380 passed).
+#
+# Round 48 (compliance refactor, no rate change): split the `SassValue` numeric
+#     layer out of the 533-line `value.rs` (crossed the 500-line budget in round
+#     38) into `src/value_number.rs` (`format_number`/`number_to_css`/
+#     `convert_number`), re-exported from `crate::value` so all call sites are
+#     unchanged. `value.rs` now 444 lines. hrx byte-identical 7581/3380/445, 0
+#     regressions. (selector_super.rs 505 and tests/builtins.rs 700 remain over
+#     budget for follow-up splits.)
 69.1

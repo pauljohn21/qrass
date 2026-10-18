@@ -46,6 +46,7 @@ pub mod selector_extend;
 pub mod selector_extend_pseudo;
 pub mod selector_extend_weave;
 pub mod value;
+mod value_number;
 
 use error::SassError;
 
