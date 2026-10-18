@@ -248,6 +248,35 @@ fn math_hypot_unit_clamp_and_predicates() {
     assert_eq!(value("math.compatible(1px, 1s)"), "false");
 }
 
+#[test]
+fn math_hypot_errors() {
+    // A non-number reads the value verbatim (a quoted string keeps its quotes).
+    let msg = eval_err(".a { p: math.hypot(\"0\", 1px); }");
+    assert!(msg.contains("\"0\" is not a number."), "{msg}");
+    // Incompatible units name each argument against $numbers[1] (1-based).
+    let msg = eval_err(".a { p: math.hypot(1deg, 1px, 1turn); }");
+    assert!(
+        msg.contains("$numbers[2]: 1px and $numbers[1]: 1deg have incompatible units."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: math.hypot(1deg, 1turn, 1px); }");
+    assert!(
+        msg.contains("$numbers[3]: 1px and $numbers[1]: 1deg have incompatible units."),
+        "{msg}"
+    );
+    // One-unitless / one-not adds the parenthetical.
+    let msg = eval_err(".a { p: math.hypot(0px, 1, 2); }");
+    assert!(
+        msg.contains(
+            "$numbers[2]: 1 and $numbers[1]: 0px have incompatible units (one has units and the other doesn't)."
+        ),
+        "{msg}"
+    );
+    // Zero arguments raise dart's own wording (min lowered to 0 so the fn guards).
+    let msg = eval_err(".a { p: math.hypot(); }");
+    assert!(msg.contains("At least one argument must be passed."), "{msg}");
+}
+
 // ─── 8.2 color.* ──────────────────────────────────────────────────────────────
 
 #[test]

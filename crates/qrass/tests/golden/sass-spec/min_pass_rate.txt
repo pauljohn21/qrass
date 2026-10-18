@@ -496,4 +496,17 @@
 #     and a lone argument raises "Expected $args to contain a key."
 # sass-spec 7459 -> 7473 (+14: all previously-failing core_functions/map/merge
 # cases now 23/23), 0 regressions, full test suite green.
-68.1
+#
+# Round 40: `math.hypot($numbers…)` golden-shaped error contract. It had used the
+#     generic `num` coercion (`expected a number, given string`) and a flat
+#     `$numbers: incompatible units`, so all 14 error cases mismatched. Rewritten
+#     to check each argument left-to-right: a non-number reads `<value> is not a
+#     number.` (a quoted string keeps its quotes), and a unit clash reads
+#     `$numbers[i]: <value> and $numbers[1]: <first> have incompatible units`
+#     (1-based, always against the first argument) with a `(one has units and the
+#     other doesn't)` suffix when exactly one side is unitless. min lowered 1 -> 0
+#     so a zero-arg call raises dart's `At least one argument must be passed.`
+#     instead of the generic arity wording.
+# sass-spec 7473 -> 7487 (+14: all math/hypot cases now 19/19), 0 regressions,
+# full test suite green.
+68.3

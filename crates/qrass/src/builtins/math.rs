@@ -34,7 +34,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("math", "acos", 1, Some(1), &["number"], acos);
     r.nsp("math", "atan", 1, Some(1), &["number"], atan);
     r.nsp("math", "atan2", 2, Some(2), &["y", "x"], atan2);
-    r.ns("math", "hypot", 1, None, hypot);
+    r.ns("math", "hypot", 0, None, hypot);
     r.nsp("math", "clamp", 3, Some(3), &["min", "number", "max"], clamp);
     r.nsp("math", "unit", 1, Some(1), &["number"], unit);
     r.nsp("math", "is-unitless", 1, Some(1), &["number"], is_unitless);
@@ -204,16 +204,55 @@ fn atan2(c: &super::Call) -> Or<SassValue> {
 }
 
 /// `math.hypot($numbers...)`: square root of the sum of squares, normalizing
-/// every argument into the first argument's unit.
+/// every argument into the first argument's unit. Errors mirror the goldens: a
+/// non-number reads `<value> is not a number.`, and a unit clash reads
+/// `$numbers[i]: <value> and $numbers[1]: <first> have incompatible units[. (one
+/// has units and the other doesn't)]` — the reference is always the first
+/// argument and the earliest clash (scanned left to right) is reported.
 fn hypot(c: &super::Call) -> Or<SassValue> {
-    let (v0, u0) = num(c, 0)?;
-    let mut sum = v0 * v0;
-    for i in 1..c.positional.len() {
-        let (v, u) = num(c, i)?;
-        let v = convert_number(v, u.as_deref(), u0.as_deref()).ok_or_else(|| {
-            SassError::new(ErrorKind::Builtins, "$numbers: incompatible units")
-        })?;
-        sum += v * v;
+    let mut vals: Vec<(f64, Option<String>)> = Vec::with_capacity(c.positional.len());
+    if c.positional.is_empty() {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "At least one argument must be passed.",
+        ));
+    }
+    for (i, arg) in c.positional.iter().enumerate() {
+        let SassValue::Number { value, unit } = arg else {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("{} is not a number.", arg.to_css()),
+            ));
+        };
+        if i > 0 {
+            let (_, u0) = &vals[0];
+            let compatible = unit == u0
+                || convert_number(1.0, unit.as_deref(), u0.as_deref()).is_some();
+            if !compatible {
+                let suffix = if unit.is_some() != u0.is_some() {
+                    " (one has units and the other doesn't)"
+                } else {
+                    ""
+                };
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!(
+                        "$numbers[{}]: {} and $numbers[1]: {} have incompatible units{}.",
+                        i + 1,
+                        arg.to_css(),
+                        c.positional[0].to_css(),
+                        suffix
+                    ),
+                ));
+            }
+        }
+        vals.push((*value, unit.clone()));
+    }
+    let u0 = vals[0].1.clone();
+    let mut sum = 0.0f64;
+    for (v, u) in &vals {
+        let cv = convert_number(*v, u.as_deref(), u0.as_deref()).unwrap_or(*v);
+        sum += cv * cv;
     }
     Ok(SassValue::Number {
         value: sum.sqrt(),
