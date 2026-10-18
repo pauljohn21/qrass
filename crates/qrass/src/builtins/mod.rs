@@ -19,6 +19,7 @@ use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 pub(crate) mod color;
+pub(crate) mod color_gamut;
 pub(crate) mod color_legacy;
 pub(crate) mod color_ops;
 pub(crate) mod global;

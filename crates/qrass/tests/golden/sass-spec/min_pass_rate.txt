@@ -699,4 +699,17 @@
 #     for the too-many-args case. Tests in string_quote_case.rs.
 # sass-spec 7611 -> 7614 (+3: all string/unique_id cases), 0 regressions, full
 # test suite green (388 passed), clippy -D warnings green.
-69.4
+#
+# Color gamut round W1: implement `color.is-in-gamut($color, $space: null)` (was
+#     entirely unregistered -> every call a passthrough). New `builtins/
+#     color_gamut.rs`: resolve `$space` (default the color's own space, legacy ->
+#     srgb), express the channels in it via the existing hub `convert`, and check
+#     each against `SPACES[].channels[].lo/hi` (1e-4 tolerance); `none` channels are
+#     never out of gamut and alpha is unchecked. Relies on change() storing
+#     out-of-range channels verbatim. Kept out of color.rs (493/500) as a sibling
+#     module; registered with one nsp line. Residual is_in_gamut failures are
+#     `$color`/`$space` error wording (shared color_at, risky) + one oklab->lch
+#     convert-precision edge (W4). Tests in tests/color_gamut.rs.
+# sass-spec 7614 -> 7640 (+26: is_in_gamut 0 -> 26/32), 0 regressions, full test
+# suite green (389 passed), clippy -D warnings green.
+69.7

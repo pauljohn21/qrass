@@ -26,6 +26,14 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("color", "space", 1, Some(1), &["color"], space);
     r.nsp("color", "is-missing", 2, Some(2), &["color", "channel"], is_missing);
     r.nsp("color", "to-space", 1, None, &["color", "space"], to_space);
+    r.nsp(
+        "color",
+        "is-in-gamut",
+        1,
+        Some(2),
+        &["color", "space"],
+        super::color_gamut::is_in_gamut,
+    );
     r.nsp("color", "adjust", 1, None, &["color"], |c| transform(c, Mode::Adjust));
     r.nsp("color", "scale", 1, None, &["color"], |c| transform(c, Mode::Scale));
     r.nsp("color", "change", 1, None, &["color"], |c| transform(c, Mode::Change));
