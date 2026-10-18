@@ -161,30 +161,47 @@ fn resolve_index(len: usize, raw: f64) -> Option<usize> {
     }
 }
 
+/// Validate + resolve the `$n` index argument shared by `nth`/`set_nth`: a
+/// non-number, `0`, or an out-of-range index each raise dart's `$n:`-prefixed
+/// message. Returns the resolved in-range (0-based) position otherwise.
+fn list_index(c: &super::Call, len: usize) -> Or<usize> {
+    let arg = &c.positional[1];
+    let SassValue::Number { value: n, .. } = arg else {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            format!("$n: {} is not a number.", arg.to_css()),
+        ));
+    };
+    if *n == 0.0 {
+        return Err(SassError::new(
+            ErrorKind::Builtins,
+            "$n: List index may not be 0.",
+        ));
+    }
+    resolve_index(len, *n).ok_or_else(|| {
+        SassError::new(
+            ErrorKind::Builtins,
+            format!(
+                "$n: Invalid index {} for a list with {} elements.",
+                arg.to_css(),
+                len
+            ),
+        )
+    })
+}
+
 fn nth(c: &super::Call) -> Or<SassValue> {
     let items = items_of(&c.positional[0]);
-    let (n, _) = num(c, 1)?;
-    resolve_index(items.len(), n)
-        .and_then(|i| items.get(i).cloned())
-        .ok_or_else(|| {
-            SassError::new(
-                ErrorKind::Builtins,
-                format!(
-                    "{n} is not a valid index in a list of {} items",
-                    items.len()
-                ),
-            )
-        })
+    let i = list_index(c, items.len())?;
+    Ok(items[i].clone())
 }
 
 fn set_nth(c: &super::Call) -> Or<SassValue> {
     let mut items = items_of(&c.positional[0]);
     let sep = sep_of(&c.positional[0]);
     let bracketed = bracketed_of(&c.positional[0]);
-    let (n, _) = num(c, 1)?;
-    if let Some(i) = resolve_index(items.len(), n) {
-        items[i] = c.positional[2].clone();
-    }
+    let i = list_index(c, items.len())?;
+    items[i] = c.positional[2].clone();
     Ok(list_br(items, sep, bracketed))
 }
 
@@ -239,14 +256,6 @@ fn zip(c: &super::Call) -> Or<SassValue> {
         })
         .collect();
     Ok(list(out, ListSep::Comma))
-}
-
-fn num(c: &super::Call, i: usize) -> Or<(f64, Option<String>)> {
-    match c.positional.get(i) {
-        Some(SassValue::Number { value, unit }) => Ok((*value, unit.clone())),
-        Some(other) => Err(super::type_err("list", "index", "a number", other)),
-        None => Err(SassError::new(ErrorKind::Builtins, "expected a number")),
-    }
 }
 
 fn str_value(s: &str) -> SassValue {

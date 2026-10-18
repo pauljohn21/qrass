@@ -666,4 +666,16 @@
 #     A/B confirmed 0 regressions.
 # sass-spec 7594 -> 7601 (+7: selector/parse/selector #8/#9/#10/#11/#14/#15/#24),
 # 0 regressions, full test suite green (383 passed).
-69.3
+#
+# Round 53: `list.nth` / `list.set-nth` index validation. Both resolved the index
+#     via the generic `num` (wrong type wording) with a non-dart out-of-range
+#     message and no zero guard, and set_nth silently no-op'd on a bad index.
+#     Extracted `list_index` (shared) raising dart's `$n:`-prefixed messages —
+#     `$n: <v> is not a number.`, `$n: List index may not be 0.`, and
+#     `$n: Invalid index {n} for a list with {len} elements.` — so set-nth now
+#     rejects bad indices too. The now-unused list-local `num` and the crate-wide
+#     `type_err` (its only caller) were deleted, keeping `clippy -D warnings` green.
+#     Tests in tests/list_index.rs.
+# sass-spec 7601 -> 7609 (+8: list/nth #13-16 + list/set_nth #13-16), 0
+# regressions, full test suite green (385 passed), clippy -D warnings green.
+69.4

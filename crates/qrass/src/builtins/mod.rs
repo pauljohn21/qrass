@@ -329,13 +329,3 @@ impl<'a> Call<'a> {
     }
 }
 
-/// Report a value of the wrong type for `fn_name`'s `$what` argument.
-pub(crate) fn type_err(fn_name: &str, what: &str, expected: &str, v: &SassValue) -> SassError {
-    SassError::new(
-        ErrorKind::Builtins,
-        format!(
-            "\"{fn_name}\": ${what} must be {expected} (given {})",
-            v.type_name()
-        ),
-    )
-}
