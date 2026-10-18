@@ -26,6 +26,7 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("string", "insert", 3, Some(3), &["string", "insert", "index"], insert);
     r.nsp("string", "to-upper-case", 1, Some(1), &["string"], upper);
     r.nsp("string", "to-lower-case", 1, Some(1), &["string"], lower);
+    r.nsp("string", "unique-id", 0, Some(0), &["string"], unique_id);
     r.def("unquote", 1, Some(1), unquote);
     r.def("quote", 1, Some(1), quote);
     r.def("str-length", 1, Some(1), length);
@@ -33,6 +34,36 @@ pub(crate) fn register(r: &mut Registry) {
     r.def("str-index", 2, Some(2), index);
     r.def("to-upper-case", 1, Some(1), upper);
     r.def("to-lower-case", 1, Some(1), lower);
+    r.def("unique-id", 0, Some(0), unique_id);
+}
+
+/// `string.unique-id()`: a fresh CSS identifier, unique per call within the
+/// process. dart draws a random one; a monotonic base-36 counter with a `u`
+/// prefix guarantees the two properties the goldens actually check — every id
+/// distinct, and every id a valid identifier (so `.#{id}` parses as a class).
+fn unique_id(_c: &super::Call) -> Or<SassValue> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    Ok(SassValue::Str {
+        text: format!("u{}", base36(n)),
+        quoted: false,
+    })
+}
+
+/// Lowercase base-36 rendering of `n` (empty-safe). Digits then letters, so the
+/// result is a valid CSS identifier body.
+fn base36(mut n: u64) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if n == 0 {
+        return "0".to_string();
+    }
+    let mut s = String::new();
+    while n > 0 {
+        s.push(DIGITS[(n % 36) as usize] as char);
+        n /= 36;
+    }
+    s.chars().rev().collect()
 }
 
 /// The string content of an argument (CSS text for non-strings).

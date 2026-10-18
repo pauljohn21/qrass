@@ -690,4 +690,13 @@
 #     need an arity() wording change (cross-cutting) and stay for a later round.
 # sass-spec 7609 -> 7611 (+2: join/error $separator type+value), 0 regressions,
 # full test suite green (387 passed), clippy -D warnings green.
+#
+# Round 55: register `string.unique-id` (absent entirely — the `string.` namespace
+#     form was never wired). dart draws a random id; the goldens only check that
+#     every id is distinct and parses as a CSS identifier, so a monotonic
+#     lock-free `AtomicU64` counter rendered `u`+base36 satisfies both, and the
+#     0-arg arity registration yields `Only 0 arguments allowed, but 1 was passed.`
+#     for the too-many-args case. Tests in string_quote_case.rs.
+# sass-spec 7611 -> 7614 (+3: all string/unique_id cases), 0 regressions, full
+# test suite green (388 passed), clippy -D warnings green.
 69.4

@@ -66,3 +66,25 @@ fn case_functions_reject_non_strings() {
     let msg = eval_err(".a { p: string.to-lower-case(1); }");
     assert!(msg.contains("$string: 1 is not a string."), "{msg}");
 }
+
+#[test]
+fn unique_id_is_distinct_and_valid() {
+    // Two calls in one run produce distinct `u…` identifiers (valid as a class).
+    let out = css(".a { p: string.unique-id(); q: string.unique-id(); }");
+    let grab = |k: &str| {
+        out.split(&format!("{k}: "))
+            .nth(1)
+            .and_then(|s| s.split(';').next())
+            .unwrap_or("")
+            .to_string()
+    };
+    let (p, q) = (grab("p"), grab("q"));
+    assert!(p.starts_with('u') && q.starts_with('u'), "{out}");
+    assert_ne!(p, q, "{out}");
+    // Takes zero arguments.
+    let msg = eval_err(".a { p: string.unique-id(c); }");
+    assert!(
+        msg.contains("Only 0 arguments allowed, but 1 was passed."),
+        "{msg}"
+    );
+}
