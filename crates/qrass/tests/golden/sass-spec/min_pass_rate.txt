@@ -712,4 +712,19 @@
 #     convert-precision edge (W4). Tests in tests/color_gamut.rs.
 # sass-spec 7614 -> 7640 (+26: is_in_gamut 0 -> 26/32), 0 regressions, full test
 # suite green (389 passed), clippy -D warnings green.
-69.7
+#
+# Color gamut round W4a (redirected by evidence from a convert rewrite to the
+#     higher-yield, lower-risk constructor arg-validation): modern `lab()/lch()/
+#     oklab()/oklch()/hsl()/hwb()` literals previously fell through to plain-CSS
+#     passthrough whenever a channel did not parse, so malformed channels wrongly
+#     succeeded. `eval_color4.rs` now, only when a 3-channel space-list has a
+#     CONCRETE-but-wrong channel, raises dart's `$<channel>: Expected <v> to have
+#     unit "%" or no units.` (Number with a bad unit) and `$channels: Expected
+#     <name> channel to be a number, was <v>.` (non-number). A `var()`/`calc()`/
+#     … symbolic channel (`is_symbolic`, the round-28 rgb() lesson) still falls
+#     through, which is what kept the passthrough goldens green. The channel-list
+#     shape/count/slash errors and to-gamut/local-minde remain (need the same
+#     symbolic boundary at other fall-through points).
+# sass-spec 7640 -> 7669 (+29: lab/lch/oklab/oklch/hsl/hwb/color channel errors),
+# 0 regressions, full test suite green (392 passed), clippy -D warnings green.
+69.9

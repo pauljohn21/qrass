@@ -6,9 +6,25 @@
 //! Color 4 literal falls through untouched to the plain-CSS passthrough.
 
 use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep};
+use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
 use super::{Ev, EvalState};
+
+/// A value that must keep falling through to plain-CSS passthrough rather than
+/// becoming a Color 4 argument error: a `var()`/`calc()`/`min()`/`env()`/… symbolic
+/// construct (the round-28 rgb() lesson — an unresolvable channel is CSS, not a
+/// Sass color argument). `none` and concrete numbers/strings are *not* symbolic.
+fn is_symbolic(v: &SassValue) -> bool {
+    match v {
+        SassValue::Str { text, .. } => {
+            ["var(", "calc(", "min(", "max(", "clamp(", "env(", "url(", "attr("]
+                .iter()
+                .any(|f| text.contains(f))
+        }
+        _ => false,
+    }
+}
 
 /// Coerce an evaluated component into a channel's canonical scale. The outer
 /// `None` marks a value that can never be a channel (the caller then lets the
@@ -147,7 +163,26 @@ impl EvalState {
         for (idx, (v, ch)) in comps.iter().zip(&space.channels).enumerate() {
             match channel_value(v, ch) {
                 Some(cv) => parsed[idx] = cv,
-                None => return Ok(None),
+                // A symbolic CSS value keeps the passthrough; a concrete-but-wrong
+                // channel raises dart's argument error (per-channel unit vs type).
+                None if is_symbolic(v) => return Ok(None),
+                None => {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        match v {
+                            SassValue::Number { .. } => format!(
+                                "${}: Expected {} to have unit \"%\" or no units.",
+                                ch.name,
+                                v.to_css()
+                            ),
+                            _ => format!(
+                                "$channels: Expected {} channel to be a number, was {}.",
+                                ch.name,
+                                v.to_css()
+                            ),
+                        },
+                    ));
+                }
             }
         }
         let mut alpha_missing = false;
