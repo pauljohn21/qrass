@@ -259,7 +259,7 @@ fn simple_at(p: &Parser, name: String, rest: &[Spanned], span: Span) -> Or<Stmt>
             }))
         }
         "use" => super::parser_module::build_use(p, rest, span),
-        "forward" => super::parser_module::build_forward(p, rest, span),
+        "forward" => super::parser_forward::build_forward(p, rest, span),
         "warn" | "error" | "debug" => {
             let level = match name.as_str() {
                 "warn" => DiagLevel::Warn,

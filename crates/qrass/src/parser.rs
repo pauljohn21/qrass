@@ -39,6 +39,8 @@ mod parser_args;
 mod parser_if;
 #[path = "parser_if_raw.rs"]
 mod parser_if_raw;
+#[path = "parser_forward.rs"]
+mod parser_forward;
 #[path = "parser_module.rs"]
 mod parser_module;
 pub(crate) use parser_module::check_module_placement;
