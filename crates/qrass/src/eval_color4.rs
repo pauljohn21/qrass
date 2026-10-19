@@ -190,6 +190,62 @@ impl EvalState {
                 }
             }
         }
+        // The `color(…)` wrapper takes one `$description` argument and dart
+        // rejects malformed shapes the same way, with the `$description:`
+        // prefix (round-60 color/error goldens). Relative syntax
+        // (`color(from …)`) is again exempt; a plain-CSS `color(…)` filter is
+        // claimed by the passthrough layer before this code ever runs.
+        let wstrict = wrapper && !relative_anchor(call.args.first());
+        if wstrict {
+            if call.args.is_empty() {
+                return Err(shape_err("Missing argument $description.".into()));
+            }
+            // A lone registered space name is a zero-channel description.
+            if let Some(Arg::Positional(Expr::Literal(crate::ast_expr::Literal::Ident(word)))) =
+                call.args.first()
+                && let Some(space) = crate::color4::lookup(word)
+            {
+                return Err(shape_err(format!(
+                    "$description: The {} color space has 3 channels but {word} has 0.",
+                    space.name
+                )));
+            }
+            if let Some(Arg::Positional(e)) = call.args.first() {
+                match e {
+                    Expr::List { items, .. } if items.is_empty() => {
+                        return Err(shape_err(
+                            "$description: Color component list may not be empty.".into(),
+                        ));
+                    }
+                    Expr::List { bracketed: true, .. } => {
+                        let v = self.eval_expr(e)?;
+                        return Err(shape_err(format!(
+                            "$description: Expected an unbracketed list, was {}",
+                            v.to_css()
+                        )));
+                    }
+                    Expr::List { sep: ListSep::Comma, .. } => {
+                        let v = self.eval_expr(e)?;
+                        return Err(shape_err(format!(
+                            "$description: Expected a space- or slash-separated list, was ({})",
+                            v.to_css()
+                        )));
+                    }
+                    Expr::FunctionCall(inner)
+                        if inner.name == "slash" || inner.name == "list.slash" =>
+                    {
+                        let n = inner.args.len();
+                        if n != 2 {
+                            return Err(shape_err(format!(
+                                "$description: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                                if n == 1 { "was" } else { "were" }
+                            )));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         // The channel source is either a single positional Space list, the
         // legacy `$description:` named spelling, or a `list.slash(<space list>,
         // <alpha>)` wrapper that flattens to the same shape.
@@ -245,8 +301,30 @@ impl EvalState {
             match self.eval_expr(first)? {
                 SassValue::Str { text, quoted: false } => match crate::color4::lookup(&text) {
                     Some(s) => s,
+                    // A concrete unknown word is dart's error, not a CSS
+                    // passthrough (`Unknown color space "foo".`); symbolic
+                    // constructs keep falling through.
+                    None if wstrict && !text.contains('(') => {
+                        return Err(shape_err(format!(
+                            "$description: Unknown color space \"{text}\"."
+                        )));
+                    }
                     None => return Ok(None),
                 },
+                // A quoted space slot is the relative-syntax spelling dart
+                // rejects verbatim; a number is simply not a string.
+                SassValue::Str { .. } if wstrict => {
+                    let shown = self.eval_expr(first)?.to_css();
+                    return Err(shape_err(format!(
+                        "$description: Expected {shown} to be an unquoted string."
+                    )));
+                }
+                v @ SassValue::Number { .. } if wstrict && !is_symbolic(&v) => {
+                    return Err(shape_err(format!(
+                        "$description: {} is not a string.",
+                        v.to_css()
+                    )));
+                }
                 _ => return Ok(None),
             }
         } else {
@@ -269,25 +347,40 @@ impl EvalState {
             }
         }
         if comps.len() != 3 {
-            // The four bare names reach here only with a 4+ element space list
-            // (shorter lists were rejected by the structural guards above); dart
-            // reports the surplus as a channel-count error over the whole list.
-            if bare4 {
-                let shown = comps
-                    .iter()
-                    .map(|v| v.to_css())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let space = crate::color4::lookup(&call.name).expect("bare4 checked");
+            // The four bare names and the wrapper reach here only with a
+            // wrong-length space list (shorter lists were rejected by the
+            // structural guards above); dart reports the mismatch as a
+            // channel-count error over the whole list — the wrapper's copy
+            // shows the space name as the first element.
+            if (bare4 || wstrict) && !comps.iter().any(is_symbolic) {
+                let shown = if wstrict {
+                    let mut all = vec![self.eval_expr(items.first().expect("wrapper has items"))?.to_css()];
+                    all.extend(comps.iter().map(|v| v.to_css()));
+                    all.join(" ")
+                } else {
+                    comps
+                        .iter()
+                        .map(|v| v.to_css())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                let space = if wrapper {
+                    space.name
+                } else {
+                    crate::color4::lookup(&call.name).expect("bare4 checked").name
+                };
+                let prefix = if wstrict { "description" } else { "channels" };
                 return Err(shape_err(format!(
-                    "$channels: The {} color space has 3 channels but ({shown}) has {}.",
-                    space.name,
+                    "${prefix}: The {space} color space has 3 channels but ({shown}) has {}.",
                     comps.len()
                 )));
             }
             return Ok(None);
         }
         let alpha_expr = alpha_expr.or(extra_alpha);
+        // dart names the failing argument differently per spelling: the wrapper
+        // reports its `$description` argument, bare forms the `$channels`.
+        let arg_name = if wrapper { "description" } else { "channels" };
         let mut parsed: [Option<f64>; 3] = [None, None, None];
         for (idx, (v, ch)) in comps.iter().zip(&space.channels).enumerate() {
             match channel_value(v, ch) {
@@ -312,7 +405,7 @@ impl EvalState {
                                 v.to_css()
                             ),
                             _ => format!(
-                                "$channels: Expected {} channel to be a number, was {}.",
+                                "${arg_name}: Expected {} channel to be a number, was {}.",
                                 ch.name,
                                 v.to_css()
                             ),
@@ -349,7 +442,7 @@ impl EvalState {
                         return Ok(None);
                     }
                     return Err(shape_err(format!(
-                        "$channels: {} is not a number.",
+                        "${arg_name}: {} is not a number.",
                         v.to_css()
                     )));
                 }

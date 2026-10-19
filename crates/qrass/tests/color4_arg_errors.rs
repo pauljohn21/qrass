@@ -144,3 +144,71 @@ fn relative_color_syntax_still_passes_through() {
     let out = css(".a { p: lab(list.slash(from #aaa r g b, 25%)); }");
     assert!(out.contains("list.slash") || out.contains("lab(from"), "{out}");
 }
+
+// ─── color() wrapper guards (round 61, $description: prefix) ─────────────────
+
+#[test]
+fn color_wrapper_shape_errors() {
+    let msg = eval_err(".a { p: color([srgb 0.1 0.2 0.3]); }");
+    assert!(
+        msg.contains("$description: Expected an unbracketed list, was [srgb 0.1 0.2 0.3]"),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color((srgb, 0.1, 0.2, 0.3)); }");
+    assert!(
+        msg.contains("$description: Expected a space- or slash-separated list, was (srgb, 0.1, 0.2, 0.3)"),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color(list.slash(srgb 0.1, 0.2, 0.3)); }");
+    assert!(
+        msg.contains("$description: Only 2 slash-separated elements allowed, but 3 were passed."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color(); }");
+    assert!(msg.contains("Missing argument $description."), "{msg}");
+}
+
+#[test]
+fn color_wrapper_space_and_count_errors() {
+    let msg = eval_err(".a { p: color(foo 1 2 3); }");
+    assert!(
+        msg.contains("$description: Unknown color space \"foo\"."),
+        "{msg}"
+    );
+    let msg = eval_err(r#".a { p: color("from" #aaa srgb r g b); }"#);
+    assert!(
+        msg.contains("$description: Expected \"from\" to be an unquoted string."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color(1 2 3); }");
+    assert!(msg.contains("$description: 1 is not a string."), "{msg}");
+    let msg = eval_err(".a { p: color(srgb); }");
+    assert!(
+        msg.contains("$description: The srgb color space has 3 channels but srgb has 0."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color(srgb 0.1 0.2); }");
+    assert!(
+        msg.contains("$description: The srgb color space has 3 channels but (srgb 0.1 0.2) has 2."),
+        "{msg}"
+    );
+    // Channel and alpha messages carry the `$description:` prefix here…
+    let msg = eval_err(".a { p: color(srgb c 0.2 0.3); }");
+    assert!(
+        msg.contains("$description: Expected red channel to be a number, was c."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: color(list.slash(srgb 0.1 0.2 0.3, c)); }");
+    assert!(msg.contains("$description: c is not a number."), "{msg}");
+}
+
+#[test]
+fn color_wrapper_multi_argument_var_still_passes_through() {
+    // var() substitutes before parsing and may occupy several channel slots —
+    // a wrong-looking count with a symbolic component is CSS, not a dart error
+    // (regression pin for the special_functions #8/#9 first-cut regressions).
+    let out = css(".a { p: color(srgb var(--foo) 0.3); }");
+    assert!(out.contains("color(srgb var(--foo) 0.3)"), "{out}");
+    let out = css(".a { p: color(srgb 0.1 var(--foo)); }");
+    assert!(out.contains("color(srgb 0.1 var(--foo))"), "{out}");
+}

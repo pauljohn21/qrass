@@ -744,4 +744,19 @@
 #     invert error clusters keep their own goldens for later rounds.
 # sass-spec 7669 -> 7737 (+68: lab/lch/oklab/oklch error+alpha sections), 0
 # regressions, full test suite green (407 passed), clippy -D warnings green.
-70.5
+#
+# Round 61: the same structural guards for the `color()` wrapper (round-60 shape
+#     vocabulary with the golden's `$description:` prefix — arity, bracketed /
+#     comma / empty / `list.slash` count, channel count incl. the zero-channel
+#     `color(srgb)` spelling), plus space-slot validation: unknown concrete space
+#     -> `Unknown color space "foo".` (overturns the pre-round-61 passthrough
+#     assumption — the old unit test was updated golden-first), quoted ->
+#     `Expected "from" to be an unquoted string.`, number -> `1 is not a string.`,
+#     symbolic still falls through. The count error exempts lists containing a
+#     multi-argument `var()` (special_functions #8/#9 first-cut regressions,
+#     caught by A/B, pinned in tests/color4_arg_errors.rs). Channel/alpha "is not
+#     a number" messages are prefix-contextualized ($channels bare / $description
+#     wrapper). eval_color4.rs now 473 lines — next edit there must split it.
+# sass-spec 7737 -> 7755 (+18: all color/color/error sections that were failing),
+# 0 regressions, full test suite green (410 passed), clippy -D warnings green.
+70.7

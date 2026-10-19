@@ -79,10 +79,24 @@ fn legacy_comma_forms_keep_old_serialization() {
     assert!(css.contains("rgb(13, 110, 253)"), "{css}");
 }
 
+/// An unknown *concrete* space name is dart's `$description:` error, not a
+/// plain-CSS passthrough (`color/error` goldens #20/#23/#24 — this replaces the
+/// earlier passthrough assumption the pre-round-61 unit test pinned). Symbolic
+/// constructs still fall through untouched.
 #[test]
-fn unknown_color_space_stays_plain_css() {
-    let css = out("a {b: color(made-up-space 1 2 3)}");
-    assert!(css.contains("color(made-up-space 1 2 3)"), "{css}");
+fn unknown_color_space_errors_symbolic_stays_plain_css() {
+    let src = "a {b: color(made-up-space 1 2 3)}";
+    let tokens = lex(0, "t.scss".into(), src.into()).expect("lex ok");
+    let program = parse(0, "t.scss".into(), src.into(), tokens).expect("parse ok");
+    let err = eval_all(0, "t.scss".into(), src.to_string(), program)
+        .expect_err("unknown concrete space must error");
+    assert!(
+        err.to_string()
+            .contains("$description: Unknown color space \"made-up-space\"."),
+        "{err}"
+    );
+    let css = out("a {b: color(var(--space) 1 2 3)}");
+    assert!(css.contains("color(var(--space) 1 2 3)"), "{css}");
 }
 
 #[test]
