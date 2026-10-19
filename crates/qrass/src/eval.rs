@@ -13,13 +13,13 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::time::Instant;
 
 use rxrust::prelude::*;
 
+use self::branch_fanout::{BranchKey, Prepared};
 use crate::ast::Stmt;
 use crate::ast::{FunctionDecl, MixinDecl};
-use self::branch_fanout::{BranchKey, Prepared};
+use crate::clock::StopWatch;
 use crate::env::{Env, ScopeId};
 use crate::error::SassError;
 use crate::module_bus::ModuleBus;
@@ -27,18 +27,18 @@ use crate::parser::parse;
 use crate::span::FileId;
 use crate::token::Piece;
 
-#[path = "eval_arith.rs"]
-mod eval_arith;
-#[path = "eval_control.rs"]
-mod eval_control;
-#[path = "eval_color4.rs"]
-mod eval_color4;
 #[path = "branch_fanout.rs"]
 mod branch_fanout;
+#[path = "eval_arith.rs"]
+mod eval_arith;
 #[path = "eval_bind.rs"]
 mod eval_bind;
+#[path = "eval_color4.rs"]
+mod eval_color4;
 #[path = "eval_config.rs"]
 mod eval_config;
+#[path = "eval_control.rs"]
+mod eval_control;
 #[path = "eval_expr.rs"]
 mod eval_expr;
 #[path = "eval_extend.rs"]
@@ -119,12 +119,12 @@ pub struct EvalState {
     pub file: FileId,
     pub name: String,
     pub content: String,
-    /// The L2 module singletons (design D1): one `Shared` multicast carrier per
+    /// The L2 module singletons (design D1): one `Local` multicast carrier per
     /// canonical path, so a diamond `@use` broadcasts the *same* `Arc<Module>` to
     /// every parent instead of copying — or re-running — the instantiation.
     pub(crate) bus: ModuleBus,
     /// The L2 branch fan-out's memoized sources (design D1, manual §2): what the
-    /// `Shared` `flat_map` over a body's `@use`/`@forward` branches acquired.
+    /// `Local` `flat_map` over a body's `@use`/`@forward` branches acquired.
     /// Purely a cache — a missing entry makes `load_module` acquire the source
     /// inline through the same unit, so behaviour never depends on this map.
     pub(crate) prepared: HashMap<BranchKey, Result<Prepared, SassError>>,
@@ -284,8 +284,10 @@ impl EvalState {
         // Commit the current module's live env before parking it, so a later
         // re-entry (e.g. a nested `@include` into this same module reached through
         // `@content`) reads the in-progress globals rather than a stale snapshot.
-        self.module_envs.insert(self.env_owner.clone(), self.env.clone());
-        self.parked.push((std::mem::take(&mut self.env), self.env_owner.clone()));
+        self.module_envs
+            .insert(self.env_owner.clone(), self.env.clone());
+        self.parked
+            .push((std::mem::take(&mut self.env), self.env_owner.clone()));
         self.env = live;
         self.env_owner = def.to_string();
         true
@@ -298,7 +300,8 @@ impl EvalState {
         if !swapped {
             return;
         }
-        self.module_envs.insert(self.env_owner.clone(), self.env.clone());
+        self.module_envs
+            .insert(self.env_owner.clone(), self.env.clone());
         if let Some((env, owner)) = self.parked.pop() {
             self.env = env;
             self.env_owner = owner;
@@ -356,7 +359,7 @@ impl EvalFold {
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
-        let started = Instant::now();
+        let started = StopWatch::start();
         if self.failure.is_none() {
             let outcome = self.st.extend_pass(&mut self.chunks);
             if let Err(err) = outcome {
@@ -364,10 +367,7 @@ impl EvalFold {
             }
         }
         span.record("chunks", self.chunks.len());
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
         let Self {
             chunks,
             failure,

@@ -1,13 +1,13 @@
 //! L2 branch fan-out (design D1, manual §2): the `@use`/`@forward` statements of
 //! one module body are **independent branches** — disjoint subtrees that share no
 //! state — so the part of their instantiation that carries no arena state
-//! (canonicalize → read → lex → parse) is orchestrated as a `Shared` concurrent
-//! stage instead of being interleaved with the recursion:
+//! (canonicalize → read → lex → parse) is orchestrated as a `Local` `flat_map`
+//! fan-out stage instead of being interleaved with the recursion:
 //!
 //! ```text
-//! Shared::from_iter(branches)
-//!     .flat_map(|branch| Shared::of((branch.idx, acquire(branch))))  // inner concurrency = usize::MAX
-//!     .subscribe(|(idx, outcome)| tx.send((idx, outcome)))           // Send terminal over mpsc
+//! Local::from_iter(branches)
+//!     .flat_map(|branch| Local::of((branch.idx, acquire(branch))))  // inline merge
+//!     .subscribe(|(idx, outcome)| tx.send((idx, outcome)))          // mpsc terminal
 //! ```
 //!
 //! Two fan-outs run back to back because the filter between them needs `&self`:
@@ -19,46 +19,48 @@
 //!
 //! What deliberately stays sequential, and why: a branch's *instantiation*
 //! mutates the shared arena (`std::mem::take(&mut self.env)`, `self.stack.push`,
-//! `self.module_envs.insert`, …), so it cannot move into a `Send` closure.
-//! Manual §14 red line 6 also bans the cross-thread operators
-//! `observe_on`/`subscribe_on`, so this fan-out executes **inline** on the current
-//! thread — `Shared` supplies the `Send + Sync` orchestration base and the merge
-//! shape, not worker threads. Measured on the `directives` subset (release,
+//! `self.module_envs.insert`, …), so it cannot leave the frame. Manual §14 red
+//! line 6 also bans the cross-thread operators `observe_on`/`subscribe_on`, so
+//! this fan-out executes **inline** on the current thread by design — and the
+//! crate-wide wasm contract (single-threaded `wasm32-unknown-unknown`) rules out
+//! worker threads outright. Measured on the `directives` subset (release,
 //! `FmtSpan::CLOSE` self busy) the whole fan-out body is 6.95 ms against 32.96 ms
 //! of body evaluation and 60.80 ms of load orchestration, i.e. the thread-parallel
-//! ceiling is ~5%. This stage is an architecture commitment, not a performance
-//! feature, and it is what keeps the [`EvalState`](crate::EvalState) `Send`
-//! invariant pinned by `tests/l2_send_invariant.rs` meaningful.
+//! ceiling was ~5% — the capability an earlier `Shared` spelling preserved cost
+//! more in `Send`-bound tax than it could ever pay back. This stage is an
+//! architecture commitment, not a performance feature.
 //!
-//! Ordering: with inline inner sources rxrust merges in outer order (the shape pin
-//! in `tests/l2_fanout_shape.rs` observes it, and rxrust's own
+//! Ordering: with inline inner sources rxrust merges in outer order (the shape
+//! pin in `tests/l2_fanout_shape.rs` observes it, and rxrust's own
 //! `flat_map_merges_inner_observables` test pins `vec![1, 11, 2, 12, 3, 13]`), but
-//! a *concurrent* shape must not let its consumer depend on that, so every result
+//! a *merge-shaped* stage must not let its consumer depend on that, so every result
 //! carries its index in the batch and the vector is sorted before use. Errors stay
 //! **data** (`Result` in the value channel, `Infallible` in the error channel —
 //! manual §14 red line 5): a canonicalize or parse failure must surface at its own
 //! `@use` statement in evaluation order, never at fan-out time.
 //!
 //! Why this stage owns its terminal instead of calling [`crate::drain::drain`]:
-//! `drain` takes a `Local` boxed stream, and `.into_local()` **cannot follow**
-//! `flat_map` — it retypes the outer chain to the Local scope while the inner
-//! observables stay `Shared`, which the merge machinery rejects (`MutRc<MergeAllState<..>>`
-//! asked to be an `Observer<Shared…, _>`). The whole pipeline therefore stays
-//! `Shared` and terminates with a `Send` closure subscribe over an `mpsc` channel.
+//! `drain` short-circuits on the first `Err`, while the fan-out must keep **every**
+//! branch's `Result` — parked failures are re-emitted later at their own statement.
+//! (A second, historical reason: the chain used to be `Shared`, and `.into_local()`
+//! **cannot follow** `flat_map` — it retypes the outer chain to the Local scope
+//! while inner observables stay `Shared`, which the merge machinery rejects
+//! (`MutRc<MergeAllState<..>>` asked to be an `Observer<Shared…, _>`). Building the
+//! chain `Local` from the start removes the mismatch entirely.)
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::Instant;
 
 use rxrust::prelude::*;
 use tracing::{Level, span};
 
+use super::EvalState;
+use super::eval_module::parent_dir;
 use crate::ast::Stmt;
+use crate::clock::StopWatch;
 use crate::error::SassError;
 use crate::loader::{Resolved, canonicalize_with};
-use super::eval_module::parent_dir;
-use super::EvalState;
 
 /// Cache key for an acquired branch: the directory of the body that wrote the
 /// statement plus the URL as written. Two parents in different directories can
@@ -94,9 +96,9 @@ struct Unit {
 /// A fan-out result: the batch index plus the unit's own `Result` (error as data).
 type Branch<T> = (usize, Result<T, SassError>);
 
-/// The fan-out itself: one `Shared` branch per unit, merged, drained through the
+/// The fan-out itself: one `Local` branch per unit, merged, drained through the
 /// standard terminal, then reordered by batch index.
-fn fan_out<T: Send + 'static>(
+fn fan_out<T: 'static>(
     id: &'static str,
     units: Vec<Unit>,
     load_paths: Vec<PathBuf>,
@@ -112,15 +114,16 @@ fn fan_out<T: Send + 'static>(
         elapsed_ms = tracing::field::Empty,
     );
     let _guard = span.enter();
-    let started = Instant::now();
+    let started = StopWatch::start();
 
-    // The stage's own terminal: a `Send` closure subscribe is legal because `Of<T>`
-    // hard-codes its error channel to `Infallible`, and every compiler error rides
-    // the value channel inside the tuple. Non-timed sources finish during
-    // `subscribe`, so the sender drops before `rx.iter()` and no runtime is needed.
+    // The stage's own terminal: a plain (non-`Send`) closure subscribe is legal on
+    // a `Local` chain, and it works here because `Of<T>` hard-codes its error
+    // channel to `Infallible`, so every compiler error rides the value channel
+    // inside the tuple. Non-timed sources finish during `subscribe`, so the sender
+    // drops before `rx.iter()` and no runtime is needed.
     let (tx, rx) = mpsc::channel::<Branch<T>>();
-    Shared::from_iter(units)
-        .flat_map(move |unit: Unit| Shared::of((unit.idx, work(&unit, &load_paths))))
+    Local::from_iter(units)
+        .flat_map(move |unit: Unit| Local::of((unit.idx, work(&unit, &load_paths))))
         .subscribe(move |item| {
             tx.send(item).ok();
         });
@@ -130,10 +133,7 @@ fn fan_out<T: Send + 'static>(
         "failures",
         branches.iter().filter(|(_, r)| r.is_err()).count(),
     );
-    span.record(
-        "elapsed_ms",
-        tracing::field::debug(started.elapsed().as_millis() as u64),
-    );
+    span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
     branches
 }
 
@@ -156,7 +156,12 @@ fn acquire_unit(unit: &Unit, load_paths: &[PathBuf]) -> Result<Prepared, SassErr
     // `instantiate` used to parse with, so every error locates identically.
     let program = crate::lexer::lex(0, key.clone(), content.clone())
         .and_then(|tokens| crate::parser::parse(0, key.clone(), content.clone(), tokens));
-    Ok(Prepared { resolved: resolved.as_ref().clone(), key, content, program })
+    Ok(Prepared {
+        resolved: resolved.as_ref().clone(),
+        key,
+        content,
+        program,
+    })
 }
 
 /// Acquire one branch inline (no fan-out cache entry for it).
@@ -207,7 +212,7 @@ impl EvalState {
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
-        let started = Instant::now();
+        let started = StopWatch::start();
         let base = parent_dir(&self.name);
         let mut units: Vec<Unit> = Vec::new();
         for stmt in program {
@@ -231,18 +236,15 @@ impl EvalState {
         if units.is_empty() {
             span.record("skipped", 0usize);
             span.record("cached", self.prepared.len());
-            span.record(
-                "elapsed_ms",
-                tracing::field::debug(started.elapsed().as_millis() as u64),
-            );
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
             return;
         }
         let all = units.clone();
         let paths = self.load_paths.clone();
 
         // Stage A — canonicalize. The filter below is the only part that needs the
-        // arena, so it sits between the two `Shared` stages rather than inside a
-        // `Send` closure. Resolutions are parked locally, not in `prepared`: the
+        // arena, so it sits between the two `Local` stages rather than inside a
+        // stream closure. Resolutions are parked locally, not in `prepared`: the
         // cache holds whole acquisitions only.
         let mut ready: Vec<Unit> = Vec::new();
         let mut skipped = 0usize;
@@ -259,7 +261,10 @@ impl EvalState {
                         skipped += 1;
                         continue;
                     }
-                    ready.push(Unit { resolved: Some(resolved), ..all[idx].clone() });
+                    ready.push(Unit {
+                        resolved: Some(resolved),
+                        ..all[idx].clone()
+                    });
                 }
                 // Keep the failure as data: `load_module` re-emits it at its own
                 // statement position instead of probing the file system again.
@@ -277,16 +282,13 @@ impl EvalState {
             acquired.push((idx, Err(err)));
         }
         // Commit in one pass: every `Result` is already in hand, so the map is
-        // written once, after both `Shared` stages have finished.
+        // written once, after both `Local` stages have finished.
         for (idx, outcome) in acquired {
             let unit = &all[idx];
             self.prepared
                 .insert(branch_key(&unit.base, &unit.url), outcome);
         }
         span.record("cached", self.prepared.len());
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
     }
 }

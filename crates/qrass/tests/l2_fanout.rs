@@ -1,5 +1,5 @@
 //! L2 branch fan-out (design D1, manual §2): the top-level `@use`/`@forward`
-//! branches of one module body are acquired by a `Shared` `flat_map` stage
+//! branches of one module body are acquired by a `Local` `flat_map` stage
 //! (`src/branch_fanout.rs`) *before* the sequential walk reaches them, and
 //! `load_module` consumes that cache instead of probing the file system again.
 //!
@@ -62,7 +62,10 @@ fn the_first_unresolvable_branch_owns_the_error() {
     // concurrent stage merges them in, the walk must still blame the first
     // statement — the second failure has to stay parked as data.
     let err = render("@use \"ghost_a\";\n@use \"ghost_b\";");
-    assert!(err.contains("ghost_a"), "first branch must be reported\n---\n{err}");
+    assert!(
+        err.contains("ghost_a"),
+        "first branch must be reported\n---\n{err}"
+    );
     assert!(
         !err.contains("ghost_b"),
         "a later branch must not jump the queue\n---\n{err}"
@@ -74,7 +77,10 @@ fn an_unresolvable_late_branch_is_reported_after_the_early_one_loaded() {
     // The early branch is a hit in the cache and must still be instantiated; the
     // failure may not turn into a different error (e.g. a missing namespace).
     let err = render("@use \"shared\";\n@use \"ghost\";");
-    assert!(err.contains("ghost"), "the failing branch is reported\n---\n{err}");
+    assert!(
+        err.contains("ghost"),
+        "the failing branch is reported\n---\n{err}"
+    );
     assert!(
         !err.contains("undefined variable"),
         "the settled branch must not leak into the error\n---\n{err}"
@@ -103,7 +109,10 @@ fn statement_order_beats_failure_kind() {
         err.contains("_fo_bad_syntax.scss"),
         "the first statement owns the error\n---\n{err}"
     );
-    assert!(!err.contains("ghost"), "the parked failure must stay parked\n---\n{err}");
+    assert!(
+        !err.contains("ghost"),
+        "the parked failure must stay parked\n---\n{err}"
+    );
 }
 
 // ─── the base dir is the writing body's ──────────────────────────────────────
@@ -114,7 +123,10 @@ fn a_nested_frame_fans_out_against_its_own_directory() {
     // frame must resolve relative to `sub/`, so the candidate list proves the
     // base dir while the error stays a single load failure.
     let err = render("@use \"sub/fo_nested\";");
-    assert!(err.contains("sub-ghost"), "the branch is reported\n---\n{err}");
+    assert!(
+        err.contains("sub-ghost"),
+        "the branch is reported\n---\n{err}"
+    );
     let sub = modules_dir().join("sub").join("_sub-ghost.scss");
     assert!(
         err.contains(&sub.to_string_lossy().to_string()),
@@ -129,9 +141,21 @@ fn a_settled_branch_is_skipped_and_still_shared_once() {
     // `shared` is open by the time the second parent's fan-out runs, so stage A
     // drops it before reading — and the load must still join the multicast.
     let out = css("@use \"diamond_a\";\n@use \"diamond_b\";");
-    assert_eq!(out.matches(".shared-rule").count(), 1, "shared ran twice: {out}");
-    assert_eq!(out.matches(".da").count(), 1, "parent A lost its body: {out}");
-    assert_eq!(out.matches(".db").count(), 1, "parent B lost its body: {out}");
+    assert_eq!(
+        out.matches(".shared-rule").count(),
+        1,
+        "shared ran twice: {out}"
+    );
+    assert_eq!(
+        out.matches(".da").count(),
+        1,
+        "parent A lost its body: {out}"
+    );
+    assert_eq!(
+        out.matches(".db").count(),
+        1,
+        "parent B lost its body: {out}"
+    );
 }
 
 #[test]
@@ -173,7 +197,12 @@ fn a_hit_and_a_miss_acquire_the_same_source() {
     // Two spellings of one file in the same body share a cache key only for the
     // first use; the second falls back to the inline acquisition, so both parents
     // must bind the very same singleton value.
-    let out = css("@use \"shared\" as a;\n@use \"shared\" as b;\n.x { value: a.$answer + b.$answer; }");
+    let out =
+        css("@use \"shared\" as a;\n@use \"shared\" as b;\n.x { value: a.$answer + b.$answer; }");
     assert!(out.contains("value: 84"), "hit and miss disagree: {out}");
-    assert_eq!(out.matches(".shared-rule").count(), 1, "body ran twice: {out}");
+    assert_eq!(
+        out.matches(".shared-rule").count(),
+        1,
+        "body ran twice: {out}"
+    );
 }

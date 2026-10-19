@@ -6,19 +6,22 @@
 //! [`flat_map`](Observable::flat_map) so **every inter-stage transition is
 //! driven by a stream emission**, not by sequential statements. An error
 //! short-circuits through [`fail`] straight to the terminal. The builder holds
-//! owned config only; a single `mpsc` terminal drains the result by value.
+//! owned config only; a single `mpsc` terminal drains the result by value. The
+//! load stage comes in two flavours — a file-system entry for the CLI and an
+//! in-memory entry that never touches `std::fs`, which is what
+//! `wasm32-unknown-unknown` (a browser has no files) compiles through.
 //!
 //! This is the qrass landing template from `docs/rxrust-ai-manual.md` §8.
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::Instant;
 
 use rxrust::observer::Emitter;
 use rxrust::prelude::*;
 
 use crate::OutputStyle;
+use crate::clock::StopWatch;
 use crate::error::{ErrorKind, SassError};
 use crate::span::FileId;
 use crate::token::Spanned;
@@ -59,7 +62,7 @@ fn fail<T: 'static>(e: SassError) -> Stage<T> {
 /// Load a single entry file into a [`Stage`] emitting one owned [`Loaded`].
 fn load_stage(path: PathBuf) -> Stage<Loaded> {
     let module = path.display().to_string();
-    let started = Instant::now();
+    let started = StopWatch::start();
     let span = tracing::span!(
         tracing::Level::INFO,
         "compile",
@@ -92,17 +95,37 @@ fn load_stage(path: PathBuf) -> Stage<Loaded> {
         },
     )
     .tap(move |_| {
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
+    })
+    .box_it()
+}
+
+/// Emit one owned [`Loaded`] straight from an in-memory source — the load stage
+/// the `wasm32-unknown-unknown` entry uses: no `std::fs`, no path resolution, a
+/// single inline emission that joins the shared lex → parse → eval → render tail.
+fn load_string_stage(name: String, content: String) -> Stage<Loaded> {
+    let started = StopWatch::start();
+    let span = tracing::span!(
+        tracing::Level::INFO,
+        "compile",
+        stage = "load",
+        module = name.as_str(),
+        elapsed_ms = tracing::field::Empty
+    );
+    Local::of(Ok(Loaded {
+        file: FileId::default(),
+        name,
+        content,
+    }))
+    .tap(move |_| {
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
     })
     .box_it()
 }
 
 /// Lex stage: pipe the loaded source through the rxrust token stream.
 fn lex_stage(loaded: Loaded) -> Stage<Lexed> {
-    let started = Instant::now();
+    let started = StopWatch::start();
     let span = tracing::span!(
         tracing::Level::INFO,
         "compile",
@@ -124,10 +147,7 @@ fn lex_stage(loaded: Loaded) -> Stage<Lexed> {
             result.map(|tokens| Lexed { loaded, tokens })
         })
         .tap(move |_| {
-            span.record(
-                "elapsed_ms",
-                tracing::field::debug(started.elapsed().as_millis() as u64),
-            );
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
         })
         .box_it()
 }
@@ -135,7 +155,7 @@ fn lex_stage(loaded: Loaded) -> Stage<Lexed> {
 /// Parse stage: fold the token stream into an owned program via the reactive
 /// per-token parser, then hand the tree to eval (tokens stay on `Parsed.lexed`).
 fn parse_stage(lexed: Lexed) -> Stage<Parsed> {
-    let started = Instant::now();
+    let started = StopWatch::start();
     let span = tracing::span!(
         tracing::Level::INFO,
         "compile",
@@ -162,20 +182,17 @@ fn parse_stage(lexed: Lexed) -> Stage<Parsed> {
                 Parsed { loaded, program }
             })
         })
-    .tap(move |_| {
-        let _g = span.enter();
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
-    })
-    .box_it()
+        .tap(move |_| {
+            let _g = span.enter();
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
+        })
+        .box_it()
 }
 
 /// Eval stage: fold the owned program into CSS chunks through the reactive
 /// per-statement eval stream, short-circuiting on the first error.
 fn eval_stage(parsed: Parsed, load_paths: Vec<PathBuf>) -> Stage<Evaled> {
-    let started = Instant::now();
+    let started = StopWatch::start();
     let Parsed { loaded, program } = parsed;
     let span = tracing::span!(
         tracing::Level::INFO,
@@ -200,20 +217,17 @@ fn eval_stage(parsed: Parsed, load_paths: Vec<PathBuf>) -> Stage<Evaled> {
                 Evaled { chunks }
             })
         })
-    .tap(move |_| {
-        let _g = span.enter();
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
-    })
-    .box_it()
+        .tap(move |_| {
+            let _g = span.enter();
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
+        })
+        .box_it()
 }
 
 /// Render stage: fold CSS chunks through rxrust `reduce_initial`, emitting one
 /// owned document.
 fn render_stage(evaled: Evaled) -> Stage<Rendered> {
-    let started = Instant::now();
+    let started = StopWatch::start();
     let span = tracing::span!(
         tracing::Level::INFO,
         "compile",
@@ -232,10 +246,7 @@ fn render_stage(evaled: Evaled) -> Stage<Rendered> {
         })
         .map(move |css| Ok(Rendered { css }))
         .tap(move |_| {
-            span.record(
-                "elapsed_ms",
-                tracing::field::debug(started.elapsed().as_millis() as u64),
-            );
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
         })
         .box_it()
 }
@@ -243,6 +254,7 @@ fn render_stage(evaled: Evaled) -> Stage<Rendered> {
 /// Collects pipeline configuration; finish with [`drain`](Self::drain).
 pub struct PipelineBuilder {
     entry: Option<PathBuf>,
+    source: Option<(String, String)>,
     style: OutputStyle,
     load_paths: Vec<PathBuf>,
 }
@@ -250,6 +262,14 @@ pub struct PipelineBuilder {
 impl PipelineBuilder {
     pub fn entry(mut self, path: impl AsRef<Path>) -> Self {
         self.entry = Some(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// Register an in-memory entry `(display name, SCSS text)` — mutually
+    /// exclusive with [`entry`](Self::entry). The name doubles as the base
+    /// directory a relative `@use` resolves against.
+    pub fn source(mut self, name: impl Into<String>, content: impl Into<String>) -> Self {
+        self.source = Some((name.into(), content.into()));
         self
     }
 
@@ -264,48 +284,59 @@ impl PipelineBuilder {
         self
     }
 
-    /// Wire load → lex → parse → eval → render via `flat_map` and drain once.
+    /// Wire (load | load-string) → lex → parse → eval → render via `flat_map`
+    /// and drain once.
     pub fn drain(self) -> Result<String, SassError> {
-        let entry = self
-            .entry
-            .ok_or_else(|| SassError::new(ErrorKind::Load, "pipeline has no entry file"))?;
+        let head = match (self.entry, self.source) {
+            (Some(path), None) => load_stage(path),
+            (None, Some((name, content))) => load_string_stage(name, content),
+            (Some(_), Some(_)) => fail(SassError::new(
+                ErrorKind::Load,
+                "pipeline has both an entry file and an inline source",
+            )),
+            (None, None) => {
+                return Err(SassError::new(
+                    ErrorKind::Load,
+                    "pipeline has no entry file",
+                ));
+            }
+        };
 
         let (tx, rx) = mpsc::channel::<Result<String, SassError>>();
         // The `Vec` travels by value into the one closure that needs it.
         let mut load_paths = Some(self.load_paths);
-        load_stage(entry)
-            .flat_map(|r| match r {
-                Ok(loaded) => lex_stage(loaded),
-                Err(e) => fail(e),
-            })
-            .flat_map(|r| match r {
-                Ok(lexed) => parse_stage(lexed),
-                Err(e) => fail(e),
-            })
-            .flat_map(move |r| match r {
-                Ok(parsed) => eval_stage(parsed, load_paths.take().expect("eval stage runs once")),
-                Err(e) => fail(e),
-            })
-            .flat_map(|r| match r {
-                Ok(evaled) => render_stage(evaled),
-                Err(e) => fail(e),
-            })
-            .map(|r| match r {
-                Ok(rendered) => {
-                    // the goldens prepend `@charset "UTF-8";` when the emitted CSS
-                    // contains any non-ASCII byte (e.g. CJK font-family names).
-                    let css = if rendered.css.is_ascii() {
-                        format!("{}\n", rendered.css)
-                    } else {
-                        format!("@charset \"UTF-8\";\n{}\n", rendered.css)
-                    };
-                    Ok(css)
-                }
-                Err(e) => Err(e),
-            })
-            .subscribe(move |out| {
-                tx.send(out).ok();
-            });
+        head.flat_map(|r| match r {
+            Ok(loaded) => lex_stage(loaded),
+            Err(e) => fail(e),
+        })
+        .flat_map(|r| match r {
+            Ok(lexed) => parse_stage(lexed),
+            Err(e) => fail(e),
+        })
+        .flat_map(move |r| match r {
+            Ok(parsed) => eval_stage(parsed, load_paths.take().expect("eval stage runs once")),
+            Err(e) => fail(e),
+        })
+        .flat_map(|r| match r {
+            Ok(evaled) => render_stage(evaled),
+            Err(e) => fail(e),
+        })
+        .map(|r| match r {
+            Ok(rendered) => {
+                // the goldens prepend `@charset "UTF-8";` when the emitted CSS
+                // contains any non-ASCII byte (e.g. CJK font-family names).
+                let css = if rendered.css.is_ascii() {
+                    format!("{}\n", rendered.css)
+                } else {
+                    format!("@charset \"UTF-8\";\n{}\n", rendered.css)
+                };
+                Ok(css)
+            }
+            Err(e) => Err(e),
+        })
+        .subscribe(move |out| {
+            tx.send(out).ok();
+        });
 
         rx.recv().unwrap_or_else(|_| {
             Err(SassError::new(
@@ -320,6 +351,7 @@ impl PipelineBuilder {
 pub fn build() -> PipelineBuilder {
     PipelineBuilder {
         entry: None,
+        source: None,
         style: OutputStyle::Expanded,
         load_paths: Vec::new(),
     }

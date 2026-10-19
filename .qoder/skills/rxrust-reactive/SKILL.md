@@ -58,15 +58,18 @@ load_stage(entry)
 ## Choosing Local vs Shared
 
 - `Local` — single-threaded, no `Send`/`Sync` bounds, works with `!Send` types.
-  Used for qrass **stage kernels**: per-item closure state machines (char→token lex,
-  token→AST parse, eval emission, render fold) — high-frequency item streams where
-  Shared would pay `Arc<Mutex>` lock cost per item.
+  **qrass uses `Local` for the entire pipeline** (design D1, wasm contract): the
+  per-item stage kernels (char→token lex, token→AST parse, eval emission, render
+  fold) *and* the module orchestration — module singleton = `Local` multicast
+  (`Local::behavior_subject`, one instantiation fan-out to N parents, `Arc<Module>`
+  read-only publish), `@use` branch fan-out via `Local::from_iter + flat_map`
+  executed inline. Rc-based plumbing, zero locks, runs on `wasm32-unknown-unknown`.
 - `Shared` — requires Item, Err, and every closure/captured value to be `Send + Sync + 'static`.
-  Used for qrass **module orchestration** (design D1-L2): module singleton = multicast
-  (`Shared::subject` / `Connectable` — one instantiation fan-out to N parents), and
-  independent `@use` branches compiled concurrently via `Shared::flat_map` +
-  `merge_observables` on a tokio multi-thread runtime. Immutable finished modules
-  are shared as `Arc<Module>` (read-only data, NOT `Arc<Mutex<business state>>`).
+  Kept available in rxrust for genuinely cross-thread streams, but qrass deliberately
+  does not use it: the thread-parallel ceiling measured ~5%, and `Shared` would break
+  the wasm target (its `Arc`/`Mutex` + `Send` bounds and the tokio scheduler base are
+  unusable in the browser). Immutable finished modules are still shared as
+  `Arc<Module>` (read-only data, NOT `Arc<Mutex<business state>>`).
 - Convert: `.into_shared()` / `.into_local()` (context.rs — swaps the wrapper, changes
   no execution model for non-timed sources; they still run inline).
 

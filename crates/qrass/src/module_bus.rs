@@ -1,21 +1,26 @@
-//! L2 module orchestration (design D1): the `@use`/`@forward` singleton as a
-//! `Shared` multicast.
+//! L2 module orchestration (design D1): the `@use` singleton as a `Local`
+//! multicast.
 //!
 //! The manual prescribes that a module imported by several parents is *instantiated
-//! once and broadcast*, not looked up and copied. The carrier is a `Shared`
+//! once and broadcast*, not looked up and copied. The carrier is a `Local`
 //! [`BehaviorSubject`] keyed by canonical path. Because the pipeline is synchronous
-//! and single-threaded, a second parent only ever joins after the first has settled
-//! the hub, so `share` reads that one instantiation with `Behavior::peek` — no
-//! observer attaches and no per-parent subscription is retained. The payload stays
-//! `Arc<Module>`, so the sharing is read-only (manual §2 "缓存共享用 `Arc<不可变
-//! Module>` 只读多播"); the `BehaviorSubject` remains a multicast carrier (not a
-//! bare lookup map) so the D1 concurrent-branch path can still attach real subscribers.
+//! and single-threaded (the wasm contract below), a second parent only ever joins
+//! after the first has settled the hub, so `share` reads that one instantiation
+//! with `Behavior::peek` — no observer attaches and no per-parent subscription is
+//! retained. The payload stays `Arc<Module>`, so the sharing is read-only (manual
+//! §2 "缓存共享用 `Arc<不可变 Module>` 只读多播"); the `BehaviorSubject` remains a
+//! multicast carrier (not a bare lookup map) so a parent can still attach a real
+//! subscriber.
 //!
-//! `Shared` rather than `Local` is deliberate: the hub is `Send + Sync`, so
-//! [`crate::eval::EvalState`] keeps the capability the *next* step of D1 needs
-//! (concurrent instantiation of disjoint `@use` branches). Per-item stage kernels
-//! stay `Local` — the manual's other half of the rule — because a hub carries one
-//! coarse value per module, so the `Arc`/`Mutex` plumbing is not a hot path.
+//! `Local` rather than `Shared` is the crate-wide wasm contract: the whole
+//! pipeline must run on a single-threaded `wasm32-unknown-unknown` target, so no
+//! stage may pay for — or require — the `Arc`/`Mutex` plumbing and `Send + Sync`
+//! bounds a `Shared` carrier imposes. An earlier revision kept the hub `Shared`
+//! to preserve a future concurrent-`@use`-branch step; that step was measured
+//! (`src/branch_fanout.rs`: ~5% thread-parallel ceiling) and deliberately retired
+//! in favour of wasm support. Per-item stage kernels were always `Local` — the
+//! hub now shares that single context, so the crate has exactly one rxrust
+//! context.
 //!
 //! Reading the singleton goes through rc.6's `Behavior::peek` rather than a
 //! subscription: `share` takes the current value synchronously, registering no
@@ -29,13 +34,13 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use rxrust::prelude::*;
-use rxrust::rc::MutArc;
+use rxrust::rc::MutRc;
 use rxrust::subject::behavior_subject::{Behavior, BehaviorSubject};
 use tracing::{Level, span};
 
+use crate::clock::StopWatch;
 use crate::error::{ErrorKind, SassError};
 use crate::module::Module;
 
@@ -45,19 +50,19 @@ use crate::module::Module;
 /// second one.
 type HubItem = Option<Arc<Module>>;
 
-/// The `Shared` carrier for one canonical module path. `ObservableFactory` is bound
-/// to `Context<Inner = ()>`, so `Shared::behavior_subject` produces exactly this
+/// The `Local` carrier for one canonical module path. `ObservableFactory` is bound
+/// to `Context<Inner = ()>`, so `Local::behavior_subject` produces exactly this
 /// spelling — which is why a hub can be a struct field instead of an unnameable chain.
 /// The error channel is `()` (not `Infallible`) so the `Behavior` trait — and its
 /// synchronous `peek` reader — is exposed for this carrier.
-type Hub = Shared<
+type Hub = Local<
     BehaviorSubject<
         // rc.6 wraps the subject payload in the context's `RcDeref` pointer
-        // (`MutArc` = `Arc<Mutex<_>>` for `Shared`); this is the framework's own
+        // (`MutRc` = `Rc<RefCell<_>>` for `Local`); this is the framework's own
         // multicast plumbing, not a business carrier — the value we share stays the
         // read-only `Option<Arc<Module>>`.
-        MutArc<HubItem>,
-        SubjectPtr<'static, SharedCtx<(), SharedScheduler>, HubItem, ()>,
+        MutRc<HubItem>,
+        SubjectPtr<'static, LocalCtx<(), LocalScheduler>, HubItem, ()>,
     >,
 >;
 
@@ -82,7 +87,7 @@ impl ModuleBus {
     pub(crate) fn open(&mut self, key: &str) {
         self.hubs
             .entry(key.to_string())
-            .or_insert_with(|| Shared::behavior_subject::<HubItem, ()>(None));
+            .or_insert_with(|| Local::behavior_subject::<HubItem, ()>(None));
     }
 
     /// Broadcast the finished singleton and close the carrier. Called once, by the
@@ -115,20 +120,17 @@ impl ModuleBus {
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
-        let started = Instant::now();
+        let started = StopWatch::start();
         let hub = self.hubs.get(key).ok_or_else(|| unsettled(key))?;
 
         // rc.6 exposes the current value synchronously through `Behavior::peek`, so
         // the singleton is read directly — no observer is registered, no `mpsc`
         // channel is needed, and there is no late-subscriber / `recv()` hang surface
-        // (the rc.5 workaround this replaces). The carrier stays a `Shared`
+        // (the rc.5 workaround this replaces). The carrier stays a `Local`
         // `BehaviorSubject` (multicast structure preserved), not a bare lookup map.
         let item = hub.peek();
 
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
         let module = item.ok_or_else(|| unsettled(key))?;
         span.record("peeked", module.css.len());
         Ok(module)

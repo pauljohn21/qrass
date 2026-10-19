@@ -9,17 +9,17 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 use tracing::{Level, span};
 
+use super::branch_fanout::{Prepared, acquire, branch_key};
+use super::eval_bind::filter_forwarded;
 use crate::ast::{Forward, Use};
+use crate::clock::StopWatch;
 use crate::error::{ErrorKind, Frame, SassError};
 use crate::loader::{SourceKind, canonicalize_with};
 use crate::module::{Module, export_vars};
 use crate::span::{BytePos, Span, line_col};
-use super::branch_fanout::{Prepared, acquire, branch_key};
-use super::eval_bind::filter_forwarded;
 
 use super::{Ev, EvalState, LoadLink};
 
@@ -117,8 +117,12 @@ impl EvalState {
                 file: link.parent_file.clone(),
                 line: link.parent_line,
                 col: link.parent_col,
-                label: if i == 0 { "root stylesheet" } else { self.links[i - 1].keyword }.
-                    to_string(),
+                label: if i == 0 {
+                    "root stylesheet"
+                } else {
+                    self.links[i - 1].keyword
+                }
+                .to_string(),
             });
         }
         err.with_trace(frames)
@@ -171,7 +175,7 @@ impl EvalState {
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
-        let started = Instant::now();
+        let started = StopWatch::start();
         // Built-in modules (`sass:math`, `sass:color`, …) have no source file: their
         // functions resolve through the builtin registry by namespace at call time
         // and their constants (`math.$pi`, …) through the `module_const` fallback, so
@@ -192,12 +196,10 @@ impl EvalState {
             // `canonicalize_with` used to fail — before any check has a path to
             // test against.
             Some(Err(err)) => return Err(err.clone()),
-            None => {
-                canonicalize_with(url, &base, &self.load_paths)?
-                    .path
-                    .display()
-                    .to_string()
-            }
+            None => canonicalize_with(url, &base, &self.load_paths)?
+                .path
+                .display()
+                .to_string(),
         };
         span.record("id", key.as_str());
 
@@ -225,8 +227,7 @@ impl EvalState {
             // configurable cannot be re-opened, so passing values at it stays
             // silent.
             if view.iter().any(|(name, idx)| {
-                !self.config_offers[*idx].consumed
-                    && module.configurable.iter().any(|c| c == name)
+                !self.config_offers[*idx].consumed && module.configurable.iter().any(|c| c == name)
             }) {
                 return Err(self.already_loaded(stmt));
             }
@@ -235,10 +236,7 @@ impl EvalState {
                 self.settle_offers(&view);
             }
             span.record("cached", true);
-            span.record(
-                "elapsed_ms",
-                tracing::field::debug(started.elapsed().as_millis() as u64),
-            );
+            span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
             return Ok((module, false)); // settled: no CSS, no re-run
         }
 
@@ -274,7 +272,9 @@ impl EvalState {
                 ..Default::default()
             }
         } else {
-            let Prepared { content, program, .. } = prepared;
+            let Prepared {
+                content, program, ..
+            } = prepared;
             self.with_link(link, |st| st.instantiate(&key, &content, program, &view))?
         };
 
@@ -289,10 +289,7 @@ impl EvalState {
         span.record("hubs", self.bus.len());
         out.extend(module.css.iter().cloned());
         span.record("cached", false);
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
         Ok((module, ran))
     }
 
@@ -322,7 +319,7 @@ impl EvalState {
             elapsed_ms = tracing::field::Empty,
         );
         let _guard = span.enter();
-        let started = Instant::now();
+        let started = StopWatch::start();
         // A parse failure surfaces here — the same point as the old inline parse,
         // before any arena state is touched.
         let program = program?;
@@ -338,7 +335,7 @@ impl EvalState {
         self.config_stack.push(view.to_vec());
 
         // This body's own `@use`/`@forward` statements are independent branches:
-        // fan their source acquisition out over the `Shared` stage before any of
+        // fan their source acquisition out over the `Local` stage before any of
         // them mutates the arena (design D1, manual §2). It runs inside the frame
         // so the base directory is *this* module's and the singleton/cycle filter
         // sees the stack entry just pushed.
@@ -374,9 +371,7 @@ impl EvalState {
                             mixins.push(n);
                         }
                     }
-                    crate::ast::Stmt::Function(f)
-                        if !crate::module::is_private(&f.name) =>
-                    {
+                    crate::ast::Stmt::Function(f) if !crate::module::is_private(&f.name) => {
                         functions.push(f.name.clone());
                     }
                     _ => {}
@@ -402,10 +397,7 @@ impl EvalState {
         self.file = outer_file;
         self.name = outer_name;
         self.content = outer_content;
-        span.record(
-            "elapsed_ms",
-            tracing::field::debug(started.elapsed().as_millis() as u64),
-        );
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
 
         ran
     }
@@ -419,7 +411,10 @@ fn underline(content: &str, span: Span) -> (BytePos, BytePos) {
     let start = span.start.0.min(content.len());
     let end = span.end.0.clamp(start, content.len());
     let text = &content[start..end];
-    (span.start, BytePos(start + text.trim_end_matches([';', ' ', '\t', '\n', '\r']).len()))
+    (
+        span.start,
+        BytePos(start + text.trim_end_matches([';', ' ', '\t', '\n', '\r']).len()),
+    )
 }
 
 /// Directory containing `path` (empty for a bare relative name) — the base a

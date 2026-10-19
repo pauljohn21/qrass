@@ -39,12 +39,12 @@ chars 流 ──lex──▶ token 流 ──parse──▶ owned AST（移入�
 **Goals:**
 - 一条可复现的编译流水线：element-plus index.scss 一次编译产出 golden CSS，回归逐行稳定
 - sass-spec 现代子集通过率达到可持续收敛的水平（allowlist 显式管理残余）
-- rxrust 管道贯穿各编译阶段：阶段内核同步内联（Local），模块编排跨线程并发（Shared + tokio multi_thread，仅此一处运行时依赖）
+- rxrust 管道贯穿各编译阶段：全链统一 `Local` 上下文（wasm 契约），阶段内核同步内联，模块单例经 `Local` Subject 多播广播；无任何跨线程运行时依赖
 
 **Non-Goals:**
 - legacy 引擎完整语义（global 函数可覆盖、legacy @import 作用域怪癖）
 - nested/compact/compressed 输出风格、source map、`@debug` 交互、indented(sass) 语法
-- watch 模式、增量编译（模块并发编排属 Goals，见 D1-L2）
+- watch 模式、增量编译（模块并发编排已因 wasm 契约退役，见 D1-L2 翻转记录）
 
 ## Decisions
 
@@ -58,7 +58,7 @@ chars 流 ──lex──▶ token 流 ──parse──▶ owned AST（移入�
 
 被否坐标系的教训（记录以防再犯）：初版设计以 dart-sass 的 GC 假设（分配即永久、引用随意共享、闭包捕获环境、persistent 传引用、异常自动清场）为默认前提，后以"GC→所有权翻译表"折中——翻译表本身仍以 dart-sass 为主语，仍是参照系错误。本节方法取代该立场。
 
-### D1: 分层上下文 — 阶段内核 Local 算子链，模块编排 Shared + Subject 多播
+### D1: 统一上下文 — 阶段内核与模块编排同为 Local 算子链（wasm 契约）
 **L1 阶段内核（Local）**：每阶段主体逻辑以 rxrust 算子闭包承载（数据流即代码形态，禁止过程式内核包流壳）：
 - loader：`Local::from_iter(worklist).scan_map(去重状态闭包)` → owned `Vec<(CanonicalPath, SourceFile)>`
 - lexer：`Local::from_iter(chars ⊕ EOF-sentinel).scan_map(Lexer, |lx, ch| feed).flat_map(Local::from_iter)` —— 逐字符状态迁移闭包生长 0..N token 的 reactive transducer
@@ -67,17 +67,16 @@ chars 流 ──lex──▶ token 流 ──parse──▶ owned AST（移入�
 - render：`reduce_initial` 折叠 + `finalize` 收尾
 逐项流数据全部按值 move（`scan_map`/`reduce_initial`/`collect`），mpsc 终端排空，错误走流内 `Result` + `Err = Infallible`；不出现 `Arc<Mutex<业务状态>>`。
 
-**L2 模块编排（Shared + tokio multi_thread runtime）**：两个真实需求决定这一层必须 Shared + 多播：
-1. **模块单例 = 多播语义**：sass 规范要求同一 canonical URL 只实例化一次并被 N 个父模块引用（fan-out 拓扑），用 `Shared::subject` / `Connectable`（首订阅者触发实例化，后续复用）表达；实例化完成后发布 `Arc<Module>` **只读**共享（所有权系统的显式共享计数，非 GC；完成即不可变），并发协调仅 `Mutex<HashMap<CanonicalPath, Arc<Module>>>` 注册表。
-2. **独立分支并发编译**：element-plus 60+ 组件的 @use 闭包互不相交，`Shared::from_iter(components).flat_map(instantiate)` 兄弟分支跨线程并发，`Shared::merge_observables` 汇聚，`collect` 落地后回到 L1 Local 完成 render。CLI 入口 `#[tokio::main(flavor = "multi_thread")]`。
-
-被否选项：(a) 全 Local + arena move 下标查表——用数据搬运绕开多播，模块 fan-out 与并发两个真实需求都不正面表达；(b) 手写命令式管线（违背 rxrust 核心要求）。单文件直通路径保留为 L2 的退化情形（依赖闭包 = 1 时无并发分支）。
+**L2 模块编排（Local + Subject 多播，2026-10 wasm 翻转）**：本层原设计为 Shared + tokio multi_thread（单例多播 + 分支并发两个需求），现整体翻转为 Local，理由按证据链：(1) 浏览器目标 `wasm32-unknown-unknown` 单线程且无 tokio multi_thread，`Send + Sync` 渗透面只会扩大；rxrust rc.6 实际仅支持这一个 wasm 目标——其 tokio 依赖的 cfg（`not(target_arch="wasm32")`）与调度器代码 cfg（仅 `wasm32-unknown-unknown` 走 gloo 分支）互斥，`wasm32-wasip1` 直接编译失败；(2) 实测分支 fan-out 线程并行天花板 ~5%（`src/branch_fanout.rs` 数据），锁税高于收益。翻转后：
+1. **模块单例 = 多播语义不变**：同一 canonical URL 只实例化一次并广播给 N 个父模块，载体为 `Local::behavior_subject`（`MutRc` 框架管道），实例化完成发布 `Arc<Module>` **只读**共享（所有权系统的显式共享计数，非 GC；完成即不可变），加入方经 `Behavior::peek` 同步读取，不注册 observer。
+2. **独立分支 fan-out 保留 merge 形状**：`Local::from_iter(@use 分支).flat_map(Local::of(acquire))` 同线程内联推进，manual §14 红线 6 的 `observe_on`/`subscribe_on` 禁令依旧；CLI 为同步入口，无 tokio 运行时。完成态不变量由 `tests/l2_send_invariant.rs`（已随翻转删除）改由 `tests/l2_fanout_shape.rs`（Local 形状钉）+ `tests/pipeline_string.rs`（无 fs 入口）+ `cargo check --target wasm32-unknown-unknown` 门禁共同钉住。
+被否选项：(a) 保留 Shared 分层——与 wasm 契约矛盾，Send/'static 约束渗透编排层；(b) 用数据搬运绕开多播（arena move 下标查表）——单例语义仍需正面表达，Subject 载体保留；(c) 手写命令式管线（违背 rxrust 核心要求）。单文件直通路径保留为 L2 的退化情形（依赖闭包 = 1）。
 
 ### D2: 数值/颜色内部表示用 f64，序列化行为受 golden 约束
 数字类型的内部表示不是对外契约：spec 只约束可观察序列化（10 位有效数字、`math.div(1,3)*3` 等数值用例），由 golden 验证。流视角的原生选择：owned `SassNumber { value: f64, unit: Option<String> }`，无间接层无分数对象；element-plus 计算面（px/rem、颜色通道取整）在 f64 下与基线差异风险低。仅当 sass-spec/回归出现精度失败用例时，才升级局部分数表示——升级依据是失败证据，不是模仿任何实现（含 dart-sass 的 Rational）。
 
 ### D3: 模块系统只做现代语义 + 一次实例化缓存
-模块身份 = canonical 文件路径；单例缓存机制见 D1-L2（`Shared::subject` 多播 + `Arc<Module>` 只读发布 + `Mutex` 注册表协调）。`@use` 支持默认名/`as`/`as *`、私有成员过滤、`with` 配置（element-plus 虽未用，sass-spec 现代用例需要）；`@forward` 支持 show/hide/prefix。SCSS `@import` 不实现（编译报错 unsupported，CSS `@import`/url() 透传）。循环 `@use` 在图构建期检测（实例化流携带父路径栈）。被否：完整 legacy 合并（工作量翻倍且无目标负载）。
+模块身份 = canonical 文件路径；单例缓存机制见 D1-L2（`Local::behavior_subject` 多播 + `Arc<Module>` 只读发布）。`@use` 支持默认名/`as`/`as *`、私有成员过滤、`with` 配置（element-plus 虽未用，sass-spec 现代用例需要）；`@forward` 支持 show/hide/prefix。SCSS `@import` 不实现（编译报错 unsupported，CSS `@import`/url() 透传）。循环 `@use` 在图构建期检测（实例化流携带父路径栈）。被否：完整 legacy 合并（工作量翻倍且无目标负载）。
 
 ### D4: `@extend` 以全局约束 pass 实现（collect → 纯函数 → flat_map）
 实测 5 处全部为 placeholder 扩展：`image.scss` 的 `%size`（同文件）与 `mixins.scss` 的 `@mixin extend-rule($name)` 动态插值扩展 `%shared-<name>`（配合 `share-rule` 用 `@at-root` 定义，同模块）。精读补充（table.scss）：placeholder 在条件 mixin 路径（`m((group, border))` 体内）定义，且可能定义于 extend 站点之后，同模块 5 个 extend 站点各自携带不同嵌套上下文。这个依赖顺序**由 extend 语义自身决定**（发射点无法局部解算），因此流形态必须是整模块收齐后的全局 pass：`collect → extend_pass（纯函数：placeholder→targets 映射上的选择器并合，展开结果按 sass extend spec 定义）→ flat_map 重发射`。实现范围："同模块 placeholder 并入目标选择器 + `!optional` + 插值 placeholder 名 + 空 placeholder 不输出"即可覆盖；跨模块 extend、复杂 combinator 由 hrx runner allowlist 管理。
@@ -115,7 +114,7 @@ BEM 体系 = `mixins/config.scss`（`el`/`-`/`__`/`--`/`is-`）+ `mixins/mixins.
 - [@extend 不完整导致 element-plus 个别选择器缺失] → e2e 覆盖断言精确定位；D4 范围内修复，超出则记 allowlist 并与用户确认扩围
 - [rxrust rc.5 API 不稳定（scan_map/reduce_initial 签名变动）] → 锁 `=1.0.0-rc.5`（Cargo.lock 已固化），编译错误集中在 lib 边界易替换
 - [sass-spec 子集仍含隐式 legacy 假设的用例] → runner 以 hrx options 段判定（如含 `:libsass` 或 legacy-only 目录直接 skip 并标注）
-- [Shared 并发的 Send/'static 约束渗透进阶段内核造成锁税] → 分层边界钉死（D1）：高频逐项流必须留在 Local；模块编译单元整链在同线程推进，仅产出跨线程
+- [wasm 目标与宿主环境的运行时差异（时钟/线程/fs）] → 全链 Local 消除 Send/锁税；`clock.rs` 目标感知 `StopWatch`（`std::time::Instant` 在 `wasm32-unknown-unknown` 运行时 panic，该目标降级为 no-op）；`compile_string` 为无 fs 入口；门禁 `cargo check --target wasm32-unknown-unknown`
 - [单文件 500 行拆分过碎增加心智负担] → 按数据形态域（token/stmt/expr）切分，mod.rs 仅 re-export
 
 ## Migration Plan
@@ -124,4 +123,4 @@ BEM 体系 = `mixins/config.scss`（`el`/`-`/`__`/`--`/`is-`）+ `mixins/mixins.
 
 ## Open Questions
 
-（无——原"@extend 上下文强度"已调研关闭：5 处均为同模块 placeholder 扩展，见 D4；"是否全 Local"已论证关闭：模块单例与并发两个结构性需求要求 L2 Shared + 多播，见 D1-L2）
+（无——原"@extend 上下文强度"已调研关闭：5 处均为同模块 placeholder 扩展，见 D4；原"是否全 Local"结论已被 wasm 需求翻转：全 Local，见 D1-L2 翻转记录）

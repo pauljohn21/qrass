@@ -5,7 +5,7 @@
 //! executes **exactly once** no matter how many parents import it, while each parent
 //! still gets the full export surface. These tests drive the real loader against the
 //! `tests/fixtures/modules` diamond (`diamond_a`/`diamond_b` → `shared`) so the
-//! `Shared` `BehaviorSubject` carrier in `module_bus` is exercised end to end — a
+//! `Local` `BehaviorSubject` carrier in `module_bus` is exercised end to end — a
 //! re-instantiation would duplicate `.shared-rule`, and a carrier that deadlocks or
 //! loses its cached value would hang or error the run.
 
@@ -42,12 +42,24 @@ fn count(hay: &str, needle: &str) -> usize {
 fn diamond_instantiates_the_shared_module_once() {
     let out = css("@use \"diamond_a\";\n@use \"diamond_b\";");
     // The shared body published its rule exactly once for two parents.
-    assert_eq!(count(&out, ".shared-rule"), 1, "shared CSS duplicated: {out}");
-    assert_eq!(count(&out, "from-shared"), 1, "shared CSS duplicated: {out}");
+    assert_eq!(
+        count(&out, ".shared-rule"),
+        1,
+        "shared CSS duplicated: {out}"
+    );
+    assert_eq!(
+        count(&out, "from-shared"),
+        1,
+        "shared CSS duplicated: {out}"
+    );
     // …while each parent still bound the namespace and read the export.
     assert_eq!(count(&out, ".da"), 1, "parent A lost its own body: {out}");
     assert_eq!(count(&out, ".db"), 1, "parent B lost its own body: {out}");
-    assert_eq!(count(&out, "value: 42"), 2, "namespace export missing: {out}");
+    assert_eq!(
+        count(&out, "value: 42"),
+        2,
+        "namespace export missing: {out}"
+    );
 }
 
 #[test]
@@ -59,7 +71,10 @@ fn shared_module_publishes_at_its_first_load() {
     let shared = out.find(".shared-rule").expect("shared rule present");
     let da = out.find(".da").expect("parent A rule present");
     let db = out.find(".db").expect("parent B rule present");
-    assert!(shared < da, "shared must publish before its importer: {out}");
+    assert!(
+        shared < da,
+        "shared must publish before its importer: {out}"
+    );
     assert!(da < db, "import order must be preserved: {out}");
 }
 
@@ -68,8 +83,16 @@ fn repeated_use_of_the_same_module_stays_a_single_instantiation() {
     // One entry importing the same module twice through two different names still
     // resolves to the same canonical path, so exactly one instantiation is broadcast.
     let out = css("@use \"diamond_a\";\n@use \"diamond_a\" as second;");
-    assert_eq!(count(&out, ".shared-rule"), 1, "re-`@use` re-ran the body: {out}");
-    assert_eq!(count(&out, "value: 42"), 1, "aliased parent lost its body: {out}");
+    assert_eq!(
+        count(&out, ".shared-rule"),
+        1,
+        "re-`@use` re-ran the body: {out}"
+    );
+    assert_eq!(
+        count(&out, "value: 42"),
+        1,
+        "aliased parent lost its body: {out}"
+    );
 }
 
 #[test]

@@ -35,11 +35,25 @@ pub(crate) fn register(r: &mut Registry) {
     r.nsp("math", "atan", 1, Some(1), &["number"], atan);
     r.nsp("math", "atan2", 2, Some(2), &["y", "x"], atan2);
     r.ns("math", "hypot", 0, None, hypot);
-    r.nsp("math", "clamp", 3, Some(3), &["min", "number", "max"], clamp);
+    r.nsp(
+        "math",
+        "clamp",
+        3,
+        Some(3),
+        &["min", "number", "max"],
+        clamp,
+    );
     r.nsp("math", "random", 0, Some(1), &["limit"], random);
     r.nsp("math", "unit", 1, Some(1), &["number"], unit);
     r.nsp("math", "is-unitless", 1, Some(1), &["number"], is_unitless);
-    r.nsp("math", "compatible", 2, Some(2), &["number1", "number2"], compatible);
+    r.nsp(
+        "math",
+        "compatible",
+        2,
+        Some(2),
+        &["number1", "number2"],
+        compatible,
+    );
     // Legacy global spellings used by older stylesheets.
     r.def("round", 1, Some(1), round);
     r.def("ceil", 1, Some(1), ceil);
@@ -254,8 +268,8 @@ fn hypot(c: &super::Call) -> Or<SassValue> {
         };
         if i > 0 {
             let (_, u0) = &vals[0];
-            let compatible = unit == u0
-                || convert_number(1.0, unit.as_deref(), u0.as_deref()).is_some();
+            let compatible =
+                unit == u0 || convert_number(1.0, unit.as_deref(), u0.as_deref()).is_some();
             if !compatible {
                 let suffix = if unit.is_some() != u0.is_some() {
                     " (one has units and the other doesn't)"
@@ -320,10 +334,17 @@ fn clamp(c: &super::Call) -> Or<SassValue> {
         ));
     }
     let num_lt_max = convert_number(val, uv.as_deref(), umx.as_deref()).is_some_and(|x| x < mx);
-    let (tv, tu) = if num_lt_max { (val, uv) } else { (mx, umx.clone()) };
+    let (tv, tu) = if num_lt_max {
+        (val, uv)
+    } else {
+        (mx, umx.clone())
+    };
     let t_gt_min = convert_number(tv, tu.as_deref(), umn.as_deref()).is_some_and(|x| x > mn);
     let (rv, ru) = if t_gt_min { (tv, tu) } else { (mn, umn) };
-    Ok(SassValue::Number { value: rv, unit: ru })
+    Ok(SassValue::Number {
+        value: rv,
+        unit: ru,
+    })
 }
 
 /// Positional argument `i` as a `(value, unit)` pair, or a `$name: <value> is not
@@ -401,16 +422,34 @@ fn random(c: &super::Call) -> Or<SassValue> {
 /// A time-seeded xorshift64* step — genuinely non-deterministic (as `math.random`
 /// should be), with no shared mutable state.
 fn rand_u64() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x9E37_79B9_7F4A_7C15);
-    let mut x = nanos ^ 0x2545_F491_4F6C_DD1D;
+    let mut x = seed_nanos() ^ 0x2545_F491_4F6C_DD1D;
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
     x
+}
+
+/// Wall-clock nanos everywhere the stock std has a clock: native targets and
+/// `wasm32-wasip1` (`clock_time_get`).
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn seed_nanos() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15)
+}
+
+/// `wasm32-unknown-unknown`: stock-std `SystemTime::now()` **panics** there, so
+/// the seed degrades to a monotonic per-process counter — successive
+/// `math.random` calls still differ, they are just reproducible.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn seed_nanos() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TICKS: AtomicU64 = AtomicU64::new(0);
+    TICKS
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_add(0x9E37_79B9_7F4A_7C15)
 }
 
 fn unit(c: &super::Call) -> Or<SassValue> {
@@ -429,8 +468,7 @@ fn is_unitless(c: &super::Call) -> Or<SassValue> {
 fn compatible(c: &super::Call) -> Or<SassValue> {
     let (_, ua) = num_as(c, 0, "number1")?;
     let (_, ub) = num_as(c, 1, "number2")?;
-    let ok = ua == ub
-        || convert_number(1.0, ua.as_deref(), ub.as_deref()).is_some();
+    let ok = ua == ub || convert_number(1.0, ua.as_deref(), ub.as_deref()).is_some();
     Ok(SassValue::Bool(ok))
 }
 
