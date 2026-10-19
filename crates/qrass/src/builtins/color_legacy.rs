@@ -36,8 +36,8 @@ pub(crate) fn register(r: &mut Registry) {
         "color",
         "invert",
         1,
-        Some(2),
-        &["color", "weight"],
+        Some(3),
+        &["color", "weight", "space"],
         invert,
     );
 }
@@ -88,11 +88,27 @@ fn grayscale(c: &super::Call) -> Or<SassValue> {
     Ok(as_legacy_rgb(Color::from_hsla(hsl.h, 0.0, hsl.l, col.a)))
 }
 
-/// `color.invert($color, $weight)`: blend each sRGB channel toward its
+/// `color.invert($color, $weight, $space)`: blend each sRGB channel toward its
 /// complement `255 - c` by the weight ratio (default `100%` = full inversion).
 fn invert(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
-    if col.c4.is_some() {
+    if let Some(c4) = &col.c4 {
+        // dart's guard (invert/error goldens): channel-modifying operations
+        // reject a color with a missing channel — in the modified space, so a
+        // same-or-unspecified `$space` names the color's own channel.
+        if let Some((i, _)) = c4.comps.iter().enumerate().find(|(_, v)| v.is_none()) {
+            let space = match c.opt("space", Some(2)) {
+                Some(SassValue::Str { text, .. }) => text.clone(),
+                _ => c4.space.name.to_string(),
+            };
+            if space == c4.space.name {
+                return Err(err(format!(
+                    "${}: Because the CSS working group is still deciding on the best behavior, Sass doesn't currently support modifying missing channels (color: {}).",
+                    c4.space.channels[i].name,
+                    col.to_css()
+                )));
+            }
+        }
         return Err(err("invert of a Color 4 color is not supported"));
     }
     let ratio = weight_ratio(c.opt("weight", Some(1)))?;
@@ -114,8 +130,8 @@ fn invert(c: &super::Call) -> Or<SassValue> {
 /// is treated as an already-scaled magnitude (`50` → `0.5`). Absent → full invert.
 fn weight_ratio(v: Option<&SassValue>) -> Or<f64> {
     let Some(v) = v else { return Ok(1.0) };
-    let (n, _) = v
-        .as_number()
-        .ok_or_else(|| err("expected a percentage for $weight"))?;
+    let (n, _) = v.as_number().ok_or_else(|| {
+        err(format!("$weight: {} is not a number.", v.to_css()))
+    })?;
     Ok((n / 100.0).clamp(0.0, 1.0))
 }

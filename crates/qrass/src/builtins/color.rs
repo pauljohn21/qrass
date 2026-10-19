@@ -53,8 +53,8 @@ pub(super) fn color_at(c: &super::Call, i: usize) -> Or<Color> {
     match c.positional.get(i) {
         Some(SassValue::Color(col)) => Ok(col.clone()),
         Some(other) => Err(err(format!(
-            "expected a color, given {}",
-            other.type_name()
+            "$color: {} is not a color.",
+            other.to_css()
         ))),
         None => Err(err("expected a color")),
     }

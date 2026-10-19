@@ -315,3 +315,41 @@ fn rgb_symbolic_still_dispatches_historically() {
     // A slash *pair* renders verbatim with spaced `/` (unlike a division slot).
     assert!(out.contains("hsl(var(--foo) / 0.4)"), "{out}");
 }
+
+// ─── invert one_arg / plain-CSS split (round 66) ──────────────────────────────
+
+#[test]
+fn invert_dart_error_wording() {
+    let msg = eval_err("@use \"sass:color\"; a { p: color.invert(c); }");
+    assert!(msg.contains("$color: c is not a color."), "{msg}");
+    let msg = eval_err("@use \"sass:color\"; a { p: color.invert(red, c); }");
+    assert!(msg.contains("$weight: c is not a number."), "{msg}");
+    let msg = eval_err("@use \"sass:color\"; a { p: color.invert(); }");
+    assert!(msg.contains("Missing argument $color."), "{msg}");
+    // dart's missing-channel guard, same-or-unspecified $space.
+    let msg = eval_err(
+        "@use \"sass:color\"; a { p: color.invert(color(srgb none 0.1 0.2), $space: srgb); }",
+    );
+    assert!(
+        msg.contains("$red: Because the CSS working group is still deciding")
+            && msg.contains("modifying missing channels (color: color(srgb none 0.1 0.2))."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn plain_css_invert_stays_verbatim_but_multi_arg_is_rejected() {
+    // CSS-filter argument kinds pass through verbatim (round-28 territory)…
+    let out = css("a { p: invert(10%); q: invert(var(--c)); }");
+    assert!(out.contains("invert(10%)"), "{out}");
+    assert!(out.contains("invert(var(--c))"), "{out}");
+    // …two CSS arguments are dart's plain-CSS arity note…
+    let msg = eval_err("a { p: invert(1, 50%); }");
+    assert!(
+        msg.contains("Only one argument may be passed to the plain-CSS invert() function."),
+        "{msg}"
+    );
+    // …and a Sass color argument computes via the namespaced builtin.
+    let out = css("a { p: invert(red); }");
+    assert!(out.contains("aqua"), "{out}");
+}

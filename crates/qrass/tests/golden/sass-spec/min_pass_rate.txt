@@ -804,4 +804,18 @@
 #     behavior byte-identical across the move.
 # sass-spec 7805 -> 7840 (+35: rgb/rgba one_arg + hsl slash pairs), 0 regressions,
 # full test suite green (415 passed), clippy -D warnings green, whole library <=500.
-71.5
+#
+# Round 66: the `invert`/`color.invert` error surface — dart wording for
+#     `$color: … is not a color.` (color_at, cross-checked by A/B: pure gain)
+#     and `$weight: … is not a number.`, `Missing argument $color.`; color.invert
+#     gained its `$space` parameter and dart's missing-channel guard for same-
+#     or-unspecified space (the long "CSS working group" message with the color
+#     serialized verbatim); and bare `invert()` split by argument kind in
+#     `eval_plain_invert` — CSS-value arguments keep the filter passthrough
+#     (single arg) or dart's plain-CSS arity note (two+), Sass-color arguments
+#     compute through the namespaced builtin. Conversion-dependent missing-
+#     channel cases (grey→hsl hue, rgb→xyz y) and Color-4 success arithmetic
+#     remain for the per-space model round.
+# sass-spec 7840 -> 7877 (+37: invert/error + color_at wording families), 0
+# regressions, full test suite green (417 passed), clippy -D warnings green.
+71.8

@@ -86,6 +86,12 @@ impl EvalState {
             return Ok(v);
         }
 
+        // The bare `invert()` is both a CSS filter function and — given Sass
+        // values — the `color.invert` builtin; dart splits on argument kind.
+        if call.namespace.is_none() && call.name == "invert" {
+            return self.eval_plain_invert(call);
+        }
+
         // Plain-CSS passthrough: a bare call that is neither a known builtin nor a
         // meta form is emitted verbatim (the goldens keep unknown calls as plain CSS),
         // preserving calc/var operators literally while resolving interpolation and
