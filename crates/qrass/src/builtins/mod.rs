@@ -26,8 +26,10 @@ pub(crate) mod global;
 pub(crate) mod list;
 pub(crate) mod map;
 pub(crate) mod math;
+pub(crate) mod math_trig;
 pub(crate) mod meta;
 pub(crate) mod selector;
+pub(crate) mod selector_ops;
 pub(crate) mod string;
 
 /// Result alias for builtin fallibility (errors ride the value channel).

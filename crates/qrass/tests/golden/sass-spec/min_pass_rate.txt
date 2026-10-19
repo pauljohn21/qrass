@@ -767,4 +767,11 @@
 #     `channel_value`, all `pub(crate)`); the parser file is now 274 lines, the
 #     check module 226 — both within budget, freeing headroom for the next
 #     color-error rounds. hrx byte-identical 7755, 0 behavior change.
+#     Same-round follow-up: the audit also caught three files that had crept
+#     over 500 unnoticed — builtins/color.rs (501: `to_space` moved to
+#     color_ops.rs), builtins/math.rs (534: angle/trig/hypot/clamp/random +
+#     num_as/unit_clash/unitless_num helpers split to new math_trig.rs) and
+#     builtins/selector.rs (522: sel_source/sel_arg + is-superselector/unify/
+#     extend/replace split to new selector_ops.rs). Whole library now ≤500;
+#     hrx still byte-identical 7755, 410 tests green, clippy green.
 70.7

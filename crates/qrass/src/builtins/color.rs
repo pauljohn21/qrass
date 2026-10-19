@@ -4,7 +4,7 @@
 //! Colors are RGBA f64 with on-demand HSL conversion (D2).
 
 use super::{Or, Registry};
-use super::color_ops::{hsl_from_legacy_src, wrap_hue};
+use super::color_ops::to_space;
 use crate::error::{ErrorKind, SassError};
 use crate::value::{Color, SassValue};
 
@@ -93,118 +93,6 @@ fn is_missing(c: &super::Call) -> Or<SassValue> {
         None => false,
     };
     Ok(SassValue::Bool(missing))
-}
-
-/// `color.to-space($color, $space)`: convert a color into another space.
-///
-/// Modern targets (`lab`/`lch`/`oklab`/`oklch`/`xyz`/`xyz-d50`/`srgb`/gamut
-/// spaces) carry a `Color4` and serialize in CSS Color 4 form. The legacy `rgb`
-/// target keeps the historical representation (an unchanged legacy color, or a
-/// concrete legacy color built from sRGB when the source is Color 4).
-fn to_space(c: &super::Call) -> Or<SassValue> {
-    let col = color_at(c, 0)?;
-    let space = match c.opt("space", Some(1)) {
-        Some(SassValue::Str { text, .. }) => text.clone(),
-        Some(other) => other.to_css(),
-        None => return Err(err("expected a color space")),
-    };
-
-    // The Color 4 source for the conversion: the color's own payload, or a legacy
-    // sRGB color promoted through its 0..255 display channels.
-    let src: crate::color4::Color4 = match &col.c4 {
-        Some(c4) => (**c4).clone(),
-        None => {
-            let mut c4 = crate::color4::Color4::new(
-                crate::color4::lookup("srgb").expect("srgb space registered"),
-                [col.r / 255.0, col.g / 255.0, col.b / 255.0],
-            );
-            if col.a != 1.0 {
-                c4.alpha = Some(col.a);
-            }
-            c4
-        }
-    };
-
-    let hsl_like = matches!(src.space.name, "hsl" | "hwb");
-
-    if space == "rgb" {
-        // Legacy target: a legacy color is returned untouched (hex/rgb form).
-        if col.c4.is_none() {
-            return Ok(make(col));
-        }
-        // `to-space(_, rgb)` always yields the golden's *legacy* rgb form: a missing
-        // channel resolves to 0 (`to_rgb` reads `raw()`), so the result is a
-        // concrete rgb color serialized as keyword/`#hex`/`rgb(%)` — never a
-        // `color(srgb …)` wrapper (confirmed across the to-space rgb goldens).
-        // An hsl/hwb source also carries its verbatim HSL triple so an
-        // out-of-gamut `hsl()` fallback emits the golden's exact channels.
-        let converted = src.convert(crate::color4::lookup("srgb").expect("srgb space"));
-        let rgb = converted.to_rgb();
-        let legacy_hsl = if hsl_like { hsl_from_legacy_src(&src).map(wrap_hue) } else { None };
-        return Ok(make(Color {
-            r: rgb[0],
-            g: rgb[1],
-            b: rgb[2],
-            a: converted.alpha(),
-            hex: false,
-            c4: None,
-            name: None,
-            legacy: Some("rgb"),
-            legacy_hsl,
-        }));
-    }
-
-    let Some(target) = crate::color4::lookup(&space) else {
-        return Err(err(format!("Unknown color space: {space}")));
-    };
-    let converted = if target.name == src.space.name {
-        src
-    } else {
-        src.convert(target)
-    };
-    // `to-space(hsl|hwb, hsl|hwb)` with every channel concrete yields the golden's
-    // *legacy* color built directly from the source's HSL-formula channels: an
-    // out-of-gamut result serializes as an unclamped `hsl()` (channels past 1,
-    // a negative saturation flipped to hue +180° — see `legacy_to_css`), and the
-    // carried triple is the golden's exact inversion (`hsl(200, 11.1111111111%,
-    // 212.5%)`), which the RGB round trip cannot recover. Only an `hsl`/`hwb`
-    // *source* takes this path; a modern source (srgb/xyz/…) keeps the Color 4
-    // payload so `.space`/`.channel` still report the target space.
-    let legacy_target = matches!(target.name, "hsl" | "hwb");
-    let missing = converted.comps.iter().any(|c| c.is_none()) || converted.alpha_missing;
-    let modern = converted.space.name == "hsl" && missing;
-    if hsl_like && legacy_target && !modern && !missing {
-        let [r, g, b] = converted.to_rgb();
-        let carried = hsl_from_legacy_src(&converted).map(wrap_hue);
-        return Ok(make(Color {
-            r,
-            g,
-            b,
-            a: converted.alpha(),
-            hex: false,
-            c4: Some(Box::new(converted)),
-            name: None,
-            legacy: Some(target.name),
-            legacy_hsl: carried,
-        }));
-    }
-    // Every other result keeps the Color 4 payload. A legacy `hsl`/`hwb` target
-    // from a *modern* source still serializes in the golden's legacy CSS form (keyword
-    // /`#hex`/`rgb(%)`/`hsl()`); a modern target, or an `hsl`/`hwb` target with a
-    // `none` channel (`hwb(10deg none none)`), serializes in the `color(…)` or
-    // bare-space form.
-    let rgb = converted.to_rgb();
-    Ok(make(Color {
-        r: rgb[0],
-        g: rgb[1],
-        b: rgb[2],
-        a: converted.alpha(),
-        hex: false,
-        c4: Some(Box::new(converted)),
-        name: None,
-        legacy: legacy_target.then_some(target.name).filter(|_| !hsl_like),
-        legacy_hsl: None,
-    }))
 }
 
 /// A numeric-valued argument (named or default-free) with its unit, if any.
