@@ -681,6 +681,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrass-wasm"
+version = "0.1.0"
+dependencies = [
+ "qrass",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
