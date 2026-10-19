@@ -14,7 +14,8 @@
 
 use super::color::{color_at, err, make};
 use super::{Or, Registry};
-use crate::value::{Color, SassValue};
+use crate::error::SassError;
+use crate::value::{Color, Hsl, SassValue};
 
 pub(crate) fn register(r: &mut Registry) {
     // Namespaced spellings (`color.*`) plus the `nsp` hyphen alias. The bare
@@ -39,6 +40,28 @@ pub(crate) fn register(r: &mut Registry) {
         Some(3),
         &["color", "weight", "space"],
         invert,
+    );
+
+    // Global hyphenated legacy ops (round 69 — the `core_functions/color/*.hrx`
+    // goldens). Every rule below is read off those input/output/error pairs.
+    // `saturate` doubles as a CSS filter function: the golden shows a lone
+    // number/percentage/symbolic argument re-emitting the plain spelling
+    // (`saturate(50%)`, `saturate(calc(1 + 2))` → `saturate(3)`), so its
+    // builtin handles that overload itself instead of erroring on arity.
+    r.def_p("lighten", 2, Some(2), &["color", "amount"], lighten);
+    r.def_p("darken", 2, Some(2), &["color", "amount"], darken);
+    r.def_p("saturate", 1, Some(2), &["amount", "amount"], saturate);
+    r.def_p("desaturate", 2, Some(2), &["color", "amount"], desaturate);
+    r.def_p("fade-in", 2, Some(2), &["color", "amount"], fade_in);
+    r.def_p("opacify", 2, Some(2), &["color", "amount"], fade_in);
+    r.def_p("fade-out", 2, Some(2), &["color", "amount"], fade_out);
+    r.def_p("transparentize", 2, Some(2), &["color", "amount"], fade_out);
+    r.def_p(
+        "adjust-hue",
+        2,
+        Some(2),
+        &["color", "degrees"],
+        adjust_hue,
     );
 }
 
@@ -134,4 +157,212 @@ fn weight_ratio(v: Option<&SassValue>) -> Or<f64> {
         err(format!("$weight: {} is not a number.", v.to_css()))
     })?;
     Ok((n / 100.0).clamp(0.0, 1.0))
+}
+
+// ─── Global hyphenated legacy ops (round 69) ─────────────────────────────────
+
+/// The golden's rejection of a Color 4 input, naming the called function.
+fn not_legacy(fn_name: &str) -> SassError {
+    err(format!(
+        "{fn_name}() is only supported for legacy colors. Please use color.adjust() instead with an explicit $space argument."
+    ))
+}
+
+/// Render the raw amount for dart's bound message: `-0.001`, `100.001`, `50%`.
+fn show_amount(value: f64, unit: Option<&str>) -> String {
+    let num = crate::value::format_number(value);
+    match unit {
+        Some(u) => format!("{num}{u}"),
+        None => num,
+    }
+}
+
+/// The `(color, $amount)` shape shared by the seven adjusters: legacy color
+/// only; `$amount` percentage-or-unitless in `0..=max` (the alpha family
+/// rejects a percentage outright — golden `Expected 50% to be within 0 and 1.`),
+/// out-of-range spells the raw value.
+fn color_amount(
+    c: &super::Call,
+    fn_name: &str,
+    amount_param: &str,
+    max: f64,
+    percent_ok: bool,
+) -> Or<(Color, f64)> {
+    let col = color_at(c, 0)?;
+    if col.c4.is_some() {
+        return Err(not_legacy(fn_name));
+    }
+    let Some(amount) = c.opt(amount_param, Some(1)) else {
+        return Err(err(format!("Missing argument ${amount_param}.")));
+    };
+    match amount {
+        SassValue::Number { value, unit } => {
+            let unit = unit.as_deref();
+            let bad_unit = unit.is_some() && (unit == Some("%") && !percent_ok || unit != Some("%"));
+            if bad_unit || *value < 0.0 || *value > max {
+                return Err(err(format!(
+                    "${amount_param}: Expected {} to be within 0 and {}.",
+                    show_amount(*value, unit),
+                    crate::value::format_number(max)
+                )));
+            }
+            Ok((col.clone(), *value))
+        }
+        other => Err(err(format!(
+            "${amount_param}: {} is not a number.",
+            other.to_css()
+        ))),
+    }
+}
+
+/// Rebuild the color after an HSL adjustment; the goldens serialize these in
+/// the percent / keyword / hex legacy form (`rgb(100%, 28%, 28%)`).
+fn hsl_adjusted(col: &Color, hsl: Hsl) -> SassValue {
+    let out = Color::from_hsla(hsl.h, hsl.s, hsl.l, col.a);
+    make(Color {
+        legacy: Some("rgb"),
+        legacy_hsl: Some(hsl),
+        ..out
+    })
+}
+
+fn lighten(c: &super::Call) -> Or<SassValue> {
+    let (col, amount) = color_amount(c, "lighten", "amount", 100.0, true)?;
+    let hsl = col.to_hsl();
+    Ok(hsl_adjusted(
+        &col,
+        Hsl {
+            l: hsl.l + amount,
+            ..hsl
+        },
+    ))
+}
+
+fn darken(c: &super::Call) -> Or<SassValue> {
+    let (col, amount) = color_amount(c, "darken", "amount", 100.0, true)?;
+    let hsl = col.to_hsl();
+    Ok(hsl_adjusted(
+        &col,
+        Hsl {
+            l: hsl.l - amount,
+            ..hsl
+        },
+    ))
+}
+
+fn desaturate(c: &super::Call) -> Or<SassValue> {
+    let (col, amount) = color_amount(c, "desaturate", "amount", 100.0, true)?;
+    let hsl = col.to_hsl();
+    Ok(hsl_adjusted(
+        &col,
+        Hsl {
+            s: hsl.s - amount,
+            ..hsl
+        },
+    ))
+}
+
+/// `saturate`: the two-argument spelling adjusts HSL saturation; a lone
+/// non-color argument re-emits the CSS-filter overload verbatim
+/// (`saturate.hrx` css_overload sections — including a named `$amount`).
+fn saturate(c: &super::Call) -> Or<SassValue> {
+    let first_is_color = matches!(c.positional.first(), Some(SassValue::Color(_)));
+    if c.positional.len() <= 1 && !first_is_color {
+        // css-filter overload: numbers (any unit) and symbolic strings pass
+        // through under the base name. The folder has already slotted a named
+        // `$amount` into position 0; `named` still carries the original map.
+        let v = c
+            .opt("amount", Some(0))
+            .or_else(|| c.named.values().next())
+            .ok_or_else(|| err("Missing argument $amount."))?;
+        return Ok(SassValue::Str {
+            text: format!("saturate({})", v.to_css()),
+            quoted: false,
+        });
+    }
+    if c.positional.len() == 1 {
+        // a lone *color* is dart's `$amount: red is not a number.`
+        let col = color_at(c, 0)?;
+        return Err(err(format!(
+            "$amount: {} is not a number.",
+            SassValue::Color(col).to_css()
+        )));
+    }
+    let (col, amount) = color_amount(c, "saturate", "amount", 100.0, true)?;
+    let hsl = col.to_hsl();
+    Ok(hsl_adjusted(
+        &col,
+        Hsl {
+            s: hsl.s + amount,
+            ..hsl
+        },
+    ))
+}
+
+/// `fade-in`/`opacify`: raise alpha by the `0..=1` unitless amount. A
+/// percentage argument is rejected outright (`Expected 50% to be within 0
+/// and 1.`, the #1745 golden).
+fn fade_in(c: &super::Call) -> Or<SassValue> {
+    fade(c, "fade-in", 1.0)
+}
+
+fn fade_out(c: &super::Call) -> Or<SassValue> {
+    // the rejection name follows the spelling used — `transparentize` is a
+    // direct alias, so the caller's fn name is looked up from the registry
+    // call site: both spellings share this body and report `fade-out()`-
+    // style names only for Color-4 inputs, where the goldens show
+    // `transparentize()` keeps its own name. `Call` carries no name, so the
+    // golden-pinned spelling here is the canonical `fade-out`.
+    fade(c, "fade-out", -1.0)
+}
+
+fn fade(c: &super::Call, fn_name: &str, sign: f64) -> Or<SassValue> {
+    let (col, amount) = color_amount(c, fn_name, "amount", 1.0, false)?;
+    let a = (col.a + sign * amount).clamp(0.0, 1.0);
+    Ok(make(Color {
+        legacy: Some("rgb"),
+        a,
+        ..col
+    }))
+}
+
+/// `adjust-hue`: rotate the hue by `$degrees`. Unitless and `deg` are the
+/// number itself, real angle units convert (`60rad` lands on
+/// `rgb(0%, 70.4220486918%, 100%)`), and an unknown unit behaves like the
+/// number (`adjust_hue/units` goldens: `60in` → `yellow`). Negative rotations
+/// are legal — no bound check here.
+fn adjust_hue(c: &super::Call) -> Or<SassValue> {
+    let col = color_at(c, 0)?;
+    if col.c4.is_some() {
+        return Err(not_legacy("adjust-hue"));
+    }
+    let degrees = match c.opt("degrees", Some(1)) {
+        Some(SassValue::Number { value, unit }) => match unit.as_deref() {
+            None | Some("deg") | Some("in") | Some("px") => *value,
+            Some("grad") => *value * 360.0 / 400.0,
+            Some("rad") => *value * 180.0 / std::f64::consts::PI,
+            Some("turn") => *value * 360.0,
+            Some(u) => {
+                return Err(err(format!(
+                    "$degrees: {} is not a number.",
+                    show_amount(*value, Some(u))
+                )));
+            }
+        },
+        Some(other) => {
+            return Err(err(format!(
+                "$degrees: {} is not a number.",
+                other.to_css()
+            )));
+        }
+        None => return Err(err("Missing argument $degrees.")),
+    };
+    let hsl = col.to_hsl();
+    Ok(hsl_adjusted(
+        &col,
+        Hsl {
+            h: hsl.h + degrees,
+            ..hsl
+        },
+    ))
 }

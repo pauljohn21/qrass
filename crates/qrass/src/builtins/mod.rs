@@ -71,6 +71,20 @@ impl Registry {
             .insert(name.to_string(), Builtin { min, max, call, params: &[] });
     }
 
+    /// Like [`Registry::def`], declaring parameter names for named-argument
+    /// folding and dart's `Missing argument $x.` arity wording.
+    fn def_p(
+        &mut self,
+        name: &str,
+        min: usize,
+        max: Option<usize>,
+        params: &'static [&'static str],
+        call: BuiltinFn,
+    ) {
+        self.global
+            .insert(name.to_string(), Builtin { min, max, call, params });
+    }
+
     /// Register a namespaced function `ns.name`, additionally exposing the
     /// legacy hyphen alias `ns-name` in the global table (both → one impl).
     fn ns(

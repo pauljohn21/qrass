@@ -848,4 +848,23 @@
 #     separate legacy-vs-CSS-filter split (round-66 invert pattern) still open.
 # sass-spec 7910 -> 7928 (+18: modules/color/error + siblings), 0 regressions,
 # full test suite green (423 passed), clippy -D warnings green.
-72.3
+#
+# Round 69: the global hyphenated legacy color functions — lighten/darken/
+#     saturate/desaturate/fade-in/opacify/fade-out/transparentize/adjust-hue
+#     registered via new `Registry::def_p` (parameters drive dart's
+#     `Missing argument $x.` arity wording). The behavior table was read
+#     EXCLUSIVELY off the golden input/output/error pairs (methodology
+#     correction mid-round: no dart-sass mechanism speculation): HSL percentage-
+#     point arithmetic with `legacy_hsl` percent serialization, alpha family in
+#     0..=1 rejecting percentages (#1745 golden), angle-unit rotation
+#     (`60rad` converts, `60in` behaves like the number per the units goldens),
+#     the Color-4 rejection spelling naming each function, and saturate's
+#     CSS-filter overload (lone non-color argument re-emits the plain spelling,
+#     named `$amount` included). Known gap: `saturate(calc(1 + 2))` wants
+#     `saturate(3)` — calc evaluation conflicts with the crate-wide calc
+#     passthrough goldens, left verbatim. ns css overloads
+#     (color.grayscale/invert/alpha/opacity, 5 cases) still open.
+# sass-spec 7928 -> 8043 (+115: the six hyphen adjuster clusters + error +
+# adjust_hue + global/color families), 0 regressions,
+# full test suite green (429 passed), clippy -D warnings green.
+73.3
