@@ -142,6 +142,13 @@ fn registry() -> &'static Registry {
     })
 }
 
+/// Whether `ns` is one of the built-in modules (`math`, `color`, …) —
+/// `meta.module-variables("math")` sees an empty user-variable map rather than
+/// a missing namespace.
+pub(crate) fn has_module(ns: &str) -> bool {
+    registry().namespaces.contains_key(ns)
+}
+
 /// Look up a builtin by optional namespace and name. `map.get` → namespace
 /// `"map"`/name `"get"`; a bare call → namespace `None`. Returns `None` when no
 /// such builtin exists (so the caller raises "Undefined function").

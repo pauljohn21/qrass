@@ -171,6 +171,11 @@ impl Env {
         self.namespaces.contains_key(namespace)
     }
 
+    /// The whole variable map published under `ns` (meta.module-variables).
+    pub fn namespace_vars(&self, namespace: &str) -> Option<&HashMap<String, SassValue>> {
+        self.namespaces.get(namespace)
+    }
+
     /// Publish a module's exported variables under `ns`.
     pub fn bind_namespace(&mut self, namespace: &str, vars: Vec<(String, SassValue)>) {
         self.namespaces

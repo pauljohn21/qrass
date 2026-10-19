@@ -933,4 +933,14 @@
 #     `or_after/interpolation` spellings owned by the plain check pass.
 # sass-spec 8087 -> 8099 (+12: media logic errors), 0 regressions,
 # full test suite green (438 passed), clippy -D warnings green.
-73.8
+#
+# Round 72 (c): `meta.module-variables($module)` — the namespace's user
+#     variables as a sorted map (new `Env::namespace_vars` + `has_module`),
+#     built-in modules answering `()` and dart's arity/type/missing-namespace
+#     spellings, meta-namespace only (no global spelling; tests in
+#     meta_introspection.rs). `module-functions`/`module-mixins` (the sibling
+#     38 cases) still wait on first-class callable values — an independent
+#     work package, not claimed here.
+# sass-spec 8099 -> 8115 (+16: module_variables cluster), 0 regressions,
+# full test suite green (439 passed), clippy -D warnings green.
+74.0

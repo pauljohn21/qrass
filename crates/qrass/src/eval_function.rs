@@ -252,6 +252,66 @@ impl EvalState {
                 SassValue::Bool(user_defined || builtin)
             }
             "content-exists" => SassValue::Bool(!self.content_stack.is_empty()),
+            // `meta.module-variables($module)`: the namespace's user variables
+            // as a name-sorted map (the module_variables goldens spell keys
+            // without `$`, in declaration-consistent order). meta-namespace
+            // only — there is no global spelling.
+            "module-variables" if namespace == Some("meta") => {
+                let given = raw.positional().len() + raw.named().len();
+                if given == 0 {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        "Missing argument $module.",
+                    ));
+                }
+                if given > 1 {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        format!(
+                            "Only 1 argument allowed, but {given} {} passed.",
+                            if given == 1 { "was" } else { "were" }
+                        ),
+                    ));
+                }
+                let ns = match raw.positional().first().or_else(|| raw.named().get("module")) {
+                    Some(SassValue::Str { text, .. }) => text.clone(),
+                    Some(other) => {
+                        return Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!(
+                                "$module: {} is neither a string nor a module reference.",
+                                other.to_css()
+                            ),
+                        ));
+                    }
+                    None => String::new(),
+                };
+                let map = match self.env.namespace_vars(&ns) {
+                    Some(v) => v.clone(),
+                    None if crate::builtins::has_module(&ns) => Default::default(),
+                    None => {
+                        return Err(SassError::new(
+                            ErrorKind::UndefinedVariable,
+                            format!("There is no module with namespace \"{ns}\"."),
+                        ));
+                    }
+                };
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                let entries = keys
+                    .into_iter()
+                    .map(|k| {
+                        (
+                            SassValue::Str {
+                                text: k.clone(),
+                                quoted: true,
+                            },
+                            map[k].clone(),
+                        )
+                    })
+                    .collect();
+                SassValue::Map { entries }
+            }
             _ => return Ok(None),
         };
         Ok(Some(found))
