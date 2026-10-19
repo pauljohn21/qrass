@@ -727,4 +727,21 @@
 #     symbolic boundary at other fall-through points).
 # sass-spec 7640 -> 7669 (+29: lab/lch/oklab/oklch/hsl/hwb/color channel errors),
 # 0 regressions, full test suite green (392 passed), clippy -D warnings green.
-69.9
+#
+# Round 60: the deferred channel-list shape/count/arity guards for the four bare
+#     perceptual spaces (lab/lch/oklab/oklch), done the way W4b never was — every
+#     check is STRUCTURAL (arg AST shape before any evaluation) and evaluation
+#     only ever happens on an already-rejected branch, so the valid-literal and
+#     passthrough hot paths are untouched. Arity (`Missing argument $channels.` /
+#     `Only 1 argument allowed, but N were passed.`), list shape (bracketed /
+#     comma / empty / `list.slash` element count with was/were), channel count
+#     (`The lab color space has 3 channels but (…) has N.`, symbolic channels
+#     still passing through), `$alpha` unit validation (was silently dropped),
+#     and the `$hue` angle-unit wording for lch/oklch. Relative color syntax
+#     (`lab(from …)`, `From`, `list.slash(from …, α)`) is exempt wholesale — the
+#     first guard cut regressed 11 such goldens and A/B caught it; pinned in
+#     tests/color4_arg_errors.rs. hsl/hwb/xyz/rgb/color() shapes and the mix/
+#     invert error clusters keep their own goldens for later rounds.
+# sass-spec 7669 -> 7737 (+68: lab/lch/oklab/oklch error+alpha sections), 0
+# regressions, full test suite green (407 passed), clippy -D warnings green.
+70.5

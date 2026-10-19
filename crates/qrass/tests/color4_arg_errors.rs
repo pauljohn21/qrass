@@ -58,3 +58,89 @@ fn color4_symbolic_channel_still_passes_through() {
     let out = css(".a { p: lab(var(--x) 2 3); }");
     assert!(out.contains("lab(var(--x) 2 3)"), "{out}");
 }
+
+// ─── shape / count / arity guards (round 60, lab/lch/oklab/oklch) ─────────────
+
+#[test]
+fn color4_list_shape_errors() {
+    let msg = eval_err(".a { p: lab([1% 2 3]); }");
+    assert!(
+        msg.contains("$channels: Expected an unbracketed list, was [1% 2 3]"),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: lab((1%, 2, 3)); }");
+    assert!(
+        msg.contains("$channels: Expected a space- or slash-separated list, was (1%, 2, 3)"),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: lab(()); }");
+    assert!(
+        msg.contains("$channels: Color component list may not be empty."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: lab(list.slash(1%, 2, 3)); }");
+    assert!(
+        msg.contains("$channels: Only 2 slash-separated elements allowed, but 3 were passed."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn color4_channel_count_errors() {
+    let msg = eval_err(".a { p: lab(1% 2); }");
+    assert!(
+        msg.contains("$channels: The lab color space has 3 channels but (1% 2) has 2."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: lch(1% 2 3deg 0.4); }");
+    assert!(
+        msg.contains("$channels: The lch color space has 3 channels but (1% 2 3deg 0.4) has 4."),
+        "{msg}"
+    );
+    // Symbolic channels keep the passthrough even at the wrong count.
+    let out = css(".a { p: lab(var(--x) var(--y)); }");
+    assert!(out.contains("lab(var(--x) var(--y))"), "{out}");
+}
+
+#[test]
+fn color4_arity_errors() {
+    let msg = eval_err(".a { p: lab(); }");
+    assert!(msg.contains("Missing argument $channels."), "{msg}");
+    let msg = eval_err(".a { p: oklab(1%, 2, 3, 0.4); }");
+    assert!(
+        msg.contains("Only 1 argument allowed, but 4 were passed."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn color4_hue_and_alpha_validation() {
+    let msg = eval_err(".a { p: lch(1% 2 3px); }");
+    assert!(
+        msg.contains("$hue: Expected 3px to have an angle unit (deg, grad, rad, turn)."),
+        "{msg}"
+    );
+    let msg = eval_err(".a { p: lab(1% 2 3 / 0.4px); }");
+    assert!(
+        msg.contains("$alpha: Expected 0.4px to have unit \"%\" or no units."),
+        "{msg}"
+    );
+    // A bare string in the alpha slot reports the `$channels:` prefix (golden).
+    let msg = eval_err(".a { p: lab(1% 2 3 / c); }");
+    assert!(msg.contains("$channels: c is not a number."), "{msg}");
+    // `%` and unitless alphas are fine, also through the list.slash wrapper.
+    let out = css(".a { p: lab(list.slash(1% 2 3, 25%)); }");
+    assert!(out.contains("lab(1% 2 3 / 0.25)"), "{out}");
+}
+
+#[test]
+fn relative_color_syntax_still_passes_through() {
+    // The shape guards must not claim relative color syntax (regression pin for
+    // the first guard cut: `from` / case-mutated `From` / list.slash wrapper).
+    let out = css(".a { p: lab(from #aaa l a b); }");
+    assert!(out.contains("lab(from"), "{out}");
+    let out = css(".a { p: lab(From #aaa l a b); }");
+    assert!(out.contains("lab(From"), "{out}");
+    let out = css(".a { p: lab(list.slash(from #aaa r g b, 25%)); }");
+    assert!(out.contains("list.slash") || out.contains("lab(from"), "{out}");
+}

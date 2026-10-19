@@ -26,6 +26,36 @@ fn is_symbolic(v: &SassValue) -> bool {
     }
 }
 
+/// A dart-shaped `$channels` argument error (arity, list shape, slash element
+/// count or channel count of a modern literal).
+fn shape_err(msg: String) -> SassError {
+    SassError::new(ErrorKind::Builtins, msg)
+}
+
+/// Whether a bare-space call is relative color syntax — `lab(from …)`, the
+/// case-mutated `lab(From …)`, or the `list.slash(from …, α)` wrapper. None of
+/// these are channel literals; the goldens keep them as verbatim CSS, so the
+/// strict `$channels` guards must not claim them.
+fn relative_anchor(arg: Option<&Arg>) -> bool {
+    let from_word = |items: &[Expr]| {
+        items.first().is_some_and(|f| {
+            matches!(f, Expr::Literal(crate::ast_expr::Literal::Ident(w)) if w.eq_ignore_ascii_case("from"))
+        })
+    };
+    match arg {
+        Some(Arg::Positional(Expr::List { items, .. })) => from_word(items),
+        Some(Arg::Positional(Expr::FunctionCall(inner)))
+            if inner.name == "slash" || inner.name == "list.slash" =>
+        {
+            matches!(
+                inner.args.first(),
+                Some(Arg::Positional(Expr::List { items, .. })) if from_word(items)
+            )
+        }
+        _ => false,
+    }
+}
+
 /// Coerce an evaluated component into a channel's canonical scale. The outer
 /// `None` marks a value that can never be a channel (the caller then lets the
 /// literal fall through to plain-CSS passthrough); the inner `None` is a
@@ -77,6 +107,89 @@ impl EvalState {
         if !wrapper && crate::color4::lookup(&call.name).is_none() {
             return Ok(None);
         }
+        // The four bare perceptual spaces take exactly one `$channels` argument
+        // and dart rejects malformed shapes by *structure* — arity, bracketed /
+        // comma / empty lists, a wrong-length slash list or too few channels.
+        // Every guard below fires only on a shape that can never be a valid
+        // literal or a meaningful passthrough, and evaluation happens solely on
+        // those already-rejected branches (the W4b lesson: never pre-evaluate the
+        // shared list on the hot path). A symbolic channel still passes through.
+        // Relative color syntax (`lab(from #aaa l a b)`) is exempt wholesale: its
+        // `from` anchor makes it not a channel literal, and the goldens keep it as
+        // verbatim CSS (the channel items are bare identifiers, so the channel
+        // pipeline below never claims them anyway).
+        let bare4 = !wrapper
+            && matches!(call.name.as_str(), "lab" | "lch" | "oklab" | "oklch")
+            && !relative_anchor(call.args.first());
+        if bare4 {
+            match call.args.len() {
+                0 => return Err(shape_err("Missing argument $channels.".into())),
+                n if n > 1 => {
+                    return Err(shape_err(format!(
+                        "Only 1 argument allowed, but {n} were passed."
+                    )));
+                }
+                _ => {}
+            }
+            if let Some(Arg::Positional(e)) = call.args.first() {
+                match e {
+                    Expr::List { items, .. } if items.is_empty() => {
+                        return Err(shape_err(
+                            "$channels: Color component list may not be empty.".into(),
+                        ));
+                    }
+                    Expr::List { bracketed: true, .. } => {
+                        let v = self.eval_expr(e)?;
+                        return Err(shape_err(format!(
+                            "$channels: Expected an unbracketed list, was {}",
+                            v.to_css()
+                        )));
+                    }
+                    Expr::List { sep: ListSep::Comma, .. } => {
+                        let v = self.eval_expr(e)?;
+                        return Err(shape_err(format!(
+                            "$channels: Expected a space- or slash-separated list, was ({})",
+                            v.to_css()
+                        )));
+                    }
+                    Expr::FunctionCall(inner)
+                        if inner.name == "slash" || inner.name == "list.slash" =>
+                    {
+                        let n = inner.args.len();
+                        if n != 2 {
+                            return Err(shape_err(format!(
+                                "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                                if n == 1 { "was" } else { "were" }
+                            )));
+                        }
+                    }
+                    Expr::List {
+                        sep: ListSep::Space,
+                        items,
+                        ..
+                    } if items.len() < 3 => {
+                        let vals: Vec<SassValue> = items
+                            .iter()
+                            .map(|i| self.eval_expr(i))
+                            .collect::<Ev<_>>()?;
+                        if vals.iter().all(|v| !is_symbolic(v)) {
+                            let shown = vals
+                                .iter()
+                                .map(|v| v.to_css())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            let space = crate::color4::lookup(&call.name).expect("bare4 checked");
+                            return Err(shape_err(format!(
+                                "$channels: The {} color space has 3 channels but ({shown}) has {}.",
+                                space.name,
+                                vals.len()
+                            )));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         // The channel source is either a single positional Space list, the
         // legacy `$description:` named spelling, or a `list.slash(<space list>,
         // <alpha>)` wrapper that flattens to the same shape.
@@ -98,7 +211,7 @@ impl EvalState {
                 _ => None,
             },
             Some(Arg::Positional(Expr::FunctionCall(inner)))
-                if wrapper && matches!(inner.name.as_str(), "slash" | "list.slash") =>
+                if (wrapper || bare4) && matches!(inner.name.as_str(), "slash" | "list.slash") =>
             {
                 match inner.args.first() {
                     Some(Arg::Positional(Expr::List {
@@ -156,6 +269,22 @@ impl EvalState {
             }
         }
         if comps.len() != 3 {
+            // The four bare names reach here only with a 4+ element space list
+            // (shorter lists were rejected by the structural guards above); dart
+            // reports the surplus as a channel-count error over the whole list.
+            if bare4 {
+                let shown = comps
+                    .iter()
+                    .map(|v| v.to_css())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let space = crate::color4::lookup(&call.name).expect("bare4 checked");
+                return Err(shape_err(format!(
+                    "$channels: The {} color space has 3 channels but ({shown}) has {}.",
+                    space.name,
+                    comps.len()
+                )));
+            }
             return Ok(None);
         }
         let alpha_expr = alpha_expr.or(extra_alpha);
@@ -170,6 +299,13 @@ impl EvalState {
                     return Err(SassError::new(
                         ErrorKind::Builtins,
                         match v {
+                            SassValue::Number { .. } if matches!(ch.unit, crate::color4::Unit::Deg) => {
+                                format!(
+                                    "${}: Expected {} to have an angle unit (deg, grad, rad, turn).",
+                                    ch.name,
+                                    v.to_css()
+                                )
+                            },
                             SassValue::Number { .. } => format!(
                                 "${}: Expected {} to have unit \"%\" or no units.",
                                 ch.name,
@@ -192,10 +328,31 @@ impl EvalState {
                     alpha_missing = true;
                     None
                 }
-                SassValue::Number { value, unit } => Some(match unit.as_deref() {
-                    Some("%") => value / 100.0,
-                    _ => value,
-                }),
+                // dart validates the `$alpha` slot: unitless or `%` only; a bare
+                // string reports the `$channels:`-prefixed type error (golden
+                // quirk), a symbolic construct keeps the passthrough.
+                v @ SassValue::Number { .. } => match &v {
+                    SassValue::Number { value, unit } => match unit.as_deref() {
+                        None => Some(*value),
+                        Some("%") => Some(value / 100.0),
+                        Some(_) => {
+                            return Err(shape_err(format!(
+                                "$alpha: Expected {} to have unit \"%\" or no units.",
+                                v.to_css()
+                            )));
+                        }
+                    },
+                    _ => unreachable!(),
+                },
+                v @ SassValue::Str { .. } => {
+                    if is_symbolic(&v) {
+                        return Ok(None);
+                    }
+                    return Err(shape_err(format!(
+                        "$channels: {} is not a number.",
+                        v.to_css()
+                    )));
+                }
                 _ => return Ok(None),
             },
             None => None,
