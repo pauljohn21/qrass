@@ -920,4 +920,17 @@
 #     plain-CSS check layer).
 # sass-spec 8074 -> 8087 (+13: supports grammar), 0 regressions,
 # full test suite green (436 passed), clippy -D warnings green.
-73.7
+#
+# Round 72: budget relief + `@media` logic grammar. (a) split `parser_forward.rs`
+#     out of parser_module (171/345 lines; byte-identical A/B). (b) conservative
+#     `validate_media` in parser_supports: a depth-0 item stream where each
+#     balanced `(…)` collapses to one Group; claims mixed and/or chains and an
+#     `or` with a non-group head (`expected "{".`) plus dangling and/or/not
+#     (`expected media condition in parentheses.`) — pure chains, `not (…)`,
+#     interpolated right operands and comma queries keep passthrough (the 18
+#     passing logic goldens). Remaining FAILs in the section are the
+#     `css/plain/error/media` family (plain-CSS layer, 19 cases) and some
+#     `or_after/interpolation` spellings owned by the plain check pass.
+# sass-spec 8087 -> 8099 (+12: media logic errors), 0 regressions,
+# full test suite green (438 passed), clippy -D warnings green.
+73.8

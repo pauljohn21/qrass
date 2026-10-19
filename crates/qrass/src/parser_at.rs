@@ -30,10 +30,13 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
         Token::AtKeyword(name) => {
             let rest = &run[1..];
             match name.as_str() {
-                "media" => Ok(Owner::Media {
-                    queries: p.pieces(rest),
-                    span,
-                }),
+                "media" => {
+                    super::parser_supports::validate_media(p, rest)?;
+                    Ok(Owner::Media {
+                        queries: p.pieces(rest),
+                        span,
+                    })
+                }
                 "supports" => {
                     // A lone `$` never parses inside a supports condition — dart
                     // keeps demanding the declaration colon there

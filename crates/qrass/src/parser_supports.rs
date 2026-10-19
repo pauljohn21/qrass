@@ -171,3 +171,170 @@ fn skip_group(p: &Parser, rest: &[&Spanned], open: usize) -> Or<usize> {
     }
     Ok(j)
 }
+
+/// Conservative `@media` logic grammar (`css/media/logic/error.hrx` goldens):
+/// * mixing `and` with `or` in one comma-separated query, or an `or` whose
+///   left operand is not a `(…)` group → `expected "{".`;
+/// * `and` / `or` / `not` with no operand after it → `expected media
+///   condition in parentheses.`
+///
+/// Every other shape — pure and-chains, pure or-chains, `not (…)`,
+/// interpolated right operands, bare type heads with `and` — keeps today's
+/// passthrough (the passing `logic/and`, `logic/or`, `logic/not`,
+/// `logic/and_not` goldens).
+pub(crate) fn validate_media(p: &Parser, rest: &[Spanned]) -> Or<()> {
+    // Depth-0 item stream: each balanced `(…)` collapses into one Group item.
+    let sig: Vec<&Spanned> = rest
+        .iter()
+        .filter(|s| !matches!(s.token, Token::Comment(_)))
+        .collect();
+    let mut items: Vec<Item> = Vec::new();
+    let mut j = 0usize;
+    while j < sig.len() {
+        let s = sig[j];
+        if matches!(s.token, Token::Punct(Punct::LParen)) {
+            let mut depth = 0usize;
+            let mut k = j;
+            while k < sig.len() {
+                match &sig[k].token {
+                    Token::Punct(Punct::LParen) => depth += 1,
+                    Token::Punct(Punct::RParen) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+            items.push(Item::Group);
+            j = k + 1;
+            continue;
+        }
+        match &s.token {
+            Token::Punct(Punct::Comma) => items.push(Item::Comma),
+            Token::Ident(w)
+                if w.eq_ignore_ascii_case("and")
+                    || w.eq_ignore_ascii_case("or")
+                    || w.eq_ignore_ascii_case("not") =>
+            {
+                let kind = if w.eq_ignore_ascii_case("and") {
+                    0
+                } else if w.eq_ignore_ascii_case("or") {
+                    1
+                } else {
+                    2
+                };
+                items.push(Item::Op(kind, s));
+            }
+            _ => items.push(Item::Operand(s)),
+        }
+        j += 1;
+    }
+    // Per-query state machine: [not]? operand ( (and|or) [not]? operand )*
+    let mut idx = 0usize;
+    while idx < items.len() {
+        let mut saw_or = false;
+        let mut first_and_or: Option<u8> = None;
+        let mut mixed_at = None;
+        let mut head_is_group = false;
+        let mut head_span = items[idx].span_of();
+        // head
+        match &items[idx] {
+            Item::Comma => {
+                idx += 1;
+                continue;
+            }
+            Item::Op(2, opspan) => {
+                head_span = opspan.span.start;
+                idx += 1;
+                match items.get(idx) {
+                    Some(Item::Group) => {
+                        head_is_group = true;
+                        idx += 1;
+                    }
+                    Some(Item::Operand(_)) => {
+                        idx += 1;
+                    }
+                    _ => {
+                        return Err(p.err(
+                            "expected media condition in parentheses.",
+                            opspan.span.start,
+                        ));
+                    }
+                }
+            }
+            Item::Group => {
+                head_is_group = true;
+                idx += 1;
+            }
+            Item::Operand(_) | Item::Op(_, _) => {
+                head_is_group = false;
+                idx += 1;
+            }
+        }
+        // chain
+        #[allow(clippy::while_let_loop)] // two distinct break shapes: end-of-items and non-op
+        loop {
+            let Some(op) = items.get(idx) else { break };
+            let Item::Op(kind, opspan) = op else {
+                // two operands without an operator: not claimed here (the
+                // media type goldens own that shape)
+                break;
+            };
+            if *kind != 2 {
+                saw_or |= *kind == 1;
+                if first_and_or.is_none() {
+                    first_and_or = Some(*kind);
+                } else if first_and_or != Some(*kind) && mixed_at.is_none() {
+                    mixed_at = Some(opspan.span.start);
+                }
+            }
+            idx += 1;
+            let operand_present = match items.get(idx) {
+                Some(Item::Group) | Some(Item::Operand(_)) => {
+                    idx += 1;
+                    true
+                }
+                Some(Item::Op(2, _)) => {
+                    idx += 1;
+                    matches!(items.get(idx), Some(Item::Group) | Some(Item::Operand(_)))
+                        .then(|| idx += 1)
+                        .is_some()
+                }
+                _ => false,
+            };
+            if !operand_present {
+                return Err(p.err(
+                    "expected media condition in parentheses.",
+                    opspan.span.start,
+                ));
+            }
+        }
+        if let Some(at) = mixed_at {
+            return Err(p.err("expected \"{\".", at));
+        }
+        if saw_or && !head_is_group {
+            return Err(p.err("expected \"{\".", head_span));
+        }
+    }
+    Ok(())
+}
+
+/// One depth-0 piece of a `@media` query head.
+enum Item<'a> {
+    Group,
+    Op(u8, &'a Spanned),
+    Operand(&'a Spanned),
+    Comma,
+}
+
+impl<'a> Item<'a> {
+    fn span_of(&self) -> crate::span::BytePos {
+        match self {
+            Item::Group | Item::Comma => crate::span::BytePos(0),
+            Item::Op(_, s) | Item::Operand(s) => s.span.start,
+        }
+    }
+}

@@ -1,5 +1,6 @@
 //! `@supports` condition grammar (round 71, `css/supports/error.hrx` +
-//! `css/supports/syntax/*` goldens): the conservative validator claims only
+//! `css/supports/syntax/*` goldens) and the conservative `@media` logic
+//! grammar (round 72, `css/media/logic/error.hrx`): the validators claim only
 //! the pinned invalid spellings; every legal shape — groups, `not (…)`
 //! heads, functional conditions (`selector(…)`, interpolated names), lone
 //! interpolations and operator chains — keeps today's passthrough.
@@ -61,6 +62,49 @@ fn legal_supports_conditions_keep_passing_through() {
         "@supports #{\"(a: b)\"} {@c}",
         "@supports #{\"(a: b)\"} and (c: 1) {@d}",
         "@supports (c: 1) and #{\"(a: b)\"} {@d}",
+    ] {
+        parses(src);
+    }
+}
+
+// ─── @media logic grammar (round 72, css/media/logic/error.hrx) ──────────────
+
+#[test]
+fn media_mixed_chains_and_dangling_operators() {
+    // `and` mixed with `or` in one query, and an `or` headed by a non-group
+    for src in [
+        "@media (a) or (b) and (c) {x {y: z}}",
+        "@media a or (b) {x {y: z}}",
+        "@media a and not (b) or (c) {x {y: z}}",
+        "@media (a) and (b) or (c) {x {y: z}}",
+        "@media a and (b) or (c) {x {y: z}}",
+    ] {
+        assert!(parse_err(src).contains("expected \"{\"."), "{src}");
+    }
+    // an operator that never received a condition
+    for src in [
+        "@media not {x {y: z}}",
+        "@media a and not {x {y: z}}",
+        "@media a and {x {y: z}}",
+    ] {
+        assert!(
+            parse_err(src).contains("expected media condition in parentheses."),
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn legal_media_chains_keep_passing_through() {
+    for src in [
+        "@media (a) and (b) and (c) and (d) {x {y: z}}",
+        "@media (a) or (b) or (c) {x {y: z}}",
+        "@media not (a) {x {y: z}}",
+        "@media (a) and not (b) {x {y: z}}",
+        "@media (a) and #{\"(b) and (c)\"} {x {y: z}}",
+        "@media (a) or #{\"(b) or (c)\"} {x {y: z}}",
+        "@media screen {x {y: z}}",
+        "@media print, (a) and (b) {x {y: z}}",
     ] {
         parses(src);
     }
