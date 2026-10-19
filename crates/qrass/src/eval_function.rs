@@ -9,7 +9,7 @@
 //! too once the registry lands (task group 8).
 
 use crate::ast::{Block, For, FunctionDecl, If, Return, Stmt, While};
-use crate::ast_expr::FunctionCall;
+use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall};
 use crate::env::AssignFlags;
 use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
@@ -99,6 +99,17 @@ impl EvalState {
         if call.namespace.is_none()
             && !crate::builtins::contains(None, &call.name)
             && !is_meta_name(&call.name)
+            // A CSS-filter call like `alpha(c=d)` passes through verbatim even
+            // though `c=d` is not an evaluable Sass expression (alpha.hrx
+            // `filter/one_arg` + `filter/multi_args` goldens).
+            || (call.namespace.is_none()
+                && call.args.iter().any(|a| matches!(
+                    a,
+                    Arg::Positional(Expr::Binary {
+                        op: BinOp::Assign,
+                        ..
+                    })
+                )))
         {
             let text = self.render_css_call(call)?;
             return Ok(SassValue::Str {
@@ -114,6 +125,20 @@ impl EvalState {
             return Ok(v);
         }
         // Pure builtins: `map.get`/`map-get` → the shared double registry.
+        // CSS overloads first (`modules/color/css_overloads` goldens): under
+        // the color namespace, arguments that do not fit the Sass signature
+        // (a lone non-color value, or non-parameter named pairs like `c=d`)
+        // re-emit the plain spelling under the base name — before any arity
+        // check could claim the call.
+        if call.namespace.as_deref() == Some("color")
+            && matches!(
+                call.name.as_str(),
+                "grayscale" | "invert" | "alpha" | "opacity"
+            )
+            && let Some(v) = super::eval_color_space::css_color_overload(&raw, &call.name)
+        {
+            return Ok(v);
+        }
         if let Some(result) = crate::builtins::call(
             call.namespace.as_deref(),
             &call.name,

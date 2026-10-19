@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Content, Include, MixinDecl, Param};
-use crate::ast_expr::{Arg, ListSep};
+use crate::ast_expr::{Arg, BinOp, Expr, ListSep, Literal};
 use crate::env::AssignFlags;
 use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
@@ -164,7 +164,24 @@ impl EvalState {
         let mut named: HashMap<String, SassValue> = HashMap::new();
         for arg in args {
             match arg {
-                Arg::Positional(e) => positional.push(self.eval_expr(e)?),
+                Arg::Positional(e) => {
+                    // CSS-style named argument (`f(c=d)`): the css color
+                    // overloads read these as keyword pairs, never as
+                    // assignment expressions (css_overloads golden
+                    // `color.alpha(c=d)` → `alpha(c=d)`).
+                    if let Expr::Binary {
+                        op: BinOp::Assign,
+                        left,
+                        right,
+                        ..
+                    } = e
+                        && let Expr::Literal(Literal::Ident(key)) = left.as_ref()
+                    {
+                        named.insert(key.clone(), self.eval_expr(right)?);
+                        continue;
+                    }
+                    positional.push(self.eval_expr(e)?);
+                }
                 Arg::Named { name, value } => {
                     let v = self.eval_expr(value)?;
                     named.insert(name.trim_start_matches('$').to_string(), v);

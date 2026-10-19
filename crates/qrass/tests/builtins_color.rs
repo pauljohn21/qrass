@@ -114,3 +114,32 @@ fn color_module_undefined_spellings() {
     let msg = err_of("color.mystery(#abc)");
     assert!(msg.contains("Undefined function \"color.mystery\""), "{msg}");
 }
+
+/// Round-70 (css_overloads + error/type goldens): the ns CSS overloads exist
+/// only for a lone *Number* on grayscale/invert/opacity; alpha has none, and
+/// symbolic/bare-word arguments keep the Sass `$color` type errors.
+#[test]
+fn color_ns_css_overloads() {
+    let err = |expr: &str| {
+        let src = format!(".a {{ p: {expr}; }}");
+        let tokens = lex(0, "t.scss".into(), src.clone()).expect("lex ok");
+        let program = parse(0, "t.scss".into(), src.clone(), tokens).expect("parse ok");
+        eval_all(0, "t.scss".into(), src, program)
+            .err()
+            .unwrap_or_else(|| panic!("{expr} must fail"))
+            .to_string()
+    };
+    assert_eq!(value("color.grayscale(1)"), "grayscale(1)");
+    assert_eq!(value("color.invert(1)"), "invert(1)");
+    assert_eq!(value("color.opacity(1)"), "opacity(1)");
+    assert_eq!(value("color.alpha(c=d)"), "alpha(c=d)");
+    assert_eq!(value("color.alpha(c=d, e=f, g=h)"), "alpha(c=d, e=f, g=h)");
+    let msg = err("color.alpha(1)");
+    assert!(msg.contains("$color: 1 is not a color."), "{msg}");
+    let msg = err("color.opacity(var(--c))");
+    assert!(msg.contains("$color: var(--c) is not a color."), "{msg}");
+    let msg = err("color.grayscale(c)");
+    assert!(msg.contains("$color: c is not a color."), "{msg}");
+    // the global CSS-filter spelling `alpha(c=d)` passes through verbatim
+    assert_eq!(value("alpha(c=d)"), "alpha(c=d)");
+}

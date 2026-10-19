@@ -867,4 +867,16 @@
 # sass-spec 7928 -> 8043 (+115: the six hyphen adjuster clusters + error +
 # adjust_hue + global/color families), 0 regressions,
 # full test suite green (429 passed), clippy -D warnings green.
-73.3
+#
+# Round 70 (a): `color.{grayscale,invert,opacity}` re-emit a lone *Number*
+#     argument as the plain CSS spelling and `color.alpha(c=d…)` keyword pairs
+#     pass through verbatim (sorted-key rendering) — per the css_overloads AND
+#     the error/type goldens together: `color.alpha(1)` and
+#     `color.opacity(var(--c))` keep the Sass `$color:` type error (first cut
+#     ignored those sections and regressed 8; golden-by-golden corrected).
+#     CSS-style `k=v` call arguments now fold into the named pool in
+#     `collect_args`, and any bare call carrying an assignment argument hits
+#     the passthrough branch verbatim (`alpha(c=d)` filter goldens).
+# sass-spec 8043 -> 8053 (+10), 0 regressions, full test suite green
+# (430 passed), clippy -D warnings green.
+73.4
