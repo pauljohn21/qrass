@@ -759,4 +759,12 @@
 #     wrapper). eval_color4.rs now 473 lines — next edit there must split it.
 # sass-spec 7737 -> 7755 (+18: all color/color/error sections that were failing),
 # 0 regressions, full test suite green (410 passed), clippy -D warnings green.
+#
+# Round 62 (compliance refactor, no rate change): split the 473-line
+#     `eval_color4.rs` at its natural seam — the structural argument guards and
+#     channel/value helpers moved to sibling module `eval_color4_check.rs`
+#     (`guard_bare4`/`guard_wrapper`/`is_symbolic`/`shape_err`/`relative_anchor`/
+#     `channel_value`, all `pub(crate)`); the parser file is now 274 lines, the
+#     check module 226 — both within budget, freeing headroom for the next
+#     color-error rounds. hrx byte-identical 7755, 0 behavior change.
 70.7

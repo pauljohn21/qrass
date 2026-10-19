@@ -3,95 +3,16 @@
 //! Turns space-separated literals (`color(srgb 0.1 0.2 0.3 / 0.4)`, `lab(...)`,
 //! `lch(...)`, `oklab(...)`, `oklch(...)`, `hsl(...)`, `hwb(...)`) into owned
 //! [`crate::color4::Color4`] values. Anything that does not parse as a strict
-//! Color 4 literal falls through untouched to the plain-CSS passthrough.
+//! Color 4 literal falls through untouched to the plain-CSS passthrough. The
+//! structural argument guards and channel coercion helpers live in the sibling
+//! [`crate::eval::eval_color4_check`] module (500-line split, round 62).
 
 use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep};
 use crate::error::{ErrorKind, SassError};
+use super::eval_color4_check::{channel_value, guard_bare4, guard_wrapper, is_symbolic, relative_anchor, shape_err};
 use crate::value::SassValue;
 
 use super::{Ev, EvalState};
-
-/// A value that must keep falling through to plain-CSS passthrough rather than
-/// becoming a Color 4 argument error: a `var()`/`calc()`/`min()`/`env()`/… symbolic
-/// construct (the round-28 rgb() lesson — an unresolvable channel is CSS, not a
-/// Sass color argument). `none` and concrete numbers/strings are *not* symbolic.
-fn is_symbolic(v: &SassValue) -> bool {
-    match v {
-        SassValue::Str { text, .. } => {
-            ["var(", "calc(", "min(", "max(", "clamp(", "env(", "url(", "attr("]
-                .iter()
-                .any(|f| text.contains(f))
-        }
-        _ => false,
-    }
-}
-
-/// A dart-shaped `$channels` argument error (arity, list shape, slash element
-/// count or channel count of a modern literal).
-fn shape_err(msg: String) -> SassError {
-    SassError::new(ErrorKind::Builtins, msg)
-}
-
-/// Whether a bare-space call is relative color syntax — `lab(from …)`, the
-/// case-mutated `lab(From …)`, or the `list.slash(from …, α)` wrapper. None of
-/// these are channel literals; the goldens keep them as verbatim CSS, so the
-/// strict `$channels` guards must not claim them.
-fn relative_anchor(arg: Option<&Arg>) -> bool {
-    let from_word = |items: &[Expr]| {
-        items.first().is_some_and(|f| {
-            matches!(f, Expr::Literal(crate::ast_expr::Literal::Ident(w)) if w.eq_ignore_ascii_case("from"))
-        })
-    };
-    match arg {
-        Some(Arg::Positional(Expr::List { items, .. })) => from_word(items),
-        Some(Arg::Positional(Expr::FunctionCall(inner)))
-            if inner.name == "slash" || inner.name == "list.slash" =>
-        {
-            matches!(
-                inner.args.first(),
-                Some(Arg::Positional(Expr::List { items, .. })) if from_word(items)
-            )
-        }
-        _ => false,
-    }
-}
-
-/// Coerce an evaluated component into a channel's canonical scale. The outer
-/// `None` marks a value that can never be a channel (the caller then lets the
-/// literal fall through to plain-CSS passthrough); the inner `None` is a
-/// powerless `none`.
-fn channel_value(v: &SassValue, ch: &crate::color4::Channel) -> Option<Option<f64>> {
-    use crate::color4::Unit;
-    match v {
-        SassValue::Str {
-            text,
-            quoted: false,
-        } if text == "none" => Some(None),
-        SassValue::Number { value, unit } => {
-            let u = unit.as_deref();
-            let out = match ch.unit {
-                Unit::Pct => match u {
-                    None | Some("%") => *value,
-                    Some(_) => return None,
-                },
-                Unit::Deg => match u {
-                    None | Some("deg") => *value,
-                    Some("rad") => value.to_degrees(),
-                    Some("grad") => *value * 0.9,
-                    Some("turn") => *value * 360.0,
-                    Some(_) => return None,
-                },
-                Unit::Num => match u {
-                    None => *value,
-                    Some("%") => *value / 100.0,
-                    Some(_) => return None,
-                },
-            };
-            Some(Some(out))
-        }
-        _ => None,
-    }
-}
 
 impl EvalState {
     /// Parse CSS Color 4 space-separated literals into a Color 4 value:
@@ -107,144 +28,24 @@ impl EvalState {
         if !wrapper && crate::color4::lookup(&call.name).is_none() {
             return Ok(None);
         }
-        // The four bare perceptual spaces take exactly one `$channels` argument
-        // and dart rejects malformed shapes by *structure* — arity, bracketed /
-        // comma / empty lists, a wrong-length slash list or too few channels.
-        // Every guard below fires only on a shape that can never be a valid
-        // literal or a meaningful passthrough, and evaluation happens solely on
-        // those already-rejected branches (the W4b lesson: never pre-evaluate the
-        // shared list on the hot path). A symbolic channel still passes through.
-        // Relative color syntax (`lab(from #aaa l a b)`) is exempt wholesale: its
-        // `from` anchor makes it not a channel literal, and the goldens keep it as
-        // verbatim CSS (the channel items are bare identifiers, so the channel
-        // pipeline below never claims them anyway).
+        // The four bare perceptual spaces and the `color()` wrapper take exactly
+        // one argument each and dart rejects malformed shapes by *structure* —
+        // the sibling `eval_color4_check` guards fire only on shapes that can
+        // never be a valid literal or a meaningful passthrough, evaluating
+        // solely inside an already-rejected branch to render the message
+        // (the W4b lesson: never pre-evaluate the shared list on the hot path).
+        // Relative color syntax (`lab(from #aaa l a b)` and its `From` /
+        // `list.slash` spellings) is exempt wholesale: the goldens keep it as
+        // verbatim CSS.
         let bare4 = !wrapper
             && matches!(call.name.as_str(), "lab" | "lch" | "oklab" | "oklch")
             && !relative_anchor(call.args.first());
         if bare4 {
-            match call.args.len() {
-                0 => return Err(shape_err("Missing argument $channels.".into())),
-                n if n > 1 => {
-                    return Err(shape_err(format!(
-                        "Only 1 argument allowed, but {n} were passed."
-                    )));
-                }
-                _ => {}
-            }
-            if let Some(Arg::Positional(e)) = call.args.first() {
-                match e {
-                    Expr::List { items, .. } if items.is_empty() => {
-                        return Err(shape_err(
-                            "$channels: Color component list may not be empty.".into(),
-                        ));
-                    }
-                    Expr::List { bracketed: true, .. } => {
-                        let v = self.eval_expr(e)?;
-                        return Err(shape_err(format!(
-                            "$channels: Expected an unbracketed list, was {}",
-                            v.to_css()
-                        )));
-                    }
-                    Expr::List { sep: ListSep::Comma, .. } => {
-                        let v = self.eval_expr(e)?;
-                        return Err(shape_err(format!(
-                            "$channels: Expected a space- or slash-separated list, was ({})",
-                            v.to_css()
-                        )));
-                    }
-                    Expr::FunctionCall(inner)
-                        if inner.name == "slash" || inner.name == "list.slash" =>
-                    {
-                        let n = inner.args.len();
-                        if n != 2 {
-                            return Err(shape_err(format!(
-                                "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                                if n == 1 { "was" } else { "were" }
-                            )));
-                        }
-                    }
-                    Expr::List {
-                        sep: ListSep::Space,
-                        items,
-                        ..
-                    } if items.len() < 3 => {
-                        let vals: Vec<SassValue> = items
-                            .iter()
-                            .map(|i| self.eval_expr(i))
-                            .collect::<Ev<_>>()?;
-                        if vals.iter().all(|v| !is_symbolic(v)) {
-                            let shown = vals
-                                .iter()
-                                .map(|v| v.to_css())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let space = crate::color4::lookup(&call.name).expect("bare4 checked");
-                            return Err(shape_err(format!(
-                                "$channels: The {} color space has 3 channels but ({shown}) has {}.",
-                                space.name,
-                                vals.len()
-                            )));
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            guard_bare4(self, call)?;
         }
-        // The `color(…)` wrapper takes one `$description` argument and dart
-        // rejects malformed shapes the same way, with the `$description:`
-        // prefix (round-60 color/error goldens). Relative syntax
-        // (`color(from …)`) is again exempt; a plain-CSS `color(…)` filter is
-        // claimed by the passthrough layer before this code ever runs.
         let wstrict = wrapper && !relative_anchor(call.args.first());
         if wstrict {
-            if call.args.is_empty() {
-                return Err(shape_err("Missing argument $description.".into()));
-            }
-            // A lone registered space name is a zero-channel description.
-            if let Some(Arg::Positional(Expr::Literal(crate::ast_expr::Literal::Ident(word)))) =
-                call.args.first()
-                && let Some(space) = crate::color4::lookup(word)
-            {
-                return Err(shape_err(format!(
-                    "$description: The {} color space has 3 channels but {word} has 0.",
-                    space.name
-                )));
-            }
-            if let Some(Arg::Positional(e)) = call.args.first() {
-                match e {
-                    Expr::List { items, .. } if items.is_empty() => {
-                        return Err(shape_err(
-                            "$description: Color component list may not be empty.".into(),
-                        ));
-                    }
-                    Expr::List { bracketed: true, .. } => {
-                        let v = self.eval_expr(e)?;
-                        return Err(shape_err(format!(
-                            "$description: Expected an unbracketed list, was {}",
-                            v.to_css()
-                        )));
-                    }
-                    Expr::List { sep: ListSep::Comma, .. } => {
-                        let v = self.eval_expr(e)?;
-                        return Err(shape_err(format!(
-                            "$description: Expected a space- or slash-separated list, was ({})",
-                            v.to_css()
-                        )));
-                    }
-                    Expr::FunctionCall(inner)
-                        if inner.name == "slash" || inner.name == "list.slash" =>
-                    {
-                        let n = inner.args.len();
-                        if n != 2 {
-                            return Err(shape_err(format!(
-                                "$description: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                                if n == 1 { "was" } else { "were" }
-                            )));
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            guard_wrapper(self, call)?;
         }
         // The channel source is either a single positional Space list, the
         // legacy `$description:` named spelling, or a `list.slash(<space list>,

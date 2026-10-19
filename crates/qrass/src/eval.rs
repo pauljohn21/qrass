@@ -35,6 +35,8 @@ mod eval_arith;
 mod eval_bind;
 #[path = "eval_color4.rs"]
 mod eval_color4;
+#[path = "eval_color4_check.rs"]
+mod eval_color4_check;
 #[path = "eval_config.rs"]
 mod eval_config;
 #[path = "eval_control.rs"]
