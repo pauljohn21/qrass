@@ -72,6 +72,8 @@ chars 流 ──lex──▶ token 流 ──parse──▶ owned AST（移入�
 2. **独立分支 fan-out 保留 merge 形状**：`Local::from_iter(@use 分支).flat_map(Local::of(acquire))` 同线程内联推进，manual §14 红线 6 的 `observe_on`/`subscribe_on` 禁令依旧；CLI 为同步入口，无 tokio 运行时。完成态不变量由 `tests/l2_send_invariant.rs`（已随翻转删除）改由 `tests/l2_fanout_shape.rs`（Local 形状钉）+ `tests/pipeline_string.rs`（无 fs 入口）+ `cargo check --target wasm32-unknown-unknown` 门禁共同钉住。
 被否选项：(a) 保留 Shared 分层——与 wasm 契约矛盾，Send/'static 约束渗透编排层；(b) 用数据搬运绕开多播（arena move 下标查表）——单例语义仍需正面表达，Subject 载体保留；(c) 手写命令式管线（违背 rxrust 核心要求）。单文件直通路径保留为 L2 的退化情形（依赖闭包 = 1）。
 
+**wasm 集成层**：浏览器无 `std::fs`，故 `src/vfs.rs` 提供 thread-local 虚拟源注册表（键 = 词法规范化后的 canonical 路径，与模块缓存同一形态）；loader 的存在探测与三处读取、fan-out 的一处读取全部改为 **virtual-first、未命中回落磁盘**——空注册表逐字节等价于旧行为（sass-spec/element-plus 套件零变）。门面 crate `qrass-wasm`（workspace 成员，cdylib+rlib）导出 `register_source`/`clear_sources`/`compile_scss`：JS 预注册 partial 树后，多文件 `@use` 链（含跨模块变量、总线单例、fan-out 缓存）在 wasm32-unknown-unknown + node/wasm-bindgen 实验跑通。`src/clock.rs` 目标感知 `StopWatch` 消除 stock-std `Instant` 在该目标的运行时 panic。
+
 ### D2: 数值/颜色内部表示用 f64，序列化行为受 golden 约束
 数字类型的内部表示不是对外契约：spec 只约束可观察序列化（10 位有效数字、`math.div(1,3)*3` 等数值用例），由 golden 验证。流视角的原生选择：owned `SassNumber { value: f64, unit: Option<String> }`，无间接层无分数对象；element-plus 计算面（px/rem、颜色通道取整）在 f64 下与基线差异风险低。仅当 sass-spec/回归出现精度失败用例时，才升级局部分数表示——升级依据是失败证据，不是模仿任何实现（含 dart-sass 的 Rational）。
 

@@ -121,11 +121,13 @@ pub fn canonicalize_with(
     .note(format!("tried candidates:\n   = {list}")))
 }
 
-/// First candidate path that is an existing file, classified SCSS/CSS.
+/// First candidate path that is an existing file, classified SCSS/CSS. A
+/// [`crate::vfs`] registration counts as an existing file without touching
+/// the disk (the browser path); disk probes follow the identical order.
 fn first_existing(candidates: impl IntoIterator<Item = impl AsRef<Path>>) -> Option<Resolved> {
     for candidate in candidates {
         let path = candidate.as_ref();
-        if path.is_file() {
+        if crate::vfs::exists(path) || path.is_file() {
             let kind = if path.extension().and_then(|e| e.to_str()) == Some("css") {
                 SourceKind::Css
             } else {
@@ -146,7 +148,7 @@ fn first_existing(candidates: impl IntoIterator<Item = impl AsRef<Path>>) -> Opt
 /// Without this the module cache key differs and a shared partial is instantiated
 /// twice (duplicating its emitted CSS and loud comments). Requires the file to
 /// exist, so it never resolves `..` past the true location.
-fn normalize_lexically(path: &Path) -> PathBuf {
+pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut stack: Vec<Component<'_>> = Vec::new();
     for c in path.components() {
@@ -191,9 +193,8 @@ impl Loader {
 
     /// Read `path` from disk and register it as file id 0 (the entry).
     pub fn load_entry(&mut self, path: &Path) -> Result<Source, SassError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|err| SassError::io(err, &path.display().to_string()))?;
         let name = path.display().to_string();
+        let content = crate::vfs::read_to_string(path, &name)?;
         tracing::info!(file = %name, len = content.len(), "loaded entry source");
         let kind = if path.extension().and_then(|e| e.to_str()) == Some("css") {
             SourceKind::Css
@@ -212,8 +213,7 @@ impl Loader {
                 kind: resolved.kind,
             });
         }
-        let content =
-            std::fs::read_to_string(&resolved.path).map_err(|err| SassError::io(err, &name))?;
+        let content = crate::vfs::read_to_string(&resolved.path, &name)?;
         tracing::info!(file = %name, kind = ?resolved.kind, len = content.len(), "loaded module source");
         Ok(self.register(name, content, resolved.kind))
     }
@@ -222,9 +222,8 @@ impl Loader {
 /// Read `path` from disk and register it as file id 0 (the entry). Free-function
 /// shim kept for the single-entry skeleton pipeline.
 pub fn load_entry(path: &Path, files: &mut Files) -> Result<Source, SassError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|err| SassError::io(err, &path.display().to_string()))?;
     let name = path.display().to_string();
+    let content = crate::vfs::read_to_string(path, &name)?;
     tracing::info!(file = %name, len = content.len(), "loaded entry source");
     let file = files.add(name, content);
     Ok(Source {

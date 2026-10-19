@@ -50,6 +50,7 @@ mod selector_super_simple;
 pub mod selector_unify;
 pub mod selector_unify_complex;
 pub mod value;
+pub mod vfs;
 mod value_number;
 
 use error::SassError;

@@ -7,7 +7,8 @@
 
 use qrass::{Options, compile_string};
 use qrass_wasm::{
-    compile_scss, compile_scss_text, compile_scss_with_style, compile_scss_with_style_text,
+    clear_sources, compile_scss, compile_scss_text, compile_scss_with_style,
+    compile_scss_with_style_text, register_source,
 };
 
 #[test]
@@ -53,4 +54,18 @@ fn facade_rejects_unknown_styles() {
     // The JS wrapper Ok path is host-callable (no JS imports are touched).
     assert!(compile_scss("e.scss", ".a { b: c }").is_ok());
     assert!(compile_scss_with_style("e.scss", ".a { b: c }", "expanded").is_ok());
+}
+
+#[test]
+fn facade_compiles_multi_file_via_registered_sources() {
+    // The browser story: JS preloads the partial tree, then one compile walks
+    // `@use` across two virtual files with zero file-system access.
+    clear_sources();
+    register_source("/f/_vars.scss", "$brand: #06c; .b { color: $brand }");
+    register_source("/f/_uses.scss", "@use \"vars\";\n.u { border-color: vars.$brand }");
+    let css = compile_scss_text("/f/entry.scss", "@use \"uses\";\n").expect("virtual compile ok");
+    assert!(css.contains(".b"), "transitive partial lost: {css}");
+    assert!(css.contains(".u"), "partial body lost: {css}");
+    assert!(css.contains("#0066cc"), "cross-module variable lost: {css}");
+    clear_sources();
 }

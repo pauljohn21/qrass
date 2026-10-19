@@ -187,10 +187,11 @@ pub(crate) fn branch_key(base: &Path, url: &str) -> BranchKey {
     (base.display().to_string(), url.to_string())
 }
 
-/// Read an acquired branch from disk, mapping IO failure to a load error. The
-/// error locates against the canonical path, exactly as the sequential walk did.
+/// Read an acquired branch, virtual-first ([`crate::vfs`] hit, else disk),
+/// mapping IO failure to a load error. The error locates against the canonical
+/// path, exactly as the sequential walk did.
 fn read_to_string(path: &Path, name: &str) -> Result<String, SassError> {
-    std::fs::read_to_string(path).map_err(|err| SassError::io(err, name))
+    crate::vfs::read_to_string(path, name)
 }
 
 impl EvalState {
