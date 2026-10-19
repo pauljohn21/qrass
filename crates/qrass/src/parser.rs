@@ -25,6 +25,8 @@ use crate::token::{Punct, Spanned, Token};
 
 pub(crate) type PsResult = Result<Stmt, SassError>;
 
+#[path = "parser_decl.rs"]
+mod parser_decl;
 #[path = "parser_at.rs"]
 mod parser_at;
 #[path = "parser_expr.rs"]

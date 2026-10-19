@@ -110,3 +110,43 @@ fn lone_dollar_gets_context_wording() {
     // root declaration head `$: 1`
     assert!(parse_err("$: 1;").contains("Expected identifier."));
 }
+
+// ─── member-syntax at-rule heads (round 71, use/error/syntax/member.hrx) ─────
+
+#[test]
+fn member_syntax_parse_time_errors() {
+    assert!(parse_err("a {a: .member()}").contains("Expected digit."));
+    assert!(parse_err("a {a: namespace.()}").contains("Expected identifier."));
+    assert!(
+        parse_err("a {a: namespace._member()}")
+            .contains("Private members can't be accessed from outside their modules.")
+    );
+    assert!(parse_err("a {a: $.member}").contains("Expected identifier."));
+    assert!(parse_err("a {a: namespace.$}").contains("Expected identifier."));
+    assert!(
+        parse_err("a {a: namespace.$_member}")
+            .contains("Private members can't be accessed from outside their modules.")
+    );
+    assert!(
+        parse_err("namespace.$member: value !global;")
+            .contains("!global isn't allowed for variables in other modules.")
+    );
+    assert!(parse_err("a {@include .member}").contains("Expected identifier."));
+    assert!(parse_err("a {@include namespace.}").contains("Expected identifier."));
+    assert!(
+        parse_err("a {@include namespace._member}")
+            .contains("Private members can't be accessed from outside their modules.")
+    );
+    assert!(
+        parse_err("@function namespace.member() {@return null}").contains("expected \"(\".")
+    );
+    assert!(parse_err("@mixin namespace.member() {}").contains("expected \"{\"."));
+}
+
+#[test]
+fn legal_member_spellings_still_parse() {
+    parses("a {b: .5em;}").expect("decimal number");
+    // namespaced includes and member calls stay legal shapes (they may fail
+    // later at load/eval, but not as parse-time syntax errors)
+    let _ = parses("@use \"other\"; a {b: other.$x;}");
+}

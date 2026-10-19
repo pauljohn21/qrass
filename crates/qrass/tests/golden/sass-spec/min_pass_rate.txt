@@ -891,4 +891,18 @@
 # sass-spec 8053 -> 8056 (+3: function-exists aliases + module form), 0
 # regressions, full test suite green (430 passed), clippy -D warnings green.
 # NOTE: 8056/10961 = 73.497% — floor stays at 73.4 until the next real gain.
-73.4
+#
+# Round 71: the `use/error/syntax/member.hrx` parse-time member grammar —
+#     leading `.` demands the digit (`Expected digit.`), empty members demand
+#     the identifier, `_`-prefixed members are a parse-time "Private members"
+#     error (expressions via `namespaced`/Dot arms, at-rule heads via new
+#     `check_atrule_member_syntax` on BOTH include forms), `@function
+#     ns.member()` → `expected "(".`, `@mixin` → `expected "{".`, and
+#     `ns.$member: … !global` → the dedicated !global rejection. The growth
+#     pushed parser_at over budget AGAIN (round-67 warning realized), so
+#     variable_decl/declaration/member-check moved to new `parser_decl.rs`
+#     (125 lines; parser_at back to 465, parser_expr 494 — both near budget,
+#     split preemptively before the next parser round).
+# sass-spec 8057 -> 8074 (+17: member syntax cluster), 0 regressions,
+# full test suite green (433 passed), clippy -D warnings green.
+73.6

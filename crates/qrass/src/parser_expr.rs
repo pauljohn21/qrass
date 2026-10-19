@@ -273,6 +273,14 @@ impl<'a> E<'a> {
             Token::Ampersand => Ok(Expr::Literal(Literal::Ident("&".into()))),
             Token::Placeholder(p) => Ok(Expr::Literal(Literal::Ident(format!("%{p}")))),
             Token::Punct(Punct::Percent) => Ok(Expr::Literal(Literal::Ident("%".into()))),
+            // `member.hrx` goldens: a leading `.` reads as the start of a number
+            // (`.5` glues in the lexer, so a surviving bare dot is a syntax
+            // error demanding the digit), and a lone `$` opens with an
+            // identifier.
+            Token::Punct(Punct::Dot) => Err(self.p.err("Expected digit.", start)),
+            Token::Variable(name) if name.is_empty() => {
+                Err(self.p.err("Expected identifier.", start))
+            }
             Token::Variable(name) => Ok(Expr::Variable(name, self.span(start))),
             Token::Ident(name) => self.ident_value(name, start),
             Token::Punct(Punct::LParen) => self.paren_group(start),
@@ -284,6 +292,14 @@ impl<'a> E<'a> {
     }
 
     fn ident_value(&mut self, name: String, start: BytePos) -> Ex<Expr> {
+        // A leading `.` glued onto the next word (the selector glue) still
+        // opens a *number* for dart's value parser: `a: .member()` errors with
+        // `Expected digit.` (member.hrx `function/no_namespace`).
+        if let Some(rest) = name.strip_prefix('.')
+            && !rest.starts_with('.')
+        {
+            return Err(self.p.err("Expected digit.", start));
+        }
         // Namespaced call `ns.fn(...)`. The lexer glues a leading `.` into the next
         // word (`.a` selectors), so `map.get` arrives as adjacent `Ident("map")` +
         // `Ident(".get")` with no whitespace gap — span adjacency disambiguates it
@@ -302,16 +318,34 @@ impl<'a> E<'a> {
             self.bump();
             // `ns.$var` — namespaced variable member.
             if let Some(Token::Variable(vname)) = self.pk().cloned() {
+                let vstart = self.it.peek().map(|s| s.span.start).unwrap_or(self.last.end);
                 self.bump();
+                // `namespace.$` demands the member identifier; a `_`-prefixed
+                // member is private to its module (member.hrx goldens).
+                if vname.is_empty() {
+                    return Err(self.p.err("Expected identifier.", vstart));
+                }
+                if vname.starts_with('_') {
+                    return Err(self.p.err(
+                        "Private members can't be accessed from outside their modules.",
+                        vstart,
+                    ));
+                }
                 return Ok(Expr::Member {
                     namespace: name,
                     name: vname,
                     span: self.span(start),
                 });
             }
+            let fstart = self
+                .it
+                .peek()
+                .map(|s| s.span.start)
+                .unwrap_or(self.last.end);
             let fname = match self.bump().map(|s| s.token) {
                 Some(Token::Ident(f)) => f,
-                _ => return Err(self.p.err("expected function name after '.'", start)),
+                // `namespace.()`: dart keeps asking for the identifier.
+                _ => return Err(self.p.err("Expected identifier.", fstart)),
             };
             return self.namespaced(name, start, fname);
         }
@@ -345,6 +379,14 @@ impl<'a> E<'a> {
     }
 
     fn namespaced(&mut self, ns: String, start: BytePos, fname: String) -> Ex<Expr> {
+        // a `_`-prefixed member is private to its module — a *parse-time*
+        // syntax error per the member.hrx goldens' comment section.
+        if fname.starts_with('_') {
+            return Err(self.p.err(
+                "Private members can't be accessed from outside their modules.",
+                start,
+            ));
+        }
         let args = if self.is(Punct::LParen) {
             self.args()?
         } else {

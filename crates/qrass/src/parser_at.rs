@@ -4,14 +4,15 @@
 //! iterator combinators (`position`, `take_while`), never a shared cursor.
 
 use crate::ast::{
-    AtRule, Content, Declaration, DiagLevel, Diagnostic, Each, Extend, For, FunctionDecl, Include,
-    Media, Return, Ruleset, Stmt, Supports, VariableDecl, While,
+    AtRule, Content, DiagLevel, Diagnostic, Each, Extend, For, FunctionDecl, Include,
+    Media, Return, Ruleset, Stmt, Supports, While,
 };
 use crate::ast_expr::Expr;
 use crate::error::SassError;
 use crate::span::{BytePos, Span};
 use crate::token::{Punct, Spanned, Token};
 
+use super::parser_decl::{check_atrule_member_syntax, declaration, variable_decl};
 use super::parser_expr::{args_of, params_of, value_of};
 use super::{Owner, Parser};
 
@@ -145,6 +146,7 @@ fn for_owner(p: &Parser, rest: &[Spanned], span: Span) -> Or<Owner> {
 /// Shared by `@mixin` and `@function`: `name(params)?`.
 fn mixin_owner(p: &Parser, rest: &[Spanned], span: Span, is_mixin: bool) -> Or<Owner> {
     let (name_run, paren) = split_paren(rest);
+    check_atrule_member_syntax(p, name_run, is_mixin, false)?;
     let params = paren
         .map(|r| params_of(p, r))
         .transpose()?
@@ -166,6 +168,7 @@ fn mixin_owner(p: &Parser, rest: &[Spanned], span: Span, is_mixin: bool) -> Or<O
 
 fn include_owner(p: &Parser, rest: &[Spanned], span: Span) -> Or<Owner> {
     let (name_run, paren) = split_paren(rest);
+    check_atrule_member_syntax(p, name_run, false, true)?;
     let args = paren
         .map(|r| args_of(p, r))
         .transpose()?
@@ -177,6 +180,7 @@ fn include_owner(p: &Parser, rest: &[Spanned], span: Span) -> Or<Owner> {
         span,
     })
 }
+
 
 fn at_root_header(rest: &[Spanned]) -> Option<(String, Vec<String>)> {
     // `@at-root (without: media)` / `(with: …)`.
@@ -239,6 +243,8 @@ fn simple_at(p: &Parser, name: String, rest: &[Spanned], span: Span) -> Or<Stmt>
         }
         "include" => {
             let (name_run, paren) = split_paren(rest);
+            // the member-syntax errors are parse-time for both include forms
+            check_atrule_member_syntax(p, name_run, false, true)?;
             let args = paren
                 .map(|r| args_of(p, r))
                 .transpose()?
@@ -279,44 +285,6 @@ fn simple_at(p: &Parser, name: String, rest: &[Spanned], span: Span) -> Or<Stmt>
     }
 }
 
-fn variable_decl(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
-    let name = match &run[0].token {
-        Token::Variable(v) if v.is_empty() => {
-            // a lone `$` is not a declaration head: dart wants the name first
-            return Err(p.err("Expected identifier.", run[0].span.start));
-        }
-        Token::Variable(v) => v.clone(),
-        _ => return Err(p.err("expected variable name", span.start)),
-    };
-    let colon = Parser::first_colon(run)
-        .ok_or_else(|| p.err("expected ':' after variable name", span.start))?;
-    let (val_run, flags) = split_flags(&run[colon + 1..]);
-    Ok(Stmt::Variable(VariableDecl {
-        name,
-        value: expr(p, val_run)?,
-        default: flags.iter().any(|f| f == "default"),
-        global: flags.iter().any(|f| f == "global"),
-        span,
-    }))
-}
-
-fn declaration(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
-    let colon =
-        Parser::first_colon(run).ok_or_else(|| p.err("expected ':' in declaration", span.start))?;
-    let (val_run, flags) = split_flags(&run[colon + 1..]);
-    // A lone `$` where the value belongs: dart's declaration parse never reaches
-    // an expression there and keeps demanding the colon (`@supports (a !:$)`,
-    // `syntax/anything/colon` golden `expected ":".`).
-    if val_run.len() == 1 && matches!(&val_run[0].token, Token::Variable(v) if v.is_empty()) {
-        return Err(p.err("expected \":\".", run[colon].span.start));
-    }
-    Ok(Stmt::Declaration(Declaration {
-        prop: p.pieces(&run[..colon]),
-        value: expr(p, val_run)?,
-        important: flags.iter().any(|f| f == "important"),
-        span,
-    }))
-}
 
 // ─── Sealing a block body into a node ──────────────────────────────────────────
 
@@ -416,7 +384,7 @@ pub(crate) fn seal_block(owner: Owner, body: Vec<Stmt>) -> Stmt {
 
 // ─── Run-splitting combinators (pure, depth-aware) ───────────────────────────
 
-fn expr(p: &Parser, run: &[Spanned]) -> Or<Expr> {
+pub(crate) fn expr(p: &Parser, run: &[Spanned]) -> Or<Expr> {
     if run.is_empty() {
         return Err(p.err("expected an expression", BytePos(0)));
     }
