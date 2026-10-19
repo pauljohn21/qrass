@@ -792,6 +792,24 @@
 # sass-spec 7755 -> 7805 (+50: hsl+hwb one_arg/legacy families), 0 regressions,
 # full test suite green (413 passed), clippy -D warnings green.
 #
+# Round 67: `@forward` strict grammar in the parser (Expected string. / Expected
+#     identifier. / expected "*". / show-hide member-list errors / second keyword
+#     as `expected ";".`), the `@use`/`@forward` placement pass
+#     (`check_module_placement`: nesting → `This at-rule is not allowed here.`,
+#     after non-module rules → `@use|@forward rules must be written before any
+#     other rules.`; root-level variable declarations do NOT close the module
+#     phase — the with/from_variable goldens require that), and lone `$` now
+#     lexes to an empty Variable token so each context words its own error
+#     (`Expected identifier.` in `with (`, `expected ":".` in declarations and
+#     supports conditions, member-name error in forward lists; the old lexical
+#     error could never match dart per-context). First cut regressed 6 cases
+#     (variable-before-@use misclassified + the supports case went silent);
+#     A/B pinned both, final: 0 regressions. Tests in tests/module_syntax.rs;
+#     parser_module.rs/parser_at.rs now 497/497 lines — both at budget, split
+#     before the next parser-touching round.
+# sass-spec 7877 -> 7910 (+33: forward/use syntax + placement, lone-$), 0
+# regressions, full test suite green (422 passed), clippy -D warnings green.
+#
 # Round 65: the dart `$channels` one_arg error family extended to `rgb`/`rgba`
 #     (empty / unbracketed / comma / slash-count / space-count / type errors via
 #     the shared slot taxonomy — `legacy_dispatch` extracted so rgb's symbolic
@@ -818,4 +836,4 @@
 #     remain for the per-space model round.
 # sass-spec 7840 -> 7877 (+37: invert/error + color_at wording families), 0
 # regressions, full test suite green (417 passed), clippy -D warnings green.
-71.8
+72.1

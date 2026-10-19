@@ -237,9 +237,10 @@ impl Lexer {
         self.i += 1;
         let mut text = String::new();
         self.read_word_run(&mut text);
-        if text.is_empty() {
-            return Err(self.err("expected variable name after '$'", start));
-        }
+        // A lone `$` lexes as an empty-named variable token: dart raises the
+        // context-specific parse error (`Expected variable, mixin, or function
+        // name` after `@forward … show`, `Expected identifier.` inside
+        // `with (…)`), which a lexical error here could never word correctly.
         self.spanned(Token::Variable(text), start)
     }
 

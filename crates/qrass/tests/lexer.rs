@@ -305,9 +305,20 @@ fn error_unterminated_interpolation() {
 }
 
 #[test]
-fn error_bare_dollar() {
-    let err = lex(0, "t.scss".into(), "a: $;".into()).expect_err("must fail");
-    assert!(err.to_string().contains("variable name"), "{err}");
+fn bare_dollar_lexes_to_an_empty_variable_token() {
+    // Round-67: a lone `$` no longer fails lexing — it becomes an empty-named
+    // Variable token so each parse context can raise dart's own wording
+    // (`Expected identifier.` / `expected ":".` / forward member lists).
+    let tokens = lex(0, "t.scss".into(), "a: $;".into()).expect("lex ok");
+    assert!(
+        tokens
+            .iter()
+            .any(|s| matches!(&s.token, qrass::token::Token::Variable(v) if v.is_empty())),
+        "{tokens:?}"
+    );
+    let err = qrass::parser::parse(0, "t.scss".into(), "a: $;".into(), tokens)
+        .expect_err("parse must reject the empty value");
+    assert!(err.to_string().contains("expected \":\"."), "{err}");
 }
 
 #[test]

@@ -33,10 +33,21 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
                     queries: p.pieces(rest),
                     span,
                 }),
-                "supports" => Ok(Owner::Supports {
-                    condition: p.pieces(rest),
-                    span,
-                }),
+                "supports" => {
+                    // A lone `$` never parses inside a supports condition — dart
+                    // keeps demanding the declaration colon there
+                    // (`css/supports/error` `syntax/anything/colon`, `expected ":".`).
+                    if let Some(bad) = rest
+                        .iter()
+                        .find(|s| matches!(&s.token, Token::Variable(v) if v.is_empty()))
+                    {
+                        return Err(p.err("expected \":\".", bad.span.start));
+                    }
+                    Ok(Owner::Supports {
+                        condition: p.pieces(rest),
+                        span,
+                    })
+                }
                 "keyframes" => Ok(Owner::Keyframes {
                     name: p.pieces(rest),
                     span,
@@ -270,6 +281,10 @@ fn simple_at(p: &Parser, name: String, rest: &[Spanned], span: Span) -> Or<Stmt>
 
 fn variable_decl(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
     let name = match &run[0].token {
+        Token::Variable(v) if v.is_empty() => {
+            // a lone `$` is not a declaration head: dart wants the name first
+            return Err(p.err("Expected identifier.", run[0].span.start));
+        }
         Token::Variable(v) => v.clone(),
         _ => return Err(p.err("expected variable name", span.start)),
     };
@@ -289,6 +304,12 @@ fn declaration(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
     let colon =
         Parser::first_colon(run).ok_or_else(|| p.err("expected ':' in declaration", span.start))?;
     let (val_run, flags) = split_flags(&run[colon + 1..]);
+    // A lone `$` where the value belongs: dart's declaration parse never reaches
+    // an expression there and keeps demanding the colon (`@supports (a !:$)`,
+    // `syntax/anything/colon` golden `expected ":".`).
+    if val_run.len() == 1 && matches!(&val_run[0].token, Token::Variable(v) if v.is_empty()) {
+        return Err(p.err("expected \":\".", run[colon].span.start));
+    }
     Ok(Stmt::Declaration(Declaration {
         prop: p.pieces(&run[..colon]),
         value: expr(p, val_run)?,

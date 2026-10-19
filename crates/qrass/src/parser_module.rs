@@ -62,6 +62,7 @@ fn reject_builtin_config(
 
 pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     let rest = strip_comments(rest);
+    validate_forward(p, &rest, span)?;
     let url = module_url(&rest);
     let config = with_config(p, &rest, true)?;
     reject_builtin_config(p, &url, &config, span, &rest)?;
@@ -73,6 +74,168 @@ pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt
         config,
         span,
     }))
+}
+
+/// `@use`/`@forward` must sit at the file's top level *and* precede every
+/// non-module rule. dart raises both violations at parse time
+/// (`directives/use/error/syntax/within.hrx` + `after.hrx`, and the placement
+/// sections of `directives/forward/error/syntax.hrx`). Comments stay neutral.
+pub(crate) fn check_module_placement(program: &[Stmt]) -> Or<()> {
+    walk_nested(program, false)?;
+    let mut phase_closed = false;
+    for s in program {
+        match s {
+            Stmt::Use(_) if phase_closed => {
+                return Err(SassError::new(
+                    crate::error::ErrorKind::Parse,
+                    "@use rules must be written before any other rules.",
+                ));
+            }
+            Stmt::Forward(_) if phase_closed => {
+                return Err(SassError::new(
+                    crate::error::ErrorKind::Parse,
+                    "@forward rules must be written before any other rules.",
+                ));
+            }
+            Stmt::Use(_) | Stmt::Forward(_) | Stmt::Comment(_) => {}
+            // A root-level variable declaration is not a *rule* for dart: it
+            // legally precedes `@use`/`@forward` and may even read a `with`'
+            // configured value (`use|forward/with/from_variable` goldens).
+            Stmt::Variable(_) => {}
+            _ => phase_closed = true,
+        }
+    }
+    Ok(())
+}
+
+/// Depth walk: a module directive inside any block body is out of place.
+fn walk_nested(stmts: &[Stmt], nested: bool) -> Or<()> {
+    for s in stmts {
+        match s {
+            Stmt::Use(_) | Stmt::Forward(_) if nested => {
+                return Err(SassError::new(
+                    crate::error::ErrorKind::Parse,
+                    "This at-rule is not allowed here.",
+                ));
+            }
+            Stmt::Ruleset(r) => walk_nested(&r.body, true)?,
+            Stmt::Each(e) => walk_nested(&e.body, true)?,
+            Stmt::For(f) => walk_nested(&f.body, true)?,
+            Stmt::If(i) => {
+                for clause in &i.clauses {
+                    walk_nested(&clause.body, true)?;
+                }
+            }
+            Stmt::While(w) => walk_nested(&w.body, true)?,
+            Stmt::Mixin(m) => walk_nested(&m.body, true)?,
+            Stmt::Function(f) => walk_nested(&f.body, true)?,
+            Stmt::Include(i) => {
+                if let Some(content) = &i.content {
+                    walk_nested(content, true)?;
+                }
+            }
+            Stmt::AtRoot(a) => walk_nested(&a.body, true)?,
+            Stmt::Media(m) => walk_nested(&m.body, true)?,
+            Stmt::Supports(su) => walk_nested(&su.body, true)?,
+            Stmt::Keyframes(k) => walk_nested(&k.body, true)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// dart parses `@forward` against a strict grammar and reports malformed
+/// spellings at the statement (before the URL is ever loaded). The
+/// `directives/forward/error/syntax.hrx` goldens pin each message:
+/// * the URL must be a quoted string — `Expected string.`;
+/// * `as <prefix>*` — the prefix starts with an identifier (`Expected
+///   identifier.`) and must run to a `*` (`expected "*".`);
+/// * `show`/`hide` take a non-empty list of variable/mixin/function names
+///   (`Expected variable, mixin, or function name`), and a second config keyword
+///   where the statement should end is dart's `expected ";".`.
+///
+/// Only clearly-invalid spellings are claimed; anything else keeps today's
+/// reconstruct-and-load behavior.
+fn validate_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<()> {
+    let at = |i: usize| {
+        rest.get(i)
+            .map(|s| s.span.start)
+            .unwrap_or(span.start)
+    };
+    let end = |t: &Token| matches!(t, Token::Punct(Punct::Semicolon) | Token::Punct(Punct::LBrace));
+    // 1. The URL word.
+    match rest.first() {
+        None => return Err(p.err("Expected string.", span.start)),
+        Some(s) if matches!(s.token, Token::Str { .. }) => {}
+        Some(s) => return Err(p.err("Expected string.", s.span.start)),
+    }
+    // 2. `as <ident>(-|.)* *`
+    if let Some(i) = find_ident(rest, "as") {
+        let after = &rest[i + 1..];
+        match after.first() {
+            None => return Err(p.err("Expected identifier.", at(i))),
+            Some(s) if end(&s.token) => return Err(p.err("Expected identifier.", s.span.start)),
+            Some(s) if matches!(s.token, Token::Ident(_)) => {}
+            Some(s) => return Err(p.err("Expected identifier.", s.span.start)),
+        }
+        let mut j = 1usize;
+        loop {
+            match after.get(j) {
+                None => return Err(p.err("expected \"*\".", at(i))),
+                Some(s) => match &s.token {
+                    Token::Punct(Punct::Star) => break,
+                    Token::Ident(_) | Token::Punct(Punct::Minus) | Token::Punct(Punct::Dot) => {
+                        j += 1
+                    }
+                    _ => return Err(p.err("expected \"*\".", s.span.start)),
+                },
+            }
+        }
+    }
+    // 3. `show` / `hide` member lists.
+    for kw in ["show", "hide"] {
+        let Some(i) = find_ident(rest, kw) else { continue };
+        let mut j = i + 1;
+        let mut expect_name = true;
+        while let Some(s) = rest.get(j) {
+            match &s.token {
+                Token::Ident(name) if name == "with" => break, // `with (…)` handled by with_config
+                Token::Variable(name) if expect_name && name.is_empty() => {
+                    // a lone `$` (no name after it) is not a member name
+                    return Err(p.err("Expected variable, mixin, or function name", s.span.start));
+                }
+                _ if expect_name && matches!(&s.token, Token::Variable(_) | Token::Ident(_)) => {
+                    if let Token::Ident(name) = &s.token {
+                        match name.as_str() {
+                            // A second config keyword (or `as`) where a member
+                            // name belongs: dart wanted the statement to end.
+                            "show" | "hide" | "as" => {
+                                return Err(p.err("expected \";\".", s.span.start));
+                            }
+                            _ => {}
+                        }
+                    }
+                    expect_name = false;
+                    j += 1;
+                }
+                _ if expect_name => {
+                    return Err(p.err("Expected variable, mixin, or function name", s.span.start));
+                }
+                Token::Punct(Punct::Comma) => {
+                    expect_name = true;
+                    j += 1;
+                }
+                Token::Punct(Punct::Semicolon) | Token::Punct(Punct::LBrace) => break,
+                Token::Punct(Punct::LParen) => break, // `with (…` already broken above
+                _ => return Err(p.err("expected \";\".", s.span.start)),
+            }
+        }
+        if expect_name {
+            // ran out (or ended right after a comma): a member name was still owed
+            return Err(p.err("Expected variable, mixin, or function name", at(j)));
+        }
+    }
+    Ok(())
 }
 
 /// Reconstruct the `as <prefix>*` rename prefix. The lexer splits `c-*` into
@@ -236,6 +399,15 @@ fn with_config(p: &Parser, rest: &[Spanned], forward: bool) -> Or<Vec<ConfigEntr
                 vec![p.caret(head.span.start)],
             ));
         };
+        if name.is_empty() {
+            // `$` with no name: dart reads the variable declaration as an
+            // identifier expectation (`with/empty_variable_name` golden).
+            return Err(p.err_marked(
+                "Expected identifier.",
+                head.span.start,
+                vec![p.caret(head.span.start)],
+            ));
+        }
         let Some(colon) = chunk.get(1).filter(|s| matches!(s.token, Token::Punct(Punct::Colon)))
         else {
             let at = chunk.get(1).map(|s| s.span.start).unwrap_or(group.close);

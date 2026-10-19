@@ -177,9 +177,12 @@ fn parse_stage(lexed: Lexed) -> Stage<Parsed> {
             let _g = span2.enter();
             let loaded = carrier.take().expect("parse stage emits once");
             let result: Result<Vec<_>, _> = items.into_iter().collect();
-            result.map(|program| {
+            // One parsing fold everywhere: the module-placement pass runs on
+            // the stream path too, exactly as in `parser::parse`.
+            result.and_then(|program| {
                 span2.record("stmts", tracing::field::debug(program.len()));
-                Parsed { loaded, program }
+                crate::parser::check_module_placement(&program)
+                    .map(|()| Parsed { loaded, program })
             })
         })
         .tap(move |_| {

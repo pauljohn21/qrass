@@ -37,6 +37,7 @@ mod parser_if;
 mod parser_if_raw;
 #[path = "parser_module.rs"]
 mod parser_module;
+pub(crate) use parser_module::check_module_placement;
 #[path = "parser_text.rs"]
 mod parser_text;
 pub(crate) use parser_text::token_to_pieces;
@@ -468,5 +469,7 @@ pub fn parse(
     content: String,
     tokens: Vec<Spanned>,
 ) -> Result<Vec<Stmt>, SassError> {
-    crate::drain::drain(parse_stream(file, name, content, tokens))
+    let program = crate::drain::drain(parse_stream(file, name, content, tokens))?;
+    check_module_placement(&program)?;
+    Ok(program)
 }
