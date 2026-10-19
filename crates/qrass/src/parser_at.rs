@@ -44,6 +44,7 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
                     {
                         return Err(p.err("expected \":\".", bad.span.start));
                     }
+                    super::parser_supports::validate_supports(p, rest)?;
                     Ok(Owner::Supports {
                         condition: p.pieces(rest),
                         span,

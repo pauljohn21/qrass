@@ -905,4 +905,19 @@
 #     split preemptively before the next parser round).
 # sass-spec 8057 -> 8074 (+17: member syntax cluster), 0 regressions,
 # full test suite green (433 passed), clippy -D warnings green.
-73.6
+#
+# Round 71 (c): conservative `@supports` condition grammar validator
+#     (`parser_supports.rs`, wired into the supports head) — heads must be a
+#     `(…)` group, `not (…)` or a call-shaped/interpolated condition; bare
+#     idents/raw declarations/`not a`/`(not a: b)` → `Expected @supports
+#     condition.`; group-without-operator and chains on the leading `not (…)`
+#     → `expected "{".`. First cut over-claimed four legal golden shapes
+#     (`not a()`, interpolated call heads, lone `#"(a: b)"` before/after
+#     operators) — corrected with span-adjacency call detection + rendering
+#     exemptions, A/B back to 0 regressions. Known stays-FAIL: `#{a}b` head
+#     (lexer gluing puts it beyond token-level reach) and the plain-media
+#     logic cluster (`css/plain/error/media`, 19 cases, owned by the
+#     plain-CSS check layer).
+# sass-spec 8074 -> 8087 (+13: supports grammar), 0 regressions,
+# full test suite green (436 passed), clippy -D warnings green.
+73.7

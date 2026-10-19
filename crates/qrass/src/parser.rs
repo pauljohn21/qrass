@@ -31,6 +31,8 @@ mod parser_decl;
 mod parser_at;
 #[path = "parser_expr.rs"]
 mod parser_expr;
+#[path = "parser_supports.rs"]
+mod parser_supports;
 #[path = "parser_args.rs"]
 mod parser_args;
 #[path = "parser_if.rs"]
