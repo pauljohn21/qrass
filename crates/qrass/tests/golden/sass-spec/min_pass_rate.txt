@@ -879,4 +879,16 @@
 #     the passthrough branch verbatim (`alpha(c=d)` filter goldens).
 # sass-spec 8043 -> 8053 (+10), 0 regressions, full test suite green
 # (430 passed), clippy -D warnings green.
+#
+# Round 70 (b): `meta.function-exists` dash/underscore alias equivalence
+#     (function_exists dash_insensitive goldens) plus the two-argument
+#     `($name, $module)` module-scoped lookup (`("rgb","list")` false,
+#     `("red","color")` true). The rest of the meta introspection clusters
+#     (module-mixins/-functions/-variables, 75 cases) need FIRST-CLASS
+#     function/mixin values — SassValue has no Function/Mixin variant at all
+#     — that is an independent work package, as is to_gamut (117 cases,
+#     local-minde iteration + 12-digit serialization, W2 survey stands).
+# sass-spec 8053 -> 8056 (+3: function-exists aliases + module form), 0
+# regressions, full test suite green (430 passed), clippy -D warnings green.
+# NOTE: 8056/10961 = 73.497% — floor stays at 73.4 until the next real gain.
 73.4

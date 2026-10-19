@@ -429,3 +429,25 @@ fn bare_percent_is_a_value_token() {
     // combined with the round-28 rgb() passthrough: an unresolvable attr channel.
     assert_eq!(value("rgb(attr(c, %), 2, 3)"), "rgb(attr(c, %), 2, 3)");
 }
+
+/// Round-70(b) (function_exists goldens): `-`/`_` alias equivalence and the
+/// `($name, $module)` module-scoped form.
+#[test]
+fn function_exists_aliases_and_module_form() {
+    assert_eq!(
+        val_prog("@function a_b() { @return null; } .a { p: meta.function-exists(a-b); }"),
+        "true"
+    );
+    assert_eq!(
+        val_prog("@function a-b() { @return null; } .a { p: meta.function-exists(a_b); }"),
+        "true"
+    );
+    assert_eq!(
+        val_prog(".a { p: meta.function-exists(\"rgb\", \"list\"); }"),
+        "false"
+    );
+    assert_eq!(
+        val_prog(".a { p: meta.function-exists(\"red\", \"color\"); }"),
+        "true"
+    );
+}

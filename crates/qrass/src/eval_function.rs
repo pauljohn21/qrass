@@ -214,9 +214,32 @@ impl EvalState {
             "mixin-exists" => SassValue::Bool(self.mixins.contains_key(&first())),
             "function-exists" => {
                 let f = first();
-                SassValue::Bool(
-                    self.functions.contains_key(&f) || crate::builtins::contains(None, &f),
-                )
+                // Sass treats `-` and `_` as interchangeable in identifiers
+                // (function_exists `dash_insensitive` goldens: defining `a_b`
+                // makes `function-exists(a-b)` true).
+                let dashed = f.replace('_', "-");
+                let underscored = f.replace('-', "_");
+                // `meta.function-exists($name, $module)` searches that
+                // module's own functions (`different_module` goldens:
+                // `("rgb", "list")` is false, `("red", "color")` true).
+                let module = raw
+                    .positional()
+                    .get(1)
+                    .map(|v| v.to_css())
+                    .or_else(|| raw.named().get("module").map(|v| v.to_css()));
+                if let Some(ns) = module {
+                    let in_module = [dashed.as_str(), underscored.as_str()]
+                        .iter()
+                        .any(|k| crate::builtins::contains(Some(&ns), k));
+                    return Ok(Some(SassValue::Bool(in_module)));
+                }
+                let user_defined = [f.as_str(), dashed.as_str(), underscored.as_str()]
+                    .iter()
+                    .any(|k| self.functions.contains_key(*k));
+                let builtin = [dashed.as_str(), underscored.as_str()]
+                    .iter()
+                    .any(|k| crate::builtins::contains(None, k));
+                SassValue::Bool(user_defined || builtin)
             }
             "content-exists" => SassValue::Bool(!self.content_stack.is_empty()),
             _ => return Ok(None),
