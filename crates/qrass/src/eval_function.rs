@@ -124,6 +124,41 @@ impl EvalState {
                 e.note(format!("during builtin `{key}` in module {}", self.name))
             });
         }
+        // dart's wording for a *module*-level miss (modules/color/error
+        // goldens): the hyphenated legacy spellings name the function and its
+        // home module; the `*-color` compat spellings report the bare
+        // `Undefined function.`.
+        if call.namespace.as_deref() == Some("color") {
+            if matches!(
+                call.name.as_str(),
+                "adjust-color" | "scale-color" | "change-color"
+            ) {
+                return Err(SassError::new(
+                    ErrorKind::UndefinedFunction,
+                    "Undefined function.",
+                ));
+            }
+            if matches!(
+                call.name.as_str(),
+                "adjust-hue"
+                    | "lighten"
+                    | "darken"
+                    | "saturate"
+                    | "desaturate"
+                    | "opacify"
+                    | "fade-in"
+                    | "transparentize"
+                    | "fade-out"
+            ) {
+                return Err(SassError::new(
+                    ErrorKind::UndefinedFunction,
+                    format!(
+                        "The function {}() isn't in the sass:color module.",
+                        call.name
+                    ),
+                ));
+            }
+        }
         Err(SassError::new(
             ErrorKind::UndefinedFunction,
             format!("Undefined function \"{key}\""),

@@ -836,4 +836,16 @@
 #     remain for the per-space model round.
 # sass-spec 7840 -> 7877 (+37: invert/error + color_at wording families), 0
 # regressions, full test suite green (417 passed), clippy -D warnings green.
-72.1
+#
+# Round 68: dart's two spellings for a missing `sass:color` function
+#     (modules/color/error goldens) — the hyphenated legacy names
+#     (adjust-hue/lighten/darken/saturate/desaturate/opacify/fade-in/
+#     transparentize/fade-out) name the function and its module, the `*-color`
+#     compat spellings (adjust-color/scale-color/change-color) report the bare
+#     `Undefined function.`; every other module miss keeps the named form
+#     (pinned for color.mystery). Explicit name lists, no global-scope
+#     generalization — the global hyphenated color functions themselves are a
+#     separate legacy-vs-CSS-filter split (round-66 invert pattern) still open.
+# sass-spec 7910 -> 7928 (+18: modules/color/error + siblings), 0 regressions,
+# full test suite green (423 passed), clippy -D warnings green.
+72.3

@@ -75,3 +75,42 @@ fn color_mix_and_meta() {
     assert_eq!(value("color.alpha(#ff0000)"), "1");
     assert_eq!(value("color.ie-hex-str(#ff0000)"), "#FFFF0000");
 }
+
+/// Round-68 (modules/color/error goldens): dart's two spellings for a missing
+/// `sass:color` function.
+#[test]
+fn color_module_undefined_spellings() {
+    let err_of = |expr: &str| {
+        let src = format!(".a {{ p: {expr}; }}");
+        let tokens = lex(0, "t.scss".into(), src.clone()).expect("lex ok");
+        let program = parse(0, "t.scss".into(), src.clone(), tokens).expect("parse ok");
+        eval_all(0, "t.scss".into(), src, program)
+            .err()
+            .unwrap_or_else(|| panic!("{expr} must fail"))
+            .to_string()
+    };
+    for name in [
+        "adjust-hue",
+        "lighten",
+        "darken",
+        "saturate",
+        "desaturate",
+        "opacify",
+        "fade-in",
+        "transparentize",
+        "fade-out",
+    ] {
+        let msg = err_of(&format!("color.{name}(#abcdef, 10%)"));
+        assert!(
+            msg.contains(&format!("The function {name}() isn't in the sass:color module.")),
+            "{name}: {msg}"
+        );
+    }
+    for name in ["adjust-color", "scale-color", "change-color"] {
+        let msg = err_of(&format!("color.{name}(#abcdef, $red: 10%)"));
+        assert!(msg.contains("Undefined function."), "{name}: {msg}");
+    }
+    // untouched names keep the named spelling
+    let msg = err_of("color.mystery(#abc)");
+    assert!(msg.contains("Undefined function \"color.mystery\""), "{msg}");
+}
