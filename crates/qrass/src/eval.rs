@@ -37,6 +37,8 @@ mod eval_bind;
 mod eval_color4;
 #[path = "eval_color4_check.rs"]
 mod eval_color4_check;
+#[path = "eval_color_space.rs"]
+mod eval_color_space;
 #[path = "eval_config.rs"]
 mod eval_config;
 #[path = "eval_control.rs"]

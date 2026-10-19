@@ -262,3 +262,56 @@ fn hsl_family_symbolic_and_relative_stay_verbatim_css() {
     let out = css("a { p: hwb(from #aaa h w b); }");
     assert!(out.contains("hwb(from"), "{out}");
 }
+
+// ─── rgb/rgba one_arg shape errors (round 65) ────────────────────────────────
+
+#[test]
+fn rgb_one_arg_shape_errors() {
+    let msg = eval_err("a { p: rgb(()); }");
+    assert!(
+        msg.contains("$channels: Color component list may not be empty."),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb(1); }");
+    assert!(
+        msg.contains("$channels: The rgb color space has 3 channels but 1 has 1."),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb(1 2); }");
+    assert!(
+        msg.contains("$channels: The rgb color space has 3 channels but (1 2) has 2."),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb((1, 2, 3)); }");
+    assert!(
+        msg.contains("$channels: Expected a space- or slash-separated list, was (1, 2, 3)"),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb([1 2 3]); }");
+    assert!(
+        msg.contains("$channels: Expected an unbracketed list, was [1 2 3]"),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb(\"foo\" 1 2); }");
+    assert!(
+        msg.contains("$channels: Expected red channel to be a number, was \"foo\"."),
+        "{msg}"
+    );
+    let msg = eval_err("a { p: rgb(list.slash(1 2 3, 0.4, 1)); }");
+    assert!(
+        msg.contains("$channels: Only 2 slash-separated elements allowed, but 3 were passed."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn rgb_symbolic_still_dispatches_historically() {
+    // The round-28 rgb special-function rules must survive the new shape pass.
+    let out = css("a { p: rgb(var(--foo) 2 3); }");
+    assert!(out.contains("rgb(var(--foo), 2, 3)"), "{out}");
+    let out = css("a { p: rgb(1, 2, var(--foo)); }");
+    assert!(out.contains("rgb(1, 2, var(--foo))"), "{out}");
+    let out = css("@use \"sass:list\"; a { p: hsl(list.slash(var(--foo), 0.4)); }");
+    // A slash *pair* renders verbatim with spaced `/` (unlike a division slot).
+    assert!(out.contains("hsl(var(--foo) / 0.4)"), "{out}");
+}

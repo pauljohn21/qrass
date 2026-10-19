@@ -791,4 +791,17 @@
 #     literal layer stays reachable.
 # sass-spec 7755 -> 7805 (+50: hsl+hwb one_arg/legacy families), 0 regressions,
 # full test suite green (413 passed), clippy -D warnings green.
-71.2
+#
+# Round 65: the dart `$channels` one_arg error family extended to `rgb`/`rgba`
+#     (empty / unbracketed / comma / slash-count / space-count / type errors via
+#     the shared slot taxonomy — `legacy_dispatch` extracted so rgb's symbolic
+#     special-function routing stays byte-identical, pinned in
+#     tests/color4_arg_errors.rs), and the `list.slash(channels, α)` *pair*
+#     rendering taught its spaced ` / ` slash (the division form keeps the
+#     literal `b/25%` spelling). The growth pushed `eval_function.rs` over
+#     budget, so the whole space-color mechanism moved to new
+#     `src/eval_color_space.rs` (400 lines; eval_function back to 296) —
+#     behavior byte-identical across the move.
+# sass-spec 7805 -> 7840 (+35: rgb/rgba one_arg + hsl slash pairs), 0 regressions,
+# full test suite green (415 passed), clippy -D warnings green, whole library <=500.
+71.5
