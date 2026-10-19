@@ -205,6 +205,8 @@ impl EvalState {
         }
         let first = || match raw.positional().first() {
             Some(SassValue::Str { text, .. }) => text.clone(),
+            // a bare identifier argument (`function-exists(a-b)`) evaluates to
+            // a symbolic string; `to_css` already spells it unquoted.
             Some(other) => other.to_css(),
             None => String::new(),
         };
@@ -225,8 +227,16 @@ impl EvalState {
                 let module = raw
                     .positional()
                     .get(1)
-                    .map(|v| v.to_css())
-                    .or_else(|| raw.named().get("module").map(|v| v.to_css()));
+                    .map(|v| match v {
+                        SassValue::Str { text, .. } => text.clone(),
+                        other => other.to_css(),
+                    })
+                    .or_else(|| {
+                        raw.named().get("module").map(|v| match v {
+                            SassValue::Str { text, .. } => text.clone(),
+                            other => other.to_css(),
+                        })
+                    });
                 if let Some(ns) = module {
                     let in_module = [dashed.as_str(), underscored.as_str()]
                         .iter()
