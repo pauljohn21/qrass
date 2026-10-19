@@ -9,7 +9,7 @@
 //! too once the registry lands (task group 8).
 
 use crate::ast::{Block, For, FunctionDecl, If, Return, Stmt, While};
-use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep};
+use crate::ast_expr::{Arg, BinOp, Expr, FunctionCall, ListSep, Literal};
 use crate::env::AssignFlags;
 use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
@@ -17,6 +17,42 @@ use crate::value::SassValue;
 use super::eval_mixin::RawArgs;
 use super::{Ev, EvalState};
 use crate::eval::eval_control::{each_elements, int_bound};
+
+/// How one `hsl`/`hwb` argument slot reads for the modern single-argument form.
+enum Slot {
+    /// a number or `none` — a real channel value
+    Number,
+    /// symbolic CSS construct (`var()`/`calc()`, a `/` product, a relative
+    /// `from` anchor) — the whole call stays verbatim CSS
+    Verbatim,
+    /// a concrete non-channel value (quoted string, bare word, color, …) —
+    /// dart raises a `$channels:` type error
+    Concrete,
+}
+
+fn slot_kind(e: &Expr) -> Slot {
+    match e {
+        Expr::Literal(Literal::Number { .. }) => Slot::Number,
+        Expr::Literal(Literal::Ident(w)) if w == "none" => Slot::Number,
+        Expr::Literal(Literal::Ident(w)) if w.eq_ignore_ascii_case("from") => Slot::Verbatim,
+        Expr::FunctionCall(_) => Slot::Verbatim,
+        Expr::Binary {
+            op, left, right, ..
+        } => {
+            if matches!(op, BinOp::Div | BinOp::Mul) {
+                // `a / b` inside a slot is kept literal by the CSS layer.
+                Slot::Verbatim
+            } else {
+                match (slot_kind(left), slot_kind(right)) {
+                    (Slot::Verbatim, _) | (_, Slot::Verbatim) => Slot::Verbatim,
+                    (Slot::Number, Slot::Number) => Slot::Number,
+                    _ => Slot::Concrete,
+                }
+            }
+        }
+        _ => Slot::Concrete,
+    }
+}
 
 impl EvalState {
     /// Register a `@function` definition (last definition wins for the name),
@@ -127,7 +163,16 @@ impl EvalState {
     /// single-argument form. Returns `Ok(None)` for every other shape so the caller
     /// falls through to ordinary builtin dispatch / passthrough unchanged.
     fn eval_space_color(&mut self, call: &FunctionCall) -> Ev<Option<SassValue>> {
-        if call.namespace.is_some() || !matches!(call.name.as_str(), "rgb" | "rgba") {
+        let rgb_family =
+            call.namespace.is_none() && matches!(call.name.as_str(), "rgb" | "rgba");
+        // The modern `hsl`/`hsla`/`hwb` single-argument spelling — bare or under
+        // the `color` namespace — is also rebuilt here (round-64, hwb/one_arg
+        // goldens): split channels route to the legacy builtins (which produce
+        // the goldens' `hsl(...)` serialization), anything else falls back to a
+        // verbatim slash-preserving passthrough below `eval_hsl_family`.
+        let hsl_family = matches!(call.name.as_str(), "hsl" | "hsla" | "hwb")
+            && matches!(call.namespace.as_deref(), None | Some("color"));
+        if !rgb_family && !hsl_family {
             return Ok(None);
         }
         let Some(Arg::Positional(Expr::List {
@@ -138,6 +183,9 @@ impl EvalState {
         else {
             return Ok(None);
         };
+        if hsl_family {
+            return self.eval_hsl_family(call, items);
+        }
         let mut positional: Vec<SassValue> = Vec::new();
         let mut alpha: Option<SassValue> = None;
         for item in items {
@@ -179,6 +227,140 @@ impl EvalState {
             })?;
         result.map_err(|e| e.note(format!("during color `{}` in module {}", call.name, self.name)))
             .map(Some)
+    }
+
+    /// The modern single-argument `hsl`/`hsla`/`hwb` spelling. Channels that are
+    /// all number/`none` leaves (exactly three, alpha optional) are split and
+    /// dispatched to the legacy builtins — hwb additionally enforces dart's
+    /// strict `%` unit on whiteness/blackness. Every other shape (symbolic
+    /// `var()`/`calc()`, a relative-color `from` anchor, a wrong count) is
+    /// rendered verbatim with the alpha slash kept literal (`hwb(0 30% var(--c)/0.5)`).
+    fn eval_hsl_family(&mut self, call: &FunctionCall, items: &[Expr]) -> Ev<Option<SassValue>> {
+        let mut channels: Vec<&Expr> = Vec::new();
+        let mut alpha: Option<&Expr> = None;
+        for item in items {
+            if let Expr::Binary {
+                op: BinOp::Div,
+                left,
+                right,
+                ..
+            } = item
+            {
+                channels.push(left);
+                alpha = Some(right);
+            } else {
+                channels.push(item);
+            }
+        }
+        // Dart's `hsl`/`hwb` single-argument form distinguishes three ways a
+        // slot can fail: a relative-color `from` anchor or a symbolic
+        // `var()`/`calc()` construct keeps the whole call verbatim CSS, while a
+        // *concrete* non-number (quoted string, bare word, color, …) is a
+        // `$channels:` type error naming the first offending channel. Only
+        // numbers and `none` are channels at all.
+        let slot_kind = |e: &Expr| -> Slot { slot_kind(e) };
+        let channel_names: &[&str] = if call.name == "hwb" {
+            &["hue", "whiteness", "blackness"]
+        } else {
+            &["hue", "saturation", "lightness"]
+        };
+        // Scan every channel slot (and the alpha): a `var()`/relative anchor
+        // anywhere makes the whole call verbatim; otherwise the first concrete
+        // non-number is dart's `$channels:` type error; a clean 3-channel list
+        // goes on to strict units and the legacy dispatch.
+        let mut first_concrete: Option<(usize, &Expr)> = None;
+        let mut verbatim = false;
+        for (i, e) in channels.iter().enumerate() {
+            match slot_kind(e) {
+                Slot::Number => {}
+                Slot::Verbatim => verbatim = true,
+                Slot::Concrete => {
+                    if i < 3 && first_concrete.is_none() {
+                        first_concrete = Some((i, e));
+                    }
+                }
+            }
+        }
+        if let Some(a) = alpha
+            && matches!(slot_kind(a), Slot::Verbatim)
+        {
+            verbatim = true;
+        }
+        if !verbatim {
+            if let Some((i, e)) = first_concrete {
+                let v = self.eval_expr(e)?;
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!(
+                        "$channels: Expected {} channel to be a number, was {}.",
+                        channel_names[i],
+                        v.to_css()
+                    ),
+                ));
+            }
+            if channels.len() == 3 {
+            // `color.hwb(0 30 40%)`: hwb's w/b channels only accept `%` (or none).
+            if call.name == "hwb" {
+                for (i, key) in [(1usize, "whiteness"), (2, "blackness")] {
+                    if let Expr::Literal(Literal::Number { value, unit }) = channels[i]
+                        && unit.as_deref() != Some("%")
+                    {
+                        let shown = format!("{value}{}", unit.as_deref().unwrap_or(""));
+                        return Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!("${key}: Expected {shown} to have unit \"%\"."),
+                        ));
+                    }
+                }
+            }
+            let mut positional: Vec<SassValue> = Vec::new();
+            for e in &channels {
+                positional.push(self.eval_expr(e)?);
+            }
+            if let Some(a) = alpha {
+                positional.push(match self.eval_expr(a)? {
+                    SassValue::Number {
+                        value,
+                        unit: Some(u),
+                    } if u == "%" => SassValue::Number {
+                        value: value / 100.0,
+                        unit: None,
+                    },
+                    other => other,
+                });
+            }
+            let named = std::collections::HashMap::new();
+            // A base name with no global builtin (e.g. bare `hwb`, which only
+            // exists namespaced in dart) falls through to the Color4 literal /
+            // passthrough layers rather than erroring.
+            let Some(result) =
+                crate::builtins::call(call.namespace.as_deref(), &call.name, &positional, &named)
+            else {
+                return Ok(None);
+            };
+            return result
+                .map_err(|e| e.note(format!("during color `{}` in module {}", call.name, self.name)))
+                .map(Some);
+            }
+        }
+        let mut parts = Vec::with_capacity(items.len());
+        for item in items {
+            if let Expr::Binary {
+                op: BinOp::Div,
+                left,
+                right,
+                ..
+            } = item
+            {
+                parts.push(format!("{}/{}", self.render_css(left)?, self.render_css(right)?));
+            } else {
+                parts.push(self.render_css(item)?);
+            }
+        }
+        Ok(Some(SassValue::Str {
+            text: format!("{}({})", call.name, parts.join(" ")),
+            quoted: false,
+        }))
     }
 
     /// Resolve the environment-dependent `meta` predicates that cannot live in

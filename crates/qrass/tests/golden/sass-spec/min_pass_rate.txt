@@ -774,4 +774,21 @@
 #     builtins/selector.rs (522: sel_source/sel_arg + is-superselector/unify/
 #     extend/replace split to new selector_ops.rs). Whole library now ≤500;
 #     hrx still byte-identical 7755, 410 tests green, clippy green.
-70.7
+#
+# Round 64: modern single-argument `hsl`/`hsla`/`hwb` (bare and `color.`
+#     prefixed) rebuilt through `eval_space_color` (the round-28 rgb mechanism,
+#     generalized): channels split on the literal slash route to the legacy
+#     builtins — producing dart's `hsl(...)`/`hsla(...)` serialization for the
+#     one_arg goldens — while hwb enforces the strict `%` unit on
+#     whiteness/blackness. A slot taxonomy (`slot_kind`: Number / Verbatim
+#     symbolic-or-relative / Concrete) keeps `var()`/`calc()`/relative-`from`
+#     calls verbatim with the alpha slash rendered literal (`hwb(0 30%
+#     var(--c)/0.5)`), yet turns concrete non-numbers (quoted strings, bare
+#     words even in wrong-count lists like `hwb(c #aaa h w b)`) into the
+#     `$channels: Expected <name> channel to be a number` error — covering the
+#     type/one_arg sections too. One fall-through fix: names without a global
+#     builtin (bare `hwb`) return Ok(None) instead of Undefined so the Color4
+#     literal layer stays reachable.
+# sass-spec 7755 -> 7805 (+50: hsl+hwb one_arg/legacy families), 0 regressions,
+# full test suite green (413 passed), clippy -D warnings green.
+71.2

@@ -212,3 +212,53 @@ fn color_wrapper_multi_argument_var_still_passes_through() {
     let out = css(".a { p: color(srgb 0.1 var(--foo)); }");
     assert!(out.contains("color(srgb 0.1 var(--foo))"), "{out}");
 }
+
+// ─── modern single-argument hsl/hwb (round 64, hsl+hwb/one_arg goldens) ───────
+
+#[test]
+fn hsl_family_single_argument_routes_to_legacy_forms() {
+    // The modern space-separated single argument produces dart's legacy `hsl()`
+    // serialization via the shared space-color rebuild.
+    let out = css("@use \"sass:color\"; a { p: color.hwb(0 30% 40%); }");
+    assert!(out.contains("hsl(0, 33.3333333333%, 45%)"), "{out}");
+    let out = css("@use \"sass:color\"; a { p: color.hwb(180 30% 40% / 0.4); }");
+    assert!(out.contains("hsla(180, 33.3333333333%, 45%, 0.4)"), "{out}");
+}
+
+#[test]
+fn hwb_strict_percent_and_type_errors() {
+    let msg = eval_err("@use \"sass:color\"; a { p: color.hwb(0 30 40%); }");
+    assert!(
+        msg.contains("$whiteness: Expected 30 to have unit \"%\"."),
+        "{msg}"
+    );
+    let msg = eval_err("@use \"sass:color\"; a { p: color.hwb(0 30px 40%); }");
+    assert!(
+        msg.contains("$whiteness: Expected 30px to have unit \"%\"."),
+        "{msg}"
+    );
+    // A quoted string in a channel is a concrete type error, not a passthrough…
+    let msg = eval_err(r#"a { p: hsl("foo" 100% 50%); }"#);
+    assert!(
+        msg.contains("$channels: Expected hue channel to be a number, was \"foo\"."),
+        "{msg}"
+    );
+    // …and so is a bare word, even with extra slots (relative anchor checked first).
+    let msg = eval_err("a { p: hwb(c #aaa h w b / 25%); }");
+    assert!(
+        msg.contains("$channels: Expected hue channel to be a number, was c."),
+        "{msg}"
+    );
+}
+
+#[test]
+fn hsl_family_symbolic_and_relative_stay_verbatim_css() {
+    // Symbolic channels and the relative `from` anchor keep the call verbatim
+    // with the alpha slash rendered literal (no surrounding spaces).
+    let out = css("@use \"sass:color\"; a { p: color.hwb(var(--c) 30% 40%); }");
+    assert!(out.contains("hwb(var(--c) 30% 40%)"), "{out}");
+    let out = css("@use \"sass:color\"; a { p: color.hwb(0 30% var(--c) / 0.5); }");
+    assert!(out.contains("hwb(0 30% var(--c)/0.5)"), "{out}");
+    let out = css("a { p: hwb(from #aaa h w b); }");
+    assert!(out.contains("hwb(from"), "{out}");
+}
