@@ -9,6 +9,16 @@ use crate::value::{SassValue, convert_number, number_to_css};
 use super::eval_expr::{Ee, err};
 
 pub(crate) fn arith(op: BinOp, l: SassValue, r: SassValue) -> Ee<SassValue> {
+    // A callable operand is not a CSS value at all: the goldens spell the
+    // *left* value's serialization (`values/mixins.hrx` addition, and
+    // `get_function/error` division both read `get-*("…") isn't a valid CSS
+    // value.`), falling through to the existing wording otherwise.
+    if matches!(l, SassValue::Function(_) | SassValue::Mixin(_)) {
+        return Err(err(ErrorKind::Eval, format!("{} isn't a valid CSS value.", l.to_css())));
+    }
+    if matches!(r, SassValue::Function(_) | SassValue::Mixin(_)) {
+        return Err(err(ErrorKind::Eval, format!("{} isn't a valid CSS value.", l.to_css())));
+    }
     let (SassValue::Number { value: a, unit: ua }, SassValue::Number { value: b, unit: ub }) =
         (l, r)
     else {

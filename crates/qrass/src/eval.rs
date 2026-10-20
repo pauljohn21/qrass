@@ -39,6 +39,8 @@ mod eval_color4;
 mod eval_color4_check;
 #[path = "eval_color_space.rs"]
 mod eval_color_space;
+#[path = "eval_callable.rs"]
+mod eval_callable;
 #[path = "eval_config.rs"]
 mod eval_config;
 #[path = "eval_control.rs"]
@@ -150,9 +152,9 @@ pub struct EvalState {
     /// the site can report exactly which entry no module declared.
     pub(crate) config_sites: Vec<Vec<usize>>,
     /// Mixin registry keyed by name (module mixins are rebound per namespace).
-    pub mixins: HashMap<String, MixinDecl>,
+    pub mixins: HashMap<String, std::rc::Rc<MixinDecl>>,
     /// Function registry keyed by name (task 7.2).
-    pub functions: HashMap<String, FunctionDecl>,
+    pub functions: HashMap<String, std::rc::Rc<FunctionDecl>>,
     /// Defining-module environment snapshot per closure: a `@function`/`@mixin`
     /// body resolves its free variables and `ns.$var` namespace bindings against
     /// the module it was **declared** in (the goldens' lexical scoping), not the

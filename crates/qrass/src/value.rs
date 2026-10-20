@@ -17,6 +17,12 @@ use crate::ast_expr::ListSep;
 // resolving unchanged.
 pub use crate::value_number::{convert_number, format_number, number_to_css};
 
+// The first-class callable payloads live in the crate-root `value_callable`
+// module (declared beside `value_number`); re-exported here so
+// `crate::value::{FnRef, FnKind, MixRef, MixKind}` keep resolving.
+pub(crate) use crate::value_callable::{MixKind, MixRef, fn_kind_eq, mix_kind_eq};
+pub use crate::value_callable::{FnKind, FnRef};
+
 /// A runtime SCSS value.
 #[derive(Clone, Debug)]
 pub enum SassValue {
@@ -63,25 +69,6 @@ pub enum SassValue {
     Mixin(std::rc::Rc<MixRef>),
 }
 
-/// Payload of a first-class function value. `module` anchors the defining
-/// module for the `meta.call` closure switch; `css` marks a `$css: true`
-/// lookup, whose call re-emits the plain-CSS spelling verbatim
-/// (`get_function/same_module` `plain_css` golden: `round(0.6)`).
-#[derive(Clone, Debug)]
-pub struct FnRef {
-    pub name: String,
-    pub module: Option<String>,
-    pub decl: std::rc::Rc<crate::ast::FunctionDecl>,
-    pub css: bool,
-}
-
-/// Payload of a first-class mixin value.
-#[derive(Clone, Debug)]
-pub struct MixRef {
-    pub name: String,
-    pub module: Option<String>,
-    pub decl: std::rc::Rc<crate::ast::MixinDecl>,
-}
 
 /// Structural value equality following Sass semantics: two strings are equal when
 /// their text matches regardless of quoting (`base` and `'base'` are the same map
@@ -104,11 +91,14 @@ impl PartialEq for SassValue {
             ) => a == b && ua == ub,
             (Self::Str { text: a, .. }, Self::Str { text: b, .. }) => a == b,
             (Self::Color(a), Self::Color(b)) => a == b,
-            // callable values are reference-equal: the same `Rc` (same
-            // definition instance) only — `get_function/equality` goldens,
-            // including `redefined` (same name, two defs) being false.
-            (Self::Function(a), Self::Function(b)) => std::rc::Rc::ptr_eq(a, b),
-            (Self::Mixin(a), Self::Mixin(b)) => std::rc::Rc::ptr_eq(a, b),
+            // callable values compare the way dart's goldens spell it:
+            // builtins by (module, name) — two `get-function(lighten)` reads
+            // are `==` (`equality/built_in/same`) while lighten vs darken is
+            // not — and user definitions by reference identity, so a later
+            // redefinition yields a fresh `Rc` and compares false
+            // (`equality/user_defined/redefined`).
+            (Self::Function(a), Self::Function(b)) => fn_kind_eq(a, b),
+            (Self::Mixin(a), Self::Mixin(b)) => mix_kind_eq(a, b),
             (
                 Self::List {
                     items: a,

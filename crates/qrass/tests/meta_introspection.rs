@@ -48,3 +48,60 @@ fn module_variables_wording() {
             .contains("There is no module with namespace \"other\".")
     );
 }
+
+/// Round-73 W2 (get_function / get_mixin / feature_exists goldens): the
+/// callable lookups, their arity/type wording, equality semantics and the
+/// feature table.
+#[test]
+fn callable_lookups() {
+    // serialization + type-of (`inspect/function.hrx`, `get_function/meta`)
+    assert_eq!(
+        value("meta.inspect(meta.get-function(lighten))"),
+        "get-function(\"lighten\")"
+    );
+    assert_eq!(value("meta.type-of(meta.get-function(lighten))"), "function");
+    assert_eq!(
+        value("meta.inspect(meta.get-mixin(load-css, meta))"),
+        "get-mixin(\"load-css\")"
+    );
+    // module-qualified builtins resolve through the module's own table
+    assert_eq!(
+        value("meta.get-function(\"round\", $module: \"math\")"),
+        "get-function(\"round\")"
+    );
+    // equality: builtins by name, user defs by locked reference identity
+    assert_eq!(
+        value("meta.get-function(lighten) == meta.get-function(lighten)"),
+        "true"
+    );
+    assert_eq!(
+        value("meta.get-function(lighten) == meta.get-function(darken)"),
+        "false"
+    );
+    assert_eq!(value("meta.is-function(meta.get-function(lighten))"), "true");
+    assert_eq!(value("meta.is-function(1)"), "false");
+    // feature table is exact-spelling (`dash_sensitive` reads at_error false)
+    assert_eq!(value("meta.feature-exists(at-error)"), "true");
+    assert_eq!(value("meta.feature-exists(\"at-error\")"), "true");
+    assert_eq!(value("meta.feature-exists(at_error)"), "false");
+    assert_eq!(value("meta.feature-exists(unknown)"), "false");
+    // dart's wording family
+    assert!(err("meta.get-mixin()").contains("Missing argument $name."));
+    assert!(
+        err("meta.get-function(nonexistent)").contains("Function not found: nonexistent")
+    );
+    assert!(
+        err("meta.get-mixin(\"c\", $module: \"d\")")
+            .contains("There is no module with namespace \"d\".")
+    );
+    assert!(
+        err("meta.get-function(c, $module: 1)")
+            .contains("$module: 1 is neither a string nor a module reference.")
+    );
+    assert!(err("meta.get-mixin(c, true, d, e)").contains("Only 2 arguments allowed, but 4 were passed."));
+    // arithmetic on a callable names its serialization (`values/mixins.hrx`)
+    assert!(
+        err("meta.get-function(rgb) / meta.get-function(lighten)")
+            .contains("get-function(\"rgb\") isn't a valid CSS value.")
+    );
+}

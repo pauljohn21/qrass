@@ -52,6 +52,7 @@ pub mod selector_unify_complex;
 pub mod value;
 pub mod vfs;
 mod value_number;
+pub(crate) mod value_callable;
 
 use error::SassError;
 

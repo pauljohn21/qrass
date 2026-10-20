@@ -943,4 +943,23 @@
 #     work package, not claimed here.
 # sass-spec 8099 -> 8115 (+16: module_variables cluster), 0 regressions,
 # full test suite green (439 passed), clippy -D warnings green.
-74.0
+#
+# Round 73 (callable plan, W1+W2): first-class function/mixin VALUES —
+#     `SassValue::Function(FnRef)/Mixin(MixRef)` with `Rc` identity for user
+#     defs (the tables moved to `Rc<FunctionDecl>`/`Rc<MixinDecl>`, so a locked
+#     reference survives redefinition per the `same_module/redefined` golden),
+#     call-text serialization `get-function("…")`/`get-mixin("…")` (inspect
+#     goldens), builtin-by-name equality (equality goldens), and
+#     `meta.get-function`/`get-mixin`/`is-function`/`is-mixin`/`feature-exists`
+#     in new `eval_callable.rs` (full dart wording family: Missing argument
+#     $name / Only 2|3 arguments / $name is not a string / $module is neither a
+#     string nor a module reference / Function|Mixin not found: X / no-namespace
+#     / arithmetic `isn't a valid CSS value.`). W1's non-Sync Module let the
+#     module bus move Arc→Rc (Local wasm contract completed). Budget: value.rs
+#     hit 532 → payloads split to `value_callable.rs` (476/69; W-split
+#     byte-identical). as-*/cross-module get-function (multi-global-modules
+#     wording, scope) lands with W4's export tables.
+# sass-spec 8115 -> 8174 (+59: get_function/get_mixin/feature_exists/values
+# clusters), 0 regressions, full test suite green (440 passed),
+# clippy -D warnings green.
+74.5

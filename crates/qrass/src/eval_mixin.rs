@@ -27,7 +27,7 @@ impl EvalState {
         let name = self.render_interp(&m.name)?;
         self.mixin_env.insert(name.clone(), self.env.clone());
         self.mixin_module.insert(name.clone(), self.name.clone());
-        self.mixins.insert(name, m.clone());
+        self.mixins.insert(name, std::rc::Rc::new(m.clone()));
         Ok(())
     }
 

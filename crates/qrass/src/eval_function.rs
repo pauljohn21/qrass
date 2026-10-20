@@ -26,7 +26,7 @@ impl EvalState {
     pub(super) fn define_function(&mut self, f: &FunctionDecl) {
         self.function_env.insert(f.name.clone(), self.env.clone());
         self.function_module.insert(f.name.clone(), self.name.clone());
-        self.functions.insert(f.name.clone(), f.clone());
+        self.functions.insert(f.name.clone(), std::rc::Rc::new(f.clone()));
     }
 
     /// Dispatch a call. Resolution order: user-defined function (which shadows
@@ -202,6 +202,10 @@ impl EvalState {
     ) -> Ev<Option<SassValue>> {
         if !matches!(namespace, None | Some("meta")) {
             return Ok(None);
+        }
+        // First-class callable lookups live in `eval_callable` (round-73 W2).
+        if let Some(v) = self.try_callable_meta(namespace, name, raw)? {
+            return Ok(Some(v));
         }
         let first = || match raw.positional().first() {
             Some(SassValue::Str { text, .. }) => text.clone(),
@@ -450,5 +454,10 @@ pub(crate) fn is_meta_name(name: &str) -> bool {
             | "mixin-exists"
             | "function-exists"
             | "content-exists"
+            | "get-function"
+            | "get-mixin"
+            | "is-function"
+            | "is-mixin"
+            | "feature-exists"
     )
 }
