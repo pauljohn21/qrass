@@ -154,6 +154,12 @@ impl RawArgs {
     pub(crate) fn named(&self) -> &HashMap<String, SassValue> {
         &self.named
     }
+
+    /// Assemble parts directly (used by `meta.call` to forward a sub-argument
+    /// list whose head — the function reference — has been peeled off).
+    pub(crate) fn from_parts(positional: Vec<SassValue>, named: HashMap<String, SassValue>) -> Self {
+        Self { positional, named }
+    }
 }
 
 impl EvalState {

@@ -410,8 +410,8 @@ pub(crate) fn register(r: &mut super::Registry) {
     r.def("ie-hex-str", 1, Some(1), ie_hex_str);
     // Legacy global color constructors element-plus leans on (`rgba($c, $a)`,
     // `rgb(r, g, b)` / `rgba(r, g, b, $alpha)`); both spellings share one impl.
-    r.def("rgb", 1, Some(4), rgb);
-    r.def("rgba", 1, Some(4), rgb);
+    r.def_p("rgb", 1, Some(4), &["red", "green", "blue", "alpha"], rgb);
+    r.def_p("rgba", 1, Some(4), &["red", "green", "blue", "alpha"], rgb);
     // NOTE: the bare global `hsl()`/`hsla()` constructors are deliberately left
     // unregistered. A real Color for `hsl()` regressed ~100 spec cases whose
     // goldens reproduce the *input* text (channel/slash/var()/calc() forms and

@@ -26,7 +26,39 @@ fn opt<'a>(raw: &'a RawArgs, key: &str, pos: usize) -> Option<&'a SassValue> {
     raw.named().get(key).or_else(|| raw.positional().get(pos))
 }
 
+/// Does a mixin body mention `@content` anywhere (dead branches included —
+/// the `accepts_content/if_false` golden reports true)?
+fn body_takes_content(body: &[crate::ast::Stmt]) -> bool {
+    use crate::ast::Stmt;
+    body.iter().any(|s| match s {
+        Stmt::Content(_) => true,
+        Stmt::Ruleset(r) => body_takes_content(&r.body),
+        Stmt::Each(e) => body_takes_content(&e.body),
+        Stmt::For(f) => body_takes_content(&f.body),
+        Stmt::While(w) => body_takes_content(&w.body),
+        Stmt::If(i) => i.clauses.iter().any(|c| body_takes_content(&c.body)),
+        Stmt::Media(m) => body_takes_content(&m.body),
+        Stmt::Supports(su) => body_takes_content(&su.body),
+        _ => false,
+    })
+}
+
 impl EvalState {
+    /// The definition-time closure snapshot recorded for user function `key`
+    /// (shared by the by-name call path and `get-function` references).
+    pub(crate) fn closure_snapshot(&self, key: &str) -> (crate::env::Env, String) {
+        (
+            self.function_env
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| self.env.clone()),
+            self.function_module
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| self.env_owner.clone()),
+        )
+    }
+
     /// The callable-family `meta` predicates. `Ok(None)` keeps the caller's
     /// existing dispatch untouched for every other name.
     pub(super) fn try_callable_meta(
@@ -43,6 +75,91 @@ impl EvalState {
                 let mixin = name == "get-mixin";
                 let found = self.lookup_callable(mixin, raw)?;
                 Ok(Some(found))
+            }
+            // `meta.call($function, $args...)`: the first argument is a
+            // function reference (or, deprecatedly, its name as a string —
+            // `call.hrx` string/* sections); everything else forwards to the
+            // target's own arity/validation, whose errors surface verbatim
+            // (`error/invalid_args` reads the rgb builtin's `$channels:` text).
+            "call" => {
+                let Some(target) = opt(raw, "function", 0).cloned() else {
+                    return Err(err("Missing argument $function."));
+                };
+                let resolved = match &target {
+                    SassValue::Function(f) => Some(f.clone()),
+                    SassValue::Str { .. } => match self.find_function(
+                        &match target {
+                            SassValue::Str { ref text, .. } => text.clone(),
+                            _ => unreachable!(),
+                        },
+                        &match target {
+                            SassValue::Str { ref text, .. } => text.replace('_', "-"),
+                            _ => unreachable!(),
+                        },
+                        None,
+                        false,
+                    )? {
+                        Some(SassValue::Function(f)) => Some(f),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(f) = resolved else {
+                    return Err(if matches!(target, SassValue::Str { .. }) {
+                        err(format!("Function not found: {}", target.to_css()))
+                    } else {
+                        SassError::new(
+                            ErrorKind::Builtins,
+                            format!("$function: {} is not a function reference.", target.to_css()),
+                        )
+                    });
+                };
+                // Peel the head argument off the positional list; when the
+                // function came from the named pool instead, every positional
+                // is a sub-argument.
+                let skip_head = raw
+                    .positional()
+                    .first()
+                    .is_some_and(|v| v == &target);
+                let positional: Vec<SassValue> = if skip_head {
+                    raw.positional()[1..].to_vec()
+                } else {
+                    raw.positional().to_vec()
+                };
+                let named: std::collections::HashMap<String, SassValue> = raw
+                    .named()
+                    .iter()
+                    .filter(|(k, _)| k.as_str() != "function")
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                let value = match &f.kind {
+                    FnKind::Css => {
+                        let mut parts: Vec<String> =
+                            positional.iter().map(|v| v.to_css()).collect();
+                        for (k, v) in &named {
+                            parts.push(format!("{k}: {}", v.to_css()));
+                        }
+                        return Ok(Some(SassValue::Str {
+                            text: format!("{}({})", f.name, parts.join(", ")),
+                            quoted: false,
+                        }));
+                    }
+                    FnKind::Builtin { namespace } => crate::builtins::call(
+                        namespace.as_deref(),
+                        &f.name,
+                        &positional,
+                        &named,
+                    )
+                    .ok_or_else(|| err(format!("Function not found: {}", f.name)))?
+                    .map_err(|e| {
+                        e.note(format!("during call of `{}` in module {}", f.name, self.name))
+                    })?,
+                    FnKind::User { decl, env, owner } => {
+                        let sub = RawArgs::from_parts(positional, named);
+                        self.invoke_user_fn(decl, env.clone(), owner.clone(), sub)?
+                    }
+                };
+                Ok(Some(value))
             }
             "is-function" => Ok(Some(SassValue::Bool(matches!(
                 raw.positional().first(),
@@ -71,8 +188,67 @@ impl EvalState {
                 );
                 Ok(Some(SassValue::Bool(known)))
             }
+            "accepts-content" => {
+                let given = raw.positional().len() + raw.named().len();
+                if given == 0 {
+                    return Err(err("Missing argument $mixin."));
+                }
+                if given > 1 {
+                    return Err(err(
+                        "Only 1 argument allowed, but {given} were passed."
+                            .replace("{given}", &given.to_string())
+                            .replace("were", if given == 1 { "was" } else { "were" }),
+                    ));
+                }
+                let v = opt(raw, "mixin", 0).expect("given > 0");
+                let accepts = match v {
+                    SassValue::Mixin(m) => match &m.kind {
+                        // `@content` anywhere in the body (even under a dead
+                        // `@if false` branch — the `if_false` golden says true).
+                        MixKind::User(decl) => body_takes_content(&decl.body),
+                        // `meta.apply` forwards a block; `load-css` does not.
+                        MixKind::Builtin { .. } => m.name == "apply",
+                    },
+                    other => {
+                        return Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!("$mixin: {} is not a mixin reference.", other.to_css()),
+                        ));
+                    }
+                };
+                Ok(Some(SassValue::Bool(accepts)))
+            }
             _ => Ok(None),
         }
+    }
+
+    /// Run a user `@function` body against its definition-time snapshot — the
+    /// shared core of the by-name call path and `meta.call` (round-73 W3).
+    pub(crate) fn invoke_user_fn(
+        &mut self,
+        func: &std::rc::Rc<crate::ast::FunctionDecl>,
+        def_env: crate::env::Env,
+        def_owner: String,
+        raw: RawArgs,
+    ) -> Ev<SassValue> {
+        let saved_env = std::mem::replace(&mut self.env, def_env);
+        let saved_owner = std::mem::replace(&mut self.env_owner, def_owner);
+        self.env.enter();
+        let bound = self.bind_params(&func.params, raw);
+        let value = match bound.and_then(|()| self.eval_fn_body(&func.body)) {
+            Ok(Some(v)) => v,
+            Ok(None) => SassValue::Null,
+            Err(e) => {
+                self.env.leave();
+                self.env = saved_env;
+                self.env_owner = saved_owner;
+                return Err(e);
+            }
+        };
+        self.env.leave();
+        self.env = saved_env;
+        self.env_owner = saved_owner;
+        Ok(value)
     }
 
     /// `meta.get-function`/`get-mixin` per the error goldens: arity wording,
@@ -174,10 +350,15 @@ impl EvalState {
         }
         for key in [text, canon] {
             if let Some(decl) = self.functions.get(key) {
+                let (env, owner) = self.closure_snapshot(key);
                 return Ok(Some(SassValue::Function(Rc::new(FnRef {
                     name: key.to_string(),
                     module: None,
-                    kind: FnKind::User(decl.clone()),
+                    kind: FnKind::User {
+                        decl: decl.clone(),
+                        env,
+                        owner,
+                    },
                 }))));
             }
         }

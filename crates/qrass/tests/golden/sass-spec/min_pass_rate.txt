@@ -962,4 +962,18 @@
 # sass-spec 8115 -> 8174 (+59: get_function/get_mixin/feature_exists/values
 # clusters), 0 regressions, full test suite green (440 passed),
 # clippy -D warnings green.
-74.5
+#
+# Round 73 W3: `meta.call` (reference or deprecated string head, named-pool
+#     $function, Css/Builtin/User arms — the User arm reuses the definition-time
+#     closure snapshot now shared with the by-name path via
+#     `invoke_user_fn`/`closure_snapshot`), `meta.accepts-content` (dead-branch
+#     `@content` counts per the if_false golden; builtin table decides apply/
+#     load-css), plus the enabling `rgb`/`rgba` parameter names (def_p) whose
+#     named slots call.hrx's args/named + splat sections need — also turned
+#     several direct `rgb($red:…)` error goldens green. Known gaps logged in
+#     the tests: call-of-rgb one-arg keeps the builtin wording (the space-color
+#     pre-dispatch is AST-side), and legacy global color accessors
+#     (`red(...)`, `hue(...)`) remain unregistered.
+# sass-spec 8174 -> 8212 (+38: call + accepts-content + rgb named), 0
+# regressions, full test suite green (441 passed), clippy -D warnings green.
+74.9

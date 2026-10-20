@@ -21,8 +21,15 @@ pub struct FnRef {
 /// What a function value points at.
 #[derive(Clone, Debug)]
 pub enum FnKind {
-    /// A user `@function`; `Rc` identity backs dart's reference equality.
-    User(std::rc::Rc<crate::ast::FunctionDecl>),
+    /// A user `@function`; `Rc` identity backs dart's reference equality, and
+    /// the captured `env`/`owner` are the definition-time closure snapshot
+    /// `meta.call` re-enters (mirroring the by-name call path). Locked at
+    /// `get-function` time — the `same_module/redefined` golden.
+    User {
+        decl: std::rc::Rc<crate::ast::FunctionDecl>,
+        env: crate::env::Env,
+        owner: String,
+    },
     /// A registered builtin (global or module-qualified).
     Builtin { namespace: Option<String> },
     /// A `$css: true` lookup (CSS filter passthrough form).
@@ -51,7 +58,7 @@ pub(crate) fn fn_kind_eq(a: &FnRef, b: &FnRef) -> bool {
         (FnKind::Builtin { namespace: x }, FnKind::Builtin { namespace: y }) => {
             a.name == b.name && x == y
         }
-        (FnKind::User(x), FnKind::User(y)) => std::rc::Rc::ptr_eq(x, y),
+        (FnKind::User { decl: x, .. }, FnKind::User { decl: y, .. }) => std::rc::Rc::ptr_eq(x, y),
         (FnKind::Css, FnKind::Css) => a.name == b.name && a.module == b.module,
         _ => false,
     }

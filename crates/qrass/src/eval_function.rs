@@ -43,33 +43,10 @@ impl EvalState {
         if let Some(func) = self.functions.get(&key).cloned() {
             // Arguments evaluate in the caller's scope…
             let raw = self.collect_args(&call.args)?;
-            // …but the body runs in its *definition-time* module env snapshot, entered
-            // as a child so parameter defaults and free lookups resolve lexically
-            // against that module (never the call-site locals). The snapshot also
-            // fixes `env_owner` to the defining module so a nested `@include` in the
-            // body dispatches closures against the right module.
-            let def_env = self
-                .function_env
-                .get(&key)
-                .cloned()
-                .unwrap_or_else(|| self.env.clone());
-            let def_owner = self
-                .function_module
-                .get(&key)
-                .cloned()
-                .unwrap_or_else(|| self.env_owner.clone());
-            let saved_env = std::mem::replace(&mut self.env, def_env);
-            let saved_owner = std::mem::replace(&mut self.env_owner, def_owner);
-            self.env.enter();
-            self.bind_params(&func.params, raw)?;
-            let value = match self.eval_fn_body(&func.body)? {
-                Some(v) => v,
-                None => SassValue::Null,
-            };
-            self.env.leave();
-            self.env = saved_env;
-            self.env_owner = saved_owner;
-            return Ok(value);
+            // …but the body runs in its *definition-time* module env snapshot
+            // (shared helper with `meta.call`, round-73 W3).
+            let (def_env, def_owner) = self.closure_snapshot(&key);
+            return self.invoke_user_fn(&func, def_env, def_owner, raw);
         }
 
         // Modern CSS color syntax (`rgb(r g b / a)`) is a single space-separated
@@ -322,7 +299,7 @@ impl EvalState {
     }
 
     /// Run a function body, returning the first `@return` value if any.
-    fn eval_fn_body(&mut self, block: &Block) -> Ev<Option<SassValue>> {
+    pub(crate) fn eval_fn_body(&mut self, block: &Block) -> Ev<Option<SassValue>> {
         for s in block {
             if let Some(v) = self.eval_fn_stmt(s)? {
                 return Ok(Some(v));
