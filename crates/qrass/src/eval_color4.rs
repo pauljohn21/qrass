@@ -239,13 +239,23 @@ impl EvalState {
                     _ => unreachable!(),
                 },
                 v @ SassValue::Str { .. } => {
-                    if is_symbolic(&v) {
+                    // Degenerate `calc(infinity)`/`calc(-infinity)`/`calc(NaN)`
+                    // alphas *concretize* rather than passing through verbatim:
+                    // the non-finite result clamps like a plain number
+                    // (`lab/alpha` `degenerate/*`: +inf → omitted 1 spelling,
+                    // -inf/NaN → `/ 0`).
+                    if let SassValue::Str { text, quoted: false } = &v
+                        && let Some(a) = degenerate_alpha(text)
+                    {
+                        Some(a)
+                    } else if is_symbolic(&v) {
                         return Ok(None);
+                    } else {
+                        return Err(shape_err(format!(
+                            "${arg_name}: {} is not a number.",
+                            v.to_css()
+                        )));
                     }
-                    return Err(shape_err(format!(
-                        "${arg_name}: {} is not a number.",
-                        v.to_css()
-                    )));
                 }
                 _ => return Ok(None),
             },
@@ -270,5 +280,17 @@ impl EvalState {
             legacy: None,
             legacy_hsl: None,
         })))
+    }
+}
+
+/// A degenerate calc-only alpha text: `calc(infinity)`/`calc(+infinity)`
+/// clamps to opaque `1`, `calc(-infinity)`/`calc(NaN)` to `0` — the exact
+/// spellings only (anything with real operands stays symbolic CSS).
+fn degenerate_alpha(text: &str) -> Option<f64> {
+    let inner = text.trim().strip_prefix("calc(")?.strip_suffix(')')?;
+    match inner.trim().to_ascii_lowercase().as_str() {
+        "infinity" | "+infinity" => Some(1.0),
+        "-infinity" | "nan" => Some(0.0),
+        _ => None,
     }
 }

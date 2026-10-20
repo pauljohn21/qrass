@@ -1217,4 +1217,11 @@
 #     Clean numeric/symbolic calls keep the verbatim passthrough untouched.
 # sass-spec 8835 -> 8862 (+27: if/splat + comma checks), 0 regressions, full
 # test suite green (475 passed), clippy -D warnings green.
-80.8
+#
+# Round 89: degenerate calc-only alphas in Color-4 literals concretize
+#     (`lab/lch/oklab/oklch alpha` `degenerate/*`): `calc(infinity)` → the
+#     omitted-1 spelling, `calc(-infinity)`/`calc(NaN)` → `/ 0`; composite
+#     calcs keep the symbolic passthrough.
+# sass-spec 8862 -> 8875 (+13: degenerate alpha), 0 regressions, full test
+# suite green (476 passed), clippy -D warnings green.
+80.9

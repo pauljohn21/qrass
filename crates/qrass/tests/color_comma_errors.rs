@@ -79,3 +79,15 @@ fn clean_and_symbolic_calls_stay_verbatim() {
     let out = outcome("rgb(0, var(--x), 0, 0.5)");
     assert!(!out.contains("not a number"), "var slot: {out}");
 }
+
+/// Round-89 degenerate calc-only alphas concretize instead of passing
+/// through verbatim (`lab/alpha` `degenerate/*` goldens).
+#[test]
+fn degenerate_alpha_concretizes() {
+    assert!(outcome("lab(1% 2 -3 / calc(infinity))").contains("lab(1% 2 -3);"));
+    assert!(outcome("lab(1% 2 -3 / calc(-infinity))").contains("lab(1% 2 -3 / 0);"));
+    assert!(outcome("lab(1% 2 -3 / calc(NaN))").contains("lab(1% 2 -3 / 0);"));
+    // composite calcs stay symbolic CSS as before
+    let out = outcome("lab(1% 2 -3 / calc(infinity - 1))");
+    assert!(out.contains("calc("), "composite calc: {out}");
+}
