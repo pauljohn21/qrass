@@ -1172,4 +1172,19 @@
 #     minde (55) — all logged as dedicated design slices, not quick cuts.
 # sass-spec 8618 -> 8657 (+39: channel-domain validation), 0 regressions,
 # full test suite green (470 passed), clippy -D warnings green.
-78.9
+#
+# Round 85: the c4-side validation ladder for adjust/scale/change
+#     (`scale/error/*` + `adjust/error/*` on Color 4 bases +
+#     `change/unusual_numbers`): domain names re-spelled
+#     `$X: Color space {space} doesn't have a channel with this name.`,
+#     scale's percent-unit demand, the ±100% scale bounds on c4 channels,
+#     the missing-channel guard for SCALE edits only (adjust floors at the
+#     channel minimum, change overwrites — the two golden families are
+#     mutually consistent only under that split), `$alpha` typing (none is
+#     NOT a missing write), `$space` quoted rejection, and the
+#     one-positional-argument rule. `calc(nan)` channel edits are a golden
+#     no-op (`nan/linear` keeps the value). transform_c4 split to
+#     builtins/color_transform.rs (color.rs 580 -> 398+195).
+# sass-spec 8657 -> 8749 (+92: c4 validation ladder), 0 regressions, full
+# test suite green (471 passed), clippy -D warnings green.
+79.8

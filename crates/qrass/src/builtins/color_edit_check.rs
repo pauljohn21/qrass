@@ -41,10 +41,31 @@ pub(super) fn validate_legacy_channel_edits(c: &super::Call, mode: Mode) -> Or<(
     };
     for key in names {
         let k = key.as_str();
+        if k == "alpha" {
+            // `$alpha` is not exempt from typing: anything but a number —
+            // including `none` — raises `$alpha: … is not a number.`
+            // (`scale/error/type` `none/error`).
+            if let Some(a) = c.named.get(k)
+                && !matches!(a, SassValue::Number { .. }) {
+                return Err(err(format!(
+                    "$alpha: {} is not a number.",
+                    a.to_css()
+                )));
+            }
+            continue;
+        }
         if matches!(
             k,
-            "alpha" | "space" | "channels" | "color" | "color1" | "color2" | "weight" | "method"
+            "space" | "channels" | "color" | "color1" | "color2" | "weight" | "method"
         ) {
+            // `$space:` on a legacy color must still be an unquoted string
+            // (`scale/error/space` `quoted/error`).
+            if k == "space"
+                && let Some(SassValue::Str { text, quoted: true }) = c.named.get(k) {
+                return Err(err(format!(
+                    "$space: Expected \"{text}\" to be an unquoted string."
+                )));
+            }
             continue;
         }
         if !domain_channels.contains(&k) {

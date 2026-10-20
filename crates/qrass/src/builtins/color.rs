@@ -112,7 +112,7 @@ fn is_missing(c: &super::Call) -> Or<SassValue> {
 }
 
 /// A numeric-valued argument (named or default-free) with its unit, if any.
-fn amount(c: &super::Call, key: &str) -> Option<(f64, Option<String>)> {
+pub(super) fn amount(c: &super::Call, key: &str) -> Option<(f64, Option<String>)> {
     c.named
         .get(key)
         .and_then(|v| v.as_number().map(|(n, u)| (n, u.map(str::to_string))))
@@ -237,9 +237,17 @@ pub(super) enum Mode {
 /// Apply `hue`/`saturation`/`lightness`/`red`/`green`/`blue`/`alpha` arguments in
 /// the given mode (absolute delta, relative scaling, or absolute set).
 fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
+    // The legacy trio takes the color positionally plus named channel edits
+    // only (`scale/error/args` `too_many`: "Only one positional argument is
+    // allowed. All other arguments must be passed by name.").
+    if c.positional.len() > 1 {
+        return Err(err(
+            "Only one positional argument is allowed. All other arguments must be passed by name.",
+        ));
+    }
     let base = color_at(c, 0)?;
     if base.c4.is_some() {
-        return transform_c4(&base, c, mode);
+        return super::color_transform::transform_c4(&base, c, mode);
     }
     super::color_edit_check::validate_legacy_channel_edits(c, mode)?;
     let mut col = base.clone();
@@ -366,105 +374,6 @@ fn hsl_channel_set(cur: f64, v: f64, mode: Mode) -> f64 {
     }
 }
 
-/// Color 4 channel editing: the named channels of the color's own space. gamut
-/// channels are *not* clamped (out-of-range values are legal, matching the
-/// `above_max`/`below_min` spec cases); hues wrap; alpha clamps to `0..=1`.
-fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<SassValue> {
-    let mut c4 = base.c4.as_ref().expect("checked by caller").as_ref().clone();
-    const LEGACY: [&str; 8] = [
-        "red",
-        "green",
-        "blue",
-        "hue",
-        "saturation",
-        "lightness",
-        "whiteness",
-        "blackness",
-    ];
-    for (key, val) in c.named.iter() {
-        if key == "alpha" {
-            continue;
-        }
-        let Some((v, unit)) = val.as_number() else {
-            // `change($channel: none)` writes the missing slot on a Color 4
-            // color (`change/hsl` `hue/none`: `hsl(none 100% 50%)`).
-            if matches!(val, SassValue::Str { text, .. } if text == "none")
-                && matches!(mode, Mode::Change)
-                && let Some(idx) = c4.space.channels.iter().position(|ch| ch.name == *key) {
-                c4.comps[idx] = None;
-            }
-            continue;
-        };
-        let Some(idx) = c4.space.channels.iter().position(|ch| ch.name == *key) else {
-            if LEGACY.contains(&key.as_str()) {
-                return Err(err(format!("{} color has no {key} channel", c4.space.name)));
-            }
-            continue;
-        };
-        let ch = &c4.space.channels[idx];
-        let pct = unit == Some("%");
-        let cur = c4.comps[idx].unwrap_or(ch.lo);
-        let next = match mode {
-            Mode::Change => {
-                if pct && ch.unit == crate::color4::Unit::Num {
-                    v / 100.0
-                } else {
-                    v
-                }
-            }
-            Mode::Adjust => {
-                let delta = if pct && ch.unit == crate::color4::Unit::Num {
-                    v / 100.0 * (ch.hi - ch.lo)
-                } else {
-                    v
-                };
-                cur + delta
-            }
-            Mode::Scale => {
-                if v >= 0.0 {
-                    cur + (ch.hi - cur) * (v / 100.0)
-                } else {
-                    cur + (cur - ch.lo) * (v / 100.0)
-                }
-            }
-        };
-        c4.comps[idx] = Some(if ch.unit == crate::color4::Unit::Deg {
-            (next % 360.0 + 360.0) % 360.0
-        } else {
-            next
-        });
-    }
-    if let Some((v, _)) = amount(c, "alpha") {
-        c4.alpha_missing = false;
-        c4.alpha = Some(
-            match mode {
-                Mode::Change => v,
-                Mode::Adjust => c4.alpha() + v,
-                Mode::Scale => {
-                    if v >= 0.0 {
-                        c4.alpha() + (1.0 - c4.alpha()) * (v / 100.0)
-                    } else {
-                        c4.alpha() * (1.0 + v / 100.0)
-                    }
-                }
-            }
-            .clamp(0.0, 1.0),
-        );
-    }
-    let [r, g, b] = c4.to_rgb();
-    let a = c4.alpha();
-    Ok(make(Color {
-        r,
-        g,
-        b,
-        a,
-        hex: false,
-        c4: Some(Box::new(c4)),
-        name: None,
-        legacy: None,
-            legacy_hsl: None,
-    }))
-}
 
 /// Combine the current value `cur` with edit `v` in `[lo, hi]` by mode.
 ///

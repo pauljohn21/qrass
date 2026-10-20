@@ -36,6 +36,35 @@ fn domain_binding_and_channel_errors() {
         .contains("$whiteness: Expected 100.001% to be within -100% and 100%."));
 }
 
+/// Round-85 c4 branch (`scale/error/*` + `adjust/error/*` on Color 4 bases).
+#[test]
+fn c4_channel_validation_ladder() {
+    // domain names report the color's own space (`incompatible_channel`)
+    assert!(
+        err("color.scale(color(srgb 0.2 0.5 0.7), $whiteness: 50%)")
+            .contains("$whiteness: Color space srgb doesn't have a channel with this name."),
+        "domain spelling"
+    );
+    // scale demands percent units (`units/a98_rgb`)
+    assert!(err("color.scale(color(a98-rgb 0.2 0.5 0.7), $green: 1)")
+        .contains("$green: Expected 1 to have unit \"%\"."));
+    // scale bounds (`bounds` modern/*)
+    assert!(err("color.scale(lab(50% -70 60), $a: -100.001%)")
+        .contains("$a: Expected -100.001% to be within -100% and 100%."));
+    // scaling a missing channel raises the guard; adjusting it floors
+    assert!(err("color.scale(lab(none 0 0), $lightness: 10%, $space: lab)")
+        .contains("$lightness: Because the CSS working group is still deciding"));
+    // `$alpha: none` is a type error, not a missing write
+    assert!(err("color.scale(red, $alpha: none)").contains("$alpha: none is not a number."));
+    // $space quoted rejection
+    assert!(err("color.scale(red, $space: \"lab\", $saturation: 10%)")
+        .contains("$space: Expected \"lab\" to be an unquoted string."));
+    // two positional arguments are rejected wholesale
+    assert!(err("color.scale(red, 1)").contains(
+        "Only one positional argument is allowed. All other arguments must be passed by name."
+    ));
+}
+
 #[test]
 fn golden_exemptions_stay_valid_edits() {
     // `adjust/units` unknown/*: magnitude passes, unit ignored (round-69
