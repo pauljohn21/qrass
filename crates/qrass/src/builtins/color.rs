@@ -282,6 +282,8 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
             col.legacy = Some("rgb");
         }
     }
+    // The alpha edit intentionally does NOT retag: alpha-only edits keep the
+    // base's existing serialization path (`adjust/space` none families).
     if let Some((v, _)) = amount(c, "alpha") {
         col.a = match mode {
             Mode::Change => v,
@@ -310,14 +312,41 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
             };
         }
         if let Some((v, _)) = amount(c, "saturation") {
-            hsl.s = edit(hsl.s, v, mode, 0.0, 100.0);
+            hsl.s = hsl_channel_set(hsl.s, v, mode);
         }
         if let Some((v, _)) = amount(c, "lightness") {
-            hsl.l = edit(hsl.l, v, mode, 0.0, 100.0);
+            hsl.l = hsl_channel_set(hsl.l, v, mode);
         }
         col = Color::from_hsla(hsl.h, hsl.s, hsl.l, col.a);
+        // The goldens' shape ladder for HSL edits (`change/hsl`, `adjust/hsl`):
+        // an edited triple outside lightness [0,100] or above saturation 100
+        // emits the verbatim `hsl(h, s%, l%)` expression (the RGB round-trip
+        // would clamp it away); in-range results serialize through the legacy
+        // rgb form — integer channels as keyword/hex, fractional ones keeping
+        // `rgb(%…)` (negative saturations clamp to 0 inside `from_hsla`,
+        // matching `saturation/below_range`, and scale edits stay bounded).
+        col.name = None;
+        if hsl.l < -1e-4 || hsl.l > 100.0001 || hsl.s > 100.0001 {
+            col.legacy = Some("hsl");
+            col.legacy_hsl = Some(hsl);
+        } else {
+            col.legacy = Some("rgb");
+        }
+        return Ok(make(col));
     }
     Ok(make(col))
+}
+
+/// Saturation/lightness edits for the legacy transform: `change` sets and
+/// `adjust` accumulates *without* clamping (the out-of-range goldens serialize
+/// the excursion through the carried `hsl(…)` fallback), while `scale` keeps
+/// the bounded interpretation.
+fn hsl_channel_set(cur: f64, v: f64, mode: Mode) -> f64 {
+    match mode {
+        Mode::Change => v,
+        Mode::Adjust => cur + v,
+        Mode::Scale => edit(cur, v, mode, 0.0, 100.0),
+    }
 }
 
 /// Color 4 channel editing: the named channels of the color's own space. gamut
@@ -339,7 +368,16 @@ fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<SassValue> {
         if key == "alpha" {
             continue;
         }
-        let Some((v, unit)) = val.as_number() else { continue };
+        let Some((v, unit)) = val.as_number() else {
+            // `change($channel: none)` writes the missing slot on a Color 4
+            // color (`change/hsl` `hue/none`: `hsl(none 100% 50%)`).
+            if matches!(val, SassValue::Str { text, .. } if text == "none")
+                && matches!(mode, Mode::Change)
+                && let Some(idx) = c4.space.channels.iter().position(|ch| ch.name == *key) {
+                c4.comps[idx] = None;
+            }
+            continue;
+        };
         let Some(idx) = c4.space.channels.iter().position(|ch| ch.name == *key) else {
             if LEGACY.contains(&key.as_str()) {
                 return Err(err(format!("{} color has no {key} channel", c4.space.name)));

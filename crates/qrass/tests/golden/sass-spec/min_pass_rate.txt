@@ -1072,4 +1072,21 @@
 #     — needs its own design slice).
 # sass-spec 8306 -> 8367 (+61: channel editing), 0 regressions, full test
 # suite green (456 passed), clippy -D warnings green.
-76.3
+#
+# Round 79: the HSL-edit shape ladder for change/adjust (`change/hsl` +
+#     `adjust/hsl` golden matrices, pure evidence induction): in-range edits
+#     serialize through the legacy rgb form via the `rgb` fmt tag (integer
+#     channels → keyword/hex, fractional → `rgb(%…)`), out-of-range edits
+#     (lightness outside [0,100], saturation above 100) carry the edited
+#     triple and emit the verbatim `hsl(h, s%, l%)` expression — negative
+#     saturations instead clamp to 0 inside the round-trip (`below_range`
+#     spells as `rgb(%)`), and `scale` stays bounded by construction.
+#     Change/Adjust accumulate/set without clamping (`hsl_channel_set`);
+#     `change($channel: none)` writes the missing slot on Color 4 colors
+#     (`hsl(none 100% 50%)`). Also this round's recon: special_functions
+#     alpha clusters need claim-layer verbatim serialization rework (hsl
+#     comma vs space forms), and load_css/load `error/with` families are
+#     unchanged by the loader round — both stay separate slices.
+# sass-spec 8367 -> 8430 (+63: HSL edit ladder + c4 none), 0 regressions,
+# full test suite green (458 passed), clippy -D warnings green.
+76.9

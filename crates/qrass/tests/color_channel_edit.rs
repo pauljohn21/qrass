@@ -63,3 +63,55 @@ fn adjust_and_scale_rgb_edits_serialize_by_shape() {
         "rgb(63.0588235294%, 50.1960784314%, 50.1960784314%)"
     );
 }
+
+/// Round-79 (`change/hsl` + `adjust/hsl` golden matrix): in-range HSL edits
+/// serialize through the legacy rgb form, out-of-range lightness/saturation
+/// keep the verbatim `hsl(…)` expression, and `none` writes the missing slot
+/// on Color 4 colors.
+#[test]
+fn hsl_edit_shape_ladder() {
+    assert_eq!(value("color.change(red, $hue: 540)"), "aqua");
+    assert_eq!(value("color.change(blue, $hue: 0)"), "red");
+    assert_eq!(value("color.change(red, $hue: 123)"), "rgb(0%, 100%, 5%)");
+    assert_eq!(value("color.change(red, $saturation: 50%)"), "rgb(75%, 25%, 25%)");
+    assert_eq!(
+        value("color.change(plum, $saturation: 0%)"),
+        "rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)"
+    );
+    // out-of-range excursions ride the carried triple
+    assert_eq!(
+        value("color.change(plum, $saturation: 120%)"),
+        "hsl(300, 120%, 74.7058823529%)"
+    );
+    assert_eq!(value("color.change(red, $lightness: -20%)"), "hsl(0, 100%, -20%)");
+    assert_eq!(
+        value("color.adjust(plum, $lightness: -100%)"),
+        "hsl(300, 47.2868217054%, -25.2941176471%)"
+    );
+    assert_eq!(value("color.adjust(red, $lightness: 200%)"), "hsl(0, 100%, 250%)");
+    // negative saturation clamps to 0 inside the round-trip, not hsl fallback
+    assert_eq!(
+        value("color.change(plum, $saturation: -20%)"),
+        "rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)"
+    );
+    // exact boundary lightness spells as keyword
+    assert_eq!(value("color.change(red, $lightness: 100%)"), "white");
+    assert_eq!(value("color.adjust(red, $lightness: -50%)"), "black");
+}
+
+#[test]
+fn c4_none_channel_edits() {
+    // `change($channel: none)` writes the missing slot on a Color 4 value
+    assert_eq!(
+        value("color.change(hsl(0deg 100% 50%), $hue: none)"),
+        "hsl(none 100% 50%)"
+    );
+    assert_eq!(
+        value("color.change(hsl(0deg 100% 50%), $saturation: none)"),
+        "hsl(0deg none 50%)"
+    );
+    assert_eq!(
+        value("color.change(hsl(0deg 100% 50%), $lightness: none)"),
+        "hsl(0deg 100% none)"
+    );
+}
