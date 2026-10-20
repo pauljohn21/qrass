@@ -1233,4 +1233,13 @@
 #     matrix (adjacent-compounds/bogus/trailing each own mechanism).
 # sass-spec 8875 -> 8879 (+4: chained comparators), 0 regressions, full test
 # suite green (478 passed), clippy -D warnings green.
-81.0
+#
+# Round 91: mix `` validation matrix (color/mix/error golden ladder: arity
+# `Missing argument .` via the newly registered legacy global, unknown
+# spaces, quoted/number values, trailing-`hue` demand, unknown interpolation
+# words, rectangular-space rejection) + split to builtins/color_mix.rs
+# (color_ops 560 -> 460+106).
+# sass-spec 8879 -> 8889 (+10: mix method matrix), 0 regressions, full test
+# suite green (480 passed), clippy -D warnings green.
+81.1
+

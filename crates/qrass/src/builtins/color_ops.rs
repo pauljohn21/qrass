@@ -161,6 +161,7 @@ pub(super) fn hsl_from_legacy_src(c4: &crate::color4::Color4) -> Option<Hsl> {
 fn mix(c: &super::Call) -> Or<SassValue> {
     let a = color_at(c, 0)?;
     let b = color_at(c, 1)?;
+    super::color_mix::validate_mix_method(c, &a, &b)?;
     let weight = c
         .opt("weight", Some(2))
         .map(|v| v.to_css())
@@ -185,6 +186,7 @@ fn parse_percent(text: &str, default: f64) -> f64 {
     let trimmed = text.trim().trim_end_matches('%');
     trimmed.parse::<f64>().unwrap_or(default)
 }
+
 
 fn alpha(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
@@ -381,6 +383,16 @@ pub(crate) fn register(r: &mut super::Registry) {
         mix,
     );
     r.nsp("color", "same", 2, Some(2), &["color1", "color2"], super::color_same::same);
+    // Legacy global `mix($color1, $color2, $weight)` — the arity wording is
+    // parameter-name driven (`mix(red)` → `Missing argument $color2.`,
+    // `color/mix/error` `too_few_args`).
+    r.def_p(
+        "mix",
+        2,
+        Some(4),
+        &["color1", "color2", "weight", "method"],
+        mix,
+    );
     // Deprecated single-channel accessors (`color.red($color)`, …): thin shims
     // over `color.channel` that read one channel in its natural space. `$color`
     // folds from a named argument via the shared dispatcher. Named fns (not
