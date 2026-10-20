@@ -1,3 +1,4 @@
+
 //! Built-in function library (task group 8, design D6).
 //!
 //! Two dispatch tables share one implementation per function:
@@ -22,6 +23,7 @@ pub(crate) mod color;
 pub(crate) mod color_gamut;
 pub(crate) mod color_legacy;
 pub(crate) mod color_ops;
+mod color_same;
 pub(crate) mod global;
 pub(crate) mod list;
 pub(crate) mod map;

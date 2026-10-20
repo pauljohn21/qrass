@@ -157,6 +157,7 @@ pub(super) fn hsl_from_legacy_src(c4: &crate::color4::Color4) -> Option<Hsl> {
     }
 }
 
+/// `color.mix($color1, $color2, $weight, $method)`.
 fn mix(c: &super::Call) -> Or<SassValue> {
     let a = color_at(c, 0)?;
     let b = color_at(c, 1)?;
@@ -379,6 +380,7 @@ pub(crate) fn register(r: &mut super::Registry) {
         &["color1", "color2", "weight", "method"],
         mix,
     );
+    r.nsp("color", "same", 2, Some(2), &["color1", "color2"], super::color_same::same);
     // Deprecated single-channel accessors (`color.red($color)`, …): thin shims
     // over `color.channel` that read one channel in its natural space. `$color`
     // folds from a named argument via the shared dispatcher. Named fns (not

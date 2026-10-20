@@ -1017,4 +1017,21 @@
 #     the per-space model's territory.
 # sass-spec 8274 -> 8282 (+8: complement grammar + global spelling), 0
 # regressions, full test suite green (443 passed), clippy -D warnings green.
-75.5
+#
+# Round 76: `color.same` (core_functions/color/same.hrx, all rules read off
+#     the golden table — no dart mechanism inference): XYZ-space comparison
+#     with missing channels normalized to 0 *before* conversion (the order
+#     the `false/different_space/both_none` golden states in its own comment),
+#     legacy colors joining through their sRGB triple, per-parameter error
+#     spellings `$color1:`/`$color2:`. Cross-space `true` goldens ride two
+#     independent conversion paths, so equality uses a 1e-7 tolerance (every
+#     `false` golden differs by orders of magnitude). A first cut registering
+#     the global comma-spelled `hsl()/hsla()` constructors beside `color.same`
+#     regressed 183 cases (the claim path owns those names) — reverted the
+#     same cut after A/B caught it. `builtins/color_ops.rs` hit 504 → split
+#     `builtins/color_same.rs` (byte-zero drift re-verified).
+#     Remaining same gaps: #6 needs the hsl *legacy comma* form to evaluate
+#     (claim-layer rework), #8 needs float-precision legacy rgb channels.
+# sass-spec 8282 -> 8298 (+16: color.same), 0 regressions, full test suite
+# green (446 passed), clippy -D warnings green.
+75.7
