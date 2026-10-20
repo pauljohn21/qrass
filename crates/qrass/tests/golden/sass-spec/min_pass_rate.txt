@@ -1154,4 +1154,22 @@
 #     `no_alpha` per-space model slices — separate territories.
 # sass-spec 8589 -> 8618 (+29: symbolic hsl comma), 0 regressions, full test
 # suite green (468 passed), clippy -D warnings green.
-78.6
+#
+# Round 84 (加速切入点分析后的最大单刀): channel-domain validation for the
+#     legacy adjust/scale/change trio (`scale/error/*` + `adjust/error/*` +
+#     `change/error/*`). The ONE-space domain rule (rgb-family present binds
+#     rgb, else hsl, else hwb; cross-domain names report that space) kills
+#     the bulk of the 250 `expected error, got success` cases; plus type
+#     errors, `Channel isn't scalable.`, and the ±100% scale bounds.
+#     Two A/B-caught over-reaches corrected the same round: unknown units
+#     (`60in`) MUST pass taking the magnitude (units/unknown goldens — no
+#     unit-category checks at all), and `none` edits belong to the missing
+#     path. Validation split to builtins/color_edit_check.rs at 500-line
+#     pressure (color.rs 556 → 481 + 84, byte-zero drift re-verified).
+#     Global triage this round: 61% of remaining FAILs sit in color; the
+#     largest single slice is to_space's none-propagation (318, the
+#     per-space dependency model), then the mix method rewrite (80) and
+#     minde (55) — all logged as dedicated design slices, not quick cuts.
+# sass-spec 8618 -> 8657 (+39: channel-domain validation), 0 regressions,
+# full test suite green (470 passed), clippy -D warnings green.
+78.9

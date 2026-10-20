@@ -220,7 +220,7 @@ fn is_hsl_channel(name: &str) -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Mode {
+pub(super) enum Mode {
     Adjust,
     Scale,
     Change,
@@ -233,6 +233,7 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
     if base.c4.is_some() {
         return transform_c4(&base, c, mode);
     }
+    super::color_edit_check::validate_legacy_channel_edits(c, mode)?;
     let mut col = base.clone();
     // Editing any channel invalidates the cached *keyword* identity (a named
     // color keeps `name: Some(..)`, which serialization would otherwise prefer
