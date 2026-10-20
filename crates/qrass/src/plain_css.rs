@@ -230,9 +230,14 @@ fn check_expr(expr: &Expr) -> Result<(), SassError> {
             if call.namespace.is_some() {
                 return Err(scss_err(NAMESPACE));
             }
-            // CSS math functions (`calc`, `min`, `max`, `clamp`) take plain-CSS
-            // arithmetic; their operands are literal, not SassScript.
+            // CSS math functions keep plain-CSS arithmetic (`*`/`/` are legal
+            // inside `calc()` per `css/plain/calculation`), but their operands
+            // still forbid interpolation, variables and namespaces
+            // (`css/plain/error/expression/calculation`).
             if is_css_math_function(&call.name) {
+                for arg in &call.args {
+                    check_arg_calc(arg)?;
+                }
                 return Ok(());
             }
             for arg in &call.args {
@@ -298,4 +303,56 @@ fn interp(text: &InterpText) -> Result<(), SassError> {
 
 fn scss_err(msg: &str) -> SassError {
     SassError::new(ErrorKind::Unsupported, msg.to_string())
+}
+
+/// Operand check inside CSS math functions (`calc`/`min`/`max`/`clamp`):
+/// arithmetic operators are CSS-legal there (unlike top level), while
+/// interpolation, variables, and module namespaces stay forbidden — the split
+/// pinned by `css/plain/calculation` vs `css/plain/error/expression/*`.
+fn check_expr_calc(expr: &Expr) -> Result<(), SassError> {
+    match expr {
+        Expr::Variable(..) => Err(scss_err(VARIABLE)),
+        Expr::Member { .. } => Err(scss_err(NAMESPACE)),
+        Expr::Interpolated { pieces, .. } => {
+            if pieces.iter().any(|p| matches!(p, Piece::Expr(_))) {
+                Err(scss_err(INTERP))
+            } else {
+                Ok(())
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            check_expr_calc(left)?;
+            check_expr_calc(right)
+        }
+        Expr::Unary { operand, .. } => check_expr_calc(operand),
+        Expr::Paren(inner, _) => check_expr_calc(inner),
+        Expr::List { items, .. } => {
+            for item in items {
+                check_expr_calc(item)?;
+            }
+            Ok(())
+        }
+        Expr::Map { .. } => Err(scss_err(EXPECT_PAREN)),
+        Expr::FunctionCall(call) => {
+            if call.namespace.is_some() {
+                return Err(scss_err(NAMESPACE));
+            }
+            for arg in &call.args {
+                match arg {
+                    Arg::Positional(e) | Arg::Splat(e) => check_expr_calc(e)?,
+                    Arg::Named { .. } => return Err(scss_err(VARIABLE)),
+                }
+            }
+            Ok(())
+        }
+        Expr::Literal(_) => Ok(()),
+        Expr::IfCall(_) => Err(scss_err(INTERP)),
+    }
+}
+
+fn check_arg_calc(arg: &Arg) -> Result<(), SassError> {
+    match arg {
+        Arg::Positional(e) | Arg::Splat(e) => check_expr_calc(e),
+        Arg::Named { .. } => Err(scss_err(VARIABLE)),
+    }
 }
