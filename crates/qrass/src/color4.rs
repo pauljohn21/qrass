@@ -95,6 +95,11 @@ pub fn lookup(name: &str) -> Option<&'static Space> {
 pub struct Color4 {
     pub space: &'static Space,
     pub comps: [Option<f64>; 3],
+    /// Text overrides for degenerate channel spellings (`change/unusual_numbers`:
+    /// `lab(50% calc(infinity) 0)` re-emits the calc *text* verbatim while the
+    /// numeric slot keeps 0 for downstream conversion). A slot is text only
+    /// when the literal wrote `calc(infinity)`/`calc(-infinity)`/`calc(NaN)`.
+    pub text: [Option<String>; 3],
     pub alpha: Option<f64>,
     /// True only when the literal wrote `/ none` explicitly (an omitted alpha
     /// defaults to opaque 1 and is never "missing").
@@ -105,6 +110,7 @@ impl PartialEq for Color4 {
     fn eq(&self, other: &Self) -> bool {
         self.space.name == other.space.name
             && self.comps == other.comps
+            && self.text == other.text
             && self.alpha == other.alpha
             && self.alpha_missing == other.alpha_missing
     }
@@ -112,7 +118,13 @@ impl PartialEq for Color4 {
 
 impl Color4 {
     pub fn new(space: &'static Space, comps: [f64; 3]) -> Self {
-        Self { space, comps: comps.map(Some), alpha: None, alpha_missing: false }
+        Self {
+            space,
+            comps: comps.map(Some),
+            text: [None, None, None],
+            alpha: None,
+            alpha_missing: false,
+        }
     }
 
     pub fn alpha(&self) -> f64 {
@@ -136,7 +148,8 @@ impl Color4 {
             .comps
             .iter()
             .zip(&self.space.channels)
-            .map(|(v, c)| fmt_comp(*v, c))
+            .zip(&self.text)
+            .map(|((v, c), t)| fmt_comp(*v, c, t.as_deref()))
             .collect();
         let mut args = parts.join(" ");
         let a = self.alpha();
@@ -172,7 +185,10 @@ fn c0(v: Option<f64>) -> f64 {
     v.unwrap_or(0.0)
 }
 
-fn fmt_comp(v: Option<f64>, c: &Channel) -> String {
+fn fmt_comp(v: Option<f64>, c: &Channel, text: Option<&str>) -> String {
+    if let Some(t) = text {
+        return t.to_string();
+    }
     match v {
         None => "none".into(),
         Some(x) => match c.unit {
@@ -337,4 +353,19 @@ pub(crate) fn lab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
         w[1] * finv(fy),
         w[2] * finv(fz),
     ]
+}
+
+/// A degenerate calc-only channel text: `calc(infinity)` / `calc(+infinity)`
+/// / `calc(-infinity)` / `calc(NaN)` — exact spellings only. The goldens
+/// re-emit these **verbatim** in the channel slot (`change/unusual_numbers`
+/// `lab(50% calc(infinity) 0)`), while downstream conversion treats the
+/// numeric part as 0 (no conversion golden exists for them).
+pub fn degenerate_channel_text(text: &str) -> bool {
+    let Some(inner) = text.trim().strip_prefix("calc(").and_then(|t| t.strip_suffix(')')) else {
+        return false;
+    };
+    matches!(
+        inner.trim().to_ascii_lowercase().as_str(),
+        "infinity" | "+infinity" | "-infinity" | "nan"
+    )
 }

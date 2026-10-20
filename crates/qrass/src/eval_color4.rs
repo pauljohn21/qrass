@@ -183,12 +183,25 @@ impl EvalState {
         // reports its `$description` argument, bare forms the `$channels`.
         let arg_name = if wrapper { "description" } else { "channels" };
         let mut parsed: [Option<f64>; 3] = [None, None, None];
+        let mut text_slots: [Option<String>; 3] = [None, None, None];
         for (idx, (v, ch)) in comps.iter().zip(&space.channels).enumerate() {
             match channel_value(v, ch) {
                 Some(cv) => parsed[idx] = cv,
                 // A symbolic CSS value keeps the passthrough; a concrete-but-wrong
                 // channel raises dart's argument error (per-channel unit vs type).
-                None if is_symbolic(v) => return Ok(None),
+                None if is_symbolic(v) => {
+                    // Degenerate `calc(infinity)`/`calc(NaN)` spellings build a
+                    // *text* channel slot instead of passing through verbatim
+                    // (`change/unusual_numbers`: `lab(50% calc(infinity) 0)`).
+                    if let SassValue::Str { text, quoted: false } = v
+                        && crate::color4::degenerate_channel_text(text)
+                    {
+                        text_slots[idx] = Some(text.trim().to_string());
+                        parsed[idx] = Some(0.0);
+                        continue;
+                    }
+                    return Ok(None);
+                }
                 None => {
                     return Err(SassError::new(
                         ErrorKind::Builtins,
@@ -263,6 +276,7 @@ impl EvalState {
         };
         let c4 = crate::color4::Color4 {
             space,
+            text: text_slots,
             comps: parsed,
             alpha,
             alpha_missing,

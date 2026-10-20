@@ -152,6 +152,7 @@ pub(crate) fn to_gamut(c: &super::Call) -> Or<SassValue> {
             let srgb = color4::lookup("srgb").expect("srgb space registered");
             Color4 {
                 space: srgb,
+                text: [None, None, None],
                 comps: [
                     Some(col.r / 255.0),
                     Some(col.g / 255.0),

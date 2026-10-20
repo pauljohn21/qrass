@@ -69,3 +69,19 @@ fn legal_methods_stay_silent() {
     assert!(!outcome("mix(red, blue, $method: lch longer hue)").contains("may not be set"));
     assert!(!outcome("mix(red, blue)").contains("must provide"));
 }
+
+/// Round-92 Color4 *text* channel slots: degenerate `calc(±infinity)` literals
+/// and `change` edits re-emit verbatim; `calc(NaN)` edits stay a no-op and
+/// composite calcs untouched (`change/unusual_numbers` golden ladder).
+#[test]
+fn degenerate_channel_text_slots() {
+    assert!(outcome("color.change(lab(50% 0 0), $a: calc(infinity))")
+        .contains("lab(50% calc(infinity) 0)"));
+    assert!(outcome("color.change(lab(50% 0 0), $a: calc(-infinity))")
+        .contains("lab(50% calc(-infinity) 0)"));
+    assert!(outcome("color.change(lab(50% 0 0), $a: calc(NaN))")
+        .contains("lab(50% 0 0)"));
+    assert!(outcome("color.change(lab(50% 20 0), $a: calc(1 + 2))")
+        .contains("lab(50% 20 0)"));
+    assert!(outcome("lab(50% calc(infinity) 0)").contains("calc(infinity)"));
+}

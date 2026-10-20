@@ -1242,4 +1242,12 @@
 # sass-spec 8879 -> 8889 (+10: mix method matrix), 0 regressions, full test
 # suite green (480 passed), clippy -D warnings green.
 81.1
-
+#
+# Round 92: Color4 text-channel slots — degenerate calc(±infinity) channel
+#     literals and `change` edits re-emit verbatim (change/unusual_numbers);
+#     calc(NaN) edits stay a golden no-op; conversion carries them as 0.
+#     New `text: [Option<String>; 3]` field threaded through all six Color4
+#     construction sites; fmt_comp prefers the text override.
+# sass-spec 8889 -> 8897 (+8: text channels), 0 regressions, full test suite
+# green (481 passed), clippy -D warnings green.
+81.1

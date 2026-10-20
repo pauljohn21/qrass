@@ -286,6 +286,7 @@ impl Color4 {
         if self.comps.iter().all(|c| c.is_none()) {
             return Color4 {
                 space: target,
+                text: [None, None, None],
                 comps: [None, None, None],
                 alpha: self.alpha,
                 alpha_missing: self.alpha_missing,
@@ -396,7 +397,7 @@ impl Color4 {
             out[0] = None;
             out[1] = None;
         }
-        Color4 { space: target, comps: out, alpha: self.alpha, alpha_missing: self.alpha_missing }
+        Color4 { space: target, comps: out, text: [None, None, None], alpha: self.alpha, alpha_missing: self.alpha_missing }
     }
 }
 

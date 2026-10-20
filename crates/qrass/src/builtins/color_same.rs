@@ -39,6 +39,7 @@ fn xyz_of(col: &Color) -> ([f64; 3], f64) {
             let srgb = crate::color4::lookup("srgb").expect("srgb space registered");
             let c4 = crate::color4::Color4 {
                 space: srgb,
+                text: [None, None, None],
                 comps: [Some(col.r / 255.0), Some(col.g / 255.0), Some(col.b / 255.0)],
                 alpha: None,
                 alpha_missing: false,

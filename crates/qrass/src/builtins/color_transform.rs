@@ -69,14 +69,20 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
                 && matches!(mode, Mode::Change)
             {
                 c4.comps[idx] = None;
-            } else if matches!(
-                val,
-                SassValue::Str { text, quoted: false }
-                    if text.to_ascii_lowercase().starts_with("calc(")
-            ) {
-                // NaN/Infinity reach the channel as `calc(nan)` text (the
-                // calc-wrapping rule); the golden edits them as a no-op
-                // (`change/unusual_numbers` `nan/linear`: value preserved).
+            } else if let SassValue::Str { text, quoted: false } = val
+                && text.to_ascii_lowercase().starts_with("calc(")
+            {
+                // `calc(NaN)` edits are a golden no-op (`change/unusual_numbers`
+                // `nan/linear`: value preserved); `calc(±infinity)` writes the
+                // verbatim *text* channel slot under `change` (`infinity/linear`:
+                // `lab(50% calc(infinity) 0)`).
+                if matches!(mode, Mode::Change)
+                    && crate::color4::degenerate_channel_text(text)
+                    && !text.to_ascii_lowercase().replace(" ", "").contains("nan")
+                {
+                    c4.comps[idx] = Some(0.0);
+                    c4.text[idx] = Some(text.trim().to_string());
+                }
                 continue;
             } else {
                 return Err(err(format!(
