@@ -1195,4 +1195,17 @@
 #     crossing of the 80% mark.
 # sass-spec 8749 -> 8831 (+82: unit ladder), 0 regressions, full test suite
 # green (472 passed), clippy -D warnings green.
+#
+# Round 87 (to-space none plan, Wave 0 verdict — see
+#     reports/to-space-none-matrix.md): the 326 to_space FAILs are NOT the
+#     none-dependence model. Evidence: identical xyz→lab inputs differ by
+#     ~1e-8 RELATIVE (dart constant-rounding tail), pre-multiply associativity
+#     probes agree bit-for-bit, and none propagation/missing-as-0 already match
+#     the goldens (a98→lab missing cases PASS). out_of_range/far adds a color-mix
+#     fallback FORM plus an exponent-magnitude gap (9.0e12 vs 9.1e13) needing
+#     separate archaeology. Plan stop-loss clause fired: no safe code slice
+#     remains; 318 logged as debt, floor unchanged.
+#     forward-conflict probe also reverted: `@forward` twice of the SAME member
+#     is only an error at consumer resolution (dart defers diamond conflicts);
+#     the eager per-statement check regressed 10 legal re-forward cases.
 80.5
