@@ -174,6 +174,14 @@ pub struct EvalState {
     /// `@use "other" as *` then `module-functions("other")` is a
     /// no-namespace error).
     pub(crate) bound_modules: std::collections::HashMap<String, std::rc::Rc<crate::module::Module>>,
+    /// Mixin members imported through `@use … as *` (exported name, defining
+    /// name). `meta.mixin-exists` consults these so `show`/`hide`-filtered
+    /// forwards are visible exactly as the importer sees them
+    /// (`meta/mixin_exists` `through_forward` families).
+    pub(crate) wildcard_mixins: Vec<(String, String)>,
+    /// Built-in namespaces actually brought into scope by `@use "sass:…"`
+    /// (exact bound spelling; used by `meta.mixin-exists` module lookups).
+    pub(crate) used_builtin_ns: Vec<String>,
     /// Defining-module environment snapshot per closure: a `@function`/`@mixin`
     /// body resolves its free variables and `ns.$var` namespace bindings against
     /// the module it was **declared** in (the goldens' lexical scoping), not the
@@ -245,6 +253,8 @@ impl EvalState {
             mixins: HashMap::new(),
             functions: HashMap::new(),
             bound_modules: HashMap::new(),
+            wildcard_mixins: Vec::new(),
+            used_builtin_ns: Vec::new(),
             mixin_env: HashMap::new(),
             function_env: HashMap::new(),
             mixin_module: HashMap::new(),

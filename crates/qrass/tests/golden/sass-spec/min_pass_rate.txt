@@ -1250,4 +1250,16 @@
 #     construction sites; fmt_comp prefers the text override.
 # sass-spec 8889 -> 8897 (+8: text channels), 0 regressions, full test suite
 # green (481 passed), clippy -D warnings green.
-81.1
+#
+# Round 93: `meta.mixin-exists` golden ladder — arity (`Missing argument
+#     $name.` / `Only 2 arguments allowed`), `$name`/`$module` type errors,
+#     `$module` lookup (bound user modules answer from exported members; a
+#     built-in namespace is in scope only once `@use`d — tracked by the new
+#     `used_builtin_ns`; unbound/wrongly-spelled names raise `There is no
+#     module with namespace "x".`); `as *` exports recorded per importer
+#     view (`wildcard_mixins`). Residuals (5): show/hide vs the shared
+#     bare-name mixin registry leak, named-fold edge, cumulative-index
+#     sections — architectural debt.
+# sass-spec 8897 -> 8905 (+8: mixin-exists ladder), 0 regressions, full test
+# suite green (483 passed), clippy -D warnings green.
+81.2

@@ -17,10 +17,32 @@ use super::EvalState;
 impl EvalState {
     /// Bind a module's exports under the `@use` alias.
     pub(super) fn bind_alias(&mut self, u: &Use, module: &std::rc::Rc<Module>, url: &str) {
+        // Track loaded built-in namespaces by their *exact* bound spelling —
+        // `meta.mixin-exists("c", "color")` answers false only when `sass:color`
+        // was actually `@use`d; an unbound name raises dart's no-module error
+        // (`meta/mixin_exists` `error/module/built_in_but_not_loaded`).
+        if url.starts_with("sass:") {
+            let bound = match &u.alias {
+                UseAlias::Named(ns) => ns.clone(),
+                UseAlias::Default => url.trim_start_matches("sass:").to_string(),
+                UseAlias::Wildcard => String::new(),
+            };
+            if !bound.is_empty() && !self.used_builtin_ns.contains(&bound) {
+                self.used_builtin_ns.push(bound);
+            }
+        }
         match &u.alias {
             UseAlias::Wildcard => {
                 for (name, value) in &module.vars {
                     self.env.define(name, value.clone(), AssignFlags::default());
+                }
+                // Record the *exported* mixin members (post show/hide) so
+                // `meta.mixin-exists` can answer per the importer's view.
+                for (exported, defined) in &module.mixins {
+                    if !self.wildcard_mixins.iter().any(|(e, _)| e == exported) {
+                        self.wildcard_mixins
+                            .push((exported.clone(), defined.clone()));
+                    }
                 }
             }
             UseAlias::Named(ns) => {

@@ -48,7 +48,7 @@ impl EvalState {
                     SassValue::Bool(self.env.defined_global(&first()))
                 }
             }
-            "mixin-exists" => SassValue::Bool(self.mixins.contains_key(&first())),
+            "mixin-exists" => return self.run_mixin_exists(raw).map(Some),
             "function-exists" => {
                 let f = first();
                 // Sass treats `-` and `_` as interchangeable in identifiers
@@ -150,5 +150,76 @@ impl EvalState {
             _ => return Ok(None),
         };
         Ok(Some(found))
+    }
+
+    /// `meta.mixin-exists($name, $module)` (`core_functions/meta/mixin_exists`):
+    /// arity/type validation plus per-module lookup. Rules read off the golden
+    /// ladder only — `Missing argument $name.`, `Only 2 arguments allowed, …`,
+    /// `$name: 12px is not a string.`, `$module: 1 is neither a string nor a
+    /// module reference.`; `$module` accepts a bound namespace name or a
+    /// `meta.get-module` reference, and the no-module form answers from the
+    /// live registry *and* the `as *` exported members (show/hide aware).
+    pub(crate) fn run_mixin_exists(&mut self, raw: &RawArgs) -> Ev<SassValue> {
+        let pos = raw.positional();
+        let named = raw.named();
+        let name_val = pos
+            .first()
+            .or_else(|| named.get("name"))
+            .ok_or_else(|| {
+                SassError::new(ErrorKind::Builtins, "Missing argument $name.")
+            })?;
+        let given = pos.len() + named.len();
+        if given > 2 {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("Only 2 arguments allowed, but {given} were passed."),
+            ));
+        }
+        let name = match name_val {
+            SassValue::Str { text, .. } => text.clone(),
+            other => {
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!("$name: {} is not a string.", other.to_css()),
+                ));
+            }
+        };
+        let module_arg = pos.get(1).or_else(|| named.get("module"));
+        let found = match module_arg {
+            None => {
+                self.mixins.contains_key(&name)
+                    || self.wildcard_mixins.iter().any(|(e, _)| e == &name)
+            }
+            Some(SassValue::Str { text, .. }) => {
+                // The name must match a namespace actually in scope — exact
+                // spelling, no `_`/`-` folding (`mixin_exists` `error/module/*`:
+                // an unbound or wrongly-spelled name raises dart's no-module
+                // error; a loaded built-in simply owns no mixins).
+                if let Some(m) = self.bound_modules.get(text) {
+                    m.mixins.iter().any(|(exported, _)| exported == &name)
+                } else if self.used_builtin_ns.iter().any(|u| u == text) {
+                    false
+                } else {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        format!("There is no module with namespace \"{text}\"."),
+                    ));
+                }
+            }
+            Some(SassValue::Module(m)) => match &m.module {
+                Some(user) => user.mixins.iter().any(|(exported, _)| exported == &name),
+                None => false,
+            },
+            Some(other) => {
+                return Err(SassError::new(
+                    ErrorKind::Builtins,
+                    format!(
+                        "$module: {} is neither a string nor a module reference.",
+                        other.to_css()
+                    ),
+                ));
+            }
+        };
+        Ok(SassValue::Bool(found))
     }
 }
