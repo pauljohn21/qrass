@@ -132,7 +132,7 @@ impl EvalState {
 
     /// Report the first offer of `site` no `!default` declaration claimed,
     /// underlining the entry in the importing file exactly as the golden does.
-    pub(crate) fn check_config_site(&self, site: usize) -> Ev<()> {
+    pub(crate) fn check_config_site(&self, site: usize, load_css: bool) -> Ev<()> {
         let Some(idx) = self.config_sites[site]
             .iter()
             .copied()
@@ -143,12 +143,21 @@ impl EvalState {
         let span = self.config_offers[idx].entry;
         let source = self.content.clone();
         let file = self.name.clone();
-        Err(SassError::new(
-            ErrorKind::Config,
-            "This variable was not declared with !default in the @used module.",
-        )
-        .with_located(crate::diag::located_in(&file, &source, span.start))
-        .with_markers(vec![crate::diag::marker_in(&source, '^', span.start, span.end)]))
+        // The two families spell the same failure differently in the goldens:
+        // `@use … with` blames "This variable" while `meta.load-css($with:)`
+        // quotes the name (`$a was not declared with !default in the @used
+        // module.`).
+        let message = if load_css {
+            format!(
+                "${} was not declared with !default in the @used module.",
+                self.config_offers[idx].name
+            )
+        } else {
+            "This variable was not declared with !default in the @used module.".to_string()
+        };
+        Err(SassError::new(ErrorKind::Config, message)
+            .with_located(crate::diag::located_in(&file, &source, span.start))
+            .with_markers(vec![crate::diag::marker_in(&source, '^', span.start, span.end)]))
     }
 
     /// Evaluate one clause value, anchoring a failure on the value text the way
@@ -186,6 +195,7 @@ impl EvalState {
     ) -> (String, usize) {
         let idx = self.config_offers.len();
         self.config_offers.push(ConfigOffer {
+            name: e.name.clone(),
             value,
             consumed: false,
             entry: e.entry,
@@ -194,6 +204,27 @@ impl EvalState {
             self.config_sites[site].push(idx);
         }
         (key, idx)
+    }
+
+    /// Register an offer from an already-evaluated value (the `meta.load-css`
+    /// `$with:` map — the values are literals in the calling expression, no
+    /// `ConfigEntry` text exists). Returns the frame view entry.
+    pub(crate) fn offer_value(
+        &mut self,
+        name: String,
+        value: SassValue,
+        site: usize,
+        entry: crate::span::Span,
+    ) -> (String, usize) {
+        let idx = self.config_offers.len();
+        self.config_offers.push(ConfigOffer {
+            name,
+            value,
+            consumed: false,
+            entry,
+        });
+        self.config_sites[site].push(idx);
+        (crate::parser::config_key(&self.config_offers[idx].name.clone()), idx)
     }
 }
 

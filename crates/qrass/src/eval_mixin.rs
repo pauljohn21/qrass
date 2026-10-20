@@ -41,6 +41,11 @@ impl EvalState {
         out: &mut Vec<String>,
     ) -> Ev<()> {
         let name = self.render_interp(&inc.name)?;
+        // `@include meta.load-css($url, $with: …)`: splice a module's CSS into
+        // the output without binding its namespace (round 80).
+        if name == "meta.load-css" {
+            return self.run_load_css(inc, out);
+        }
         // `@include meta.apply($mixin, $args…)`: first-class mixin dispatch
         // (round-73 W4 — the `module_mixins` print-mixin-map consumption
         // chain). The reference head is peeled off; the remainder binds like

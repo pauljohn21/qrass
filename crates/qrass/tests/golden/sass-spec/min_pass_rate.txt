@@ -1089,4 +1089,22 @@
 #     unchanged by the loader round — both stay separate slices.
 # sass-spec 8367 -> 8430 (+63: HSL edit ladder + c4 none), 0 regressions,
 # full test suite green (458 passed), clippy -D warnings green.
-76.9
+#
+# Round 80: `meta.load-css($url, $with:)` mixin (eval_load_css.rs, a sibling
+#     impl split; `core_functions/meta/load_css/*`): the target module's CSS
+#     splices into the output with no namespace binding (member.hrx keeps
+#     `$c` Undefined), the singleton/cycle machinery is reused through
+#     `load_module`, and the load-css-specific golden spellings are honored:
+#     `$a was not declared with !default…` (ConfigOffer now carries its
+#     original spelling; the @use family keeps `This variable was…` — the two
+#     tables differ and both are pinned), `Built-in module X can't be
+#     configured.`, `The variable $a-b was configured twice.` (normalized
+#     collision inside the $with map), and the direct-target already-loaded
+#     `_other.scss was already loaded…` pre-check on the caller frame only
+#     (forwarded distribution keeps `This module was…` via load_module).
+#     Deferred: the `meta.load()` function (module first-class value — new
+#     value variant; ~19 error/with + member cases) and apply(load-css) for
+#     builtin mixins.
+# sass-spec 8430 -> 8487 (+57: load-css mixin), 0 regressions, full test
+# suite green (462 passed), clippy -D warnings green.
+77.4

@@ -55,6 +55,8 @@ mod eval_extend;
 mod eval_function;
 #[path = "eval_if.rs"]
 mod eval_if;
+#[path = "eval_load_css.rs"]
+mod eval_load_css;
 #[path = "eval_mixin.rs"]
 mod eval_mixin;
 #[path = "eval_module.rs"]
@@ -69,6 +71,9 @@ mod eval_stmt;
 /// `!default` declaration anywhere down the `@forward` chain claims it — the
 /// check that decides `directives/use/error/with/undefined.hrx`.
 pub(crate) struct ConfigOffer {
+    /// Original spelling of the configured name (`$a-b`), quoted verbatim by
+    /// the load-css family's error messages.
+    pub(crate) name: String,
     pub(crate) value: crate::value::SassValue,
     pub(crate) consumed: bool,
     /// Where the entry was written, for the golden's marker run.

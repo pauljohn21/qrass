@@ -36,7 +36,7 @@ impl EvalState {
             .load_module(&u.url, view, out, true, link, u.span)
             .map_err(|err| self.attach_frames(err))?;
         self.bind_alias(u, &module, &u.url);
-        self.check_config_site(site)
+        self.check_config_site(site, false)
     }
 
     /// Resolve and load one `@forward`, re-exporting the target's members into
@@ -72,14 +72,14 @@ impl EvalState {
         // or plain-CSS target has no `!default` to claim them with, and the
         // golden gives that case its own message (`multi_configuration`).
         if ran {
-            self.check_config_site(site)?;
+            self.check_config_site(site, false)?;
         }
         Ok(())
     }
 
     /// The load-stack link a `@use`/`@forward` at `span` creates, resolved
     /// against the file that wrote it.
-    fn link_to(&self, span: &Span, keyword: &'static str) -> LoadLink {
+    pub(crate) fn link_to(&self, span: &Span, keyword: &'static str) -> LoadLink {
         let lc = line_col(&self.content, span.start);
         LoadLink {
             parent_file: self.name.clone(),
@@ -102,7 +102,7 @@ impl EvalState {
         traced
     }
 
-    fn attach_frames(&self, err: SassError) -> SassError {
+    pub(crate) fn attach_frames(&self, err: SassError) -> SassError {
         let Some(loc) = err.located.as_ref() else {
             return err;
         };
@@ -157,7 +157,7 @@ impl EvalState {
     /// (`error/with/multi_configuration.hrx`). `stmt` is the loading statement's
     /// own span, recorded as the target's `original load` and underlined when a
     /// later load tries to re-open the same configuration.
-    fn load_module(
+    pub(crate) fn load_module(
         &mut self,
         url: &str,
         view: Vec<(String, usize)>,
