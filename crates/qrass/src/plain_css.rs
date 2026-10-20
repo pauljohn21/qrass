@@ -31,6 +31,21 @@ const PARENT_SUFFIX: &str = "Parent selectors can't have suffixes in plain CSS."
 // the goldens reads as an unterminated paren group and reports as `expected ")"`.
 const EXPECT_PAREN: &str = "expected \")\".";
 
+/// Whether a parse failure came from the conservative `@media`/`@supports`
+/// condition grammar (`parser_supports`) rather than the SCSS parser being
+/// unable to read exotic CSS. Those validators only fire on golden-pinned
+/// invalid logic spellings, so plain-CSS files carrying them must surface the
+/// error (`css/plain/error/media.hrx`) instead of the silent passthrough.
+/// `expected "{".` / `expected "(".` are shared with the general parser, so
+/// they only count when the located excerpt shows an `@media`/`@supports` head.
+pub(crate) fn is_css_grammar_error(err: &SassError) -> bool {
+    let msg = err.to_string();
+    msg.contains("expected media condition in parentheses.")
+        || msg.contains("Expected @supports condition.")
+        || ((msg.contains("@media") || msg.contains("@supports"))
+            && (msg.contains("expected \"{\".") || msg.contains("expected \"(\".")))
+}
+
 /// Reject SCSS-only constructs in a parsed plain-CSS program.
 pub(crate) fn validate(program: &[Stmt]) -> Result<(), SassError> {
     for stmt in program {

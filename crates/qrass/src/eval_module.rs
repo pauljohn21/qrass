@@ -260,8 +260,16 @@ impl EvalState {
             // the goldens would. When the content does not even parse (an exotic
             // CSS feature the SCSS parser cannot read) keep the prior passthrough
             // instead of reporting a spurious error.
-            if let Ok(program) = &prepared.program {
-                crate::plain_css::validate(program)?;
+            match &prepared.program {
+                Ok(program) => crate::plain_css::validate(program)?,
+                Err(err) if crate::plain_css::is_css_grammar_error(err) => {
+                    // the conservative `@media`/`@supports` grammar validators
+                    // only ever fire on golden-pinned invalid CSS logic — that
+                    // is a real syntax error the goldens demand
+                    // (`css/plain/error/media.hrx`), not an exotic-CSS miss.
+                    return Err(err.clone());
+                }
+                Err(_) => {}
             }
             if direct {
                 self.settle_offers(&view);
