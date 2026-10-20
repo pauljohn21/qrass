@@ -208,6 +208,27 @@ pub(crate) fn validate_media(p: &Parser, rest: &[Spanned]) -> Or<()> {
                 }
                 k += 1;
             }
+            // Media *ranges* allow at most two top-level comparators
+            // (`1 <= width <= 2`); a third reads to dart's grammar as garbage
+            // inside the paren group (`css/media/range/error`
+            // `invalid_binary_operator`: `expected ")".`).
+            let mut cmp = 0usize;
+            let mut d = 0usize;
+            for g in &sig[j..=k.min(sig.len() - 1)] {
+                match &g.token {
+                    Token::Punct(Punct::LParen) => d += 1,
+                    Token::Punct(Punct::RParen) => d -= 1,
+                    Token::Punct(Punct::Lt | Punct::Le | Punct::Gt | Punct::Ge)
+                        if d == 1 =>
+                    {
+                        cmp += 1;
+                    }
+                    _ => {}
+                }
+            }
+            if cmp >= 3 {
+                return Err(p.err("expected \")\".", s.span.start));
+            }
             items.push(Item::Group);
             j = k + 1;
             continue;

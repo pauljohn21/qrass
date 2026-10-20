@@ -1224,4 +1224,13 @@
 #     calcs keep the symbolic passthrough.
 # sass-spec 8862 -> 8875 (+13: degenerate alpha), 0 regressions, full test
 # suite green (476 passed), clippy -D warnings green.
-80.9
+#
+# Round 90: media-range grammar — more than two top-level comparators inside
+#     a parenthesised feature report `expected ")".` (`css/media/range/error`
+#     `invalid_binary_operator`); legal two-comparator ranges untouched.
+#     Probes: change-channel `calc(infinity)` serialization needs Color4
+#     text-channel support (logged as debt); selector/combinator family has no shared
+#     matrix (adjacent-compounds/bogus/trailing each own mechanism).
+# sass-spec 8875 -> 8879 (+4: chained comparators), 0 regressions, full test
+# suite green (478 passed), clippy -D warnings green.
+81.0
