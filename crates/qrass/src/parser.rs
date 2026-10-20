@@ -33,6 +33,8 @@ mod parser_at;
 mod parser_expr;
 #[path = "parser_supports.rs"]
 mod parser_supports;
+#[path = "parser_groups.rs"]
+mod parser_groups;
 #[path = "parser_args.rs"]
 mod parser_args;
 #[path = "parser_if.rs"]
