@@ -71,6 +71,8 @@ impl EvalState {
             return Ok(None);
         }
         match name {
+            "get-module" => self.run_get_module(raw),
+            "load" => self.run_load_function(raw),
             "get-function" | "get-mixin" => {
                 let mixin = name == "get-mixin";
                 let found = self.lookup_callable(mixin, raw)?;

@@ -56,6 +56,19 @@ pub enum MixKind {
     Builtin { namespace: String },
 }
 
+/// A module reference value (`meta.get-module`, round-81). Equality rides the
+/// identity: built-ins compare by namespace name, user modules by the `Rc`
+/// singleton pointer (two reads of the same loaded module are `==`, different
+/// modules are not — `get_module.hrx` equality family).
+#[derive(Clone, Debug)]
+pub struct ModuleRef {
+    /// `Some(ns)` for a built-in module (`sass:math`, …); `None` for a user
+    /// module, whose inspect spelling drops the argument (`get-module()`).
+    pub builtin: Option<String>,
+    /// The bound singleton of a user module; `None` for built-ins.
+    pub module: Option<std::rc::Rc<crate::module::Module>>,
+}
+
 /// Equality of two function values per the `get_function/equality` goldens.
 pub(crate) fn fn_kind_eq(a: &FnRef, b: &FnRef) -> bool {
     match (&a.kind, &b.kind) {

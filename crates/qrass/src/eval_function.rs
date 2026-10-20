@@ -193,7 +193,17 @@ impl EvalState {
         };
         let found = match name {
             "variable-exists" => SassValue::Bool(self.env.get(&first()).is_some()),
-            "global-variable-exists" => SassValue::Bool(self.env.defined_global(&first())),
+            "global-variable-exists" => {
+                // `$module:` accepts a module reference (`get_module.hrx`:
+                // global-variable-exists("e", $module: meta.get-module(math))
+                // asks the built-in module about its own constants).
+                if let Some(SassValue::Module(m)) = raw.named().get("module")
+                    && let Some(ns) = &m.builtin {
+                    SassValue::Bool(crate::builtins::module_const(ns, &first()).is_some())
+                } else {
+                    SassValue::Bool(self.env.defined_global(&first()))
+                }
+            }
             "mixin-exists" => SassValue::Bool(self.mixins.contains_key(&first())),
             "function-exists" => {
                 let f = first();

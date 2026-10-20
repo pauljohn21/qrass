@@ -15,7 +15,7 @@ pub struct LineCol {
 }
 
 /// A region of a source file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
     pub file: FileId,
     pub start: BytePos,

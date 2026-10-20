@@ -21,7 +21,7 @@ pub use crate::value_number::{convert_number, format_number, number_to_css};
 // module (declared beside `value_number`); re-exported here so
 // `crate::value::{FnRef, FnKind, MixRef, MixKind}` keep resolving.
 pub(crate) use crate::value_callable::{MixKind, MixRef, fn_kind_eq, mix_kind_eq};
-pub use crate::value_callable::{FnKind, FnRef};
+pub use crate::value_callable::{FnKind, FnRef, ModuleRef};
 
 /// A runtime SCSS value.
 #[derive(Clone, Debug)]
@@ -67,6 +67,10 @@ pub enum SassValue {
     /// A first-class mixin value (`meta.get-mixin` / `meta.apply`); serialized
     /// as `get-mixin("name")` (`values/mixins.hrx` goldens).
     Mixin(std::rc::Rc<MixRef>),
+    /// A module reference value (`meta.get-module`, round-81). Built-ins
+    /// serialize as `get-module("ns")`, user modules as bare `get-module()`
+    /// (`get_module.hrx` inspect family).
+    Module(std::rc::Rc<ModuleRef>),
 }
 
 
@@ -112,6 +116,16 @@ impl PartialEq for SassValue {
                 },
             ) => a == b && (a.len() <= 1 || sa == sb),
             (Self::Map { entries: a }, Self::Map { entries: b }) => a == b,
+            // module identity (`get_module/equality`): built-ins by namespace,
+            // user modules by the singleton `Rc` pointer
+            (Self::Module(a), Self::Module(b)) => {
+                a.builtin == b.builtin
+                    && match (&a.module, &b.module) {
+                        (Some(x), Some(y)) => std::rc::Rc::ptr_eq(x, y),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            }
             _ => false,
         }
     }
@@ -189,9 +203,10 @@ impl SassValue {
             SassValue::Color(_) => "color",
             SassValue::List { .. } => "list",
             SassValue::Map { .. } => "map",
-            // `type-of` goldens spell them `function` / `mixin`.
+            // `type-of` goldens spell them `function` / `mixin` / `module`.
             SassValue::Function(_) => "function",
             SassValue::Mixin(_) => "mixin",
+            SassValue::Module(_) => "module",
         }
     }
 
@@ -232,6 +247,12 @@ impl SassValue {
             // (`get-mixin("a")`) — identical in CSS and inspect form.
             SassValue::Function(f) => format!("get-function(\"{}\")", f.name),
             SassValue::Mixin(m) => format!("get-mixin(\"{}\")", m.name),
+            // `get_module/inspect`: built-ins carry the namespace, user
+            // modules serialize argument-less.
+            SassValue::Module(m) => match &m.builtin {
+                Some(ns) => format!("get-module(\"{ns}\")"),
+                None => "get-module()".to_string(),
+            },
             SassValue::Null => "null".into(),
             SassValue::Bool(b) => b.to_string(),
             SassValue::Number { value, unit } => number_to_css(*value, unit.as_deref()),

@@ -102,3 +102,70 @@ fn configured_twice_and_already_loaded() {
     .unwrap_or_default();
     assert!(err.contains("was configured twice."), "{err}");
 }
+
+/// Round-81 (`get_module.hrx` + `meta/load/*`): the module first-class value
+/// — inspect spellings, `type-of`, identity equality, the arity/type error
+/// family, and `meta.load` returning the reference without emitting CSS.
+#[test]
+fn module_reference_values() {
+    vfs::clear();
+    let out = compile_string(
+        "/lc/gm.scss".to_string(),
+        "@use \"sass:meta\";\n@use \"sass:math\";\n\n\
+         a {
+           inspect: meta.inspect(meta.get-module(meta));
+           ty: meta.type-of(meta.get-module(math));
+           eq: meta.get-module(meta) == meta.get-module(meta);
+           ne: meta.get-module(meta) == meta.get-module(color);
+           gve: meta.global-variable-exists(\"e\", $module: meta.get-module(math));
+           loaded: meta.inspect(meta.load(\"sass:color\"));
+         }",
+        &Options::default(),
+    )
+    .expect("compile ok");
+    assert!(out.contains("inspect: get-module(\"meta\");"), "{out}");
+    assert!(out.contains("ty: module"), "{out}");
+    assert!(out.contains("eq: true"), "{out}");
+    assert!(out.contains("ne: false"), "{out}");
+    assert!(out.contains("gve: true"), "{out}");
+    assert!(out.contains("loaded: get-module(\"color\");"), "{out}");
+    vfs::clear();
+}
+
+#[test]
+fn get_module_error_spellings() {
+    let err = load(
+        "gmnull",
+        "@use \"sass:meta\";\na {b: meta.get-module(null)}\n",
+    )
+    .err()
+    .unwrap_or_default();
+    assert!(
+        err.contains("$module: null is neither a string nor a module reference."),
+        "{err}"
+    );
+    let err = load("gmfew", "@use \"sass:meta\";\na {b: meta.get-module()}\n")
+        .err()
+        .unwrap_or_default();
+    assert!(err.contains("Missing argument $module."), "{err}");
+    let err = load(
+        "gmmany",
+        "@use \"sass:meta\";\na {b: meta.get-module(c, d)}\n",
+    )
+    .err()
+    .unwrap_or_default();
+    assert!(
+        err.contains("Only 1 argument allowed, but 2 were passed."),
+        "{err}"
+    );
+    let err = load(
+        "gmnone",
+        "@use \"sass:meta\";\na {b: meta.get-module(does-not-exist)}\n",
+    )
+    .err()
+    .unwrap_or_default();
+    assert!(
+        err.contains("There is no module with namespace \"does-not-exist\"."),
+        "{err}"
+    );
+}

@@ -167,8 +167,15 @@ pub(crate) fn contains(namespace: Option<&str>, name: &str) -> bool {
     lookup(namespace, name).is_some()
 }
 
-/// Built-in module *constants* (task 8.2): `math.$pi`, `math.$e`, … resolved when
-/// a namespaced member lookup misses. These are the variables a `@use "sass:math"`
+/// Namespaces that own module constants (the `meta.get-module` built-in
+/// check: `math` is a module even though the constant table is separate
+/// from the function registry).
+pub(crate) fn is_const_ns(namespace: &str) -> bool {
+    namespace == "math"
+}
+
+/// Built-in module *constants* (task 8.2): `math.`, `math.`, … resolved when
+/// a namespaced member lookup misses. These are the variables a ` "sass:math"`
 /// exposes without a source file; only the `math` module defines any today.
 pub(crate) fn module_const(namespace: &str, name: &str) -> Option<SassValue> {
     if namespace != "math" {

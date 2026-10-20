@@ -1107,4 +1107,21 @@
 #     builtin mixins.
 # sass-spec 8430 -> 8487 (+57: load-css mixin), 0 regressions, full test
 # suite green (462 passed), clippy -D warnings green.
-77.4
+#
+# Round 81: module first-class values (`get_module.hrx` + `meta/load/*`).
+#     `SassValue::Module(Rc<ModuleRef>)`: built-ins spell `get-module("ns")`,
+#     user modules bare `get-module()` and compare by the bound singleton `Rc`;
+#     `meta.get-module` (one arg: string/identifier/passthrough reference, the
+#     `$module: … is neither a string nor a module reference.` family), and
+#     `meta.load($url, $with:)` — loads without emitting CSS, sharing the
+#     load-css `$with:` prep, the `Built-in module … can't be configured.`
+#     guard and the file-named already-loaded pre-check (`prepare_with` /
+#     `css_config_precheck` in eval_load_css.rs). `global-variable-exists`
+#     accepts a module reference and consults the constant table (math's `$e`).
+#     The get-module/load arms moved to eval_load_css.rs when eval_callable
+#     crossed 500 again (module-value family cohesive; 472/267).
+#     Next load slices (logged, not claimed): user-module member access
+#     (`load("x").$var`), apply(load-css) builtin forwarding.
+# sass-spec 8487 -> 8527 (+40: module values + get-module + meta.load), 0
+# regressions, full test suite green (464 passed), clippy -D warnings green.
+77.7
