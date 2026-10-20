@@ -1052,4 +1052,24 @@
 #     `sass_before_css`/`index/sass` goldens need the syntax itself).
 # sass-spec 8298 -> 8306 (+8: loader grammar), 0 regressions, full test suite
 # green (453 passed), clippy -D warnings green.
-75.7
+#
+# Round 78: legacy channel editing for change/adjust/scale (`change/rgb` +
+#     `adjust/rgb`/`scale/rgb` low, all shapes read off the golden tables):
+#     named $red/$green/$blue kwargs fold into the implementation's named pool
+#     and actually edit; Change mode keeps out-of-range values unclamped so
+#     `legacy_to_css` falls back to the `hsl(…)` expression (hsl(0, 5000%,
+#     98.0392156863%)); a `none` edit re-spells the color as its Color-4
+#     `rgb(none …)` line; edited legacy bases take the `rgb` fmt tag so
+#     integer channels re-spell keyword→hex and fractional ones stay `rgb(%…)`
+#     (lightcoral -33% keeps the percent form instead of snapping #a18080).
+#     Iterated under the A/B gate: three over-broad cuts (blanket tag+name
+#     clear, forced hsl fallback, unclamped adjust + carried triple) each
+#     regressed space/darken/no_channels families (14/9/9) — converged to
+#     edits-only tagging; the HSL-edit out-of-range matrix (adjust/hsl
+#     lightness `below_min` verbatim-hsl goldens, #6 saturation>100) is
+#     DEFERRED: the carried `legacy_hsl` collides with the round-69
+#     adjust-family triple semantics (round-65 relative-color guard territory
+#     — needs its own design slice).
+# sass-spec 8306 -> 8367 (+61: channel editing), 0 regressions, full test
+# suite green (456 passed), clippy -D warnings green.
+76.3

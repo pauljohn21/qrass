@@ -64,9 +64,12 @@ fn color_constructors() {
 
 #[test]
 fn color_adjust_scale_change() {
-    assert_eq!(value("color.adjust(#000000, $red: 128)"), "#800000");
+    // golden serialization shapes (`change/rgb` `red/*`, `scale/rgb` `red/low`):
+    // integer channels prefer the keyword then `#hex`, fractional ones stay
+    // `rgb(%…)` — round 78.
+    assert_eq!(value("color.adjust(#000000, $red: 128)"), "maroon");
     assert_eq!(value("color.change(#000000, $red: 200)"), "#c80000");
-    assert_eq!(value("color.scale(#000000, $red: 50%)"), "#800000");
+    assert_eq!(value("color.scale(#000000, $red: 50%)"), "rgb(50%, 0%, 0%)");
 }
 
 #[test]
