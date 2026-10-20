@@ -34,6 +34,14 @@ pub(crate) fn register(r: &mut Registry) {
         &["color", "space"],
         super::color_gamut::is_in_gamut,
     );
+    r.nsp(
+        "color",
+        "to-gamut",
+        1,
+        Some(3),
+        &["color", "space", "method"],
+        super::color_gamut::to_gamut,
+    );
     r.nsp("color", "adjust", 1, None, &["color"], |c| transform(c, Mode::Adjust));
     r.nsp("color", "scale", 1, None, &["color"], |c| transform(c, Mode::Scale));
     r.nsp("color", "change", 1, None, &["color"], |c| transform(c, Mode::Change));
