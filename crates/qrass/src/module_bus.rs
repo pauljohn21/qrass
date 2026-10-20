@@ -7,10 +7,9 @@
 //! and single-threaded (the wasm contract below), a second parent only ever joins
 //! after the first has settled the hub, so `share` reads that one instantiation
 //! with `Behavior::peek` — no observer attaches and no per-parent subscription is
-//! retained. The payload stays `Arc<Module>`, so the sharing is read-only (manual
-//! §2 "缓存共享用 `Arc<不可变 Module>` 只读多播"); the `BehaviorSubject` remains a
-//! multicast carrier (not a bare lookup map) so a parent can still attach a real
-//! subscriber.
+//! retained. The payload is `Rc<Module>` — with first-class callable values
+//! (round 73 W1) `Module` is no longer `Sync`, so the read-only multicast
+//! shares it single-threaded like every other Local payload in the crate.
 //!
 //! `Local` rather than `Shared` is the crate-wide wasm contract: the whole
 //! pipeline must run on a single-threaded `wasm32-unknown-unknown` target, so no
@@ -33,7 +32,7 @@
 //! already carries the `None` "not settled yet" state).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use rxrust::prelude::*;
 use rxrust::rc::MutRc;
@@ -48,7 +47,7 @@ use crate::module::Module;
 /// singleton exists. Keeping the "not yet" state *inside* the payload is what lets a
 /// request that arrives mid-instantiation join the same carrier instead of starting a
 /// second one.
-type HubItem = Option<Arc<Module>>;
+type HubItem = Option<Rc<Module>>;
 
 /// The `Local` carrier for one canonical module path. `ObservableFactory` is bound
 /// to `Context<Inner = ()>`, so `Local::behavior_subject` produces exactly this
@@ -60,7 +59,7 @@ type Hub = Local<
         // rc.6 wraps the subject payload in the context's `RcDeref` pointer
         // (`MutRc` = `Rc<RefCell<_>>` for `Local`); this is the framework's own
         // multicast plumbing, not a business carrier — the value we share stays the
-        // read-only `Option<Arc<Module>>`.
+        // read-only `Option<Rc<Module>>`.
         MutRc<HubItem>,
         SubjectPtr<'static, LocalCtx<(), LocalScheduler>, HubItem, ()>,
     >,
@@ -92,7 +91,7 @@ impl ModuleBus {
 
     /// Broadcast the finished singleton and close the carrier. Called once, by the
     /// request that owns the instantiation.
-    pub(crate) fn settle(&mut self, key: &str, module: Arc<Module>) -> Result<(), SassError> {
+    pub(crate) fn settle(&mut self, key: &str, module: Rc<Module>) -> Result<(), SassError> {
         let Some(hub) = self.hubs.get_mut(key) else {
             return Err(unsettled(key));
         };
@@ -108,7 +107,7 @@ impl ModuleBus {
 
     /// Join the multicast for `key` and take the instantiation it broadcasts. Every
     /// parent of a shared module lands here, and each gets the *same* `Arc`.
-    pub(crate) fn share(&self, key: &str) -> Result<Arc<Module>, SassError> {
+    pub(crate) fn share(&self, key: &str) -> Result<Rc<Module>, SassError> {
         // Cross-function boundary in the load pipeline: one span per join, so a
         // diamond reads as N `module_share` children under their `module_load` parent.
         let span = span!(

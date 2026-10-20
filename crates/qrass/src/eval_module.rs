@@ -8,7 +8,7 @@
 //! `!default` variables; a supplied-but-unconsumed name is an error (design D3).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tracing::{Level, span};
 
@@ -160,7 +160,7 @@ impl EvalState {
         direct: bool,
         link: LoadLink,
         stmt: Span,
-    ) -> Ev<(Arc<Module>, bool)> {
+    ) -> Ev<(Rc<Module>, bool)> {
         // Cross-file pipeline boundary: one span per load so a module graph's
         // instantiation chain is readable as nested spans with timings.
         let span = span!(
@@ -184,7 +184,7 @@ impl EvalState {
             if direct {
                 self.settle_offers(&view);
             }
-            return Ok((Arc::new(Module::default()), false));
+            return Ok((Rc::new(Module::default()), false));
         }
         let base = parent_dir(&self.name);
         // The fan-out stage may already have acquired this branch. Reuse its
@@ -286,7 +286,7 @@ impl EvalState {
             self.with_link(link, |st| st.instantiate(&key, &content, program, &view))?
         };
 
-        let module = Arc::new(module);
+        let module = Rc::new(module);
         // Broadcast the singleton and close the carrier. This parent already holds
         // the `Arc` it just produced, so it takes it directly; every later parent
         // lands on the `is_open` branch above and joins the same carrier — which is

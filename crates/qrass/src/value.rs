@@ -52,6 +52,35 @@ pub enum SassValue {
     Map {
         entries: Vec<(SassValue, SassValue)>,
     },
+    /// A first-class function value (`meta.get-function` / `meta.call`, task
+    /// group 11 round-73 W1). The `Rc` is the identity: two reads of the same
+    /// definition compare `==`, a redefinition does not
+    /// (`get_function/equality` goldens). CSS serialization is the call text
+    /// `get-function("name")` (`meta/inspect/function.hrx`).
+    Function(std::rc::Rc<FnRef>),
+    /// A first-class mixin value (`meta.get-mixin` / `meta.apply`); serialized
+    /// as `get-mixin("name")` (`values/mixins.hrx` goldens).
+    Mixin(std::rc::Rc<MixRef>),
+}
+
+/// Payload of a first-class function value. `module` anchors the defining
+/// module for the `meta.call` closure switch; `css` marks a `$css: true`
+/// lookup, whose call re-emits the plain-CSS spelling verbatim
+/// (`get_function/same_module` `plain_css` golden: `round(0.6)`).
+#[derive(Clone, Debug)]
+pub struct FnRef {
+    pub name: String,
+    pub module: Option<String>,
+    pub decl: std::rc::Rc<crate::ast::FunctionDecl>,
+    pub css: bool,
+}
+
+/// Payload of a first-class mixin value.
+#[derive(Clone, Debug)]
+pub struct MixRef {
+    pub name: String,
+    pub module: Option<String>,
+    pub decl: std::rc::Rc<crate::ast::MixinDecl>,
 }
 
 /// Structural value equality following Sass semantics: two strings are equal when
@@ -75,6 +104,11 @@ impl PartialEq for SassValue {
             ) => a == b && ua == ub,
             (Self::Str { text: a, .. }, Self::Str { text: b, .. }) => a == b,
             (Self::Color(a), Self::Color(b)) => a == b,
+            // callable values are reference-equal: the same `Rc` (same
+            // definition instance) only — `get_function/equality` goldens,
+            // including `redefined` (same name, two defs) being false.
+            (Self::Function(a), Self::Function(b)) => std::rc::Rc::ptr_eq(a, b),
+            (Self::Mixin(a), Self::Mixin(b)) => std::rc::Rc::ptr_eq(a, b),
             (
                 Self::List {
                     items: a,
@@ -165,6 +199,9 @@ impl SassValue {
             SassValue::Color(_) => "color",
             SassValue::List { .. } => "list",
             SassValue::Map { .. } => "map",
+            // `type-of` goldens spell them `function` / `mixin`.
+            SassValue::Function(_) => "function",
+            SassValue::Mixin(_) => "mixin",
         }
     }
 
@@ -200,6 +237,11 @@ impl SassValue {
     /// and `source` selects the inspect disambiguation above; scalars ignore both.
     fn render(&self, parent: Option<ListSep>, source: bool) -> String {
         match self {
+            // The call-text spellings pinned by `meta/inspect/function.hrx`
+            // (`get-function("get-function")`) and `values/mixins.hrx`
+            // (`get-mixin("a")`) — identical in CSS and inspect form.
+            SassValue::Function(f) => format!("get-function(\"{}\")", f.name),
+            SassValue::Mixin(m) => format!("get-mixin(\"{}\")", m.name),
             SassValue::Null => "null".into(),
             SassValue::Bool(b) => b.to_string(),
             SassValue::Number { value, unit } => number_to_css(*value, unit.as_deref()),
