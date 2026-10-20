@@ -55,6 +55,8 @@ mod eval_expr;
 mod eval_extend;
 #[path = "eval_function.rs"]
 mod eval_function;
+#[path = "eval_meta.rs"]
+mod eval_meta;
 #[path = "eval_if.rs"]
 mod eval_if;
 #[path = "eval_load_css.rs"]

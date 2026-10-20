@@ -13,12 +13,14 @@
 //! and `The variable $a-b was configured twice.`.
 
 use crate::ast::Include;
+use crate::clock::StopWatch;
 use crate::error::{ErrorKind, SassError};
 use crate::value::{ModuleRef, SassValue};
 
 use std::rc::Rc;
 
 use super::{Ev, EvalState};
+use tracing::{Level, span};
 
 impl EvalState {
     /// `meta.get-module($module)` (`get_module.hrx`): exactly one argument —
@@ -82,6 +84,23 @@ impl EvalState {
     /// module's CSS is *not* emitted and the result is the module reference;
     /// all configuration spellings are shared with the load-css family.
     pub(crate) fn run_load_function(&mut self, raw: &super::eval_mixin::RawArgs) -> Ev<Option<SassValue>> {
+        // Same cross-file pipeline convention as `run_load_css`.
+        let span = span!(
+            Level::DEBUG,
+            "load_fn",
+            stage = "load",
+            module = %self.name,
+            url = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+        let started = StopWatch::start();
+        let result = self.run_load_function_inner(raw);
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
+        result
+    }
+
+    fn run_load_function_inner(&mut self, raw: &super::eval_mixin::RawArgs) -> Ev<Option<SassValue>> {
         let url = match raw.positional().first().or_else(|| raw.named().get("url")) {
             Some(SassValue::Str { text, .. }) => text.clone(),
             None => {
@@ -98,6 +117,7 @@ impl EvalState {
             }
         };
         let entry = crate::span::Span::default();
+        tracing::Span::current().record("url", url.as_str());
         let with_v = raw
             .named()
             .get("with")
@@ -133,6 +153,25 @@ impl EvalState {
     }
 
     pub(super) fn run_load_css(&mut self, inc: &Include, out: &mut Vec<String>) -> Ev<()> {
+        // Cross-file pipeline boundary (rule: every stage gets a span): this
+        // entry drives a full module load + configuration settlement, so it
+        // records the same stage/url/elapsed fields as `module_load`.
+        let span = span!(
+            Level::DEBUG,
+            "load_css",
+            stage = "load",
+            module = %self.name,
+            url = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+        let started = StopWatch::start();
+        let result = self.run_load_css_inner(inc, out);
+        span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
+        result
+    }
+
+    fn run_load_css_inner(&mut self, inc: &Include, out: &mut Vec<String>) -> Ev<()> {
         let raw = self.collect_args(&inc.args)?;
         let url = match raw.positional().first() {
             Some(SassValue::Str { text, .. }) => text.clone(),
@@ -150,6 +189,7 @@ impl EvalState {
             }
         };
         let entry = inc.span;
+        tracing::Span::current().record("url", url.as_str());
 
         // `$with:` — named first, then the second positional (dart's order).
         let with_v = raw

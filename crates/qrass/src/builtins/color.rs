@@ -57,11 +57,19 @@ pub(super) fn err(msg: impl Into<String>) -> SassError {
     SassError::new(ErrorKind::Builtins, msg)
 }
 
+/// Read slot `i` as a color, reporting the shared `$color:` spelling.
 pub(super) fn color_at(c: &super::Call, i: usize) -> Or<Color> {
+    color_at_named(c, i, "color")
+}
+
+/// Typed color slot with an arbitrary parameter name — the goldens spell the
+/// failing parameter per function (`$color1:` for `color.same`, plain
+/// `$color:` elsewhere); one implementation for both (round-84 dedup).
+pub(super) fn color_at_named(c: &super::Call, i: usize, param: &str) -> Or<Color> {
     match c.positional.get(i) {
         Some(SassValue::Color(col)) => Ok(col.clone()),
         Some(other) => Err(err(format!(
-            "$color: {} is not a color.",
+            "${param}: {} is not a color.",
             other.to_css()
         ))),
         None => Err(err("expected a color")),
