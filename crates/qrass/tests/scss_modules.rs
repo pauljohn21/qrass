@@ -81,7 +81,7 @@ fn not_found_lists_candidates() {
     let err = canonicalize("missing", &modules_dir()).expect_err("should fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("Couldn't resolve"),
+        msg.contains("Can't find stylesheet to import."),
         "load error surfaced\n---\n{msg}"
     );
     assert!(

@@ -1034,4 +1034,22 @@
 #     (claim-layer rework), #8 needs float-precision legacy rgb channels.
 # sass-spec 8282 -> 8298 (+16: color.same), 0 regressions, full test suite
 # green (446 passed), clippy -D warnings green.
+#
+# Round 77: loader candidate grammar (`directives/use/{error/,}load.hrx`,
+#     all rules read off the golden tables): URLs carrying a recognized
+#     extension never grow one nor resolve through their own directory index
+#     (dir_dot_scss); extensionless files are not candidates (no_extension);
+#     ambiguity is *within one level* only — SCSS-level vs SCSS-index are
+#     priority tiers (`precedence/normal_before_index` resolves dir.scss with
+#     dir/index.scss present; the first cut mixed them and A/B caught 1
+#     regression, debug-protocol span probe pinned the exact hit list),
+#     partial-vs-nonpartial and _index-vs-index pairs raise `It's not clear
+#     which file to import. Found:` (sorted, root-relative); misses raise the
+#     bare `Can't find stylesheet to import.` first line with URL + tried
+#     candidates moved to a note (keeps CLI/L2-fanout diagnostics intact —
+#     runner compares only the first Error: line).
+#     Deferred: `.sass` indented-syntax candidates (conflict/extension, the
+#     `sass_before_css`/`index/sass` goldens need the syntax itself).
+# sass-spec 8298 -> 8306 (+8: loader grammar), 0 regressions, full test suite
+# green (453 passed), clippy -D warnings green.
 75.7
