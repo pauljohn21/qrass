@@ -1208,4 +1208,13 @@
 #     forward-conflict probe also reverted: `@forward` twice of the SAME member
 #     is only an error at consumer resolution (dart defers diamond conflicts);
 #     the eager per-statement check regressed 10 legal re-forward cases.
-80.5
+#
+# Round 88: plain-CSS `sass()` condition rejection + splat `expected ")"` (if
+#     family), and the pre-passthrough legacy comma color constructor checks
+#     (eval_color_comma.rs): arity cap `Only 4 arguments allowed`, quoted-slot
+#     `$name: … is not a number.`, alpha unit demand, and color.hwb's diverging
+#     `Expected {channel} channel to be a number, was …` + percent-forced w/b.
+#     Clean numeric/symbolic calls keep the verbatim passthrough untouched.
+# sass-spec 8835 -> 8862 (+27: if/splat + comma checks), 0 regressions, full
+# test suite green (475 passed), clippy -D warnings green.
+80.8

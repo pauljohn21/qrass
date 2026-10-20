@@ -57,6 +57,23 @@ impl EvalState {
             return Ok(v);
         }
 
+        // Legacy comma constructors keep builtins-style *error* checks even
+        // though clean numeric calls still pass through verbatim
+        // (`color/{hsl,rgb,hwb}/error/four_args|five_args`).
+        if call.namespace.is_none()
+            && call.args.len() >= 3
+            && matches!(call.name.as_str(), "hsl" | "hsla" | "rgb" | "rgba")
+            && let Some(e) = super::eval_color_comma::check_legacy_comma_color(call)
+        {
+            return Err(e);
+        }
+        if call.namespace.as_deref() == Some("color")
+            && call.name == "hwb"
+            && let Some(e) = super::eval_color_comma::check_color_hwb_comma(call)
+        {
+            return Err(e);
+        }
+
         // CSS Color 4 literals (`color(a98-rgb 0.2 0.5 0.7)`, `lab(...)`, ...).
         if let Some(v) = self.eval_color4_literal(call)? {
             return Ok(v);

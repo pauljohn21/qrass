@@ -30,6 +30,10 @@ const PARENT_SUFFIX: &str = "Parent selectors can't have suffixes in plain CSS."
 // A map literal `(k: v)` is a `:` inside parentheses, which the CSS grammar in
 // the goldens reads as an unterminated paren group and reports as `expected ")"`.
 const EXPECT_PAREN: &str = "expected \")\".";
+// A `sass(…)` test inside a CSS `if()` is SassScript syntax level, not value
+// level — the goldens reject it wherever it appears (`css/plain/error/
+// expression/if`: bare, `not`, `and`/`or` chains, and parenthesized arms).
+const SASS_COND: &str = "sass() conditions aren't allowed in plain CSS";
 
 /// Whether a parse failure came from the conservative `@media`/`@supports`
 /// condition grammar (`parser_supports`) rather than the SCSS parser being
@@ -271,7 +275,10 @@ fn check_if_cond(cond: Option<&crate::ast_expr::IfCond>) -> Result<(), SassError
                 Ok(())
             }
         }
-        Some(IfCond::Sass(e)) => check_expr(e),
+        // Any Sass arm — `sass($x)` tests are rejected wholesale, not descended
+        // (`css/plain/error/expression/if` `sass/*` family; note the message
+        // carries no trailing period).
+        Some(IfCond::Sass(_)) => Err(scss_err(SASS_COND)),
         Some(IfCond::Not(inner)) => check_if_cond(Some(inner)),
         Some(IfCond::Paren(inner)) => check_if_cond(Some(inner)),
         Some(IfCond::Chain { parts, .. }) => {
@@ -285,7 +292,11 @@ fn check_if_cond(cond: Option<&crate::ast_expr::IfCond>) -> Result<(), SassError
 
 fn check_arg(arg: &Arg) -> Result<(), SassError> {
     match arg {
-        Arg::Positional(e) | Arg::Splat(e) => check_expr(e),
+        Arg::Positional(e) => check_expr(e),
+        // `f(…)` spread has no plain-CSS spelling: the CSS grammar reads the
+        // `...` as garbage inside the paren group (`expression/function`
+        // `variable_arguments`: `expected ")".`).
+        Arg::Splat(_) => Err(scss_err(EXPECT_PAREN)),
         // `f($name: v)` is SassScript named-argument syntax (the parser folds a
         // `$name:` argument into `Arg::Named`); plain CSS has no such form, so
         // the goldens report the `$` as a disallowed Sass variable.
