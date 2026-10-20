@@ -65,6 +65,32 @@ fn c4_channel_validation_ladder() {
     ));
 }
 
+/// Round-86 unit ladder for adjust/change (`adjust/error/units/*`).
+#[test]
+fn unit_ladder_adjust_change() {
+    // numeric channels accept `%` or unitless only
+    assert!(
+        err("color.adjust(color(a98-rgb 0.2 0.5 0.7), $green: 0.5px)")
+            .contains("$green: Expected 0.5px to have unit \"%\" or no units.")
+    );
+    // percent-only channels reject foreign units (lch chroma is numeric per
+    // `units/lch`; lab a/b take `%`-or-no-units per `units/lab`)
+    assert!(
+        err("color.adjust(lab(50% 30 -50), $a: 20px)")
+            .contains("$a: Expected 20px to have unit \"%\" or no units.")
+    );
+    // hue demands an angle unit
+    assert!(err("color.adjust(oklch(50% 0.3 50deg), $hue: 20%)")
+        .contains("$hue: Expected 20% to have an angle unit (deg, grad, rad, turn)."));
+    // legacy hwb-family channels are percent-only in every mode
+    assert!(err("color.adjust(black, $blackness: 1)")
+        .contains("$blackness: Expected 1 to have unit \"%\"."));
+    // legal spellings stay silent
+    assert!(err("color.adjust(color(a98-rgb 0.2 0.5 0.7), $green: 10%)").is_empty());
+    assert!(err("color.adjust(oklch(50% 0.3 50deg), $hue: 20deg)").is_empty());
+    assert!(err("color.adjust(oklch(50% 0.3 50deg), $hue: 20)").is_empty());
+}
+
 #[test]
 fn golden_exemptions_stay_valid_edits() {
     // `adjust/units` unknown/*: magnitude passes, unit ignored (round-69

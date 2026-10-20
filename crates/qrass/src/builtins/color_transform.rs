@@ -102,6 +102,39 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
                     val.to_css()
                 )));
             }
+        } else {
+            // Adjust/change unit ladder per channel unit (`adjust/error/units/*`):
+            // percent-only channels (w/b/s/l) reject other units; numeric
+            // channels accept `%` or unitless; hue accepts angle units.
+            match ch.unit {
+                crate::color4::Unit::Pct => {
+                    if unit.is_some() && unit != Some("%") {
+                        return Err(err(format!(
+                            "${key}: Expected {} to have unit \"%\".",
+                            val.to_css()
+                        )));
+                    }
+                }
+                crate::color4::Unit::Deg => {
+                    if !matches!(
+                        unit,
+                        None | Some("deg") | Some("grad") | Some("rad") | Some("turn")
+                    ) {
+                        return Err(err(format!(
+                            "${key}: Expected {} to have an angle unit (deg, grad, rad, turn).",
+                            val.to_css()
+                        )));
+                    }
+                }
+                crate::color4::Unit::Num => {
+                    if !matches!(unit, None | Some("%")) {
+                        return Err(err(format!(
+                            "${key}: Expected {} to have unit \"%\" or no units.",
+                            val.to_css()
+                        )));
+                    }
+                }
+            }
         }
         if mode == Mode::Scale && c4.comps[idx].is_none() {
             // Scaling a MISSING channel is dart's unresolved-behavior guard

@@ -74,6 +74,16 @@ pub(super) fn validate_legacy_channel_edits(c: &super::Call, mode: Mode) -> Or<(
             )));
         }
         let Some(value) = c.named.get(k) else { continue };
+        // Legacy hwb-family channels are percent-only in every mode
+        // (`adjust/error/units/hwb`: `$blackness: Expected 1 to have unit "%".`).
+        if matches!(k, "whiteness" | "blackness")
+            && let SassValue::Number { unit, .. } = value
+            && unit.as_deref() != Some("%") {
+            return Err(err(format!(
+                "${k}: Expected {} to have unit \"%\".",
+                value.to_css()
+            )));
+        }
         // A `none` edit is the missing-slot path (handled by the edit loops /
         // deferred legacy missing modeling), not a type error.
         if matches!(value, SassValue::Str { text, quoted: false } if text == "none") {

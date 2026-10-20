@@ -1187,4 +1187,12 @@
 #     builtins/color_transform.rs (color.rs 580 -> 398+195).
 # sass-spec 8657 -> 8749 (+92: c4 validation ladder), 0 regressions, full
 # test suite green (471 passed), clippy -D warnings green.
-79.8
+#
+# Round 86: the adjust/change unit ladder (`adjust/error/units/*`): Pct
+#     channels reject foreign units (`to have unit "%".`), Num channels
+#     accept only `%`/unitless (`"%" or no units.`), hue demands an angle
+#     unit; legacy hwb-family w/b are percent-only in every mode. First
+#     crossing of the 80% mark.
+# sass-spec 8749 -> 8831 (+82: unit ladder), 0 regressions, full test suite
+# green (472 passed), clippy -D warnings green.
+80.5
