@@ -976,4 +976,15 @@
 #     (`red(...)`, `hue(...)`) remain unregistered.
 # sass-spec 8174 -> 8212 (+38: call + accepts-content + rgb named), 0
 # regressions, full test suite green (441 passed), clippy -D warnings green.
-74.9
+#
+# Round 73 W4 (first wave): `bound_modules` (ns → instantiated `Module`) is
+#     recorded by `bind_alias` for Named/Default aliases — never `as *` (the
+#     goldens call that a no-namespace error) — and `meta.module-functions`/
+#     `module-mixins` enumerate it in definition order with callable values
+#     (built-in modules answer the empty map, mirroring module-variables).
+#     Remaining cluster FAILs (19) need the `utils.print-*` mixin consumption
+#     chain, `meta.apply` block-execution, and two `unsupported feature` heads
+#     — logged as the plan's tail work, not claimed here.
+# sass-spec 8212 -> 8233 (+21: module-functions/-mixins introspection), 0
+# regressions, full test suite green (441 passed), clippy -D warnings green.
+75.1

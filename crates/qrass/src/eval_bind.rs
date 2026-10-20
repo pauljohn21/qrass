@@ -16,7 +16,7 @@ use super::EvalState;
 
 impl EvalState {
     /// Bind a module's exports under the `@use` alias.
-    pub(super) fn bind_alias(&mut self, u: &Use, module: &Module, url: &str) {
+    pub(super) fn bind_alias(&mut self, u: &Use, module: &std::rc::Rc<Module>, url: &str) {
         match &u.alias {
             UseAlias::Wildcard => {
                 for (name, value) in &module.vars {
@@ -25,12 +25,14 @@ impl EvalState {
             }
             UseAlias::Named(ns) => {
                 self.env.bind_namespace(ns, module.vars.clone());
+                self.bound_modules.insert(ns.clone(), module.clone());
                 self.bind_members(ns, module);
             }
             UseAlias::Default => {
                 let ns = default_namespace(url);
                 if !ns.is_empty() {
                     self.env.bind_namespace(&ns, module.vars.clone());
+                    self.bound_modules.insert(ns.clone(), module.clone());
                     self.bind_members(&ns, module);
                 }
             }

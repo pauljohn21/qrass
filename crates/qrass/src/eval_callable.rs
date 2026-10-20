@@ -218,6 +218,81 @@ impl EvalState {
                 };
                 Ok(Some(SassValue::Bool(accepts)))
             }
+            // `meta.module-functions`/`module-mixins` (round-73 W4, the
+            // module_functions/module_mixins goldens): the namespace's public
+            // member names in *definition order* (not sorted like
+            // module-variables), each value the callable reference. Built-in
+            // modules carry no user members → empty map; a name never bound by
+            // `@use … as ns` (including `as *`) is the namespace error.
+            "module-functions" | "module-mixins" => {
+                let mixins = name == "module-mixins";
+                let given = raw.positional().len() + raw.named().len();
+                if given == 0 {
+                    return Err(err("Missing argument $module."));
+                }
+                if given > 1 {
+                    return Err(err(format!(
+                        "Only 1 argument allowed, but {given} {} passed.",
+                        if given == 1 { "was" } else { "were" }
+                    )));
+                }
+                let ns = match opt(raw, "module", 0) {
+                    Some(SassValue::Str { text, .. }) => text.clone(),
+                    Some(other) => {
+                        return Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!(
+                                "$module: {} is neither a string nor a module reference.",
+                                other.to_css()
+                            ),
+                        ));
+                    }
+                    None => String::new(),
+                };
+                let members: Vec<String> =
+                    if let Some(module) = self.bound_modules.get(&ns) {
+                        if mixins {
+                            module.mixins.clone()
+                        } else {
+                            module.functions.clone()
+                        }
+                    } else if crate::builtins::has_module(&ns) {
+                        Vec::new()
+                    } else {
+                        return Err(SassError::new(
+                            ErrorKind::UndefinedVariable,
+                            format!("There is no module with namespace \"{ns}\"."),
+                        ));
+                    };
+                let mut entries = Vec::with_capacity(members.len());
+                for member in members {
+                    let key = format!("{ns}.{member}");
+                    let value = if mixins {
+                        let decl = self.mixins.get(&key).cloned().expect("bound member");
+                        SassValue::Mixin(Rc::new(MixRef {
+                            name: member.clone(),
+                            module: Some(ns.clone()),
+                            kind: MixKind::User(decl),
+                        }))
+                    } else {
+                        let decl = self.functions.get(&key).cloned().expect("bound member");
+                        let (env, owner) = self.closure_snapshot(&key);
+                        SassValue::Function(Rc::new(FnRef {
+                            name: member.clone(),
+                            module: Some(ns.clone()),
+                            kind: FnKind::User { decl, env, owner },
+                        }))
+                    };
+                    entries.push((
+                        SassValue::Str {
+                            text: member,
+                            quoted: true,
+                        },
+                        value,
+                    ));
+                }
+                Ok(Some(SassValue::Map { entries }))
+            }
             _ => Ok(None),
         }
     }

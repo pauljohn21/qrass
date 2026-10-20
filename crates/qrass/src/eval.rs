@@ -155,6 +155,12 @@ pub struct EvalState {
     pub mixins: HashMap<String, std::rc::Rc<MixinDecl>>,
     /// Function registry keyed by name (task 7.2).
     pub functions: HashMap<String, std::rc::Rc<FunctionDecl>>,
+    /// The module bound to each `@use` namespace (round-73 W4): what
+    /// `meta.module-functions`/`module-mixins` enumerate. `as *` binds no
+    /// namespace and therefore records nothing (`module_functions` goldens:
+    /// `@use "other" as *` then `module-functions("other")` is a
+    /// no-namespace error).
+    pub(crate) bound_modules: std::collections::HashMap<String, std::rc::Rc<crate::module::Module>>,
     /// Defining-module environment snapshot per closure: a `@function`/`@mixin`
     /// body resolves its free variables and `ns.$var` namespace bindings against
     /// the module it was **declared** in (the goldens' lexical scoping), not the
@@ -225,6 +231,7 @@ impl EvalState {
             config_sites: Vec::new(),
             mixins: HashMap::new(),
             functions: HashMap::new(),
+            bound_modules: HashMap::new(),
             mixin_env: HashMap::new(),
             function_env: HashMap::new(),
             mixin_module: HashMap::new(),
