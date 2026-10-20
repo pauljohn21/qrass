@@ -1002,4 +1002,19 @@
 # sass-spec 8233 -> 8274 (+41: forward exports + apply + module-qualified
 # getters), 0 regressions, full test suite green (442 passed),
 # clippy -D warnings green.
-75.4
+#
+# Round 75: complement's working-space grammar (`color/complement.hrx`, read
+#     off the golden table + the SPACES channel data the to-space goldens
+#     already exercise — no dart mechanism guessing): `$space` non-string /
+#     unknown-space / non-polar (`doesn't have a hue channel.`, validated
+#     BEFORE the color-kind branch per error/non_polar_angle on a legacy
+#     color), missing-hue guard in the working space, c4 same-space rotation
+#     re-emitting the space verbatim (missing non-hue channels survive:
+#     `hsl(180deg 50% none)`), legacy hsl/hwb/rgb targets rotating identically
+#     (first cut over-rejected them — A/B caught 3, corrected), and the global
+#     `complement` spelling (no CSS-filter twin). Deferred: legacy→modern
+#     conversions, cross-space guard spellings, powerless/hsl-comma outputs —
+#     the per-space model's territory.
+# sass-spec 8274 -> 8282 (+8: complement grammar + global spelling), 0
+# regressions, full test suite green (443 passed), clippy -D warnings green.
+75.5

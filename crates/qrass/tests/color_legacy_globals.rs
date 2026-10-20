@@ -133,3 +133,36 @@ fn adjust_hue_rotates_with_angle_units() {
     assert!(err("adjust-hue(red)").contains("Missing argument $degrees."));
     assert!(err("adjust-hue(red, blue)").contains("$degrees: blue is not a number."));
 }
+
+/// Round-75 (`color/complement.hrx`): the `$space` working-space grammar and
+/// the modern same-space rotation.
+#[test]
+fn complement_space_grammar() {
+    // legacy colors rotate in hsl-equivalent targets unchanged
+    assert_eq!(value("color.complement(red, hwb)"), "aqua");
+    assert_eq!(value("color.complement($color: red, $space: hwb)"), "aqua");
+    // a non-polar or unknown `$space` fails before the color's kind matters
+    let msg = err("color.complement(red, xyz)");
+    assert!(
+        msg.contains("$space: Color space xyz doesn't have a hue channel."),
+        "{msg}"
+    );
+    // c4 rotated in its own space re-emits that space (missing non-hue
+    // channels survive: `hsl(0deg 50% none)` → `hsl(180deg 50% none)`)
+    assert_eq!(
+        value("color.complement(hsl(0deg 50% none))"),
+        "hsl(180deg 50% none)"
+    );
+    // a missing hue in the working space is dart's guard, spelling the color
+    let msg = err("color.complement(hsl(none 30% 40%))");
+    assert!(
+        msg.contains("$hue: Because the CSS working group is still deciding")
+            && msg.contains("(color: hsl(none 30% 40%))"),
+        "{msg}"
+    );
+    assert!(
+        err("color.complement(red, $space: null)").contains("$space: null is not a string.")
+    );
+    // global legacy spelling (no CSS-filter twin)
+    assert_eq!(value("complement(turquoise)"), "#e04050");
+}

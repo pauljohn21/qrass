@@ -56,6 +56,9 @@ pub(crate) fn register(r: &mut Registry) {
     r.def_p("opacify", 2, Some(2), &["color", "amount"], fade_in);
     r.def_p("fade-out", 2, Some(2), &["color", "amount"], fade_out);
     r.def_p("transparentize", 2, Some(2), &["color", "amount"], fade_out);
+    // `complement` has no CSS-filter twin, so the legacy global spelling
+    // registers cleanly (`global/color/complement.hrx`).
+    r.def_p("complement", 1, Some(2), &["color", "space"], complement);
     r.def_p(
         "adjust-hue",
         2,
@@ -81,24 +84,97 @@ fn as_legacy_rgb(col: Color) -> SassValue {
     })
 }
 
-/// `color.complement($color, $space)`: rotate the hue 180° in HSL. A modern Color 4
-/// input is rejected (its goldens need gamut conversion). The optional `$space`
-/// (hsl/hwb) selects the same hue rotation for a legacy color, so it is accepted
-/// and ignored here.
+/// `color.complement($color, $space)`: rotate the hue 180° in the working
+/// space, per the `color/complement.hrx` goldens: a non-string `$space` is
+/// `$space: … is not a string.`, a non-polar space is `Color space X doesn't
+/// have a hue channel.`, and a *missing hue* in the working space raises
+/// dart's missing-channels guard spelling the color in that space. A modern
+/// color rotated in its own space re-emits that space verbatim (a missing
+/// lightness etc. survives); legacy colors keep the historical HSL rotation.
+/// Cross-space rotations needing none-propagation conversions stay on the
+/// per-space model's deferred list (the pre-existing rejection).
 fn complement(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
-    if col.c4.is_some() {
+    let space_arg = c.opt("space", Some(1));
+    let target = match space_arg {
+        None => None,
+        Some(SassValue::Str { text, .. }) => Some(text.replace('_', "-")),
+        Some(other) => {
+            return Err(err(format!(
+                "$space: {} is not a string.",
+                other.to_css()
+            )));
+        }
+    };
+    let Some(c4) = &col.c4 else {
+        // the `$space` argument is validated before any rotation (golden
+        // `error/space/non_polar_angle` reads `xyz` on a *legacy* color)
+        if let Some(t) = &target {
+            validate_polar(t)?;
+        }
+        // legacy color: HSL rotation, and the goldens show `hsl`/`hwb`/`rgb`
+        // targets rotate identically (`space/legacy/to_legacy`, `named` →
+        // `aqua`); a modern target needs the deferred conversion model.
+        let hsl = col.to_hsl();
+        let legacy_target = match &target {
+            None => true,
+            Some(t) => matches!(t.as_str(), "rgb" | "hsl" | "hwb"),
+        };
+        if legacy_target {
+            return Ok(as_legacy_rgb(Color::from_hsla(
+                wrap(hsl.h + 180.0),
+                hsl.s,
+                hsl.l,
+                col.a,
+            )));
+        }
+        return Err(err(
+            "complement of a Color 4 color in another space is not supported",
+        ));
+    };
+    let working = target.clone().unwrap_or_else(|| c4.space.name.to_string());
+    validate_polar(&working)?;
+    let Some(space) = crate::color4::lookup(&working).cloned() else {
+        unreachable!("validated polar by validate_polar")
+    };
+    let hue_idx = space.channels.iter().position(|ch| ch.name == "hue").expect("polar space");
+    if working != c4.space.name {
         return Err(err(
             "complement of a Color 4 color in another space is not supported",
         ));
     }
-    let hsl = col.to_hsl();
-    Ok(as_legacy_rgb(Color::from_hsla(
-        wrap(hsl.h + 180.0),
-        hsl.s,
-        hsl.l,
-        col.a,
-    )))
+    let mut rotated = c4.clone();
+    match rotated.comps[hue_idx] {
+        None => {
+            return Err(err(format!(
+                "$hue: Because the CSS working group is still deciding on the best behavior, Sass doesn't currently support modifying missing channels (color: {}).",
+                c4.to_css()
+            )));
+        }
+        Some(h) => rotated.comps[hue_idx] = Some(wrap(h + 180.0)),
+    }
+    Ok(make(Color {
+        c4: Some(rotated),
+        ..col
+    }))
+}
+
+/// `complement`'s `$space` validation, read off the space table itself (the
+/// channel names the to-space goldens already exercise): an unknown name or a
+/// space without a `hue` channel fails the same way regardless of the color's
+/// origin (`error/space/non_polar_angle`).
+fn validate_polar(target: &str) -> Or<()> {
+    let Some(space) = crate::color4::lookup(target) else {
+        return Err(err(format!(
+            "$space: Unknown color space \"{target}\"."
+        )));
+    };
+    if !space.channels.iter().any(|ch| ch.name == "hue") {
+        return Err(err(format!(
+            "$space: Color space {target} doesn't have a hue channel."
+        )));
+    }
+    Ok(())
 }
 
 /// `color.grayscale($color)`: drop the HSL saturation to `0`, keeping lightness.
