@@ -39,6 +39,8 @@ mod eval_color4;
 mod eval_color4_check;
 #[path = "eval_color_space.rs"]
 mod eval_color_space;
+#[path = "eval_color_space_symbolic.rs"]
+mod eval_color_space_symbolic;
 #[path = "eval_callable.rs"]
 mod eval_callable;
 #[path = "eval_callable_call.rs"]

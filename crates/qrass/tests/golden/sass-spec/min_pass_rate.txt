@@ -1142,4 +1142,16 @@
 #     preservation (`rgb(none 255 none)` goldens need legacy missing slots).
 # sass-spec 8527 -> 8589 (+62: to-gamut clip + grammar), 0 regressions, full
 # test suite green (466 passed), clippy -D warnings green.
-78.3
+#
+# Round 83: symbolic-slot serialization for the modern space-separated
+#     `hsl`/`hsla` spelling (`hsl/one_arg/special_functions/*`): a
+#     calc/var/env/attr slot — directly or through `string.unquote("…")`,
+#     recognized by its EVALUATED unquoted text — re-emits the legacy comma
+#     form `hsl(1, calc(2%), 3%, 0.4)`; `from` anchors and `/`-product slots
+#     fail the leaf test and keep the verbatim slash spelling (round-65
+#     relative-color families untouched).
+#     Remaining special_functions gaps (49): the hwb/rgb comma families and
+#     `no_alpha` per-space model slices — separate territories.
+# sass-spec 8589 -> 8618 (+29: symbolic hsl comma), 0 regressions, full test
+# suite green (468 passed), clippy -D warnings green.
+78.6

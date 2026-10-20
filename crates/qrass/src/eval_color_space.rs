@@ -329,6 +329,15 @@ impl EvalState {
         if channels.len() == 3 && !verbatim {
             return self.legacy_dispatch(call, &channels, alpha);
         }
+        // A symbolic hsl/hsla slot (calc/var/env/attr) re-emits the call in
+        // the legacy COMMA form — `hsl(1, calc(2%), 3%, 0.4)`
+        // (`hsl/one_arg/special_functions/*`). `from` anchors and `/`-product
+        // slots are not leaf-ok, so the verbatim slash form below keeps them.
+        if channels.len() == 3
+            && let Some(text) = self.try_comma_symbolic_color(call, &channels, alpha)?
+        {
+            return Ok(Some(SassValue::Str { text, quoted: false }));
+        }
         // Symbolic / relative colors render verbatim with the alpha slash kept
         // literal (`hwb(0 30% var(--c)/0.5)`). The hsl family only.
         let items = verbatim_items.unwrap_or(std::slice::from_ref(arg0));
@@ -358,43 +367,6 @@ impl EvalState {
         }))
     }
 
-    /// The bare global `invert()`: dart disambiguates by argument kind — a
-    /// plain-CSS filter call (`invert(10%)`, `invert(var(--c))`) passes through
-    /// verbatim (two or more CSS-value arguments are dart's plain-CSS arity
-    /// note), while any Sass-side spelling (`invert(c)`, `invert(red)`, a named
-    /// `$weight`/`$space`) routes to the `color.invert` builtin verbatim.
-    pub(super) fn eval_plain_invert(&mut self, call: &FunctionCall) -> Ev<SassValue> {
-        let raw = self.collect_args(&call.args)?;
-        let cssish = |v: &SassValue| {
-            matches!(v, SassValue::Number { .. }) || super::eval_color4_check::is_symbolic(v)
-        };
-        if raw.named().is_empty() && raw.positional().iter().all(cssish) {
-            if raw.positional().len() == 1 {
-                return Ok(SassValue::Str {
-                    text: self.render_css_call(call)?,
-                    quoted: false,
-                });
-            }
-            return Err(SassError::new(
-                ErrorKind::Builtins,
-                "Only one argument may be passed to the plain-CSS invert() function.",
-            ));
-        }
-        let Some(result) = crate::builtins::call(
-            Some("color"),
-            "invert",
-            raw.positional(),
-            raw.named(),
-        ) else {
-            return Ok(SassValue::Str {
-                text: self.render_css_call(call)?,
-                quoted: false,
-            });
-        };
-        result.map_err(|e| e.note(format!("during builtin `invert` in module {}", self.name)))
-    }
-
-    /// Evaluate the split channel ASTs into values and hand them to the legacy
     /// positional builtins (which keep the goldens' serialization forms),
     /// normalizing a percentage alpha to `0..=1`.
     pub(super) fn legacy_dispatch(
