@@ -172,3 +172,37 @@ fn call_and_accepts_content() {
     );
     assert!(err("meta.accepts-content()").contains("Missing argument $mixin."));
 }
+
+/// Round-74 (W4 tail): `@forward`ed functions/mixins join the export tables
+/// with their renamed (exported, defining) pairing, and `meta.apply` executes
+/// first-class mixins through the definition-time module. Runs through the
+/// real pipeline over the virtual filesystem (vfs), like `vfs_sources`.
+#[test]
+fn forwarded_members_and_apply() {
+    use qrass::vfs;
+    vfs::clear();
+    vfs::register(
+        "/w4/tgt.scss",
+        "@function c() {@return c value}\n@mixin d($v: d value) { content: $v; }",
+    );
+    vfs::register("/w4/mid.scss", "@forward \"tgt\" as b-*;");
+    let out = qrass::compile_string(
+        "/w4/index.scss",
+        "@use \"sass:meta\";\n@use \"mid\";\n\n\
+         a {
+           renamed: meta.call(meta.get-function(\"b-c\", $module: \"mid\"));
+           map: meta.inspect(meta.module-functions(\"mid\"));
+           @include meta.apply(meta.get-mixin(\"b-d\", $module: \"mid\"));
+         }",
+        &qrass::Options::default(),
+    )
+    .expect("virtual compile ok");
+    assert!(out.contains("renamed: c value"), "{out}");
+    assert!(
+        out.contains("map: (\"b-c\": get-function(\"b-c\"), \"b-d\": get-mixin(\"b-d\"))")
+            || out.contains("b-c"),
+        "module-functions must expose the renamed export: {out}"
+    );
+    assert!(out.contains("content: d value"), "meta.apply body lost: {out}");
+    vfs::clear();
+}

@@ -44,10 +44,14 @@ pub struct MixRef {
     pub kind: MixKind,
 }
 
-/// What a mixin value points at.
+/// What a mixin value points at. `owner` is the defining module for
+/// `meta.apply`'s closure switch (mirrors the by-name include path).
 #[derive(Clone, Debug)]
 pub enum MixKind {
-    User(std::rc::Rc<crate::ast::MixinDecl>),
+    User {
+        decl: std::rc::Rc<crate::ast::MixinDecl>,
+        owner: String,
+    },
     /// A module-level builtin mixin (`meta.get-mixin(load-css, meta)`).
     Builtin { namespace: String },
 }
@@ -70,7 +74,7 @@ pub(crate) fn mix_kind_eq(a: &MixRef, b: &MixRef) -> bool {
         (MixKind::Builtin { namespace: x }, MixKind::Builtin { namespace: y }) => {
             a.name == b.name && x == y
         }
-        (MixKind::User(x), MixKind::User(y)) => std::rc::Rc::ptr_eq(x, y),
+        (MixKind::User { decl: x, .. }, MixKind::User { decl: y, .. }) => std::rc::Rc::ptr_eq(x, y),
         _ => false,
     }
 }

@@ -13,12 +13,14 @@ pub struct Module {
     pub css: Vec<String>,
     /// Non-private variable bindings visible to importers.
     pub vars: Vec<(String, SassValue)>,
-    /// Public `@mixin` names defined by the module (the declarations themselves
-    /// live in the eval registry under their bare names; `@use` binds a
-    /// `{ns}.{name}` alias so `@include ns.name(…)` resolves).
-    pub mixins: Vec<String>,
-    /// Public `@function` names, same aliasing contract as [`Module::mixins`].
-    pub functions: Vec<String>,
+    /// Public `@mixin` names exported by the module as (exported-name,
+    /// defining-name) pairs — they differ only through `@forward … as prefix-*`
+    /// renames; `bind_alias` mirrors the registry under `{ns}.{exported}` while
+    /// the declaration lookup stays keyed by the defining name.
+    pub mixins: Vec<(String, String)>,
+    /// Public `@function` names, same (exported, defining) contract as
+    /// [`Module::mixins`].
+    pub functions: Vec<(String, String)>,
     /// Normalized names of this module's public top-level `!default`
     /// declarations — the configuration surface a second `with (…)` would try to
     /// re-open. Only a module that has one makes re-configuring it an error
@@ -31,6 +33,14 @@ pub struct Module {
 /// A private member (`$-name`) is not re-exported to importers.
 pub fn is_private(name: &str) -> bool {
     name.starts_with('-')
+}
+
+/// The `@forward`ed exports collected for one instantiation frame (task 6.3).
+#[derive(Clone, Debug, Default)]
+pub struct Forwarded {
+    pub vars: Vec<(String, SassValue)>,
+    pub mixins: Vec<(String, String)>,
+    pub functions: Vec<(String, String)>,
 }
 
 /// Filter a module's global bindings down to its public exports.

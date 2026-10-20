@@ -987,4 +987,19 @@
 #     — logged as the plan's tail work, not claimed here.
 # sass-spec 8212 -> 8233 (+21: module-functions/-mixins introspection), 0
 # regressions, full test suite green (441 passed), clippy -D warnings green.
-75.1
+#
+# Round 74 (W4 tail): `@forward`ed members join exports as (exported,
+#     defining) pairs (renames ride `bind_members` mirrors `{ns}.{exported}`),
+#     `meta.apply($mixin, $args…)` executes user mixin values through the
+#     definition-time module, and get-function/get-mixin `$module:` reads now
+#     consult the mirrored `{ns}.{name}` registry (different_module goldens).
+#     First cut panicked on `expect("bound member")` (introspection looked up
+#     the defining name while bind keyed the exported one) — A/B caught it;
+#     fixed to exported-key-then-defined-fallback with defensive skip.
+#     Remaining cluster gaps: the `#{$name}: { … }` property-block syntax in
+#     print-mixin-map consumption (5 mixins cases) and `meta.get-module`
+#     module-reference values (2 cases) — separate slices.
+# sass-spec 8233 -> 8274 (+41: forward exports + apply + module-qualified
+# getters), 0 regressions, full test suite green (442 passed),
+# clippy -D warnings green.
+75.4

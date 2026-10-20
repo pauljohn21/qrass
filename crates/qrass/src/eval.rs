@@ -140,7 +140,7 @@ pub struct EvalState {
     /// frame stack (see [`LoadLink`]).
     pub(crate) links: Vec<LoadLink>,
     /// Per-instantiation-frame buffer of `@forward`ed exports (task 6.3).
-    pub forward_buf: Vec<Vec<(String, crate::value::SassValue)>>,
+    pub forward_buf: Vec<crate::module::Forwarded>,
     /// Per-instantiation-frame view of the `with (…)` configuration visible to
     /// the module being run: `(normalized name, offer index)` pairs.
     pub(crate) config_stack: Vec<Vec<(String, usize)>>,

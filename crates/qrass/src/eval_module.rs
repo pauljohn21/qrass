@@ -13,7 +13,7 @@ use std::rc::Rc;
 use tracing::{Level, span};
 
 use super::branch_fanout::{Prepared, acquire, branch_key};
-use super::eval_bind::filter_forwarded;
+use super::eval_bind::{filter_forwarded, filter_forwarded_names};
 use crate::ast::{Forward, Use};
 use crate::clock::StopWatch;
 use crate::error::{ErrorKind, Frame, SassError};
@@ -60,8 +60,13 @@ impl EvalState {
             .load_module(&f.url, view, out, false, link, f.span)
             .map_err(|err| self.attach_frames(err))?;
         let members = filter_forwarded(module.vars.clone(), &f.shown, &f.hidden, &f.prefix);
+        let fwd_mixins = filter_forwarded_names(&module.mixins, &f.shown, &f.hidden, &f.prefix);
+        let fwd_functions =
+            filter_forwarded_names(&module.functions, &f.shown, &f.hidden, &f.prefix);
         if let Some(buf) = self.forward_buf.last_mut() {
-            buf.extend(members);
+            buf.vars.extend(members);
+            buf.mixins.extend(fwd_mixins);
+            buf.functions.extend(fwd_functions);
         }
         // Only a body that actually ran could have claimed the entries; a cached
         // or plain-CSS target has no `!default` to claim them with, and the
@@ -339,7 +344,7 @@ impl EvalState {
         let outer_name = std::mem::replace(&mut self.name, key.to_string());
         let outer_content = std::mem::replace(&mut self.content, content.to_string());
         self.stack.push(key.to_string());
-        self.forward_buf.push(Vec::new());
+        self.forward_buf.push(crate::module::Forwarded::default());
         self.config_stack.push(view.to_vec());
 
         // This body's own `@use`/`@forward` statements are independent branches:
@@ -356,7 +361,7 @@ impl EvalState {
             }
             let forwarded = st.forward_buf.last().cloned().unwrap_or_default();
             let mut vars = export_vars(st.env.global_bindings());
-            vars.extend(forwarded);
+            vars.extend(forwarded.vars);
             // Public mixin/function members: collect the top-level declarations so
             // `bind_alias` can register `{ns}.{name}` aliases over the live registry
             // entries (bare-name definitions + their lexical env snapshots remain).
@@ -376,11 +381,11 @@ impl EvalState {
                     crate::ast::Stmt::Mixin(m) => {
                         let n = st.render_interp(&m.name)?;
                         if !crate::module::is_private(&n) {
-                            mixins.push(n);
+                            mixins.push((n.clone(), n));
                         }
                     }
                     crate::ast::Stmt::Function(f) if !crate::module::is_private(&f.name) => {
-                        functions.push(f.name.clone());
+                        functions.push((f.name.clone(), f.name.clone()));
                     }
                     _ => {}
                 }
@@ -388,8 +393,8 @@ impl EvalState {
             Ok(Module {
                 css,
                 vars,
-                mixins,
-                functions,
+                mixins: dedup_members(mixins, forwarded.mixins),
+                functions: dedup_members(functions, forwarded.functions),
                 configurable,
             })
         })(self);
@@ -432,4 +437,18 @@ pub(crate) fn parent_dir(path: &str) -> PathBuf {
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_default()
+}
+
+/// Merge a module's own member names with its `@forward`ed (exported, defining)
+/// pairs, first-wins on the exported name.
+fn dedup_members(
+    mut own: Vec<(String, String)>,
+    forwarded: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    for pair in forwarded {
+        if !own.iter().any(|(n, _)| *n == pair.0) {
+            own.push(pair);
+        }
+    }
+    own
 }

@@ -205,7 +205,7 @@ impl EvalState {
                     SassValue::Mixin(m) => match &m.kind {
                         // `@content` anywhere in the body (even under a dead
                         // `@if false` branch — the `if_false` golden says true).
-                        MixKind::User(decl) => body_takes_content(&decl.body),
+                        MixKind::User { decl, .. } => body_takes_content(&decl.body),
                         // `meta.apply` forwards a block; `load-css` does not.
                         MixKind::Builtin { .. } => m.name == "apply",
                     },
@@ -249,7 +249,7 @@ impl EvalState {
                     }
                     None => String::new(),
                 };
-                let members: Vec<String> =
+                let members: Vec<(String, String)> =
                     if let Some(module) = self.bound_modules.get(&ns) {
                         if mixins {
                             module.mixins.clone()
@@ -265,27 +265,61 @@ impl EvalState {
                         ));
                     };
                 let mut entries = Vec::with_capacity(members.len());
-                for member in members {
-                    let key = format!("{ns}.{member}");
+                for (exported, defined) in members {
+                    // `bind_members` mirrors the registry under `{ns}.{exported}`
+                    // (forwarded renames included); the defining name keeps the
+                    // snapshot lookups working for plain members too.
+                    let key = format!("{ns}.{exported}");
                     let value = if mixins {
-                        let decl = self.mixins.get(&key).cloned().expect("bound member");
+                        let Some(decl) =
+                            self.mixins.get(&key).or_else(|| self.mixins.get(&defined)).cloned()
+                        else
+                        {
+                            continue;
+                        };
                         SassValue::Mixin(Rc::new(MixRef {
-                            name: member.clone(),
+                            name: exported.clone(),
                             module: Some(ns.clone()),
-                            kind: MixKind::User(decl),
+                            kind: MixKind::User {
+                                decl,
+                                owner: self
+                                    .mixin_module
+                                    .get(&key)
+                                    .or_else(|| self.mixin_module.get(&defined))
+                                    .cloned()
+                                    .unwrap_or_else(|| self.env_owner.clone()),
+                            },
                         }))
                     } else {
-                        let decl = self.functions.get(&key).cloned().expect("bound member");
-                        let (env, owner) = self.closure_snapshot(&key);
+                        let Some(decl) =
+                            self.functions.get(&key).or_else(|| self.functions.get(&defined)).cloned()
+                        else
+                        {
+                            continue;
+                        };
+                        let (env, owner) = self
+                            .function_env
+                            .get(&key)
+                            .cloned()
+                            .map(|e| (e, self.function_module.get(&key).cloned()))
+                            .or_else(|| {
+                                self.function_env.get(&defined).cloned().map(|e| {
+                                    (e, self.function_module.get(&defined).cloned())
+                                })
+                            })
+                            .map_or_else(
+                                || self.closure_snapshot(&key),
+                                |(e, o)| (e, o.unwrap_or_else(|| self.env_owner.clone())),
+                            );
                         SassValue::Function(Rc::new(FnRef {
-                            name: member.clone(),
+                            name: exported.clone(),
                             module: Some(ns.clone()),
                             kind: FnKind::User { decl, env, owner },
                         }))
                     };
                     entries.push((
                         SassValue::Str {
-                            text: member,
+                            text: exported,
                             quoted: true,
                         },
                         value,
@@ -412,6 +446,17 @@ impl EvalState {
                     format!("There is no module with namespace \"{ns}\"."),
                 ));
             }
+            // the module's own user functions live mirrored under `{ns}.{name}`
+            // by `bind_members` (get_function/different_module goldens);
+            // forwarded renames ride the same key.
+            if let Some(decl) = self.functions.get(&format!("{ns}.{canon}")) {
+                let (env, owner) = self.closure_snapshot(&format!("{ns}.{canon}"));
+                return Ok(Some(SassValue::Function(Rc::new(FnRef {
+                    name: canon.to_string(),
+                    module: Some(ns.to_string()),
+                    kind: FnKind::User { decl: decl.clone(), env, owner },
+                }))));
+            }
             if crate::builtins::contains(Some(ns), canon) {
                 return Ok(Some(SassValue::Function(Rc::new(FnRef {
                     name: canon.to_string(),
@@ -455,8 +500,23 @@ impl EvalState {
                     format!("There is no module with namespace \"{ns}\"."),
                 ));
             }
-            // The only built-in module mixin the goldens pin is
-            // `meta.get-mixin(load-css, meta)` (`inspect/mixin.hrx`).
+            // The only built-in module mixins the goldens pin are
+            // `meta.get-mixin(load-css, meta)` (`inspect/mixin.hrx`) and
+            // `meta.apply` (`accepts_content/builtin`).
+            if let Some(decl) = self.mixins.get(&format!("{ns}.{canon}")) {
+                return Ok(Some(SassValue::Mixin(Rc::new(MixRef {
+                    name: canon.to_string(),
+                    module: Some(ns.to_string()),
+                    kind: MixKind::User {
+                        decl: decl.clone(),
+                        owner: self
+                            .mixin_module
+                            .get(&format!("{ns}.{canon}"))
+                            .cloned()
+                            .unwrap_or_else(|| self.env_owner.clone()),
+                    },
+                }))));
+            }
             if ns == "meta" && canon == "load-css" {
                 return Ok(Some(SassValue::Mixin(Rc::new(MixRef {
                     name: "load-css".to_string(),
@@ -473,7 +533,14 @@ impl EvalState {
                 return Ok(Some(SassValue::Mixin(Rc::new(MixRef {
                     name: key.to_string(),
                     module: None,
-                    kind: MixKind::User(decl.clone()),
+                    kind: MixKind::User {
+                        decl: decl.clone(),
+                        owner: self
+                            .mixin_module
+                            .get(key)
+                            .cloned()
+                            .unwrap_or_else(|| self.env_owner.clone()),
+                    },
                 }))));
             }
         }

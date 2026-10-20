@@ -41,21 +41,61 @@ impl EvalState {
         out: &mut Vec<String>,
     ) -> Ev<()> {
         let name = self.render_interp(&inc.name)?;
-        let mixin = match self.mixins.get(&name) {
-            Some(m) => m.clone(),
-            None => {
-                return Err(SassError::new(
+        // `@include meta.apply($mixin, $args…)`: first-class mixin dispatch
+        // (round-73 W4 — the `module_mixins` print-mixin-map consumption
+        // chain). The reference head is peeled off; the remainder binds like
+        // an ordinary include against the definition-time module.
+        let apply_head = name == "meta.apply";
+        let (mixin, def_owner, raw) = if apply_head {
+            let raw0 = self.collect_args(&inc.args)?;
+            let head = raw0.positional().first().cloned().ok_or_else(|| {
+                SassError::new(ErrorKind::Builtins, "Missing argument $mixin.")
+            })?;
+            let (decl, owner) = match &head {
+                crate::value::SassValue::Mixin(m) => match &m.kind {
+                    crate::value::MixKind::User { decl, owner } => (decl.clone(), owner.clone()),
+                    crate::value::MixKind::Builtin { .. } => {
+                        return Err(SassError::new(
+                            ErrorKind::Unsupported,
+                            format!("meta.apply of builtin mixin `{}` is not supported.", m.name),
+                        ));
+                    }
+                },
+                other => {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        format!("$mixin: {} is not a mixin reference.", other.to_css()),
+                    ));
+                }
+            };
+            let named: HashMap<String, SassValue> = raw0
+                .named()
+                .iter()
+                .filter(|(k, _)| k.as_str() != "mixin")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let positional = raw0.positional()[1..].to_vec();
+            (
+                decl,
+                owner,
+                super::eval_mixin::RawArgs::from_parts(positional, named),
+            )
+        } else {
+            let mixin = self.mixins.get(&name).cloned().ok_or_else(|| {
+                SassError::new(
                     ErrorKind::Eval,
                     format!("Undefined mixin `{name}`"),
-                ));
-            }
+                )
+            })?;
+            let owner = self
+                .mixin_module
+                .get(&name)
+                .cloned()
+                .unwrap_or_else(|| self.env_owner.clone());
+            (mixin, owner, self.collect_args(&inc.args)?)
         };
 
         let site_scope = self.env.current_scope();
-        // Argument expressions evaluate in the caller's scope; defaults resolve
-        // later against the mixin body scope so `$h: $w` sees the prior parameter.
-        let raw = self.collect_args(&inc.args)?;
-
         // `@content` must replay in the include site's *whole* environment, so the
         // site arena (and its owning module) is captured up front — a scope id alone
         // is meaningless once the body swaps into the defining module's live env.
@@ -73,12 +113,7 @@ impl EvalState {
         // nested calls share `self.env` directly; cross-module calls park the caller
         // and swap the module's persistent env in so `!global` writes (e.g. BEM
         // `$B`/`$E`) propagate across the whole call tree.
-        let def = self
-            .mixin_module
-            .get(&name)
-            .cloned()
-            .unwrap_or_else(|| self.env_owner.clone());
-        let swapped = self.begin_closure(&def);
+        let swapped = self.begin_closure(&def_owner);
         self.env.enter();
         self.bind_params(&mixin.params, raw)?;
         for s in &mixin.body {

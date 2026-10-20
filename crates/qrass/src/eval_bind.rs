@@ -43,27 +43,27 @@ impl EvalState {
     /// the lexical env/module snapshots registered at definition time so namespaced
     /// bodies still resolve against the defining module's environment.
     fn bind_members(&mut self, ns: &str, module: &Module) {
-        for name in &module.mixins {
-            let key = format!("{ns}.{name}");
-            if let Some(d) = self.mixins.get(name) {
+        for (exported, defined) in &module.mixins {
+            let key = format!("{ns}.{exported}");
+            if let Some(d) = self.mixins.get(defined) {
                 self.mixins.insert(key.clone(), d.clone());
             }
-            if let Some(e) = self.mixin_env.get(name) {
+            if let Some(e) = self.mixin_env.get(defined) {
                 self.mixin_env.insert(key.clone(), e.clone());
             }
-            if let Some(o) = self.mixin_module.get(name) {
+            if let Some(o) = self.mixin_module.get(defined) {
                 self.mixin_module.insert(key, o.clone());
             }
         }
-        for name in &module.functions {
-            let key = format!("{ns}.{name}");
-            if let Some(d) = self.functions.get(name) {
+        for (exported, defined) in &module.functions {
+            let key = format!("{ns}.{exported}");
+            if let Some(d) = self.functions.get(defined) {
                 self.functions.insert(key.clone(), d.clone());
             }
-            if let Some(e) = self.function_env.get(name) {
+            if let Some(e) = self.function_env.get(defined) {
                 self.function_env.insert(key.clone(), e.clone());
             }
-            if let Some(o) = self.function_module.get(name) {
+            if let Some(o) = self.function_module.get(defined) {
                 self.function_module.insert(key, o.clone());
             }
         }
@@ -79,6 +79,32 @@ pub(super) fn filter_forwarded(
 ) -> Vec<(String, SassValue)> {
     let norm = |s: &str| s.trim_start_matches(['$', '-']).to_string();
     let mut out = members;
+    if !shown.is_empty() {
+        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| keep.contains(n));
+    }
+    if !hidden.is_empty() {
+        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| !drop.contains(n));
+    }
+    if !prefix.is_empty() {
+        for (name, _) in &mut out {
+            *name = format!("{prefix}{name}");
+        }
+    }
+    out
+}
+
+/// Apply the same `@forward` `show`/`hide`/`as prefix*` filter to mixin or
+/// function members, keeping the (exported, defining) pairing intact.
+pub(super) fn filter_forwarded_names(
+    names: &[(String, String)],
+    shown: &[String],
+    hidden: &[String],
+    prefix: &str,
+) -> Vec<(String, String)> {
+    let norm = |s: &str| s.trim_start_matches(['$', '-']).to_string();
+    let mut out: Vec<(String, String)> = names.to_vec();
     if !shown.is_empty() {
         let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
         out.retain(|(n, _)| keep.contains(n));
