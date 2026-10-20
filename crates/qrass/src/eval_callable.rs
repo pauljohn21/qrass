@@ -17,12 +17,12 @@ use crate::value::{FnKind, FnRef, MixKind, MixRef, SassValue};
 use super::eval_mixin::RawArgs;
 use super::{Ev, EvalState};
 
-pub(super) fn err(msg: impl Into<String>) -> SassError {
+pub(crate) fn err(msg: impl Into<String>) -> SassError {
     SassError::new(ErrorKind::UndefinedFunction, msg)
 }
 
 /// Named-or-positional read on `RawArgs` (mirrors `builtins::Call::opt`).
-fn opt<'a>(raw: &'a RawArgs, key: &str, pos: usize) -> Option<&'a SassValue> {
+pub(crate) fn opt<'a>(raw: &'a RawArgs, key: &str, pos: usize) -> Option<&'a SassValue> {
     raw.named().get(key).or_else(|| raw.positional().get(pos))
 }
 
@@ -81,86 +81,7 @@ impl EvalState {
             // `call.hrx` string/* sections); everything else forwards to the
             // target's own arity/validation, whose errors surface verbatim
             // (`error/invalid_args` reads the rgb builtin's `$channels:` text).
-            "call" => {
-                let Some(target) = opt(raw, "function", 0).cloned() else {
-                    return Err(err("Missing argument $function."));
-                };
-                let resolved = match &target {
-                    SassValue::Function(f) => Some(f.clone()),
-                    SassValue::Str { .. } => match self.find_function(
-                        &match target {
-                            SassValue::Str { ref text, .. } => text.clone(),
-                            _ => unreachable!(),
-                        },
-                        &match target {
-                            SassValue::Str { ref text, .. } => text.replace('_', "-"),
-                            _ => unreachable!(),
-                        },
-                        None,
-                        false,
-                    )? {
-                        Some(SassValue::Function(f)) => Some(f),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                let Some(f) = resolved else {
-                    return Err(if matches!(target, SassValue::Str { .. }) {
-                        err(format!("Function not found: {}", target.to_css()))
-                    } else {
-                        SassError::new(
-                            ErrorKind::Builtins,
-                            format!("$function: {} is not a function reference.", target.to_css()),
-                        )
-                    });
-                };
-                // Peel the head argument off the positional list; when the
-                // function came from the named pool instead, every positional
-                // is a sub-argument.
-                let skip_head = raw
-                    .positional()
-                    .first()
-                    .is_some_and(|v| v == &target);
-                let positional: Vec<SassValue> = if skip_head {
-                    raw.positional()[1..].to_vec()
-                } else {
-                    raw.positional().to_vec()
-                };
-                let named: std::collections::HashMap<String, SassValue> = raw
-                    .named()
-                    .iter()
-                    .filter(|(k, _)| k.as_str() != "function")
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                let value = match &f.kind {
-                    FnKind::Css => {
-                        let mut parts: Vec<String> =
-                            positional.iter().map(|v| v.to_css()).collect();
-                        for (k, v) in &named {
-                            parts.push(format!("{k}: {}", v.to_css()));
-                        }
-                        return Ok(Some(SassValue::Str {
-                            text: format!("{}({})", f.name, parts.join(", ")),
-                            quoted: false,
-                        }));
-                    }
-                    FnKind::Builtin { namespace } => crate::builtins::call(
-                        namespace.as_deref(),
-                        &f.name,
-                        &positional,
-                        &named,
-                    )
-                    .ok_or_else(|| err(format!("Function not found: {}", f.name)))?
-                    .map_err(|e| {
-                        e.note(format!("during call of `{}` in module {}", f.name, self.name))
-                    })?,
-                    FnKind::User { decl, env, owner } => {
-                        let sub = RawArgs::from_parts(positional, named);
-                        self.invoke_user_fn(decl, env.clone(), owner.clone(), sub)?
-                    }
-                };
-                Ok(Some(value))
-            }
+            "call" => self.run_call(raw),
             "is-function" => Ok(Some(SassValue::Bool(matches!(
                 raw.positional().first(),
                 Some(SassValue::Function(_))
@@ -363,7 +284,7 @@ impl EvalState {
     /// `meta.get-function`/`get-mixin` per the error goldens: arity wording,
     /// `$name`/`$module` type wording, local → builtin lookup, and dart's
     /// `Function not found:` / `Mixin not found:` / namespace errors.
-    fn lookup_callable(&mut self, mixin: bool, raw: &RawArgs) -> Ev<SassValue> {
+    pub(super) fn lookup_callable(&mut self, mixin: bool, raw: &RawArgs) -> Ev<SassValue> {
         let max = if mixin { 2 } else { 3 };
         let given = raw.positional().len() + raw.named().len();
         if given == 0 {
@@ -420,7 +341,7 @@ impl EvalState {
         Err(err(format!("{label} not found: {display}")))
     }
 
-    fn find_function(
+    pub(super) fn find_function(
         &mut self,
         text: &str,
         canon: &str,

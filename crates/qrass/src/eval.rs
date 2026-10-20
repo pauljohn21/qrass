@@ -41,6 +41,8 @@ mod eval_color4_check;
 mod eval_color_space;
 #[path = "eval_callable.rs"]
 mod eval_callable;
+#[path = "eval_callable_call.rs"]
+mod eval_callable_call;
 #[path = "eval_config.rs"]
 mod eval_config;
 #[path = "eval_control.rs"]
