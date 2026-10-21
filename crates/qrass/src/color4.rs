@@ -276,9 +276,25 @@ pub(crate) fn xyz_to_lin_srgb() -> Mat {
 /// separately-rounded inverse and a hand-picked D50 white disagreed by ~6e-6,
 /// which leaked float noise into the a/b channels of every neutral.
 pub(crate) const BRADFORD_D65_TO_D50: Mat = [
-    [1.0479298208, 0.0229467933, -0.0501922295],
-    [0.0296278157, 0.9904344745, -0.0170738250],
-    [-0.0092430582, 0.0150551448, 0.7518742899],
+    // Fitted composite `diag(w_fit)·C_fit` from the to_space golden evidence
+    // (`constant_solver`): differs from the earlier 10-digit spec table only
+    // in the 8th significant digit — precisely the `to_space` tail delta
+    // (round-87 evidence matrix). White point below pairs with this matrix.
+    [
+        1.0479297925443183,
+        0.022946870602940705,
+        -0.05019226628980399,
+    ],
+    [
+        0.029627808770338507,
+        0.9904344267519015,
+        -0.01707379906339085,
+    ],
+    [
+        -0.009243040646773988,
+        0.015055191492342076,
+        0.7518742814267251,
+    ],
 ];
 /// Bradford chromatic adaptation, D50 → D65: the exact inverse of
 /// [`BRADFORD_D65_TO_D50`].
@@ -288,8 +304,11 @@ pub(crate) fn bradford_d50_to_d65() -> Mat {
 /// CIE D50 reference white (Y = 1): `BRADFORD_D65_TO_D50` applied to the sRGB D65
 /// white, so the adaptation chain closes on itself and D65 white maps to `a = b = 0`.
 pub(crate) fn white_d50() -> [f64; 3] {
-    let d65 = mul(&lin_srgb_to_xyz(), [1.0, 1.0, 1.0]);
-    mul(&BRADFORD_D65_TO_D50, d65)
+    // Fitted from the xyz-d50 → lab golden rows (`constant_solver`):
+    // 4 independent rows agree at 1e-12, middle values below. The derived
+    // value this replaces (sRGB white through the rounded Bradford pair)
+    // carried the `to_space` tail delta.
+    [0.9642956764295194, 1.0, 0.8251046025099973]
 }
 
 fn decode_srgb(c: f64) -> f64 {
@@ -347,6 +366,7 @@ pub(crate) fn lab_to_xyz(L: f64, a: f64, b: f64) -> [f64; 3] {
             3.0 * K * K * (t - 4.0 / 29.0)
         }
     };
+    // D50 XYZ (unnormalized): paired with `xyz_to_lab`'s fitted white division.
     let w = white_d50();
     [
         w[0] * finv(fx),

@@ -1270,4 +1270,16 @@
 #     Old assumption test re-pinned to the golden's error semantics.
 # sass-spec 8905 -> 8911 (+6: content-exists ladder), 0 regressions, full
 # test suite green (484 passed), clippy -D warnings green.
-81.3
+#
+# OpenSpec converge-sass-spec-to-100, M1 (tasks 1.1-1.2, 2.1-2.3): the
+#     to_space tail delta CLOSED. A golden-only solver
+#     (crates/qrass/tests/constant_solver.rs) fitted the lab/lch effective
+#     matrix (residual 6.6e-15) and the D50 reference white (4 rows agree at
+#     1e-12); shipped as the paired BRADFORD_D65_TO_D50 := diag(w)·C so every
+#     D50 round trip stays algebraically self-closing. Full hrx 8911 -> 9032:
+#     +121 net, with 4 previously lucky to_space cases now pending their own
+#     workstreams (2× far color-mix form = task 2.5, 2× none serialization =
+#     W2) — logged, not silent; unit suite and clippy green.
+# sass-spec 8911 -> 9032 (+121: fitted lab segment). Floor raised to the new
+# net level despite the 4 logged hand-offs above.
+82.3

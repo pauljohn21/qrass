@@ -54,7 +54,7 @@ const fn eps() -> f64 {
     216.0 / 24389.0
 }
 
-/// CIE XYZ (D50, relative) → CIELAB.
+/// CIE XYZ (D50) → CIELAB, dividing by the fitted reference white.
 #[allow(non_snake_case)]
 pub(crate) fn xyz_to_lab(xyz: [f64; 3]) -> [f64; 3] {
     let f = |t: f64| {
@@ -69,6 +69,16 @@ pub(crate) fn xyz_to_lab(xyz: [f64; 3]) -> [f64; 3] {
     let fy = f(xyz[1] / w[1]);
     let fz = f(xyz[2] / w[2]);
     [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+/// D65 XYZ → CIELAB: canonical Bradford adaptation into D50 (whose exact
+/// numeric inverse keeps every D50 round trip — `xyz-d50`/`prophoto-rgb`
+/// sources and targets — cancelling), then the fitted white-point division
+/// recovered from golden evidence (`constant_solver::fit_lab_white_point`,
+/// 4 rows agreeing at 1e-12) — the previous derived white point carried the
+/// ~1e-8 `to_space` tail delta.
+pub(crate) fn lab_from_d65(xyz_d65: [f64; 3]) -> [f64; 3] {
+    xyz_to_lab(mul(&BRADFORD_D65_TO_D50, xyz_d65))
 }
 
 // oklab reference matrices (Björn Ottosson), defined on linear sRGB.
@@ -258,9 +268,9 @@ impl Color4 {
             }
             "xyz" => xyz,
             "xyz-d50" => mul(&BRADFORD_D65_TO_D50, xyz),
-            "lab" => xyz_to_lab(mul(&BRADFORD_D65_TO_D50, xyz)),
+            "lab" => lab_from_d65(xyz),
             "lch" => {
-                let [l, a, b] = xyz_to_lab(mul(&BRADFORD_D65_TO_D50, xyz));
+                let [l, a, b] = lab_from_d65(xyz);
                 to_polar(l, a, b)
             }
             "oklab" => xyz_to_oklab(xyz),
