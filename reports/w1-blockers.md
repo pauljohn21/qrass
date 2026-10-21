@@ -89,3 +89,16 @@ unweighted default). Next session: score oklab variants only (L-domain
 CLOSED; production run_mix must route unweighted legacy pairs through oklab
 too (current legacy path = per-channel srgb, which is why both_weights
 mostly fails today).
+
+### M3 session-5: OKLAB HYPOTHESIS REFUTED — collection needs per-section method
+The opaque 50% row's golden (73, 146.5, 151) is EXACTLY plain srgb midpoint
+interpolation ((145+1)/2, (225+68)/2, (111+191)/2) — so legacy mix without an
+explicit $method is NOT oklab; session-4's out-of-span conclusion came from
+MIS-COLLECTED rows (the section's real method/operands were not carried in the
+row tuple — alpha-index fix alone is insufficient, e.g. nested rgba(#hex,a)
+parts indexing was silently wrong before; and some sections live under
+different default methods or carry method in a line my regex never captured).
+HARD PRECONDITION before any further algebra scoring: extend collect to
+(key = hrx section name) + capture the FULL input.scss text per row and
+verify a few rows by hand-running `qrass`/expectations; only then score.
+Treat all session-3/4 candidate numbers as void until rows are section-keyed.

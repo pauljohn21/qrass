@@ -884,6 +884,65 @@ fn solve_mix_algebra() {
     // color-mix defaults to OKLAB; score that too: premul-alpha interpolate
     // the oklab coords through the production kernel, convert back.
     {
+        // STANDALONE spec-oklab kernel (Björn Ottosson's published matrices +
+        // CSS Color 4 sRGB↔XYZ), NOT the production self-consistent path —
+        // the opaque 50% rows failed on the production kernel, so dart's
+        // mix uses the spec chain.
+        let oklab_of = |c: [f64; 3]| -> [f64; 3] {
+            let lin = c.map(|v| {
+                let s = v / 255.0;
+                if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            });
+            let l = 0.4122214708 * lin[0] + 0.5363325363 * lin[1] + 0.0514459929 * lin[2];
+            let m = 0.2119034982 * lin[0] + 0.6806995451 * lin[1] + 0.1073969566 * lin[2];
+            let s = 0.0883024619 * lin[0] + 0.2817188376 * lin[1] + 0.6299787005 * lin[2];
+            let (l_, m_, s_) = (l.cbrt(), m.cbrt(), s.cbrt());
+            [
+                0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720469 * s_,
+                1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+                0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757540 * s_,
+            ]
+        };
+        let srgb_of = |lab: [f64; 3]| -> [f64; 3] {
+            let l_ = lab[0] + 0.3963377774 * lab[1] + 0.2158037573 * lab[2];
+            let m_ = lab[0] - 0.1055613458 * lab[1] - 0.0638541728 * lab[2];
+            let s_ = lab[0] - 0.0894841775 * lab[1] - 1.2914855480 * lab[2];
+            let (l, m, s) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+            let lin = [
+                4.0767454819 * l - 3.3078165464 * m + 0.2309666057 * s,
+                -1.2684380061 * l + 2.6097573491 * m - 0.3413197701 * s,
+                -0.0041960863 * l - 0.7034186151 * m + 1.7076146986 * s,
+            ];
+            lin.map(|v| {
+                let s2 = if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+                s2.clamp(0.0, 1.0) * 255.0
+            })
+        };
+        let mut errs = 0.0f64;
+        let mut n = 0;
+        for (a, b, w, outs, oa) in &rows {
+            let la = oklab_of(a.ch);
+            let lb = oklab_of(b.ch);
+            let mut lab = [0.0f64; 3];
+            for i in 0..3 {
+                lab[i] = (la[i] * a.al * w + lb[i] * b.al * (1.0 - w)) / if *oa > 0.0 { *oa } else { 1.0 };
+            }
+            let back = srgb_of(lab);
+            for i in 0..3 {
+                if (back[i] - outs[i]).abs() > 1.0 {
+                    errs += 1.0;
+                    println!("ERR spekoklab ch{i}: got {:.4} want {:.4} (w={w} a1={} a2={} al={})", back[i], outs[i], a.al, b.al, oa);
+                }
+                n += 1;
+            }
+        }
+        println!("cand oklab-spec-premul: mismatched channels {errs}/{n}");
+        if errs < best.1 {
+            best = ("oklab-spec-premul", errs, n);
+        }
+    }
+    #[allow(clippy::needless_range_loop)]
+    {
         let mut errs = 0.0f64;
         let mut n = 0;
         for (a, b, w, outs, oa) in &rows {
@@ -916,6 +975,10 @@ fn solve_mix_algebra() {
                 let got = back.comps[i].unwrap_or(0.0) * 255.0;
                 if (got - outs[i]).abs() > 1.0 {
                     errs += 1.0;
+                    println!(
+                        "ERR oklab ch{i}: got {got:.4} want {:.4} (w={w} a1={} a2={} al={} {} )",
+                        outs[i], a.al, b.al, oa, a.ch[0]
+                    );
                 }
                 n += 1;
             }
@@ -1068,7 +1131,8 @@ fn parse_legacy_color(s: &str) -> Option<Color2> {
     if !cur.trim().is_empty() {
         parts.push(cur.trim().to_string());
     }
-    let base = if parts[0].starts_with('#') {
+    let nested = parts[0].starts_with('#');
+    let base = if nested {
         parse_legacy_color(&parts[0])?
     } else {
         let nums: Vec<f64> = parts
@@ -1084,6 +1148,11 @@ fn parse_legacy_color(s: &str) -> Option<Color2> {
             .collect();
         Color2 { ch: [nums.get(0).copied()?, nums.get(1).copied()?, nums.get(2).copied()?], al: 1.0 }
     };
-    let al = parts.get(3).and_then(|p| p.trim_end_matches(char::from(0x25)).parse::<f64>().ok()).unwrap_or(1.0);
+    // `rgba(#hex, a)` carries the alpha at index 1; the plain form at index 3
+    // (ROW dump audit: mis-slotted alphas corrupted most rows).
+    let al = parts
+        .get(if nested { 1 } else { 3 })
+        .and_then(|p| p.trim_end_matches('%').parse::<f64>().ok())
+        .unwrap_or(1.0);
     Some(Color2 { ch: base.ch, al })
 }
