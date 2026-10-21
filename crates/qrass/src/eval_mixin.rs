@@ -109,6 +109,7 @@ impl EvalState {
         self.content_stack.push(ContentCtx {
             block: inc.content.clone().unwrap_or_default(),
             params: inc.content_params.clone(),
+            has_content: inc.content.is_some(),
             site_env,
             site_scope,
             site_owner,
@@ -121,9 +122,11 @@ impl EvalState {
         let swapped = self.begin_closure(&def_owner);
         self.env.enter();
         self.bind_params(&mixin.params, raw)?;
+        self.in_mixin_body += 1;
         for s in &mixin.body {
             self.collect_stmt(s, sel_ctx, decls, out)?;
         }
+        self.in_mixin_body -= 1;
         self.env.leave();
         self.end_closure(swapped);
         self.content_stack.pop();
@@ -167,9 +170,13 @@ impl EvalState {
         for (p, v) in ctx.params.iter().zip(vals) {
             self.env.define(p, v, AssignFlags::default());
         }
+        // The replay is lexically at the include site: `content-exists()`
+        // inside it reads as outside-a-mixin (golden `error/in_content`).
+        self.content_replay += 1;
         for s in &ctx.block {
             self.collect_stmt(s, sel_ctx, decls, out)?;
         }
+        self.content_replay -= 1;
         self.env.leave();
         self.env.set_scope(prev);
         self.env = saved;

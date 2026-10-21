@@ -238,6 +238,17 @@ fn global_if_and_units() {
 
 // ─── env-dependent meta (intercepted in eval_call) ─────────────────────────────
 
+/// Evaluate `prog` and return the emitted error message (panics on success).
+fn err_prog(prog: &str) -> String {
+    match qrass::eval::eval_all(0, "t.scss".into(), prog.to_string(), {
+        let tokens = qrass::lexer::lex(0, "t.scss".into(), prog.to_string()).expect("lex");
+        qrass::parser::parse(0, "t.scss".into(), prog.to_string(), tokens).expect("parse")
+    }) {
+        Ok(out) => panic!("expected error, got: {}", out.join("\n")),
+        Err(e) => e.message,
+    }
+}
+
 /// Evaluate a full `prog` whose last rule emits `p`, returning `p`'s CSS value.
 fn val_prog(prog: &str) -> String {
     let out = css(prog);
@@ -287,7 +298,12 @@ fn mixin_and_function_exist() {
 
 #[test]
 fn content_exists_is_false_outside_include() {
-    assert_eq!(val_prog(".a { p: meta.content-exists(); }"), "false");
+    // golden `meta/content_exists` `error/outside_mixin`: calling outside a
+    // mixin body is an error, not a silent false (round 94).
+    assert!(
+        err_prog(".a { p: meta.content-exists(); }")
+            .contains("content-exists() may only be called within a mixin.")
+    );
 }
 
 /// The named-argument dispatcher folds `$name:`-style arguments into the

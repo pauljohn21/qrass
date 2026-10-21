@@ -86,7 +86,29 @@ impl EvalState {
                     .any(|k| crate::builtins::contains(None, k));
                 SassValue::Bool(user_defined || builtin)
             }
-            "content-exists" => SassValue::Bool(!self.content_stack.is_empty()),
+            "content-exists" => {
+                // Golden ladder (`meta/content_exists`): arity 0, mixin-scope
+                // gate (also during an `@content` replay), then a per-include
+                // "was a block passed" answer — `@include m {}` counts as
+                // content, `@include m;` does not.
+                let given = raw.positional().len();
+                if given > 0 {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        format!(
+                            "Only 0 arguments allowed, but {given} {} passed.",
+                            if given == 1 { "was" } else { "were" }
+                        ),
+                    ));
+                }
+                if self.in_mixin_body == 0 || self.content_replay > 0 {
+                    return Err(SassError::new(
+                        ErrorKind::Builtins,
+                        "content-exists() may only be called within a mixin.",
+                    ));
+                }
+                SassValue::Bool(self.content_stack.last().is_some_and(|c| c.has_content))
+            }
             // `meta.module-variables($module)`: the namespace's user variables
             // as a name-sorted map (the module_variables goldens spell keys
             // without `$`, in declaration-consistent order). meta-namespace

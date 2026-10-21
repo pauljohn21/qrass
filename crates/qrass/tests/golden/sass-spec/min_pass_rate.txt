@@ -1262,4 +1262,12 @@
 #     sections — architectural debt.
 # sass-spec 8897 -> 8905 (+8: mixin-exists ladder), 0 regressions, full test
 # suite green (483 passed), clippy -D warnings green.
-81.2
+#
+# Round 94: `meta.content-exists` golden ladder — arity 0 (`Only 0 arguments
+#     allowed, but 1 was passed.`), the within-a-mixin gate (also active
+#     during `@content` replay via `content_replay`), and per-include
+#     `has_content` (`@include m {}` counts, bare `@include m;` does not).
+#     Old assumption test re-pinned to the golden's error semantics.
+# sass-spec 8905 -> 8911 (+6: content-exists ladder), 0 regressions, full
+# test suite green (484 passed), clippy -D warnings green.
+81.3

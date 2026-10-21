@@ -122,6 +122,10 @@ pub(crate) struct PlaceholderRule {
 pub(crate) struct ContentCtx {
     pub block: Vec<Stmt>,
     pub params: Vec<String>,
+    /// Whether the include site actually passed a content block —
+    /// `meta.content-exists` answers per this, not per stack emptiness
+    /// (`meta/content_exists`: `@include m;` → false, `@include m {}` → true).
+    pub has_content: bool,
     /// The include site's **full** environment (arena + active scope): a mixin
     /// body runs in its defining module's scope, so `@content` must restore the
     /// caller's whole arena, not merely a scope id from a now-discarded env.
@@ -209,6 +213,14 @@ pub struct EvalState {
     pub(crate) parked: Vec<(Env, String)>,
     /// Stack of active `@include` content blocks; `@content` replays the top.
     pub(crate) content_stack: Vec<ContentCtx>,
+    /// Nesting counter: non-zero while a mixin body executes — gates
+    /// `content-exists()` outside-mixin rejection (`meta/content_exists`
+    /// `error/outside_mixin`).
+    pub(crate) in_mixin_body: usize,
+    /// Non-zero while an `@content` block replays: the replay runs in the
+    /// *include site's* lexical world, so `content-exists()` there is
+    /// outside-a-mixin too (golden `error/in_content`).
+    pub(crate) content_replay: usize,
     /// `@extend` sites: `(placeholder target, concrete selector, optional)`.
     pub extends: Vec<(String, String, bool)>,
     /// Placeholder rules held back for the global `@extend` pass.
@@ -263,6 +275,8 @@ impl EvalState {
             env_owner: owner,
             parked: Vec::new(),
             content_stack: Vec::new(),
+            in_mixin_body: 0,
+            content_replay: 0,
             extends: Vec::new(),
             placeholder_rules: Vec::new(),
             at_root: false,

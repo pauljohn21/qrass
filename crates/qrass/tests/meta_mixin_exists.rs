@@ -63,3 +63,32 @@ fn module_lookup() {
             .contains("b: false")
     );
 }
+
+/// Round-94 `meta.content-exists` golden ladder (`meta/content_exists`):
+/// arity 0, the within-a-mixin gate (also during `@content` replay), and the
+/// per-include "was a block passed" answer — `@include m {}` counts, a bare
+/// `@include m;` does not.
+#[test]
+fn content_exists_ladder() {
+    assert!(outcome("@use \"sass:meta\"; a {b: meta.content-exists()}")
+        .contains("content-exists() may only be called within a mixin."));
+    assert!(outcome("@use \"sass:meta\"; @mixin m { a {b: meta.content-exists(1)} } @include m;")
+        .contains("Only 0 arguments allowed, but 1 was passed."));
+    assert!(
+        outcome(
+            "@use \"sass:meta\"; @mixin m { a {b: meta.content-exists()} @content; } @include m;"
+        )
+        .contains("b: false")
+    );
+    assert!(
+        outcome(
+            "@use \"sass:meta\"; @mixin m { a {b: meta.content-exists()} @content; } @include m {}"
+        )
+        .contains("b: true")
+    );
+    // inside the content block the call is outside-a-mixin again
+    assert!(outcome(
+        "@use \"sass:meta\"; @mixin m { @content; } @include m { a {b: meta.content-exists()} }"
+    )
+    .contains("may only be called within a mixin"));
+}
