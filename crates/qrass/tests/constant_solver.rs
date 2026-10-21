@@ -840,3 +840,186 @@ fn fit_oklab_joint_clean() {
     ];
     println!("payload pred {got:?} vs golden 2.0602077969 1.6344741917 1.0169248199");
 }
+
+/// M3 task 4.1: batch-decide the mix channel algebra from golden pairs.
+/// Collects `color.mix(A, B, W%)` inputs (legacy rgb/hex/rgba spellings) +
+/// the 4 output channels, then scores candidate formulas. Print the best.
+#[test]
+#[ignore]
+fn solve_mix_algebra() {
+    let root = Path::new("../../sass-spec/spec/core_functions/color/mix");
+    let mut rows: Vec<(Color2, Color2, f64, [f64; 3], f64)> = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let rd = fs::read_dir(&d);
+        let Ok(entries) = rd else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "hrx") {
+                collect_mix_rows(&p, &mut rows);
+            }
+        }
+    }
+    let dec = |v: f64| {
+        let s = v / 255.0;
+        if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    };
+    let enc = |l: f64| {
+        if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 }
+    };
+    // candidates: (name, per-channel function) — all return the 0..255
+    // encoding domain, matching `outs`.
+    let cands: Vec<(&str, fn(&Color2, &Color2, f64, f64, &dyn Fn(f64) -> f64, &dyn Fn(f64) -> f64) -> f64)> = vec![
+        ("enc-premul", |a, b, w, oa, _, _| (w * a.al * a.ch[0] + (1.0 - w) * b.al * b.ch[0]) / oa),
+        ("lin-premul", |a, b, w, oa, d, e| e((w * a.al * d(a.ch[0]) + (1.0 - w) * b.al * d(b.ch[0])) / oa) * 255.0),
+        ("plain-enc", |a, b, w, _, _, _| w * a.ch[0] + (1.0 - w) * b.ch[0]),
+        ("plain-lin-enc", |a, b, w, _, d, e| e(w * d(a.ch[0]) + (1.0 - w) * d(b.ch[0])) * 255.0),
+    ];
+    let mut best = ("", 0.0f64, usize::MAX);
+    for (name, f) in &cands {
+        let mut errs = 0.0f64;
+        let mut n = 0;
+        for (a, b, w, outs, oa) in &rows {
+            let _ = (dec, enc);
+            for i in 0..3 {
+                let got = f(a, b, *w, *oa, &|v| dec(v), &|v| enc(v));
+                let d = (got - outs[i]).abs();
+                if d > 1.0 {
+                    errs += 1.0;
+                }
+                n += 1;
+            }
+        }
+        if n > 0 {
+            println!("cand {name}: mismatched channels {errs}/{}", n);
+            if errs < best.2 as f64 {
+                best = (name, errs, n);
+            }
+        }
+    }
+    println!("rows={} best={:?}", rows.len(), best);
+}
+
+#[derive(Clone, Copy)]
+struct Color2 {
+    ch: [f64; 3], // 0..255
+    al: f64,
+}
+
+fn collect_mix_rows(path: &Path, rows: &mut Vec<(Color2, Color2, f64, [f64; 3], f64)>) {
+    let Ok(text) = fs::read_to_string(path) else { return };
+    let rel = path.to_string_lossy().to_string();
+    if !rel.contains("/both_weights.hrx") && !rel.contains("/explicit_weight.hrx") && !rel.contains("/alpha.hrx")
+    {
+        return;
+    }
+    for section in text.split("================================================================================") {
+        let flat = section.replace('\n', " ");
+        let Some(mix_at) = flat.find("color.mix(") else { continue };
+        let inner = &flat[mix_at + 10..];
+        // parse two operands + optional percent weight
+        let (a_txt, rest) = split_first_color(inner);
+        let Some(a) = parse_legacy_color(a_txt) else { continue };
+        let rest = rest.trim_start().trim_start_matches(',').trim_start();
+        let (b_txt, rest2) = split_first_color(rest);
+        let Some(b) = parse_legacy_color(b_txt) else { continue };
+        let w = if let Some(at) = rest2.find("%") {
+            let pre = &rest2[..at];
+            let num: String = pre.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+            num.parse::<f64>().unwrap_or(50.0) / 100.0
+        } else {
+            0.5
+        };
+        // golden out: first `b:` line inside output.css
+        let Some(css_at) = flat.find("output.css") else { continue };
+        let after = &flat[css_at..];
+        let Some(b_at) = after.find("b: ") else { continue };
+        let tail = &after[b_at + 3..];
+        let line_end = [tail.find(';'), tail.find(" <=="), tail.find('\n')]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(tail.len());
+        let line = &tail[..line_end];
+        let Some(out) = parse_legacy_color(line.trim().trim_end_matches(';')) else {
+            continue;
+        };
+        let outs = out.ch;
+        rows.push((a, b, w, outs, out.al));
+    }
+}
+
+/// Peel the first balanced color spelling (possibly nested `rgba(#hex, a)`)
+/// returning (text, remainder-after-it).
+fn split_first_color(s: &str) -> (&str, &str) {
+    let s = s.trim_start();
+    // naive: colors end at the first ',' or ')' at depth 0
+    let bytes: Vec<char> = s.chars().collect();
+    let mut depth = 0;
+    for (i, ch) in bytes.iter().enumerate() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return (&s[..i], &s[i..]);
+                }
+                depth -= 1;
+            }
+            ',' if depth == 0 => return (&s[..i], &s[i..]),
+            _ => {}
+        }
+    }
+    (s, "")
+}
+
+fn parse_legacy_color(s: &str) -> Option<Color2> {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("transparent") {
+        return Some(Color2 { ch: [0.0, 0.0, 0.0], al: 0.0 });
+    }
+    if let Some(hex) = s.strip_prefix('#') {
+        let (h, _) = hex.split_once(|c: char| c == ',').unwrap_or((hex, ""));
+        let h = h.trim();
+        if h.len() == 6 {
+            let v = u32::from_str_radix(h, 16).ok()?;
+            return Some(Color2 {
+                ch: [((v >> 16) & 0xff) as f64, ((v >> 8) & 0xff) as f64, (v & 0xff) as f64],
+                al: 1.0,
+            });
+        }
+        return None;
+    }
+    let inner = s
+        .strip_prefix("rgba(")
+        .or_else(|| s.strip_prefix("rgb("))
+        .and_then(|t| t.strip_suffix(')'))?;
+    let mut parts: Vec<String> = Vec::new();
+    let mut depth = 0;
+    let mut cur = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' | ' ' if depth == 0 => {
+                if !cur.is_empty() {
+                    parts.push(cur.trim().to_string());
+                    cur = String::new();
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    let base = if parts[0].starts_with('#') {
+        parse_legacy_color(&parts[0])?
+    } else {
+        let nums: Vec<f64> = parts.iter().take(3).filter_map(|p| p.trim_end_matches(char::from(0x25)).parse().ok()).collect();
+        Color2 { ch: [nums.get(0).copied()?, nums.get(1).copied()?, nums.get(2).copied()?], al: 1.0 }
+    };
+    let al = parts.get(3).and_then(|p| p.trim_end_matches(char::from(0x25)).parse::<f64>().ok()).unwrap_or(1.0);
+    Some(Color2 { ch: base.ch, al })
+}

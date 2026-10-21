@@ -61,3 +61,15 @@ UNRESOLVED: the 42% case rgb channels match NEITHER encoding-domain premul
   candidates (encode-domain × {a-weighted, plain-w} × display paths) against
   ALL ~200 concrete mix goldens; let residuals pick the formula — no more
   hand-solving.
+
+### M3 session-3 solver batch (solve_mix_algebra, tool landed, verdict pending)
+Tool extends constant_solver: collects mix(A,B,W) legacy golden pairs from
+both_weights/explicit_weight/alpha (currently 17 rows / 51 channels) and
+scores 4 algebra candidates ALL in the 0..255 encoding domain (unit bug fixed
+mid-session). Result: enc-premul 48/51, lin-premul 44/51, plain-enc 48/51,
+plain-lin-enc 42/51 — everything fails, including formulas the
+`transparent × #0144bf 70%` hand-check proved exact. ⇒ the ROWS themselves
+are suspect (parse mapping: golden line extraction, weight attribution, or the
+17-vs-expected-40 row count). NEXT session: dump the 17 rows verbatim
+(a, b, w, outs) and eyeball against their hrx sections BEFORE scoring; the
+mix verdict gates on clean rows, not new formulas.
