@@ -75,10 +75,41 @@ pub(super) fn to_space(c: &super::Call) -> Or<SassValue> {
         return Err(err(format!("Unknown color space: {space}")));
     };
     let converted = if target.name == src.space.name {
-        src
+        src.clone()
     } else {
         src.convert(target)
     };
+    // dart's lossy serialization: when the destination's *lightness* escapes
+    // its declared range, or the source already breaks its declared channel
+    // bounds, the color prints as `color-mix(in {tgt}, color(xyz …) 100%,
+    // black)` with the source's own XYZ verbatim inside (`to_space/*`
+    // `out_of_range/near|far`, `white` sections; the same input triggers the
+    // form for every destination — no per-target variation in the evidence).
+    // Undeclared-by-the-goldens dimensions stay unchecked: rgb-family r/g/b
+    // (`srgb -1 0.4 2` prints plainly), lab/lch a/b/C of the *destination*,
+    // and hue. `None` in the lightness-relevant source slot joins the form
+    // (`missing/y`, hsl `s`/`l`), while RGB gamut `none` sources keep the
+    // computed path (`a98-rgb none …` passes through today).
+    if mix_form_needed(&src, &converted) {
+        // The mix carries the source's own XYZ: missing slots floor to 0 for
+        // the display too (`xyz 0.1 none 0.3` → `color(xyz 0.1 0 0.3)`,
+        // `xyz/lab` `missing/y`) — exactly what `to_xyz_d65` computes.
+        let xyz = crate::color4::Color4 {
+            space: crate::color4::lookup("xyz").expect("xyz space"),
+            comps: src.to_xyz_d65().map(Some),
+            text: [None, None, None],
+            alpha: src.alpha,
+            alpha_missing: src.alpha_missing,
+        };
+        return Ok(SassValue::Str {
+            text: format!(
+                "color-mix(in {}, {} 100%, black)",
+                converted.space.name,
+                xyz.to_css()
+            ),
+            quoted: false,
+        });
+    }
     // `to-space(hsl|hwb, hsl|hwb)` with every channel concrete yields the golden's
     // *legacy* color built directly from the source's HSL-formula channels: an
     // out-of-gamut result serializes as an unclamped `hsl()` (channels past 1,
@@ -185,6 +216,48 @@ fn mix(c: &super::Call) -> Or<SassValue> {
 fn parse_percent(text: &str, default: f64) -> f64 {
     let trimmed = text.trim().trim_end_matches('%');
     trimmed.parse::<f64>().unwrap_or(default)
+}
+
+/// Whether `to-space` must emit dart's lossy `color-mix(…, black)` form.
+/// Evidence (all 89 MIX sections of `to_space/*.hrx`): the trigger is the
+/// *destination lightness* escaping its declared range (`xyz 1 1 1` → L
+/// 100.115; prophoto `-1 .4 2` → negative L), plus an `xyz`/`xyz-d50`
+/// source whose `y` is missing. Channel excursions that keep L inside the
+/// range never trigger (`srgb -1 0.4 2` and `hsl 20 999999% 50%` print
+/// plainly), and rgb-family excursions are exempt throughout.
+fn mix_form_needed(
+    src: &crate::color4::Color4,
+    converted: &crate::color4::Color4,
+) -> bool {
+    let outside = |v: f64, lo: f64, hi: f64| v < lo - 1e-9 || v > hi + 1e-9;
+    // Destination lightness on the polar/perceptual serialization paths.
+    if matches!(converted.space.name, "lab" | "lch" | "oklab" | "oklch") {
+        let ch = converted.space.channels[0];
+        if let Some(l) = converted.comps[0] {
+            // all-missing sources keep the `lab(none none none)` form (existing
+            // PASS path); only a *computed* lightness past the bounds triggers.
+            if outside(l, ch.lo, ch.hi) {
+                return true;
+            }
+        }
+    }
+    // xyz/xyz-d50 source with a missing luminance heading for a lightness
+    // destination: L is not computable (`xyz/lab` `missing/y` mixes, while
+    // the same source to a gamut target keeps `none` channels computed-plain
+    // — `xyz/a98_rgb` `missing/y`). Gamut destinations never mix.
+    // A D65 `xyz` source feeds lab without a matrix step, so a missing
+    // `y` leaves the lightness undetermined → mix (`xyz/lab`
+    // `missing/y`). An `xyz-d50` source recovers y from x/z through the
+    // adaptation matrix and prints plainly (`xyz_d50/lab` computes
+    // `lab(0% 165.9436315393 -115.1609314454)`).
+    if matches!(converted.space.name, "lab" | "lch" | "oklab" | "oklch")
+        && src.space.name == "xyz"
+        && src.comps[1].is_none()
+        && !src.comps.iter().all(|c| c.is_none())
+    {
+        return true;
+    }
+    false
 }
 
 

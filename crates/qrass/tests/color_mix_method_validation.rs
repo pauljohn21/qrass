@@ -85,3 +85,27 @@ fn degenerate_channel_text_slots() {
         .contains("lab(50% 20 0)"));
     assert!(outcome("lab(50% calc(infinity) 0)").contains("calc(infinity)"));
 }
+
+/// Round-95 (OpenSpec task 2.5): the lossy `color-mix(…, black)` form of
+/// `to-space` — destination lightness past its declared bounds, or an
+/// `xyz`(D65)-sourced missing `y` aimed at a lightness space. L-value
+/// excursions that keep lightness inside bounds print plainly.
+#[test]
+fn lossy_mix_form() {
+    assert!(outcome("color.to-space(color(xyz 1 1 1), lab)").contains(
+        "color-mix(in lab, color(xyz 1 1 1) 100%, black)"
+    ));
+    assert!(outcome("color.to-space(color(prophoto-rgb -1 0.4 2), lab)").contains(
+        "color-mix(in lab, color(xyz"
+    ));
+    // lightness stays in range → plain output despite wild other channels
+    assert!(!outcome("color.to-space(color(xyz -1 0.4 2), lab)")
+        .contains("color-mix"));
+    assert!(!outcome("color.to-space(color(srgb -1 0.4 2), oklab)").contains("color-mix"));
+    // xyz D65 source with missing y heading for lab mixes; the D50 twin recovers
+    // y through the adaptation matrix and prints computed.
+    assert!(outcome("color.to-space(color(xyz 0.1 none 0.3), lab)").contains("color-mix"));
+    assert!(!outcome("color.to-space(color(xyz-d50 0.1 none 0.3), lab)").contains("color-mix"));
+    // all-missing keeps the none form, never the mix
+    assert!(!outcome("color.to-space(color(xyz none none none), lab)").contains("color-mix"));
+}

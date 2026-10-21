@@ -1282,4 +1282,14 @@
 #     W2) — logged, not silent; unit suite and clippy green.
 # sass-spec 8911 -> 9032 (+121: fitted lab segment). Floor raised to the new
 # net level despite the 4 logged hand-offs above.
-82.3
+#
+# OpenSpec task 2.5 (M1 tail): the lossy `color-mix(in {tgt}, color(xyz …)
+#     100%, black)` form of to-space — triggered by destination lightness
+#     past bounds (xyz(1,1,1)->L 100.115; negative-L prophoto) or D65-xyz
+#     sourced missing `y` aimed at a lightness space (the D50 twin recovers y
+#     via the adaptation matrix and prints computed); all-missing and
+#     lightness-in-range excursions stay plain. 3 edge cases remain in the
+#     mix form (digits/edge hand-offs, tasks 2.4/7.1).
+# sass-spec 9032 -> 9104 (+72 net: lossy mix form; 3 vs-procedure-baseline
+# hand-offs logged), unit suite green (485 passed), clippy green.
+83.0
