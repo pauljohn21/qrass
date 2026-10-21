@@ -14,6 +14,12 @@ type Ex<T> = Result<T, crate::error::SassError>;
 impl<'a> E<'a> {
     pub(crate) fn paren_group(&mut self, start: BytePos) -> Ex<Expr> {
         if self.eat(Punct::RParen) {
+            // `()` is dart's dual-valued empty literal: `meta.type-of` calls
+            // it a map, list/channel operations see an empty list. The
+            // dualism is resolved at the VALUE layer (`SassValue::is_empty_paren`
+            // sites below), so the parser keeps the plain empty-list shape
+            // (`lab(())` demands "Color component list may not be empty.",
+            // `color/lab/error` `list/too_few_channels`).
             return Ok(Expr::List {
                 items: Vec::new(),
                 sep: ListSep::Comma,

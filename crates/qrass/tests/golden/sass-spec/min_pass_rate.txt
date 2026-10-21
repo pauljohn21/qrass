@@ -1336,4 +1336,11 @@
 #     value (singleton-identity resolve), and wildcard `@forward … as p-*`
 #     mixins mirror under the bare renamed name like functions do.
 # sass-spec 9147 floor, unit suite green (504 passed), clippy -D warnings green.
+#
+# OpenSpec task 5.3 slice A (`()` empty-literal dualism): 9147 -> 9149 (+8,
+#     0 regress). `$with: ()` coerces to the empty map at consumer sites
+#     (prepare_with, mirroring map.coerce_map's existing arm); type-of(())
+#     stays `list` per golden — flipping the parser itself regressed 13
+#     color/error rows and was reverted to value-layer sites.
+# sass-spec 9149 floor, unit suite green (506 passed), clippy -D warnings green.
 83.4

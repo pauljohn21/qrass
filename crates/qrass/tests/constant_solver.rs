@@ -846,7 +846,8 @@ fn fit_oklab_joint_clean() {
 /// the 4 output channels, then scores candidate formulas. Print the best.
 #[test]
 #[ignore]
-fn solve_mix_algebra() {
+#[allow(clippy::type_complexity)]
+    fn solve_mix_algebra() {
     let root = Path::new("../../sass-spec/spec/core_functions/color/mix");
     let mut rows: Vec<(Color2, Color2, f64, [f64; 3], f64)> = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -1097,7 +1098,7 @@ fn parse_legacy_color(s: &str) -> Option<Color2> {
         return Some(Color2 { ch: [0.0, 0.0, 0.0], al: 0.0 });
     }
     if let Some(hex) = s.strip_prefix('#') {
-        let (h, _) = hex.split_once(|c: char| c == ',').unwrap_or((hex, ""));
+        let (h, _) = hex.split_once(',').unwrap_or((hex, ""));
         let h = h.trim();
         if h.len() == 6 {
             let v = u32::from_str_radix(h, 16).ok()?;
@@ -1146,7 +1147,7 @@ fn parse_legacy_color(s: &str) -> Option<Color2> {
                     .ok()
             })
             .collect();
-        Color2 { ch: [nums.get(0).copied()?, nums.get(1).copied()?, nums.get(2).copied()?], al: 1.0 }
+        Color2 { ch: [nums.first().copied()?, nums.get(1).copied()?, nums.get(2).copied()?], al: 1.0 }
     };
     // `rgba(#hex, a)` carries the alpha at index 1; the plain form at index 3
     // (ROW dump audit: mis-slotted alphas corrupted most rows).

@@ -201,6 +201,10 @@ impl SassValue {
             SassValue::Number { .. } => "number",
             SassValue::Str { .. } => "string",
             SassValue::Color(_) => "color",
+            // NB: the golden spells `meta.type-of(())` as `list`, NOT map
+            // (`meta/type_of` `list/empty`) — the empty literal's map side
+            // shows up only where consumers coerce (`$with:`, `map.*`),
+            // never in `type-of`.
             SassValue::List { .. } => "list",
             SassValue::Map { .. } => "map",
             // `type-of` goldens spell them `function` / `mixin` / `module`.

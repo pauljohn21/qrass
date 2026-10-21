@@ -271,6 +271,10 @@ impl EvalState {
         let mut view: Vec<(String, usize)> = Vec::new();
         match &with_v {
             None | Some(SassValue::Null) => {}
+            // `()` parses as the empty comma-list but dart's `$with: ()` is
+            // the EMPTY MAP (`load_css/with/empty` goldens) — same value-layer
+            // dualism `map.coerce_map` already accepts.
+            Some(SassValue::List { items, .. }) if items.is_empty() => {}
             Some(SassValue::Map { entries }) => {
                 let mut seen: Vec<String> = Vec::new();
                 for (k, v) in entries {

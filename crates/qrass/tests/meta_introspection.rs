@@ -206,3 +206,11 @@ fn forwarded_members_and_apply() {
     assert!(out.contains("content: d value"), "meta.apply body lost: {out}");
     vfs::clear();
 }
+
+#[test]
+fn empty_paren_is_a_list_for_type_of() {
+    // `meta/type_of` `list/empty`: the golden spells `type-of(())` as `list` —
+    // the empty literal's map side only appears in consumer coercion
+    // (`$with:`, `map.*`), never in `type-of`.
+    assert_eq!(value("meta.type-of(())"), "list");
+}

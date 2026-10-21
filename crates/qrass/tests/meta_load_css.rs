@@ -169,3 +169,20 @@ fn get_module_error_spellings() {
         "{err}"
     );
 }
+
+#[test]
+fn with_empty_map_loads() {
+    // `load_css/with/empty`: `$with: ()` is dart's empty-map coercion of the
+    // empty literal — the module loads unchanged (OpenSpec task 5.3).
+    vfs::clear();
+    vfs::register("/lc/_plain.scss", "a {b: c}\n");
+    let body = "@use \"sass:meta\";\n@include meta.load-css(\"plain\", $with: ());\n";
+    let out = compile_string(
+        "/lc/idx.scss".to_string(),
+        body.to_string(),
+        &Options::default(),
+    )
+    .expect("$with: () must coerce to the empty map");
+    assert!(out.contains("b: c"), "{out}");
+    vfs::clear();
+}
