@@ -312,6 +312,21 @@ impl EvalState {
         let module_v = opt(raw, "module", 1);
         let ns: Option<String> = match module_v {
             Some(SassValue::Str { text, .. }) => Some(text.clone()),
+            Some(SassValue::Module(mv)) => {
+                // A `meta.get-module` reference value: resolve it back to the
+                // namespace it was bound under (identity via the shared Rc),
+                // built-ins by their recorded spelling
+                // (`get_mixin/different_module` `defined/module_value`).
+                mv.module
+                    .as_ref()
+                    .and_then(|rm| {
+                        self.bound_modules
+                            .iter()
+                            .find(|(_, b)| std::rc::Rc::ptr_eq(b, rm))
+                            .map(|(k, _)| k.clone())
+                    })
+                    .or_else(|| mv.builtin.clone())
+            }
             Some(other) => {
                 return Err(SassError::new(
                     ErrorKind::Builtins,

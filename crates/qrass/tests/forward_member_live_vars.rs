@@ -167,3 +167,32 @@ fn show_is_a_global_allowlist_across_types() {
     assert!(css.contains("\"d\": d value"), "{css}");
     assert!(!css.contains("e value"), "{css}");
 }
+
+#[test]
+fn wildcard_prefixed_mixin_resolves_bare() {
+    // `@use "mid" as *` over `@forward "up" as c-*` exposes mixin `c-d` by
+    // the bare renamed name — the wildcard mixin mirror (`meta/get_mixin`
+    // `through_forward/as`, `use/error/member`).
+    let css = sass(
+        "@use \"sass:meta\";\n@use \"mid\" as *;\na {@include meta.apply(meta.get-mixin(c-d))}\n",
+        &[
+            ("_up.scss", "@mixin d() {c {d: e}}\n"),
+            ("_mid.scss", "@forward \"up\" as c-*;\n"),
+        ],
+    )
+    .expect("bare prefixed mixin via wildcard");
+    assert!(css.contains("d: e"), "{css}");
+}
+
+#[test]
+fn get_mixin_accepts_module_reference_value() {
+    // `$module: meta.get-module("other")` resolves through the bound
+    // singleton identity, not a string (`get_mixin/different_module`
+    // `defined/module_value`).
+    let css = sass(
+        "@use \"sass:meta\";\n@use \"other\";\na {@include meta.apply(meta.get-mixin(\"a\", $module: meta.get-module(\"other\")))}\n",
+        &[("_other.scss", "@mixin a {b: c}\n")],
+    )
+    .expect("module-value get-mixin");
+    assert!(css.contains("b: c"), "{css}");
+}

@@ -82,6 +82,19 @@ impl EvalState {
                         self.wildcard_mixins
                             .push((exported.clone(), defined.clone()));
                     }
+                    // Bare-name mixin mirror (mirrors `bind_members` without
+                    // the namespace prefix) — `@forward … as prefix-*` names
+                    // must resolve for bare `@include` and the callable
+                    // lookups alike (`meta/get_mixin` `through_forward/as`).
+                    if let Some(d) = self.mixins.get(defined) {
+                        self.mixins.insert(exported.clone(), d.clone());
+                    }
+                    if let Some(e) = self.mixin_env.get(defined) {
+                        self.mixin_env.insert(exported.clone(), e.clone());
+                    }
+                    if let Some(o) = self.mixin_module.get(defined) {
+                        self.mixin_module.insert(exported.clone(), o.clone());
+                    }
                 }
                 for (exported, _defined) in &module.functions {
                     let org = origin_of(exported);

@@ -1330,4 +1330,10 @@
 #     non-empty show is a GLOBAL allowlist (unmentioned kind exports nothing);
 #     forward_members keeps the `$` spelling the lexer used to drop.
 # sass-spec 9144 floor, unit suite green (502 passed incl. 10 live-var tests).
+#
+# OpenSpec M4 slice 6 (callable lookups): 9144 -> 9147 (+3, 0 regress).
+#     `meta.get-mixin`/`get-function` accept a meta.get-module REFERENCE
+#     value (singleton-identity resolve), and wildcard `@forward … as p-*`
+#     mixins mirror under the bare renamed name like functions do.
+# sass-spec 9147 floor, unit suite green (504 passed), clippy -D warnings green.
 83.4
