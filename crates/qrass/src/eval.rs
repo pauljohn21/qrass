@@ -193,6 +193,15 @@ pub struct EvalState {
     pub(crate) wildcard_vars: Vec<(String, String)>,
     pub(crate) wildcard_fns: Vec<(String, String)>,
     pub(crate) wildcard_mixin_src: Vec<(String, String)>,
+    /// Live module-variable cells keyed by `(origin module, var name)`
+    /// (OpenSpec M4 slice 3). dart module vars are shared-mutable: a
+    /// namespaced write `ns.$a: value` updates the **defining module's**
+    /// cell, visible to every read path (other importers, the module's own
+    /// functions). Reads consult this store before any snapshot copy.
+    pub(crate) member_store: std::collections::HashMap<(String, String), crate::value::SassValue>,
+    /// `(ns, var) -> origin module` map of every namespaced binding, backing
+    /// both the store lookup on writes and the live read override.
+    pub(crate) ns_origins: std::collections::HashMap<(String, String), String>,
     /// Built-in namespaces actually brought into scope by `@use "sass:…"`
     /// (exact bound spelling; used by `meta.mixin-exists` module lookups).
     pub(crate) used_builtin_ns: Vec<String>,
@@ -280,6 +289,8 @@ impl EvalState {
             wildcard_vars: Vec::new(),
             wildcard_fns: Vec::new(),
             wildcard_mixin_src: Vec::new(),
+            member_store: std::collections::HashMap::new(),
+            ns_origins: std::collections::HashMap::new(),
             used_builtin_ns: Vec::new(),
             mixin_env: HashMap::new(),
             function_env: HashMap::new(),

@@ -1311,4 +1311,10 @@
 # dangling `as`, invalid derived namespaces at parse time; "scheme:bar" now
 # derives `bar` (unknown_scheme falls back to the load error, golden order).
 # sass-spec 9124 floor, unit suite green (492 passed), clippy -D warnings green.
-83.2
+#
+# OpenSpec M4 slice 3 (live module vars): 9124 -> 9133 (+9, 0 regress).
+#     Top-level `ns.$var: value` writes the defining module's live cell via
+#     member_store/ns_origins; Member + defining-module Variable reads consult
+#     the store first (dart shared-mutable semantics). e2e tripwire green.
+# sass-spec 9133 floor, unit suite green (496 passed), clippy -D warnings green.
+83.3

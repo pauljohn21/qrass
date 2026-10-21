@@ -37,6 +37,27 @@ impl EvalState {
         match stmt {
             Stmt::Variable(v) => self.bind_variable(v, sel_ctx.is_empty()),
             Stmt::Declaration(d) => {
+                // A top-level `ns.$var: value` is a member assignment into
+                // that module (never a CSS declaration): write the defining
+                // module's live cell + the ns view (OpenSpec M4 slice 3,
+                // `forward/member` bare/shadowed/visibility goldens).
+                if sel_ctx.is_empty() {
+                    let prop = self.render_interp(&d.prop)?;
+                    if let Some((ns, name)) = prop.split_once(".$")
+                        && self.env.has_namespace(ns)
+                    {
+                        let value = self.eval_expr(&d.value)?;
+                        let origin = self
+                            .ns_origins
+                            .get(&(ns.to_string(), name.to_string()))
+                            .cloned();
+                        self.env.set_member(ns, name, value.clone());
+                        if let Some(o) = origin {
+                            self.member_store.insert((o, name.to_string()), value);
+                        }
+                        return Ok(());
+                    }
+                }
                 if let Some((prop, value)) = self.render_declaration(d)? {
                     decls.push(Item::Decl { prop, value });
                 }
@@ -120,6 +141,24 @@ impl EvalState {
     /// `root` marks a declaration at the running module's top level, which is the
     /// only place a `with (…)` configuration can land.
     pub(super) fn bind_variable(&mut self, v: &VariableDecl, root: bool) -> Ev<()> {
+        // `ns.$var: value` — a namespaced assignment always reaches the
+        // DEFINING module's live cell (`forward/member` `bare` "Namespaced
+        // assignments always assign to the defining module"), visible to
+        // every other read path (OpenSpec M4 slice 3).
+        if let Some((ns, name)) = v.name.split_once(".$")
+            && self.env.has_namespace(ns)
+        {
+            let value = self.eval_expr(&v.value)?;
+            let origin = self
+                .ns_origins
+                .get(&(ns.to_string(), name.to_string()))
+                .cloned();
+            self.env.set_member(ns, name, value.clone());
+            if let Some(o) = origin {
+                self.member_store.insert((o, name.to_string()), value);
+            }
+            return Ok(());
+        }
         // A `!default` at module root answers the matching offer: the offered value
         // is bound and the declaration's own right-hand side is never evaluated
         // (`with/doesnt_run_default.hrx`), except for a `null` offer, which the

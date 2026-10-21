@@ -41,6 +41,11 @@ impl EvalState {
                         "This variable is available from multiple global modules.",
                     ));
                 }
+                // Live module-var cell of the *defining* module wins over the
+                // snapshot env (namespaced writes mutate it, M4 slice 3).
+                if let Some(v) = self.member_store.get(&(self.env_owner.clone(), name.clone())) {
+                    return Ok(v.clone());
+                }
                 self.env.get(name).cloned().ok_or_else(|| {
                     // Every golden spells this message bare — `Error: Undefined
                     // variable.` — the name being carried by the annotated source
@@ -52,9 +57,14 @@ impl EvalState {
                 namespace, name, ..
             } => {
                 let bound = self.env.has_namespace(namespace);
-                self.env
-                    .get_member(namespace, name)
-                    .cloned()
+                // Live cell first: a namespaced write elsewhere mutated the
+                // defining module's copy (M4 slice 3).
+                let live = self
+                    .ns_origins
+                    .get(&(namespace.clone(), name.clone()))
+                    .and_then(|o| self.member_store.get(&(o.clone(), name.clone())).cloned());
+                live
+                    .or_else(|| self.env.get_member(namespace, name).cloned())
                     .or_else(|| crate::builtins::module_const(namespace, name))
                     .ok_or_else(|| {
                         // Like the plain-variable case above the name lives in the

@@ -113,18 +113,40 @@ impl EvalState {
                 }
             }
             UseAlias::Named(ns) => {
-                self.env.bind_namespace(ns, module.vars.clone());
+                self.bind_ns_vars(ns, module);
                 self.bound_modules.insert(ns.clone(), module.clone());
                 self.bind_members(ns, module);
             }
             UseAlias::Default => {
                 let ns = default_namespace(url);
                 if !ns.is_empty() {
-                    self.env.bind_namespace(&ns, module.vars.clone());
+                    self.bind_ns_vars(&ns, module);
                     self.bound_modules.insert(ns.clone(), module.clone());
                     self.bind_members(&ns, module);
                 }
             }
+        }
+    }
+
+    /// Publish a module's vars under `ns` AND register the live-cell
+    /// bookkeeping (OpenSpec M4 slice 3): `(ns, var) -> origin module` plus
+    /// the initial `member_store` value, so `ns.$var: value` writes reach the
+    /// defining module and every read path sees the update (dart module vars
+    /// are shared-mutable, not snapshot copies).
+    fn bind_ns_vars(&mut self, ns: &str, module: &std::rc::Rc<Module>) {
+        self.env.bind_namespace(ns, module.vars.clone());
+        for (name, value) in &module.vars {
+            let origin = module
+                .member_origins
+                .iter()
+                .find(|(e, _)| e == name)
+                .map(|(_, o)| o.clone())
+                .unwrap_or_else(|| module.origin_base.clone());
+            self.ns_origins
+                .insert((ns.to_string(), name.clone()), origin.clone());
+            self.member_store
+                .entry((origin, name.clone()))
+                .or_insert_with(|| value.clone());
         }
     }
 

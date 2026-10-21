@@ -181,6 +181,13 @@ impl Env {
         self.namespaces
             .insert(namespace.to_string(), vars.into_iter().collect());
     }
+
+    /// Write a namespaced member (`ns.$var: value` — OpenSpec M4 slice 3).
+    pub fn set_member(&mut self, namespace: &str, name: &str, value: SassValue) {
+        if let Some(m) = self.namespaces.get_mut(namespace) {
+            m.insert(name.to_string(), value);
+        }
+    }
 }
 
 impl Default for Env {
