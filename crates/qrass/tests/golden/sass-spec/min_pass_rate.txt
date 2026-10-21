@@ -1305,4 +1305,10 @@
 #     longer leak `@use as *` vars (dart semantics); wildcard functions now
 #     resolve by bare name.
 # sass-spec 9118 floor, unit suite green (492 passed), clippy -D warnings green.
-83.1
+#
+# OpenSpec M4 slice 2 (use/error/syntax parse matrix + scheme-aware default
+# namespace): 9118 -> 9124 (+6, 0 regress). build_use rejects non-string urls,
+# dangling `as`, invalid derived namespaces at parse time; "scheme:bar" now
+# derives `bar` (unknown_scheme falls back to the load error, golden order).
+# sass-spec 9124 floor, unit suite green (492 passed), clippy -D warnings green.
+83.2

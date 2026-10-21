@@ -26,15 +26,64 @@ pub(crate) fn strip_comments(rest: &[Spanned]) -> Vec<Spanned> {
 
 pub(crate) fn build_use(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     let rest = strip_comments(rest);
+    // dart validates the `@use` head at parse time, before any load:
+    // `directives/use/error/syntax/*` — a non-string URL (absent or bare,
+    // `Expected string.`), an `as` without an identifier/`*`
+    // (`Expected identifier.`), and a derived default namespace that is not
+    // a valid Sass identifier (`The default namespace "x" is not a valid
+    // Sass identifier.`). Interpolated URLs keep today's load path.
+    match rest.first().map(|s| &s.token) {
+        None | Some(Token::Punct(Punct::Semicolon)) => {
+            return Err(p.err("Expected string.", span.end));
+        }
+        Some(Token::Str { .. }) | Some(Token::Interpolated { .. }) => {}
+        Some(_) => {
+            return Err(p.err("Expected string.", rest[0].span.start));
+        }
+    }
+    if let Some(as_i) = find_ident(&rest, "as") {
+        match rest.get(as_i + 1).map(|s| &s.token) {
+            Some(Token::Punct(Punct::Star)) | Some(Token::Ident(_)) => {}
+            _ => {
+                let at = rest
+                    .get(as_i + 1)
+                    .map(|s| s.span.start)
+                    .unwrap_or(span.end);
+                return Err(p.err("Expected identifier.", at));
+            }
+        }
+    }
     let url = module_url(&rest);
+    let alias = use_alias(&rest);
+    if matches!(alias, UseAlias::Default) {
+        let ns = crate::module::default_namespace(&url);
+        if !is_valid_namespace(&ns) {
+            return Err(p.err(
+                format!("The default namespace \"{ns}\" is not a valid Sass identifier."),
+                span.start,
+            ));
+        }
+    }
     let config = with_config(p, &rest, false)?;
     reject_builtin_config(p, &url, &config, span, &rest)?;
     Ok(Stmt::Use(Use {
         url,
-        alias: use_alias(&rest),
+        alias,
         config,
         span,
     }))
+}
+
+/// A derived default namespace must be a plain Sass identifier: leading
+/// letter/underscore, then alphanumerics, `-` or `_` (`use/error/syntax/url`
+/// `empty`/`non_identifier` reject `""` and `"123"`).
+fn is_valid_namespace(ns: &str) -> bool {
+    let mut chars = ns.chars();
+    match chars.next() {
+        Some(c) if c.is_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
 
 /// A built-in module has no configurable surface, and the golden rejects the

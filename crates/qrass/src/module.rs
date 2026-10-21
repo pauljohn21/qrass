@@ -68,9 +68,24 @@ pub fn export_vars(bindings: Vec<(String, SassValue)>) -> Vec<(String, SassValue
 /// Default `@use` namespace = the URL's final path segment with any file
 /// extension and leading `.`/`_` stripped (`src/vars` → `vars`, `_a.scss` → `a`).
 pub fn default_namespace(url: &str) -> String {
-    let seg = url.rsplit('/').next().unwrap_or(url);
+    // A leading URL scheme drops out of the namespace derivation before the
+    // path split: `@use "scheme:bar"` would bind `bar` if its load succeeded
+    // (`use/error/load` `unknown_scheme` — the load error surfaces first,
+    // not a namespace complaint), while `sass:` builtins reached through
+    // `@use "sass:…"` resolve to their suffix (`color`, not `sass:color`).
+    let rest = match url.split_once(':') {
+        Some((scheme, tail))
+            if !scheme.is_empty()
+                && !tail.is_empty()
+                && !url.contains('/')
+                && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+                && scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) =>
+        {
+            tail
+        }
+        _ => url,
+    };
+    let seg = rest.rsplit('/').next().unwrap_or(rest);
     let stem = seg.split_once('.').map(|(s, _)| s).unwrap_or(seg);
-    // A built-in URL's namespace is its suffix: `@use "sass:color"` is reached
-    // as `color.…`, not `sass:color.…`.
-    stem.trim_start_matches(['.', '_']).trim_start_matches("sass:").to_string()
+    stem.trim_start_matches(['.', '_']).to_string()
 }
