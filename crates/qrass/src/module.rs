@@ -32,13 +32,16 @@ pub struct Module {
     /// origin of its locally defined members (see [`Module::member_origins`]).
     pub origin_base: String,
     /// Provenance of `@forward`ed members: `(exported-name, origin-path of the
-    /// file that actually defines the member)`, carried through each hop of a
-    /// forward chain. Members absent here are locally defined and carry
-    /// [`Module::origin_base`]. The wildcard-conflict ledger (OpenSpec M4)
-    /// compares origins: two midstreams forwarding one upstream member share
-    /// an origin (no conflict — element-plus chains), two local definitions of
-    /// one name differ (`directives/use/error/member` goldens).
-    pub member_origins: Vec<(String, String)>,
+    /// file that actually defines the member, defining-module name)`, carried
+    /// through each hop of a forward chain. Members absent here are locally
+    /// defined and carry [`Module::origin_base`] as origin and their own name
+    /// as defined. The wildcard-conflict ledger (OpenSpec M4) compares
+    /// origins: two midstreams forwarding one upstream member share an origin
+    /// (no conflict — element-plus chains), two local definitions of one name
+    /// differ (`directives/use/error/member` goldens). The defined name keys
+    /// the live `member_store` cell so `@forward … as prefix-*` renames still
+    /// reach the base variable (`forward/member/as`).
+    pub member_origins: Vec<(String, String, String)>,
 }
 
 /// A private member (`$-name`) is not re-exported to importers.
@@ -52,9 +55,9 @@ pub struct Forwarded {
     pub vars: Vec<(String, SassValue)>,
     pub mixins: Vec<(String, String)>,
     pub functions: Vec<(String, String)>,
-    /// `(exported-name, origin-path)` provenance carried through this hop
-    /// (see [`Module::member_origins`]).
-    pub origins: Vec<(String, String)>,
+    /// `(exported-name, origin-path, defining-module name)` provenance
+    /// carried through this hop (see [`Module::member_origins`]).
+    pub origins: Vec<(String, String, String)>,
 }
 
 /// Filter a module's global bindings down to its public exports.

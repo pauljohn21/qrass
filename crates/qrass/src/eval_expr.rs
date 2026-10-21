@@ -58,11 +58,11 @@ impl EvalState {
             } => {
                 let bound = self.env.has_namespace(namespace);
                 // Live cell first: a namespaced write elsewhere mutated the
-                // defining module's copy (M4 slice 3).
+                // defining module's copy (M4 slice 3/4, below any rename).
                 let live = self
                     .ns_origins
                     .get(&(namespace.clone(), name.clone()))
-                    .and_then(|o| self.member_store.get(&(o.clone(), name.clone())).cloned());
+                    .and_then(|c| self.member_store.get(c).cloned());
                 live
                     .or_else(|| self.env.get_member(namespace, name).cloned())
                     .or_else(|| crate::builtins::module_const(namespace, name))

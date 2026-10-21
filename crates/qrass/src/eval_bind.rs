@@ -42,8 +42,8 @@ impl EvalState {
                     module
                         .member_origins
                         .iter()
-                        .find(|(e, _)| e == name)
-                        .map(|(_, o)| o.clone())
+                        .find(|(e, _, _)| e == name)
+                        .map(|(_, o, _)| o.clone())
                         .unwrap_or_else(|| module.origin_base.clone())
                 };
                 for (name, value) in &module.vars {
@@ -139,13 +139,23 @@ impl EvalState {
             let origin = module
                 .member_origins
                 .iter()
-                .find(|(e, _)| e == name)
-                .map(|(_, o)| o.clone())
-                .unwrap_or_else(|| module.origin_base.clone());
+                .find(|(e, _, _)| e == name)
+                .map(|(_, o, d)| (o.clone(), d.clone()))
+                .unwrap_or_else(|| (module.origin_base.clone(), name.clone()));
             self.ns_origins
                 .insert((ns.to_string(), name.clone()), origin.clone());
+            // `-`/`_` spellings of one member name are interchangeable for
+            // reads and writes (`as` `different_separator`): route both
+            // single-swap spellings through the origin map only — the ns view
+            // itself keeps dart's clean export set (`meta.module-variables`).
+            for alt in [name.replace('_', "-"), name.replace('-', "_")] {
+                if alt != *name {
+                    self.ns_origins
+                        .insert((ns.to_string(), alt.clone()), origin.clone());
+                }
+            }
             self.member_store
-                .entry((origin, name.clone()))
+                .entry(origin)
                 .or_insert_with(|| value.clone());
         }
     }
@@ -188,20 +198,25 @@ pub(super) fn filter_forwarded(
     hidden: &[String],
     prefix: &str,
 ) -> Vec<(String, SassValue)> {
-    let norm = |s: &str| s.trim_start_matches(['$', '-']).to_string();
+    // dart applies `as prefix-*` FIRST and the `show`/`hide` lists name the
+    // RENAMED members (`forward/member/as` `show/*`: `as b-* show b-a`
+    // keeps; `as b-* hide a` hides nothing — `a` no longer names anything);
+    // `-` and `_` are interchangeable in Sass member names (`d_* prefix +
+    // `$d-c` access reads `different_separator`).
+    let norm = |s: &str| s.trim_start_matches('$').replace('_', "-");
     let mut out = members;
-    if !shown.is_empty() {
-        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| keep.contains(n));
-    }
-    if !hidden.is_empty() {
-        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| !drop.contains(n));
-    }
     if !prefix.is_empty() {
         for (name, _) in &mut out {
             *name = format!("{prefix}{name}");
         }
+    }
+    if !shown.is_empty() {
+        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| keep.contains(&norm(n)));
+    }
+    if !hidden.is_empty() {
+        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| !drop.contains(&norm(n)));
     }
     out
 }
@@ -214,20 +229,22 @@ pub(super) fn filter_forwarded_names(
     hidden: &[String],
     prefix: &str,
 ) -> Vec<(String, String)> {
-    let norm = |s: &str| s.trim_start_matches(['$', '-']).to_string();
+    // Rename first, then filter on the renamed names, with `-`/`_`
+    // equivalence (see `filter_forwarded`).
+    let norm = |s: &str| s.trim_start_matches(['$', '-']).replace('_', "-");
     let mut out: Vec<(String, String)> = names.to_vec();
-    if !shown.is_empty() {
-        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| keep.contains(n));
-    }
-    if !hidden.is_empty() {
-        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| !drop.contains(n));
-    }
     if !prefix.is_empty() {
         for (name, _) in &mut out {
             *name = format!("{prefix}{name}");
         }
+    }
+    if !shown.is_empty() {
+        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| keep.contains(&norm(n)));
+    }
+    if !hidden.is_empty() {
+        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
+        out.retain(|(n, _)| !drop.contains(&norm(n)));
     }
     out
 }

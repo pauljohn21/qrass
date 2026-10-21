@@ -77,3 +77,48 @@ fn plain_local_assignment_is_not_a_member_write() {
     let css = sass("$a: one;\nb {c: $a}\n", &[]).expect("plain assignment");
     assert!(css.contains("c: one"), "{css}");
 }
+
+#[test]
+fn prefixed_forward_write_reaches_the_base_variable() {
+    // `@forward … as d-*` renames export; writing the renamed name mutates
+    // the DEFINING module's base variable (`forward/member/as`
+    // `variable_assignment/top_level`: `midstream.$d-a: new` then
+    // `midstream.d-get-a()` reads `new value`).
+    let css = sass(
+        "@use \"mid\";\nmid.$d-a: new;\nb {c: mid.d-get-a(); d: mid.$d-a}\n",
+        &[
+            ("_up.scss", "$a: old;\n@function get-a() { @return $a }\n"),
+            ("_mid.scss", "@forward \"up\" as d-*;\n"),
+        ],
+    )
+    .expect("prefixed write-through");
+    assert!(css.contains("c: new"), "{css}");
+    assert!(css.contains("d: new"), "{css}");
+}
+
+#[test]
+fn show_hide_name_renamed_members() {
+    // rename applies FIRST, `show`/`hide` name the renamed members
+    // (`as b-* show b-a` keeps; `-`/`_` interchangeable per `show b_a`).
+    let css = sass(
+        "@use \"mid\";\n@include mid.b-a;\n",
+        &[
+            ("_up.scss", "@mixin a() {c {d: e}}\n"),
+            ("_mid.scss", "@forward \"up\" as b-* show b_a;\n"),
+        ],
+    )
+    .expect("show on renamed name");
+    assert!(css.contains("d: e"), "{css}");
+}
+
+#[test]
+fn separator_equivalence_on_prefixed_reads() {
+    // `as d_*` + `mid.$d-c` reads the prefixed variable across separators
+    // (`as` `different_separator`).
+    let css = sass(
+        "@use \"mid\";\na {b: mid.$d-c}\n",
+        &[("_up.scss", "$c: e;\n"), ("_mid.scss", "@forward \"up\" as d_*;\n")],
+    )
+    .expect("-/_ interchangeable");
+    assert!(css.contains("b: e"), "{css}");
+}

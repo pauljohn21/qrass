@@ -64,29 +64,34 @@ impl EvalState {
         let fwd_functions =
             filter_forwarded_names(&module.functions, &f.shown, &f.hidden, &f.prefix);
         // Carry member provenance through this hop: an exported name's origin
-        // is the upstream's recorded origin, falling back to the upstream's
-        // own base (it defined it locally). `as prefix-*` renames are
-        // reversible by stripping the prefix from the new exported name.
-        let origin_of_in = |name: &str| -> String {
+        // is the upstream's recorded origin+defined name, falling back to the
+        // upstream's own base with its own name (it defined it locally).
+        // `as prefix-*` renames are reversible by stripping the prefix from
+        // the new exported name; the DEFINED name below the rename is what
+        // keys the live member cell (`forward/member/as`).
+        let origin_of_in = |name: &str| -> (String, String) {
             module
                 .member_origins
                 .iter()
-                .find(|(e, _)| e == name)
-                .map(|(_, o)| o.clone())
-                .unwrap_or_else(|| module.origin_base.clone())
+                .find(|(e, _, _)| e == name)
+                .map(|(_, o, d)| (o.clone(), d.clone()))
+                .unwrap_or_else(|| (module.origin_base.clone(), name.to_string()))
         };
         let strip = |n: &str| -> String {
             n.strip_prefix(f.prefix.as_str()).unwrap_or(n).to_string()
         };
         if let Some(buf) = self.forward_buf.last_mut() {
             for (name, _) in &members {
-                buf.origins.push((name.clone(), origin_of_in(name)));
+                let (o, d) = origin_of_in(&strip(name));
+                buf.origins.push((name.clone(), o, d));
             }
             for (new, _) in &fwd_mixins {
-                buf.origins.push((new.clone(), origin_of_in(&strip(new))));
+                let (o, d) = origin_of_in(&strip(new));
+                buf.origins.push((new.clone(), o, d));
             }
             for (new, _) in &fwd_functions {
-                buf.origins.push((new.clone(), origin_of_in(&strip(new))));
+                let (o, d) = origin_of_in(&strip(new));
+                buf.origins.push((new.clone(), o, d));
             }
             buf.vars.extend(members);
             buf.mixins.extend(fwd_mixins);
@@ -451,8 +456,8 @@ impl EvalState {
                 member_origins: {
                     let mut o = forwarded.origins;
                     for name in local_members {
-                        if !o.iter().any(|(e, _)| *e == name) {
-                            o.push((name, st.name.clone()));
+                        if !o.iter().any(|(e, _, _)| *e == name) {
+                            o.push((name.clone(), st.name.clone(), name));
                         }
                     }
                     o

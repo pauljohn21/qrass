@@ -37,23 +37,23 @@ impl EvalState {
         match stmt {
             Stmt::Variable(v) => self.bind_variable(v, sel_ctx.is_empty()),
             Stmt::Declaration(d) => {
-                // A top-level `ns.$var: value` is a member assignment into
-                // that module (never a CSS declaration): write the defining
-                // module's live cell + the ns view (OpenSpec M4 slice 3,
-                // `forward/member` bare/shadowed/visibility goldens).
-                if sel_ctx.is_empty() {
+                // A `ns.$var: value` is a member assignment into that module
+                // (never a CSS declaration) — at ANY block depth: "Namespaced
+                // assignments always assign to the other module's variable,
+                // even if they're nested in a block scope" (`forward/member`
+                // `as` `variable_assignment/nested`). Write the defining
+                // module's live cell + the ns view (OpenSpec M4 slice 3/4).
+                {
                     let prop = self.render_interp(&d.prop)?;
                     if let Some((ns, name)) = prop.split_once(".$")
                         && self.env.has_namespace(ns)
                     {
                         let value = self.eval_expr(&d.value)?;
-                        let origin = self
-                            .ns_origins
-                            .get(&(ns.to_string(), name.to_string()))
-                            .cloned();
+                        let cell =
+                            self.ns_origins.get(&(ns.to_string(), name.to_string())).cloned();
                         self.env.set_member(ns, name, value.clone());
-                        if let Some(o) = origin {
-                            self.member_store.insert((o, name.to_string()), value);
+                        if let Some(c) = cell {
+                            self.member_store.insert(c, value);
                         }
                         return Ok(());
                     }
@@ -149,13 +149,13 @@ impl EvalState {
             && self.env.has_namespace(ns)
         {
             let value = self.eval_expr(&v.value)?;
-            let origin = self
+            let cell = self
                 .ns_origins
                 .get(&(ns.to_string(), name.to_string()))
                 .cloned();
             self.env.set_member(ns, name, value.clone());
-            if let Some(o) = origin {
-                self.member_store.insert((o, name.to_string()), value);
+            if let Some(c) = cell {
+                self.member_store.insert(c, value);
             }
             return Ok(());
         }

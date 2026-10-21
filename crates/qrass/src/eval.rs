@@ -199,9 +199,13 @@ pub struct EvalState {
     /// cell, visible to every read path (other importers, the module's own
     /// functions). Reads consult this store before any snapshot copy.
     pub(crate) member_store: std::collections::HashMap<(String, String), crate::value::SassValue>,
-    /// `(ns, var) -> origin module` map of every namespaced binding, backing
-    /// both the store lookup on writes and the live read override.
-    pub(crate) ns_origins: std::collections::HashMap<(String, String), String>,
+    /// `(ns, exported-name) -> (origin module, defining-module name)` map of
+    /// every namespaced binding, backing both the store lookup on writes and
+    /// the live read override (renames live below the exported name).
+    pub(crate) ns_origins: std::collections::HashMap<
+        (String, String),
+        (String, String),
+    >,
     /// Built-in namespaces actually brought into scope by `@use "sass:…"`
     /// (exact bound spelling; used by `meta.mixin-exists` module lookups).
     pub(crate) used_builtin_ns: Vec<String>,
