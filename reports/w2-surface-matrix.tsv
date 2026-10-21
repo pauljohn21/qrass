@@ -2829,3 +2829,19 @@ to_space/xyz_d50/xyz_d50.hrx	#9	b: 	.to-space	vvvvv	color.to-space(color(xyz-d50
 #    storage (0..1 for oklab family per CSS spec) with display ×100, touching
 #    color4_convert::from_xyz_d65/to_xyz_d65 + all channel readout sites —
 #    own task 3.0 (added to design), sized as a mini-milestone, not a knife.
+#
+# M1.9 layer-attribution results (session probe log, all reverted):
+# A. adjust-clamp + edit-MIX + display-clamp layers are each individually
+#    golden-confirmed on their anchor cases (adjust/lab `lightness/arg_above_max`
+#    → lab(100% …); change/lab `lightness/out_of_range` → mix with byte-exact
+#    XYZ 1.7255148283 …; no_alpha literal 1.1 ratio → prints 100%).
+# B. BUT combining them regressed `to_space/lab/*#4` (`to-space(lab(50% -999999 0),
+#    a98-rgb)`): golden converts the TRUE a=-999999 (−16.66/12.15/−2.41);
+#    the combined build floor a to ~0 (0.437/0.313/1.143). Root cause NOT yet
+#    attributed (binary search exceeded budget; literals alone keep raw
+#    -999999 per CLI check). Next session: bisect edit-MIX vs mix_form_needed
+#    call-path on that single case before touching any layer.
+# C. unitless lightness stays PERCENT at literals (no_alpha's 1.1→100 print is
+#    display clamp of 1.1%? NO — golden prints 100% for input 1.1: the
+#    unitless-ratio reading is REQUIRED for no_alpha but its scope must be
+#    exactly the no_alpha file family; blanket ratio reading regressed 75).
