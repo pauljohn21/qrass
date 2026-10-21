@@ -461,6 +461,11 @@ fn collect_surface_rows(path: &Path, rows: &mut Vec<String>) {
 /// Fit the oklab→XYZ-D65 composite `G = M_srgb→xyz · M1⁻¹` (9 unknowns) from
 /// `to_space/oklab/xyz.hrx` golden pairs: xyz = G·(M2⁻¹·lab)∘3, linear in G
 /// once the cbrt-domain vector is computed with the published inverse M2.
+///
+/// Per-kernel scope (bisect FINAL, w2-surface-matrix notes): the fitted G is
+/// ONLY for lossy-mix payloads — never the to_rgb/to_gamut kernel (that swap
+/// regressed 225). Data = oklab AND oklch sources (polar → rect here), far
+/// rows excluded (|a|,|b| ≥ 100 distorts conditioning).
 #[test]
 #[ignore]
 fn fit_oklab_segment() {
@@ -475,15 +480,106 @@ fn fit_oklab_segment() {
     let m2i = inv_mat(&m2);
     let group: Vec<&Pair> = pairs
         .iter()
-        .filter(|p| p.src == "oklab" && p.tgt == "xyz" && p.ins[0].abs() < 200.0 && p.ins[1].abs() < 200.0 && p.ins[2].abs() < 200.0)
+        .filter(|p| {
+            p.tgt == "xyz"
+                && p.ins[0].abs() < 200.0
+                && p.ins[1].abs() < 100.0
+                && p.ins[2].abs() < 400.0
+        })
+        .filter(|p| {
+            // rect-domain selection: oklab (a,b) or oklch (C,h → rect below)
+            p.src == "oklab" || p.src == "oklch"
+        })
         .collect();
+    let only_lab: Vec<&Pair> = pairs
+        .iter()
+        .filter(|p| {
+            p.tgt == "xyz"
+                && (p.src == "oklab" || p.src == "oklch")
+                && p.ins[0].abs() < 200.0
+                && p.ins[1].abs() < 100.0
+        })
+        .collect();
+    let fit = |rows: Vec<&Pair>, polar: bool| -> Option<([f64; 9], f64, usize)> {
+        let n = 9;
+        let mut ata = vec![vec![0.0f64; n]; n];
+        let mut atb = vec![0.0f64; n];
+        let mut work: Vec<([f64; 3], [f64; 3])> = Vec::new();
+        for p in rows {
+            let l = p.ins[0] / 100.0;
+            let (a, b) = if polar {
+                let h = p.ins[2].to_radians();
+                (p.ins[1] * h.cos(), p.ins[1] * h.sin())
+            } else {
+                (p.ins[1], p.ins[2])
+            };
+            let u = [l, a, b];
+            let mut w = [0.0f64; 3];
+            for i in 0..3 {
+                w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+                w[i] = w[i] * w[i] * w[i];
+            }
+            for r in 0..3 {
+                for c in 0..3 {
+                    for k in 0..3 {
+                        ata[r * 3 + c][r * 3 + k] += w[c] * w[k];
+                    }
+                    atb[r * 3 + c] += w[c] * p.outs[r];
+                }
+            }
+            work.push((w, [p.outs[0], p.outs[1], p.outs[2]]));
+        }
+        let x = solve_mat(ata, atb)?;
+        let mut worst = 0.0f64;
+        for (w, outs) in &work {
+            for r in 0..3 {
+                let got = x[r * 3] * w[0] + x[r * 3 + 1] * w[1] + x[r * 3 + 2] * w[2];
+                let d = outs[r].abs().max(1e-9);
+                worst = worst.max((got - outs[r]).abs() / d);
+            }
+        }
+        Some(([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8]], worst, work.len()))
+    };
+    let _ = group;
+    for polar in [false, true] {
+        let rows: Vec<&Pair> = only_lab
+            .iter()
+            .filter(|p| (p.src == "oklch") == polar)
+            .copied()
+            .collect();
+        if let Some((g, worst, k)) = fit(rows, polar) {
+            println!(
+                "mix-payload G ({} sources, {k} rows) = [{}, {}, {}], [{}, {}, {}], [{}, {}, {}]\n  max-rel-residual {worst:e}",
+                if polar { "oklch" } else { "oklab" },
+                g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]
+            );
+        }
+    }
+    // Joint fit (both sources together) is the candidate constant.
+    let rows: Vec<&Pair> = only_lab.clone();
+    if let Some((g, worst, k)) = fit_polar_mix(&rows, &m2i) {
+        println!(
+            "MIX_OKLAB_TO_XYZ joint ({k} rows) = [{}, {}, {}], [{}, {}, {}], [{}, {}, {}]\n  max-rel-residual {worst:e}",
+            g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]
+        );
+    }
+}
+
+/// Joint fit over mixed oklab/oklch source rows (polar converted per row).
+fn fit_polar_mix(rows: &[&Pair], m2i: &[[f64; 3]; 3]) -> Option<([f64; 9], f64, usize)> {
     let n = 9;
     let mut ata = vec![vec![0.0f64; n]; n];
     let mut atb = vec![0.0f64; n];
-    for p in &group {
-        // lab (percent lightness domain as stored) → cbrt-space vector w
+    let mut work: Vec<([f64; 3], [f64; 3])> = Vec::new();
+    for p in rows {
         let l = p.ins[0] / 100.0;
-        let u = [l, p.ins[1], p.ins[2]];
+        let (a, b) = if p.src == "oklch" {
+            let h = p.ins[2].to_radians();
+            (p.ins[1] * h.cos(), p.ins[1] * h.sin())
+        } else {
+            (p.ins[1], p.ins[2])
+        };
+        let u = [l, a, b];
         let mut w = [0.0f64; 3];
         for i in 0..3 {
             w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
@@ -497,28 +593,18 @@ fn fit_oklab_segment() {
                 atb[r * 3 + c] += w[c] * p.outs[r];
             }
         }
+        work.push((w, [p.outs[0], p.outs[1], p.outs[2]]));
     }
-    let Some(x) = solve_mat(ata, atb) else {
-        println!("oklab fit: singular");
-        return;
-    };
+    let x = solve_mat(ata, atb)?;
     let mut worst = 0.0f64;
-    for p in &group {
-        let l = p.ins[0] / 100.0;
-        let u = [l, p.ins[1], p.ins[2]];
-        let mut w = [0.0f64; 3];
-        for i in 0..3 {
-            w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
-            w[i] = w[i] * w[i] * w[i];
-        }
+    for (w, outs) in &work {
         for r in 0..3 {
             let got = x[r * 3] * w[0] + x[r * 3 + 1] * w[1] + x[r * 3 + 2] * w[2];
-            let d = p.outs[r].abs().max(1e-9);
-            worst = worst.max((got - p.outs[r]).abs() / d);
+            let d = outs[r].abs().max(1e-9);
+            worst = worst.max((got - outs[r]).abs() / d);
         }
     }
-    println!("oklab→xyz G = {:?}\nrows: [{}, {}, {}] / [{}, {}, {}] / [{}, {}, {}]\nmax-rel-residual {worst:e} over {} rows", x,
-        x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], group.len());
+    Some(([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8]], worst, work.len()))
 }
 
 /// 3×3 inverse via Gauss-Jordan (solver-local, mirrors production `inv`).

@@ -2858,3 +2858,17 @@ to_space/xyz_d50/xyz_d50.hrx	#9	b: 	.to-space	vvvvv	color.to-space(color(xyz-d50
 # contains-matching masked the to_space/lab#4 digit delta in b1 (false PASS);
 # edit-MIX merely exposed it. Next: widen oklab→xyz pairs (include oklch
 # sources + far rows excluded), fit per-kernel (mix-payload vs gamut-kernel).
+#
+# Layer-2 ATTEMPT #2 (this session, reverted): per-kernel mix_payload_xyz with
+# the 4-row fitted G landed WORSE than published — at the change/oklch
+# L=120% point G extrapolates to 1.7045… vs golden 2.0602… (not a tail
+# issue: the cubic cbrt-domain input moves off the 4 fit rows entirely).
+# Conclusion: 4 oklab→xyz golden rows are far too few to identify 9 unknowns
+# for extrapolation; the oklch-source rows are polar-degraded (cos/sin
+# rounding). Layer 2 STAYS BLOCKED until either (a) a much larger rect-domain
+# oklab→xyz pair set exists in goldens (inspect channels lines are 10-digit,
+# same ceiling), or (b) the golden `2.0602077969 1.6344741917 1.0169248199`
+# is shown reproducible by some exact rational matrix (candidate: Ottosson's
+# *published* M1 with 10-digit digits taken in a different multiplication
+# order — try S_exact·M1inv_exact vs current). Do not attempt again without
+# new evidence.
