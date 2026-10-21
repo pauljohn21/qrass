@@ -22,3 +22,27 @@ provenance — `eval_module.rs` builds `forward_buf` merges without upstream ids
 Next attempt preconditions: (1) origin recorded at the @forward collection site;
 (2) element_plus_e2e run BEFORE full hrx — the 4-case e2e is the cheap tripwire
 for this whole cross-module-identity family.
+
+## M3 mix algorithm (color/mix, ~60 cases) — OPENED, probe reverted
+
+First-run evidence (`missing.hrx` matrix read this session, probe reverted to
+9147 baseline):
+* per-channel interpolation in the $method space; BOTH-missing → `none` output;
+* ONE-side missing: with `$method: rgb` the result shows the OTHER side's value
+  (e.g. `rgb(0 100 200) x rgb(200 none 0)` → g prints 100) — but this is NOT
+  yet proven to be "fill with other value": the rec2020 twin of the same pair
+  prints g = 37.57%, consistent with the CSS spec rule "missing component
+  converts as ZERO in the source space THEN interpolates in method space"
+  (0-side value + weight algebra can land on 100 for the identity-weight rgb
+  case). The two readings only diverge under non-trivial matrices — build the
+  decision table from `both_weights/` + `explicit_weight/` rows (weight 0/100%
+  edges) BEFORE coding;
+* output form: legacy-first-operand display (method=rgb all-concrete → hex;
+  rec2020 → `rgb(p%, p%, p%)` legacy percent commas; hsl a → `hsl(h, s%, l%)`);
+  both modern → method-space `color(...)`;
+* `lookup()` space names are `srgb` etc. — normalize $method rgb→srgb and keep
+  the *display* decision (hex) keyed off the original method spelling.
+Next session: dump the full `color/mix/*.hrx` evidence table via the solver's
+pair extractor (extend `collect_pairs` to mix() calls), decide fill-vs-zero,
+then one A/B-gated implementation pass (color_mix.rs has room; color_ops.rs is
+at 533 lines — the dispatch edit must land there or split it first).
