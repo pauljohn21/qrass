@@ -383,6 +383,81 @@ fn fit_lab_white_point() {
     }
 }
 
+/// W2 surface matrix (task 1.3): every color-function golden section that
+/// carries a `none` channel becomes a row `(space, in-mask, surface) ->
+/// golden text`, where surface is the output shape (`value`, `inspect`,
+/// `channels:`, `color-space:`…). Dumps `reports/w2-surface-matrix.tsv`.
+#[test]
+#[ignore]
+fn dump_w2_matrix() {
+    let root = Path::new("../../sass-spec/spec/core_functions/color");
+    let mut rows: Vec<String> = Vec::new();
+    walk_color(root, &mut rows);
+    rows.sort();
+    let mut out = String::from("file\tsec\tsurface\tspace\tmask\tgolden\n");
+    out.push_str(&rows.join("\n"));
+    std::fs::write("../../reports/w2-surface-matrix.tsv", out).expect("write");
+    println!("w2 rows: {}", rows.len());
+}
+
+fn walk_color(dir: &Path, rows: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            walk_color(&p, rows);
+        } else if p.extension().is_some_and(|x| x == "hrx") {
+            collect_surface_rows(&p, rows);
+        }
+    }
+}
+
+fn collect_surface_rows(path: &Path, rows: &mut Vec<String>) {
+    let Ok(text) = fs::read_to_string(path) else { return };
+    let rel = path.to_string_lossy().replace("../../sass-spec/spec/core_functions/color/", "");
+    for (i, section) in text
+        .split("================================================================================")
+        .enumerate()
+        .skip(1)
+    {
+        let flat = section.replace('\n', " | ");
+        if !flat.contains("none") {
+            continue;
+        }
+        // surface lines
+        for key in ["value: ", "channels: ", "color-space: ", "b: ", "p: "] {
+            let mut pos = 0;
+            while let Some(at) = flat[pos..].find(key) {
+                let start = pos + at + key.len();
+                let line = flat[start..].split(" | ").next().unwrap_or("");
+                let val = line.trim_end_matches(';').trim();
+                if !val.is_empty() {
+                    let space = val
+                        .find('(')
+                        .map(|o| val[..o].replace("color", "").trim().to_string())
+                        .unwrap_or_default();
+                    let inside = val
+                        .find('(')
+                        .and_then(|o| val.rfind(')').map(|c| &val[o + 1..c]))
+                        .unwrap_or("");
+                    let mask: String = inside
+                        .split([' ', '/'])
+                        .filter(|t| !t.is_empty())
+                        .map(|t| if t == "none" { "N" } else { "v" })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    rows.push(format!(
+                        "{rel}\t#{}\t{key}\t{space}\t{mask}\t{}",
+                        i - 1,
+                        val.replace('\t', " ")
+                    ));
+                }
+                pos = start;
+            }
+        }
+    }
+}
+
 #[test]
 #[ignore]
 fn diagnose_parse() {
