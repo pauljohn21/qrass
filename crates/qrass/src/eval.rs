@@ -183,6 +183,16 @@ pub struct EvalState {
     /// forwards are visible exactly as the importer sees them
     /// (`meta/mixin_exists` `through_forward` families).
     pub(crate) wildcard_mixins: Vec<(String, String)>,
+    /// Names exported from **two different origin files** through `as *`
+    /// modules — a bare reference fails with dart's `This {variable,
+    /// function,mixin} is available from multiple global modules.`
+    /// (`directives/use/error/member/*`). Origin = Module::member_origins
+    /// provenance, so one upstream forwarded twice is NOT a conflict.
+    pub(crate) wildcard_conflicts: (Vec<String>, Vec<String>, Vec<String>),
+    /// `(name, origin)` ledgers backing the conflict detection above.
+    pub(crate) wildcard_vars: Vec<(String, String)>,
+    pub(crate) wildcard_fns: Vec<(String, String)>,
+    pub(crate) wildcard_mixin_src: Vec<(String, String)>,
     /// Built-in namespaces actually brought into scope by `@use "sass:…"`
     /// (exact bound spelling; used by `meta.mixin-exists` module lookups).
     pub(crate) used_builtin_ns: Vec<String>,
@@ -266,6 +276,10 @@ impl EvalState {
             functions: HashMap::new(),
             bound_modules: HashMap::new(),
             wildcard_mixins: Vec::new(),
+            wildcard_conflicts: (Vec::new(), Vec::new(), Vec::new()),
+            wildcard_vars: Vec::new(),
+            wildcard_fns: Vec::new(),
+            wildcard_mixin_src: Vec::new(),
             used_builtin_ns: Vec::new(),
             mixin_env: HashMap::new(),
             function_env: HashMap::new(),

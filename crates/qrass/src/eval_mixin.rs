@@ -86,6 +86,14 @@ impl EvalState {
                 super::eval_mixin::RawArgs::from_parts(positional, named),
             )
         } else {
+            if self.wildcard_conflicts.2.iter().any(|c| c == &name) {
+                // Two origin files exporting this mixin through `as *` reject
+                // the bare `@include` (`use/error/member` `mixin/*`).
+                return Err(SassError::new(
+                    ErrorKind::Eval,
+                    "This mixin is available from multiple global modules.",
+                ));
+            }
             let mixin = self.mixins.get(&name).cloned().ok_or_else(|| {
                 SassError::new(
                     ErrorKind::Eval,

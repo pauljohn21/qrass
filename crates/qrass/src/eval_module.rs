@@ -63,7 +63,31 @@ impl EvalState {
         let fwd_mixins = filter_forwarded_names(&module.mixins, &f.shown, &f.hidden, &f.prefix);
         let fwd_functions =
             filter_forwarded_names(&module.functions, &f.shown, &f.hidden, &f.prefix);
+        // Carry member provenance through this hop: an exported name's origin
+        // is the upstream's recorded origin, falling back to the upstream's
+        // own base (it defined it locally). `as prefix-*` renames are
+        // reversible by stripping the prefix from the new exported name.
+        let origin_of_in = |name: &str| -> String {
+            module
+                .member_origins
+                .iter()
+                .find(|(e, _)| e == name)
+                .map(|(_, o)| o.clone())
+                .unwrap_or_else(|| module.origin_base.clone())
+        };
+        let strip = |n: &str| -> String {
+            n.strip_prefix(f.prefix.as_str()).unwrap_or(n).to_string()
+        };
         if let Some(buf) = self.forward_buf.last_mut() {
+            for (name, _) in &members {
+                buf.origins.push((name.clone(), origin_of_in(name)));
+            }
+            for (new, _) in &fwd_mixins {
+                buf.origins.push((new.clone(), origin_of_in(&strip(new))));
+            }
+            for (new, _) in &fwd_functions {
+                buf.origins.push((new.clone(), origin_of_in(&strip(new))));
+            }
             buf.vars.extend(members);
             buf.mixins.extend(fwd_mixins);
             buf.functions.extend(fwd_functions);
@@ -360,7 +384,26 @@ impl EvalState {
                 st.eval_top_level(stmt, &mut css)?;
             }
             let forwarded = st.forward_buf.last().cloned().unwrap_or_default();
-            let mut vars = export_vars(st.env.global_bindings());
+            // dart exports ONLY the module's own top-level assignments; vars
+            // injected into the env by `@use … as *` are visible locally but
+            // never re-exported (re-export needs `@forward`). The old
+            // global-bindings export leaked upstream vars as own members,
+            // giving them a wrong origin and firing false wildcard conflicts
+            // (element-plus `mixins/_var.scss` ← `common/var.scss` probe).
+            let local_var_names: Vec<String> = program
+                .iter()
+                .filter_map(|s| match s {
+                    crate::ast::Stmt::Variable(v) => {
+                        Some(v.name.trim_start_matches('$').to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let local_vars: Vec<(String, crate::value::SassValue)> = export_vars(st.env.global_bindings())
+                .into_iter()
+                .filter(|(n, _)| local_var_names.iter().any(|lv| lv == n))
+                .collect();
+            let mut vars = local_vars.clone();
             vars.extend(forwarded.vars);
             // Public mixin/function members: collect the top-level declarations so
             // `bind_alias` can register `{ns}.{name}` aliases over the live registry
@@ -368,6 +411,7 @@ impl EvalState {
             let mut mixins = Vec::new();
             let mut functions = Vec::new();
             let mut configurable = Vec::new();
+            let mut local_members: Vec<String> = local_vars.iter().map(|(n, _)| n.clone()).collect();
             for stmt in &program {
                 match stmt {
                     crate::ast::Stmt::Variable(v) if v.default => {
@@ -381,10 +425,12 @@ impl EvalState {
                     crate::ast::Stmt::Mixin(m) => {
                         let n = st.render_interp(&m.name)?;
                         if !crate::module::is_private(&n) {
+                            local_members.push(n.clone());
                             mixins.push((n.clone(), n));
                         }
                     }
                     crate::ast::Stmt::Function(f) if !crate::module::is_private(&f.name) => {
+                        local_members.push(f.name.clone());
                         functions.push((f.name.clone(), f.name.clone()));
                     }
                     _ => {}
@@ -396,6 +442,21 @@ impl EvalState {
                 mixins: dedup_members(mixins, forwarded.mixins),
                 functions: dedup_members(functions, forwarded.functions),
                 configurable,
+                origin_base: st.name.clone(),
+                // Local members are recorded with their own base too, so one
+                // file reached both directly (`@use … as *`) and through a
+                // forwarder (`@forward …`) keeps a single origin (element-plus
+                // `common/var.scss` dual paths), while genuinely different
+                // definers differ (`use/error/member` goldens).
+                member_origins: {
+                    let mut o = forwarded.origins;
+                    for name in local_members {
+                        if !o.iter().any(|(e, _)| *e == name) {
+                            o.push((name, st.name.clone()));
+                        }
+                    }
+                    o
+                },
             })
         })(self);
 

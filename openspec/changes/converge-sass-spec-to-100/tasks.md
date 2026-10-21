@@ -30,7 +30,7 @@
 ## 5. M4 — W4 module member visibility (≈94 cases)
 
 - [ ] 5.1 Introduce module-scoped member view (exports post show/hide) consumed by `meta.*-exists` family and `@include`/call error paths; keep registry for resolution only
-- [ ] 5.2 `forward/member` + `use/error` diamond-conflict deferred to consumer access; fix the 10-case over-eager lesson with the no_conflict family as regression pin
+- [x] 5.2 `forward/member` + `use/error` diamond-conflict deferred to consumer access; fix the 10-case over-eager lesson with the no_conflict family as regression pin
 - [ ] 5.3 `meta/load_css` residue sweep (user-member access through configured module, apply(load-css) gaps)
 - [ ] 5.4 Full-module-visibility cluster re-run; floor ratchet
 

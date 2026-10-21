@@ -28,6 +28,17 @@ pub struct Module {
     /// spells out that its target "only throws an error because it defines a
     /// configurable variable").
     pub configurable: Vec<String>,
+    /// Canonical path of the file that **defines** this module — the fallback
+    /// origin of its locally defined members (see [`Module::member_origins`]).
+    pub origin_base: String,
+    /// Provenance of `@forward`ed members: `(exported-name, origin-path of the
+    /// file that actually defines the member)`, carried through each hop of a
+    /// forward chain. Members absent here are locally defined and carry
+    /// [`Module::origin_base`]. The wildcard-conflict ledger (OpenSpec M4)
+    /// compares origins: two midstreams forwarding one upstream member share
+    /// an origin (no conflict — element-plus chains), two local definitions of
+    /// one name differ (`directives/use/error/member` goldens).
+    pub member_origins: Vec<(String, String)>,
 }
 
 /// A private member (`$-name`) is not re-exported to importers.
@@ -41,6 +52,9 @@ pub struct Forwarded {
     pub vars: Vec<(String, SassValue)>,
     pub mixins: Vec<(String, String)>,
     pub functions: Vec<(String, String)>,
+    /// `(exported-name, origin-path)` provenance carried through this hop
+    /// (see [`Module::member_origins`]).
+    pub origins: Vec<(String, String)>,
 }
 
 /// Filter a module's global bindings down to its public exports.

@@ -30,12 +30,24 @@ impl EvalState {
                 quoted: false,
             }),
             Expr::Literal(l) => Ok(eval_literal(l)),
-            Expr::Variable(name, _) => self.env.get(name).cloned().ok_or_else(|| {
-                // Every golden spells this message bare — `Error: Undefined
-                // variable.` — the name being carried by the annotated source
-                // line rather than the sentence.
-                err(ErrorKind::UndefinedVariable, "Undefined variable.")
-            }),
+            Expr::Variable(name, _) => {
+                // A name two different origin files both export through
+                // `as *` is rejected at the reference, not silently last-won
+                // (`directives/use/error/member` `variable/*`; same values
+                // still conflict, one upstream forwarded twice does not).
+                if self.wildcard_conflicts.0.iter().any(|c| c == name) {
+                    return Err(err(
+                        ErrorKind::UndefinedVariable,
+                        "This variable is available from multiple global modules.",
+                    ));
+                }
+                self.env.get(name).cloned().ok_or_else(|| {
+                    // Every golden spells this message bare — `Error: Undefined
+                    // variable.` — the name being carried by the annotated source
+                    // line rather than the sentence.
+                    err(ErrorKind::UndefinedVariable, "Undefined variable.")
+                })
+            }
             Expr::Member {
                 namespace, name, ..
             } => {

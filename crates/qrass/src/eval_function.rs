@@ -40,6 +40,16 @@ impl EvalState {
             None => call.name.clone(),
         };
         if let Some(func) = self.functions.get(&key).cloned() {
+            // Two origin files exporting one name through `as *` reject the
+            // bare call (`directives/use/error/member` `function/*`).
+            if call.namespace.is_none()
+                && self.wildcard_conflicts.1.iter().any(|c| c == &call.name)
+            {
+                return Err(SassError::new(
+                    ErrorKind::UndefinedFunction,
+                    "This function is available from multiple global modules.",
+                ));
+            }
             // Arguments evaluate in the caller's scope…
             let raw = self.collect_args(&call.args)?;
             // …but the body runs in its *definition-time* module env snapshot

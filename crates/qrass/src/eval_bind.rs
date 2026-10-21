@@ -33,15 +33,82 @@ impl EvalState {
         }
         match &u.alias {
             UseAlias::Wildcard => {
+                // Conflict identity = the origin file that *defines* the
+                // member (Module::member_origins provenance), so two
+                // midstreams forwarding one upstream stay conflict-free
+                // (element-plus chains) while two independent definitions
+                // of one name collide (`directives/use/error/member` goldens).
+                let origin_of = |name: &str| -> String {
+                    module
+                        .member_origins
+                        .iter()
+                        .find(|(e, _)| e == name)
+                        .map(|(_, o)| o.clone())
+                        .unwrap_or_else(|| module.origin_base.clone())
+                };
                 for (name, value) in &module.vars {
+                    let org = origin_of(name);
+                    if let Some((_, prev)) =
+                        self.wildcard_vars.iter().find(|(n, _)| n == name)
+                        && prev != &org
+                        && !self.wildcard_conflicts.0.iter().any(|c| c == name)
+                    {
+                        
+                        self.wildcard_conflicts.0.push(name.clone());
+                    }
+                    if !self.wildcard_vars.iter().any(|(n, u)| n == name && u == &org) {
+                        self.wildcard_vars.push((name.clone(), org));
+                    }
                     self.env.define(name, value.clone(), AssignFlags::default());
                 }
                 // Record the *exported* mixin members (post show/hide) so
                 // `meta.mixin-exists` can answer per the importer's view.
                 for (exported, defined) in &module.mixins {
+                    let org = origin_of(exported);
+                    if let Some((_, prev)) =
+                        self.wildcard_mixin_src.iter().find(|(e, _)| e == exported)
+                        && prev != &org
+                        && !self.wildcard_conflicts.2.iter().any(|c| c == exported)
+                    {
+                        self.wildcard_conflicts.2.push(exported.clone());
+                    }
+                    if !self.wildcard_mixin_src
+                        .iter()
+                        .any(|(e, u)| e == exported && u == &org)
+                    {
+                        self.wildcard_mixin_src.push((exported.clone(), org));
+                    }
                     if !self.wildcard_mixins.iter().any(|(e, _)| e == exported) {
                         self.wildcard_mixins
                             .push((exported.clone(), defined.clone()));
+                    }
+                }
+                for (exported, _defined) in &module.functions {
+                    let org = origin_of(exported);
+                    if let Some((_, prev)) =
+                        self.wildcard_fns.iter().find(|(e, _)| e == exported)
+                        && prev != &org
+                        && !self.wildcard_conflicts.1.iter().any(|c| c == exported)
+                    {
+                        self.wildcard_conflicts.1.push(exported.clone());
+                    }
+                    if !self.wildcard_fns
+                        .iter()
+                        .any(|(e, u)| e == exported && u == &org)
+                    {
+                        self.wildcard_fns.push((exported.clone(), org));
+                    }
+                    // Bare-name mirror (mirrors `bind_members` without the
+                    // namespace prefix): wildcard functions were never
+                    // resolvable, the gap behind `use/member` fn cases.
+                    if let Some(d) = self.functions.get(_defined) {
+                        self.functions.insert(exported.clone(), d.clone());
+                    }
+                    if let Some(e) = self.function_env.get(_defined) {
+                        self.function_env.insert(exported.clone(), e.clone());
+                    }
+                    if let Some(o) = self.function_module.get(_defined) {
+                        self.function_module.insert(exported.clone(), o.clone());
                     }
                 }
             }

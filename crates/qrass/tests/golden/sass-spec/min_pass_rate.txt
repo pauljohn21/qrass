@@ -1298,4 +1298,11 @@
 #     oklab reverse-kernel precision — per-kernel fit required (notes in
 #     reports/w2-surface-matrix.tsv).
 # sass-spec 9110 floor, unit suite green (486 passed), clippy green.
+#
+# OpenSpec M4 (wildcard member conflicts, use/error/member): 9110 -> 9118
+#     (+8, 0 regress). Origin provenance (Module::member_origins) keeps
+#     element-plus forward chains conflict-free (e2e 4/4); module exports no
+#     longer leak `@use as *` vars (dart semantics); wildcard functions now
+#     resolve by bare name.
+# sass-spec 9118 floor, unit suite green (492 passed), clippy -D warnings green.
 83.1
