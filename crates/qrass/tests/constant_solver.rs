@@ -458,6 +458,110 @@ fn collect_surface_rows(path: &Path, rows: &mut Vec<String>) {
     }
 }
 
+/// Fit the oklab→XYZ-D65 composite `G = M_srgb→xyz · M1⁻¹` (9 unknowns) from
+/// `to_space/oklab/xyz.hrx` golden pairs: xyz = G·(M2⁻¹·lab)∘3, linear in G
+/// once the cbrt-domain vector is computed with the published inverse M2.
+#[test]
+#[ignore]
+fn fit_oklab_segment() {
+    let root = Path::new("../../sass-spec/spec/core_functions/color/to_space");
+    let pairs = collect_pairs(root);
+    // M2⁻¹ (published OKLAB_LMS_TO_LAB inverse, same numbers production uses).
+    let m2 = [
+        [0.2104542553f64, 0.7936177850, -0.0040720469],
+        [1.9779984951, -2.4285922050, 0.4505937099],
+        [0.0259040371, 0.7827717662, -0.8086757540],
+    ];
+    let m2i = inv_mat(&m2);
+    let group: Vec<&Pair> = pairs
+        .iter()
+        .filter(|p| p.src == "oklab" && p.tgt == "xyz" && p.ins[0].abs() < 200.0 && p.ins[1].abs() < 200.0 && p.ins[2].abs() < 200.0)
+        .collect();
+    let n = 9;
+    let mut ata = vec![vec![0.0f64; n]; n];
+    let mut atb = vec![0.0f64; n];
+    for p in &group {
+        // lab (percent lightness domain as stored) → cbrt-space vector w
+        let l = p.ins[0] / 100.0;
+        let u = [l, p.ins[1], p.ins[2]];
+        let mut w = [0.0f64; 3];
+        for i in 0..3 {
+            w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+            w[i] = w[i] * w[i] * w[i];
+        }
+        for r in 0..3 {
+            for c in 0..3 {
+                for k in 0..3 {
+                    ata[r * 3 + c][r * 3 + k] += w[c] * w[k];
+                }
+                atb[r * 3 + c] += w[c] * p.outs[r];
+            }
+        }
+    }
+    let Some(x) = solve_mat(ata, atb) else {
+        println!("oklab fit: singular");
+        return;
+    };
+    let mut worst = 0.0f64;
+    for p in &group {
+        let l = p.ins[0] / 100.0;
+        let u = [l, p.ins[1], p.ins[2]];
+        let mut w = [0.0f64; 3];
+        for i in 0..3 {
+            w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+            w[i] = w[i] * w[i] * w[i];
+        }
+        for r in 0..3 {
+            let got = x[r * 3] * w[0] + x[r * 3 + 1] * w[1] + x[r * 3 + 2] * w[2];
+            let d = p.outs[r].abs().max(1e-9);
+            worst = worst.max((got - p.outs[r]).abs() / d);
+        }
+    }
+    println!("oklab→xyz G = {:?}\nrows: [{}, {}, {}] / [{}, {}, {}] / [{}, {}, {}]\nmax-rel-residual {worst:e} over {} rows", x,
+        x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], group.len());
+}
+
+/// 3×3 inverse via Gauss-Jordan (solver-local, mirrors production `inv`).
+fn inv_mat(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut a = [
+        [m[0][0], m[0][1], m[0][2], 1.0, 0.0, 0.0],
+        [m[1][0], m[1][1], m[1][2], 0.0, 1.0, 0.0],
+        [m[2][0], m[2][1], m[2][2], 0.0, 0.0, 1.0],
+    ];
+    for col in 0..3 {
+        let piv = (col..3)
+            .max_by(|i, j| {
+                a[*i][col]
+                    .abs()
+                    .partial_cmp(&a[*j][col].abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap();
+        a.swap(col, piv);
+        let d = a[col][col];
+        for j in 0..6 {
+            a[col][j] /= d;
+        }
+        for i in 0..3 {
+            if i != col {
+                let f = a[i][col];
+                for j in 0..6 {
+                    a[i][j] -= f * a[col][j];
+                }
+            }
+        }
+    }
+    [
+        [a[0][3], a[0][4], a[0][5]],
+        [a[1][3], a[1][4], a[1][5]],
+        [a[2][3], a[2][4], a[2][5]],
+    ]
+}
+
+fn solve_mat(a: Vec<Vec<f64>>, b: Vec<f64>) -> Option<Vec<f64>> {
+    solve(a, b)
+}
+
 #[test]
 #[ignore]
 fn diagnose_parse() {

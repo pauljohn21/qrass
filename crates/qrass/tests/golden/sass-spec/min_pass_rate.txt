@@ -1292,4 +1292,10 @@
 #     mix form (digits/edge hand-offs, tasks 2.4/7.1).
 # sass-spec 9032 -> 9104 (+72 net: lossy mix form; 3 vs-procedure-baseline
 # hand-offs logged), unit suite green (485 passed), clippy green.
-83.0
+#
+# OpenSpec M2 layer 1 (adjust lightness clamp, commit 6c036df): 9104 -> 9110
+#     (+6), 0 regressions, unit 486 green. Layer 2 (edit-MIX) bisected to the
+#     oklab reverse-kernel precision — per-kernel fit required (notes in
+#     reports/w2-surface-matrix.tsv).
+# sass-spec 9110 floor, unit suite green (486 passed), clippy green.
+83.1

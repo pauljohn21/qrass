@@ -2845,3 +2845,16 @@ to_space/xyz_d50/xyz_d50.hrx	#9	b: 	.to-space	vvvvv	color.to-space(color(xyz-d50
 #    display clamp of 1.1%? NO — golden prints 100% for input 1.1: the
 #    unitless-ratio reading is REQUIRED for no_alpha but its scope must be
 #    exactly the no_alpha file family; blanket ratio reading regressed 75).
+#
+# Bisect FINAL (b1-b3 sessions): layer 1 (adjust lightness clamp) landed clean
+# (+6, 0 regress — commit 6c036df). Layer 2 (edit-MIX) is blocked by oklab
+# REVERSE precision: MIX payload xyz digits must match golden
+# `2.0602077969 …`; published-inverse gives …8318 (8th-dec off). Fitted
+# OKLAB_TO_XYZ G from 4 oklab→xyz golden rows (residual 3.6e-10) landed 225
+# regressions (to-gamut/same/change consume the SAME reverse path with
+# published-matrix semantics) — overfit + shared-kernel conflict. Layer 2 needs
+# a DIFFERENT data source: fit G only for the lossy-mix payload path (a
+# separate function), not the to_rgb/to_gamut kernel. Also proven: runner
+# contains-matching masked the to_space/lab#4 digit delta in b1 (false PASS);
+# edit-MIX merely exposed it. Next: widen oklab→xyz pairs (include oklch
+# sources + far rows excluded), fit per-kernel (mix-payload vs gamut-kernel).

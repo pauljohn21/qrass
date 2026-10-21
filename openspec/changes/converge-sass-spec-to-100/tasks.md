@@ -54,5 +54,5 @@
 
 ## 9. M1.9 — scale audit prelude for W2 (added by evidence, design D2 amendment)
 
-- [ ] 9.1 Audit the oklab/oklch lightness storage scale across convert/readout sites; pick one canonical scale (0..1 storage, ×100 display) with a byte-exact A/B plan
+- [x] 9.1 Audit the oklab/oklch lightness storage scale across convert/readout sites; pick one canonical scale (0..1 storage, ×100 display) with a byte-exact A/B plan
 - [ ] 9.2 Implement clamp-at-display + unitless-ratio literal reading on top of the audited scale; land the change/edit lossy-mix form (evidence in reports/w2-surface-matrix.tsv)
