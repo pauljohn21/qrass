@@ -122,3 +122,48 @@ fn separator_equivalence_on_prefixed_reads() {
     .expect("-/_ interchangeable");
     assert!(css.contains("b: e"), "{css}");
 }
+
+#[test]
+fn hide_variable_does_not_touch_mixin() {
+    // `hide $a` names a VARIABLE; the identically-spelled mixin survives
+    // (`visibility` `hide/wrong_type/mixin`).
+    let css = sass(
+        "@use \"mid\";\n@include mid.a;\n",
+        &[
+            ("_up.scss", "@mixin a() {c {d: e}}\n"),
+            ("_mid.scss", "@forward \"up\" hide $a;\n"),
+        ],
+    )
+    .expect("$-prefixed hide must not hide the mixin");
+    assert!(css.contains("d: e"), "{css}");
+}
+
+#[test]
+fn hide_bare_name_does_not_touch_variable() {
+    // `hide c` names mixins/functions; the variable $c stays readable
+    // (`visibility` `hide/wrong_type/variable_use`).
+    let css = sass(
+        "@use \"mid\";\na {b: mid.$c}\n",
+        &[("_up.scss", "$c: e;\n"), ("_mid.scss", "@forward \"up\" hide c;\n")],
+    )
+    .expect("bare hide must not hide the variable");
+    assert!(css.contains("b: e"), "{css}");
+}
+
+#[test]
+fn show_is_a_global_allowlist_across_types() {
+    // Non-empty `show` constrains every kind: `show $c, $d` (variables) also
+    // exports no mixins/functions, and exports only the named vars
+    // (`meta/module-variables` `through_forward/show`).
+    let css = sass(
+        "@use \"sass:meta\";\n@use \"used\";\na {b: meta.inspect(meta.module-variables(\"used\"))}\n",
+        &[
+            ("_forwarded.scss", "$c: c value;\n$d: d value;\n$e: e value;\n@mixin m(){x{y:z}}\n"),
+            ("_used.scss", "@forward \"forwarded\" show $c, $d;\n"),
+        ],
+    )
+    .expect("show allowlist");
+    assert!(css.contains("\"c\": c value"), "{css}");
+    assert!(css.contains("\"d\": d value"), "{css}");
+    assert!(!css.contains("e value"), "{css}");
+}

@@ -163,7 +163,10 @@ fn forward_members(rest: &[Spanned], kw: &str) -> Vec<String> {
         })
         .filter_map(|s| match &s.token {
             Token::Ident(name) if name != "with" => Some(name.clone()),
-            Token::Variable(name) => Some(name.clone()),
+            // Keep the `$` spelling: `show`/`hide` entries are type-scoped —
+            // `$name` targets variables, a bare name targets mixins/functions
+            // (`forward/member/visibility` `hide/wrong_type/*`).
+            Token::Variable(name) => Some(format!("${name}")),
             _ => None,
         })
         .collect()

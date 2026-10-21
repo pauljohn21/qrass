@@ -1317,4 +1317,17 @@
 #     member_store/ns_origins; Member + defining-module Variable reads consult
 #     the store first (dart shared-mutable semantics). e2e tripwire green.
 # sass-spec 9133 floor, unit suite green (496 passed), clippy -D warnings green.
-83.3
+#
+# OpenSpec M4 slice 4 (forward `as` provenance): 9133 -> 9141 (+8, 0 regress).
+#     member_origins is a (exported, origin, defined) triple so prefixed
+#     writes reach the base variable; show/hide filter AFTER rename with -/_
+#     equivalence; ns writes legal at any block depth; alternate-separator
+#     routing via ns_origins only (module-variables export stays clean).
+# sass-spec 9141 floor, unit suite green (499 passed), clippy -D warnings green.
+#
+# OpenSpec M4 slice 5 (show/hide type prefixes): 9141 -> 9144 (+3, 0 regress).
+#     `$name` entries act on variables only, bare names on mixins/functions;
+#     non-empty show is a GLOBAL allowlist (unmentioned kind exports nothing);
+#     forward_members keeps the `$` spelling the lexer used to drop.
+# sass-spec 9144 floor, unit suite green (502 passed incl. 10 live-var tests).
+83.4

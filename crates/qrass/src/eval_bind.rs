@@ -202,7 +202,11 @@ pub(super) fn filter_forwarded(
     // RENAMED members (`forward/member/as` `show/*`: `as b-* show b-a`
     // keeps; `as b-* hide a` hides nothing — `a` no longer names anything);
     // `-` and `_` are interchangeable in Sass member names (`d_* prefix +
-    // `$d-c` access reads `different_separator`).
+    // `$d-c` access reads `different_separator`). Type prefixes isolate:
+    // `$name` entries act on variables only, bare names on mixins/functions
+    // only — a list that mentions no entry of this kind constrains nothing
+    // here (`forward/member/visibility` `hide/wrong_type/*`: `hide c` keeps
+    // the variable $c, `hide $a` keeps mixin a).
     let norm = |s: &str| s.trim_start_matches('$').replace('_', "-");
     let mut out = members;
     if !prefix.is_empty() {
@@ -210,12 +214,19 @@ pub(super) fn filter_forwarded(
             *name = format!("{prefix}{name}");
         }
     }
+    let keep: Vec<String> = shown.iter().filter(|s| s.starts_with('$')).map(|s| norm(s)).collect();
     if !shown.is_empty() {
-        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| keep.contains(&norm(n)));
+        // `show` is a GLOBAL allowlist: when non-empty it constrains every
+        // kind; a kind whose entries the list never names exports nothing
+        // (`meta/module-variables` `through_forward`, `global_variable_exists`).
+        if keep.is_empty() {
+            out.clear();
+        } else {
+            out.retain(|(n, _)| keep.contains(&norm(n)));
+        }
     }
-    if !hidden.is_empty() {
-        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
+    let drop: Vec<String> = hidden.iter().filter(|s| s.starts_with('$')).map(|s| norm(s)).collect();
+    if !drop.is_empty() {
         out.retain(|(n, _)| !drop.contains(&norm(n)));
     }
     out
@@ -230,7 +241,8 @@ pub(super) fn filter_forwarded_names(
     prefix: &str,
 ) -> Vec<(String, String)> {
     // Rename first, then filter on the renamed names, with `-`/`_`
-    // equivalence (see `filter_forwarded`).
+    // equivalence and type-prefix isolation (see `filter_forwarded`): this
+    // kind only consumes the bare (non-`$`) entries.
     let norm = |s: &str| s.trim_start_matches(['$', '-']).replace('_', "-");
     let mut out: Vec<(String, String)> = names.to_vec();
     if !prefix.is_empty() {
@@ -238,12 +250,19 @@ pub(super) fn filter_forwarded_names(
             *name = format!("{prefix}{name}");
         }
     }
+    let keep: Vec<String> =
+        shown.iter().filter(|s| !s.starts_with('$')).map(|s| norm(s)).collect();
     if !shown.is_empty() {
-        let keep: Vec<String> = shown.iter().map(|s| norm(s)).collect();
-        out.retain(|(n, _)| keep.contains(&norm(n)));
+        // Global allowlist semantics (see `filter_forwarded`).
+        if keep.is_empty() {
+            out.clear();
+        } else {
+            out.retain(|(n, _)| keep.contains(&norm(n)));
+        }
     }
-    if !hidden.is_empty() {
-        let drop: Vec<String> = hidden.iter().map(|s| norm(s)).collect();
+    let drop: Vec<String> =
+        hidden.iter().filter(|s| !s.starts_with('$')).map(|s| norm(s)).collect();
+    if !drop.is_empty() {
         out.retain(|(n, _)| !drop.contains(&norm(n)));
     }
     out
