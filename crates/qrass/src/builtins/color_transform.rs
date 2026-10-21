@@ -180,6 +180,12 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
         };
         c4.comps[idx] = Some(if ch.unit == crate::color4::Unit::Deg {
             (next % 360.0 + 360.0) % 360.0
+        } else if mode == Mode::Adjust && ch.name == "lightness" {
+            // `adjust(lab(30% …), $lightness: 120%)` → `lab(100% 60 -100)`
+            // (`color/adjust/{lab,lch,oklab,oklch}` `lightness/arg_above_max`):
+            // adjust clamps the resulting lightness into the channel bounds;
+            // `change` overflows into the lossy mix form instead.
+            next.clamp(ch.lo, ch.hi)
         } else {
             next
         });
