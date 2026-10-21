@@ -683,3 +683,160 @@ fn diagnose_parse() {
         }
     }
 }
+
+/// Layer-2 candidate hunt (approach b): find an exact-matrix composition that
+/// reproduces golden `2.0602077969 1.6344741917 1.0169248199` for the
+/// change/oklch L=120% payload, and the golden oklab→xyz rows. Variants:
+/// published M1/M2 vs Ottosson's exact coefficients, left/right multiply of
+/// the srgb→xyz lift, lightness /100 vs *100 rounding paths.
+#[test]
+#[ignore]
+fn hunt_oklab_payload_exact() {
+    // change/oklch(50% 0.2 30deg){$lightness:120%} → l=1.2, a=0.2cos30, b=0.2sin30
+    let a = 0.2f64 * 30f64.to_radians().cos();
+    let b = 0.2f64 * 30f64.to_radians().sin();
+    let u = [1.2f64, a, b];
+    // Ottosson's published M1 (linear sRGB → LMS) and M2 exactly as the CSS
+    // spec / his blog rounds them; the current crate uses the same.
+    let m1 = [
+        [0.4122214708f64, 0.5363325363, 0.0514459929],
+        [0.2119034982, 0.6806995451, 0.1073969566],
+        [0.0883024619, 0.2817188376, 0.6299787005],
+    ];
+    let m2 = [
+        [0.2104542553f64, 0.7936177850, -0.0040720469],
+        [1.9779984951, -2.4285922050, 0.4505937099],
+        [0.0259040371, 0.7827717662, -0.8086757540],
+    ];
+    let m2i = inv_mat(&m2);
+    let mut w = [0.0f64; 3];
+    for i in 0..3 {
+        w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+        w[i] = w[i] * w[i] * w[i];
+    }
+    let m1i = inv_mat(&m1);
+    // lin-srgb = M1⁻¹·w  (two orders: as written vs transpose-rounded published inverse)
+    let lin = [
+        m1i[0][0] * w[0] + m1i[0][1] * w[1] + m1i[0][2] * w[2],
+        m1i[1][0] * w[0] + m1i[1][1] * w[1] + m1i[1][2] * w[2],
+        m1i[2][0] * w[0] + m1i[2][1] * w[1] + m1i[2][2] * w[2],
+    ];
+    // srgb→xyz exact rationals (production lin_srgb_to_xyz)
+    let s = [
+        [506752.0f64 / 1228815.0, 87881.0 / 245763.0, 12673.0 / 70218.0],
+        [87098.0 / 409605.0, 175762.0 / 245763.0, 12673.0 / 175545.0],
+        [7918.0 / 409605.0, 87881.0 / 737289.0, 1001167.0 / 1053270.0],
+    ];
+    let xyz = [
+        s[0][0] * lin[0] + s[0][1] * lin[1] + s[0][2] * lin[2],
+        s[1][0] * lin[0] + s[1][1] * lin[1] + s[1][2] * lin[2],
+        s[2][0] * lin[0] + s[2][1] * lin[1] + s[2][2] * lin[2],
+    ];
+    println!(
+        "reproduce golden 2.0602077969 1.6344741917 1.0169248199\n  got {xyz:?}"
+    );
+    // Also the exact-decimal Ottosson M1 from his blog (4th/5th digit variants)
+    // is unknown locally — print the residual against golden for the record.
+    println!(
+        "deltas: {:e} {:e} {:e}",
+        xyz[0] - 2.0602077969,
+        xyz[1] - 1.6344741917,
+        xyz[2] - 1.0169248199
+    );
+}
+
+/// Print the raw oklab/oklch→xyz golden rows (diagnose whether stored l/a/b
+/// are display-% or working 0..1 — the 4-row fit mixed domains and the
+/// extrapolation collapsed).
+#[test]
+#[ignore]
+fn dump_oklab_xyz_rows() {
+    let root = Path::new("../../sass-spec/spec/core_functions/color/to_space");
+    for p in collect_pairs(root)
+        .iter()
+        .filter(|p| (p.src == "oklab" || p.src == "oklch") && p.tgt == "xyz")
+    {
+        println!("{} ins={:?} outs={:?}", p.src, p.ins, p.outs);
+    }
+}
+
+/// Clean joint fit on verified display-domain rows (oklab 4 + oklch 3 with
+/// local polar→rect), excluding zeros and the -999999 far row.
+#[test]
+#[ignore]
+fn fit_oklab_joint_clean() {
+    let root = Path::new("../../sass-spec/spec/core_functions/color/to_space");
+    let pairs = collect_pairs(root);
+    // (l_display_pct, a, b, xyz)
+    let rows: Vec<([f64; 3], [f64; 3])> = pairs
+        .iter()
+        .filter(|p| (p.src == "oklab" || p.src == "oklch") && p.tgt == "xyz")
+        .filter(|p| !(p.ins[0] == 0.0 && p.ins[1] == 0.0 && p.ins[2] == 0.0))
+        .filter(|p| p.ins[1].abs() < 1.0 && p.ins[2].abs() < 360.0)
+        .map(|p| {
+            let u = if p.src == "oklab" {
+                [p.ins[0], p.ins[1], p.ins[2]]
+            } else {
+                let h = p.ins[2].to_radians();
+                [p.ins[0], p.ins[1] * h.cos(), p.ins[1] * h.sin()]
+            };
+            (u, [p.outs[0], p.outs[1], p.outs[2]])
+        })
+        .collect();
+    println!("joint clean rows: {}", rows.len());
+    let m2 = [
+        [0.2104542553f64, 0.7936177850, -0.0040720469],
+        [1.9779984951, -2.4285922050, 0.4505937099],
+        [0.0259040371, 0.7827717662, -0.8086757540],
+    ];
+    let m2i = inv_mat(&m2);
+    let n = 9;
+    let mut ata = vec![vec![0.0f64; n]; n];
+    let mut atb = vec![0.0f64; n];
+    let mut ws: Vec<([f64; 3], [f64; 3])> = Vec::new();
+    for (u, o) in &rows {
+        let l = u[0] / 100.0;
+        let mut w = [0.0f64; 3];
+        for i in 0..3 {
+            w[i] = m2i[i][0] * l + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+            w[i] = w[i] * w[i] * w[i];
+        }
+        for r in 0..3 {
+            for c in 0..3 {
+                for k in 0..3 {
+                    ata[r * 3 + c][r * 3 + k] += w[c] * w[k];
+                }
+                atb[r * 3 + c] += w[c] * o[r];
+            }
+        }
+        ws.push((w, *o));
+    }
+    let x = solve_mat(ata, atb).expect("solve");
+    let mut worst = 0.0f64;
+    for (w, o) in &ws {
+        for r in 0..3 {
+            let got = x[r * 3] * w[0] + x[r * 3 + 1] * w[1] + x[r * 3 + 2] * w[2];
+            let d = o[r].abs().max(1e-9);
+            worst = worst.max((got - o[r]).abs() / d);
+        }
+    }
+    println!(
+        "G-clean = [{}, {}, {}], [{}, {}, {}], [{}, {}, {}]\n  worst rel {worst:e}",
+        x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8]
+    );
+    // Extrapolate the change/oklch payload point with G-clean.
+    let a = 0.2f64 * 30f64.to_radians().cos();
+    let b = 0.2f64 * 30f64.to_radians().sin();
+    let u = [1.2f64, a, b];
+    let mut w = [0.0f64; 3];
+    for i in 0..3 {
+        w[i] = m2i[i][0] * u[0] + m2i[i][1] * u[1] + m2i[i][2] * u[2];
+        w[i] = w[i] * w[i] * w[i];
+    }
+    let got = [
+        x[0] * w[0] + x[1] * w[1] + x[2] * w[2],
+        x[3] * w[0] + x[4] * w[1] + x[5] * w[2],
+        x[6] * w[0] + x[7] * w[1] + x[8] * w[2],
+    ];
+    println!("payload pred {got:?} vs golden 2.0602077969 1.6344741917 1.0169248199");
+}

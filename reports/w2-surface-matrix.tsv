@@ -2872,3 +2872,15 @@ to_space/xyz_d50/xyz_d50.hrx	#9	b: 	.to-space	vvvvv	color.to-space(color(xyz-d50
 # *published* M1 with 10-digit digits taken in a different multiplication
 # order — try S_exact·M1inv_exact vs current). Do not attempt again without
 # new evidence.
+#
+# Layer-2 ATTEMPT #3 (joint 7-row fit, reverted): G-joint extrapolates the
+# change/oklch payload to 2.0602077753 vs golden 2.0602077969 (1.6e-8) —
+# published gives …8318 (3.5e-8). NEITHER round(10)-matches the golden, so
+# dart's payload path is not any 3×3-matrix composition of the published
+# constants. Remaining hypothesis (unverified): Ottosson's *exact decimal*
+# M1/M2 (not their float64 roundings) with linear-sRGB intermediate, or an
+# fp32 fast path. Also unresolved: to_space/oklab `far` shows CLI output
+# -7.68373264e16 in ALL states (HEAD included) while the m1-final/b1 runner
+# recorded PASS — the runner's per-case vroot/fixture path must diverge from
+# single-file CLI reproduction; bisect layer-2 only via full-suite tsv diffs,
+# never via CLI spot-checks.
