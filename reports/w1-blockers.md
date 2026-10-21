@@ -46,3 +46,18 @@ Next session: dump the full `color/mix/*.hrx` evidence table via the solver's
 pair extractor (extend `collect_pairs` to mix() calls), decide fill-vs-zero,
 then one A/B-gated implementation pass (color_mix.rs has room; color_ops.rs is
 at 533 lines — the dispatch edit must land there or split it first).
+
+### M3 mix session-2 probes (numeric, throwaway rustc harness)
+CONFIRMED: * `mix(transparent, #0144bf, 70%)` = alpha-weighted premul with the
+  alpha=0 operand contributing ZERO rgb (exact on r/g/b + out_a 0.3) — weight
+  is the FIRST color's (dart's `$weight` = w1, w2 = 1-w1);
+  out_a = w1a1 + w2a2 (plain, verified on the 42% case = 0.49 ✓).
+UNRESOLVED: the 42% case rgb channels match NEITHER encoding-domain premul
+  (10.07%) NOR linear-light premul (24.47%); back-solving gives an implausible
+  W1≈0.194 ⇒ the golden's operands are NOT what the literal spelling shows —
+  the legacy `rgba(#hex, a)` carrier's channel domain (0..255 vs % vs the
+  hex's ORIGINAL c4 payload) must enter differently. NEXT: extend the solver
+  `collect_pairs` to mix() (4 args incl. weight) and batch-evaluate algebraic
+  candidates (encode-domain × {a-weighted, plain-w} × display paths) against
+  ALL ~200 concrete mix goldens; let residuals pick the formula — no more
+  hand-solving.
