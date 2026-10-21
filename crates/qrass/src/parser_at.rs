@@ -390,7 +390,9 @@ pub(crate) fn seal_block(owner: Owner, body: Vec<Stmt>) -> Stmt {
 
 pub(crate) fn expr(p: &Parser, run: &[Spanned]) -> Or<Expr> {
     if run.is_empty() {
-        return Err(p.err("expected an expression", BytePos(0)));
+        // Every golden spells this capitalized (`Error: Expected expression.`,
+        // 33 sections across the suite — load_css/error `syntax` included).
+        return Err(p.err("Expected expression.", BytePos(0)));
     }
     value_of(p, run.to_vec())
 }

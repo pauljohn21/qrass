@@ -173,6 +173,19 @@ impl EvalState {
 
     fn run_load_css_inner(&mut self, inc: &Include, out: &mut Vec<String>) -> Ev<()> {
         let raw = self.collect_args(&inc.args)?;
+        // Arity first, before any argument coercion (`load_css/error
+        // /too_many_args`: `load-css("other", (), "a")` is a call-arity
+        // error, not a $with type error).
+        let given = raw.positional().len() + raw.named().len();
+        if given > 2 {
+            return Err(SassError::new(
+                ErrorKind::Builtins,
+                format!(
+                    "Only 2 arguments allowed, but {given} {} passed.",
+                    if given == 1 { "was" } else { "were" }
+                ),
+            ));
+        }
         let url = match raw.positional().first() {
             Some(SassValue::Str { text, .. }) => text.clone(),
             None => {

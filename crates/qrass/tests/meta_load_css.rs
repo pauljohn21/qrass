@@ -186,3 +186,32 @@ fn with_empty_map_loads() {
     assert!(out.contains("b: c"), "{out}");
     vfs::clear();
 }
+
+#[test]
+fn parse_error_in_loaded_module_is_capitalized() {
+    // `load_css/error/from_other` `syntax`: dart spells the module's parse
+    // failure `Expected expression.` (capitalized, period) — 33 goldens.
+    vfs::clear();
+    vfs::register("/lc/_bad.scss", "a {b: }\n");
+    let err = compile_string(
+        "/lc/idx.scss".to_string(),
+        "@use \"sass:meta\";\n@include meta.load-css(\"bad\");\n".to_string(),
+        &Options::default(),
+    )
+    .expect_err("parse error must propagate");
+    assert!(err.message.contains("Expected expression."), "{}", err.message);
+    vfs::clear();
+}
+
+#[test]
+fn too_many_positional_args_is_arity_error() {
+    // `too_many_args`: arity beats $with coercion.
+    vfs::clear();
+    let err = load(
+        "index.scss",
+        "@use \"sass:meta\";\n@include meta.load-css(\"other\", (), \"a\");\n",
+    )
+    .expect_err("three args must fail on arity");
+    assert!(err.contains("Only 2 arguments allowed, but 3 were passed."), "{err}");
+    vfs::clear();
+}

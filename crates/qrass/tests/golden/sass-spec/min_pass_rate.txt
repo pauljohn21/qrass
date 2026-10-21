@@ -1343,4 +1343,10 @@
 #     stays `list` per golden — flipping the parser itself regressed 13
 #     color/error rows and was reverted to value-layer sites.
 # sass-spec 9149 floor, unit suite green (506 passed), clippy -D warnings green.
-83.4
+#
+# OpenSpec task 5.3 slice B (load_css error wordings): 9149 -> 9152 (+3, 0
+#     regress). `Expected expression.` capitalized per the 33 golden sections
+#     (was lowercase; contains-matching had masked it); call arity checked
+#     before $with coercion in run_load_css_inner.
+# sass-spec 9152 floor, unit suite green (508 passed), clippy -D warnings green.
+83.5
