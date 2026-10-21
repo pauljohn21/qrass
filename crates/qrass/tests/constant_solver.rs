@@ -878,6 +878,60 @@ fn solve_mix_algebra() {
         ("plain-lin-enc", |a, b, w, _, d, e| e(w * d(a.ch[0]) + (1.0 - w) * d(b.ch[0])) * 255.0),
     ];
     let mut best = ("", 0.0f64, usize::MAX);
+    // The channel-domain candidates above all fail with b-channels OUTSIDE
+    // the [c1,c2] span (e.g. 111,191 → 175.4 at w=0.5 / alpha 0.2 vs 0.7) —
+    // that is only producible by a NON-srgb interpolation space. CSS
+    // color-mix defaults to OKLAB; score that too: premul-alpha interpolate
+    // the oklab coords through the production kernel, convert back.
+    {
+        let mut errs = 0.0f64;
+        let mut n = 0;
+        for (a, b, w, outs, oa) in &rows {
+            let m = |x: &Color2| -> qrass::color4::Color4 {
+                let sp = qrass::color4::lookup("srgb").expect("srgb");
+                let mut c = qrass::color4::Color4::new(sp, [x.ch[0] / 255.0, x.ch[1] / 255.0, x.ch[2] / 255.0]);
+                c.alpha = Some(x.al);
+                c.convert(qrass::color4::lookup("oklab").expect("oklab"))
+            };
+            let (ca, cb) = (m(a), m(b));
+            // encode/decode premul in oklab L with the operand alphas
+            let la = ca.channel("lightness").unwrap_or(0.0) * a.al * w;
+            let lb = cb.channel("lightness").unwrap_or(0.0) * b.al * (1.0 - w);
+            let mut comps = [0.0f64; 3];
+            for i in 0..3 {
+                let x = ca.comps[i].unwrap_or(0.0) * a.al * w;
+                let y = cb.comps[i].unwrap_or(0.0) * b.al * (1.0 - w);
+                comps[i] = if *oa > 0.0 { (x + y) / oa } else { 0.0 };
+            }
+            let _ = la + lb;
+            let outc = qrass::color4::Color4 {
+                space: qrass::color4::lookup("oklab").expect("oklab"),
+                comps: comps.map(Some),
+                text: [None, None, None],
+                alpha: Some(*oa),
+                alpha_missing: false,
+            };
+            let back = outc.convert(qrass::color4::lookup("srgb").expect("srgb"));
+            for i in 0..3 {
+                let got = back.comps[i].unwrap_or(0.0) * 255.0;
+                if (got - outs[i]).abs() > 1.0 {
+                    errs += 1.0;
+                }
+                n += 1;
+            }
+        }
+        println!("cand oklab-premul: mismatched channels {errs}/{n}");
+        if errs < best.1 {
+            best = ("oklab-premul", errs, n);
+        }
+    }
+    for (a, b, w, outs, oa) in &rows {
+        println!(
+            "ROW mix(rgb({}, {}, {})/{}, rgb({}, {}, {})/{}) w={} => rgb({}, {}, {})/{}",
+            a.ch[0], a.ch[1], a.ch[2], a.al, b.ch[0], b.ch[1], b.ch[2], b.al,
+            w, outs[0], outs[1], outs[2], oa
+        );
+    }
     for (name, f) in &cands {
         let mut errs = 0.0f64;
         let mut n = 0;
@@ -1017,7 +1071,17 @@ fn parse_legacy_color(s: &str) -> Option<Color2> {
     let base = if parts[0].starts_with('#') {
         parse_legacy_color(&parts[0])?
     } else {
-        let nums: Vec<f64> = parts.iter().take(3).filter_map(|p| p.trim_end_matches(char::from(0x25)).parse().ok()).collect();
+        let nums: Vec<f64> = parts
+            .iter()
+            .take(3)
+            .filter_map(|p| {
+                let pct = p.ends_with('%');
+                p.trim_end_matches('%')
+                    .parse()
+                    .map(|v: f64| if pct { v * 255.0 / 100.0 } else { v })
+                    .ok()
+            })
+            .collect();
         Color2 { ch: [nums.get(0).copied()?, nums.get(1).copied()?, nums.get(2).copied()?], al: 1.0 }
     };
     let al = parts.get(3).and_then(|p| p.trim_end_matches(char::from(0x25)).parse::<f64>().ok()).unwrap_or(1.0);

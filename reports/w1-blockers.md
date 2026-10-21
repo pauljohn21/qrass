@@ -73,3 +73,19 @@ are suspect (parse mapping: golden line extraction, weight attribution, or the
 17-vs-expected-40 row count). NEXT session: dump the 17 rows verbatim
 (a, b, w, outs) and eyeball against their hrx sections BEFORE scoring; the
 mix verdict gates on clean rows, not new formulas.
+
+### M3 session-4: MIX DEFAULT METHOD SOLVED = OKLAB
+Decisive evidence: several golden rows put a channel OUTSIDE the [c1,c2]
+interval (e.g. b: 111 vs 191 -> 175.4 at w=0.5 with alphas 0.2/0.7) — no
+srgb-domain formula (4 candidates scored) can produce that; routing the same
+premul-alpha interpolation through the production OKLAB kernel (solver now
+does this via qrass::color4) drops mismatches to 30/51 vs 38-42 for every
+channel-domain candidate. Also fixed: the scorer parsed `%`-form channel
+numbers as 0..255 values (11.37% -> 11.37 not 29) — units now normalized.
+Remaining 30 mismatches = oklab premul DETAILS (weight normalization of the
+a=0 operands / L percent-domain (0..100) vs 0..1 in the kernel / possibly the
+unweighted default). Next session: score oklab variants only (L-domain
+±, /oa vs /(w1a1+w2a2), alpha-zero short-circuit) — the space question is
+CLOSED; production run_mix must route unweighted legacy pairs through oklab
+too (current legacy path = per-channel srgb, which is why both_weights
+mostly fails today).
