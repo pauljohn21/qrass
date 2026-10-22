@@ -46,7 +46,7 @@ impl EvalState {
                         .map(|(_, o, _)| o.clone())
                         .unwrap_or_else(|| module.origin_base.clone())
                 };
-                for (name, value) in &module.vars {
+                module.vars.iter().for_each(|(name, value)| {
                     let org = origin_of(name);
                     if let Some((_, prev)) =
                         self.wildcard_vars.iter().find(|(n, _)| n == name)
@@ -60,10 +60,10 @@ impl EvalState {
                         self.wildcard_vars.push((name.clone(), org));
                     }
                     self.env.define(name, value.clone(), AssignFlags::default());
-                }
+                });
                 // Record the *exported* mixin members (post show/hide) so
                 // `meta.mixin-exists` can answer per the importer's view.
-                for (exported, defined) in &module.mixins {
+                module.mixins.iter().for_each(|(exported, defined)| {
                     let org = origin_of(exported);
                     if let Some((_, prev)) =
                         self.wildcard_mixin_src.iter().find(|(e, _)| e == exported)
@@ -95,8 +95,8 @@ impl EvalState {
                     if let Some(o) = self.mixin_module.get(defined) {
                         self.mixin_module.insert(exported.clone(), o.clone());
                     }
-                }
-                for (exported, _defined) in &module.functions {
+                });
+                module.functions.iter().for_each(|(exported, _defined)| {
                     let org = origin_of(exported);
                     if let Some((_, prev)) =
                         self.wildcard_fns.iter().find(|(e, _)| e == exported)
@@ -123,7 +123,7 @@ impl EvalState {
                     if let Some(o) = self.function_module.get(_defined) {
                         self.function_module.insert(exported.clone(), o.clone());
                     }
-                }
+                });
             }
             UseAlias::Named(ns) => {
                 self.bind_ns_vars(ns, module);
@@ -148,7 +148,7 @@ impl EvalState {
     /// are shared-mutable, not snapshot copies).
     fn bind_ns_vars(&mut self, ns: &str, module: &std::rc::Rc<Module>) {
         self.env.bind_namespace(ns, module.vars.clone());
-        for (name, value) in &module.vars {
+        module.vars.iter().for_each(|(name, value)| {
             let origin = module
                 .member_origins
                 .iter()
@@ -161,23 +161,23 @@ impl EvalState {
             // reads and writes (`as` `different_separator`): route both
             // single-swap spellings through the origin map only — the ns view
             // itself keeps dart's clean export set (`meta.module-variables`).
-            for alt in [name.replace('_', "-"), name.replace('-', "_")] {
-                if alt != *name {
-                    self.ns_origins
-                        .insert((ns.to_string(), alt.clone()), origin.clone());
-                }
-            }
+            [name.replace('_', "-"), name.replace('-', "_")]
+                .into_iter()
+                .filter(|alt| alt != name)
+                .for_each(|alt| {
+                    self.ns_origins.insert((ns.to_string(), alt), origin.clone());
+                });
             self.member_store
                 .entry(origin)
                 .or_insert_with(|| value.clone());
-        }
+        });
     }
 
     /// Mirror a module's public mixins/functions under `{ns}.{name}` keys, copying
     /// the lexical env/module snapshots registered at definition time so namespaced
     /// bodies still resolve against the defining module's environment.
     fn bind_members(&mut self, ns: &str, module: &Module) {
-        for (exported, defined) in &module.mixins {
+        module.mixins.iter().for_each(|(exported, defined)| {
             let key = format!("{ns}.{exported}");
             if let Some(d) = self.mixins.get(defined) {
                 self.mixins.insert(key.clone(), d.clone());
@@ -188,8 +188,8 @@ impl EvalState {
             if let Some(o) = self.mixin_module.get(defined) {
                 self.mixin_module.insert(key, o.clone());
             }
-        }
-        for (exported, defined) in &module.functions {
+        });
+        module.functions.iter().for_each(|(exported, defined)| {
             let key = format!("{ns}.{exported}");
             if let Some(d) = self.functions.get(defined) {
                 self.functions.insert(key.clone(), d.clone());
@@ -200,7 +200,7 @@ impl EvalState {
             if let Some(o) = self.function_module.get(defined) {
                 self.function_module.insert(key, o.clone());
             }
-        }
+        });
     }
 }
 
@@ -223,9 +223,7 @@ pub(super) fn filter_forwarded(
     let norm = |s: &str| s.trim_start_matches('$').replace('_', "-");
     let mut out = members;
     if !prefix.is_empty() {
-        for (name, _) in &mut out {
-            *name = format!("{prefix}{name}");
-        }
+        out.iter_mut().for_each(|(name, _)| *name = format!("{prefix}{name}"));
     }
     let keep: Vec<String> = shown.iter().filter(|s| s.starts_with('$')).map(|s| norm(s)).collect();
     if !shown.is_empty() {
@@ -259,9 +257,7 @@ pub(super) fn filter_forwarded_names(
     let norm = |s: &str| s.trim_start_matches(['$', '-']).replace('_', "-");
     let mut out: Vec<(String, String)> = names.to_vec();
     if !prefix.is_empty() {
-        for (name, _) in &mut out {
-            *name = format!("{prefix}{name}");
-        }
+        out.iter_mut().for_each(|(name, _)| *name = format!("{prefix}{name}"));
     }
     let keep: Vec<String> =
         shown.iter().filter(|s| !s.starts_with('$')).map(|s| norm(s)).collect();
