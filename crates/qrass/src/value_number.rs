@@ -9,24 +9,19 @@
 /// trimmed. (Full precision behavior is golden-checked in task group 10.)
 pub fn format_number(v: f64) -> String {
     if !v.is_finite() {
-        return if v.is_nan() {
-            "NaN".into()
-        } else if v > 0.0 {
-            "Infinity".into()
-        } else {
-            "-Infinity".into()
+        return match (v.is_nan(), v > 0.0) {
+            (true, _) => "NaN".into(),
+            (false, true) => "Infinity".into(),
+            (false, false) => "-Infinity".into(),
         };
     }
     if v == v.round() && v.abs() < 1e15 {
         return format!("{}", v as i64);
     }
-    let mut s = format!("{v:.10}");
-    while s.contains('.') && (s.ends_with('0')) {
-        s.pop();
-    }
-    if s.ends_with('.') {
-        s.pop();
-    }
+    let s = format!("{v:.10}");
+    let s = s.trim_end_matches('0');
+    let s = s.trim_end_matches('.');
+    let s = s.to_string();
     // A channel like an hwb whiteness can carry a -0.0 / sub-resolution negative
     // residue from the RGB round trip; its trimmed text would read "-0", but
     // the goldens always emit a plain "0". Normalize the signed-zero artifact.

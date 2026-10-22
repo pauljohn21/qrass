@@ -19,15 +19,18 @@ pub(crate) fn validate_mix_method(
     let err = |m: String| SassError::new(ErrorKind::Builtins, m);
     let method = c.opt("method", Some(3));
     let Some(m) = method else {
-        for (v, col) in [("color1", a), ("color2", b)] {
-            if let Some(c4) = &col.c4 {
-                return Err(err(format!(
-                    "${v}: To use color.mix() with non-legacy color {}, you must provide a $method.",
-                    c4.to_css()
-                )));
-            }
-        }
-        return Ok(());
+        // first non-legacy color without a $method blames, in order
+        return [("color1", a), ("color2", b)]
+            .iter()
+            .find_map(|(v, col)| {
+                col.c4.as_ref().map(|c4| {
+                    err(format!(
+                        "${v}: To use color.mix() with non-legacy color {}, you must provide a $method.",
+                        c4.to_css()
+                    ))
+                })
+            })
+            .map_or(Ok(()), Err);
     };
     // Flatten the method value into words. Quoted strings blame the whole
     // text; Number items raise dart's not-a-string.
@@ -39,15 +42,17 @@ pub(crate) fn validate_mix_method(
         }
         SassValue::Str { text, .. } => text.split_whitespace().map(str::to_string).collect(),
         SassValue::List { items, sep, .. } => {
-            let mut parts: Vec<String> = Vec::with_capacity(items.len());
-            for i in items {
-                match i {
-                    SassValue::Number { .. } => {
-                        return Err(err(format!("$method: {} is not a string.", i.to_css())));
-                    }
-                    other => parts.push(other.to_css()),
-                }
-            }
+            // a Number item blames, everything else flattens to css text
+            let parts: Vec<String> = items
+                .iter()
+                .map(|i| match i {
+                    SassValue::Number { .. } => Err(err(format!(
+                        "$method: {} is not a string.",
+                        i.to_css()
+                    ))),
+                    other => Ok(other.to_css()),
+                })
+                .collect::<Or<Vec<String>>>()?;
             let joined = parts.join(match sep {
                 ListSep::Slash => "/",
                 ListSep::Comma => " ",

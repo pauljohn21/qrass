@@ -102,50 +102,67 @@ pub(super) fn atan2(c: &super::Call) -> Or<SassValue> {
 /// has units and the other doesn't)]` — the reference is always the first
 /// argument and the earliest clash (scanned left to right) is reported.
 pub(super) fn hypot(c: &super::Call) -> Or<SassValue> {
-    let mut vals: Vec<(f64, Option<String>)> = Vec::with_capacity(c.positional.len());
     if c.positional.is_empty() {
         return Err(SassError::new(
             ErrorKind::Builtins,
             "At least one argument must be passed.",
         ));
     }
-    for (i, arg) in c.positional.iter().enumerate() {
-        let SassValue::Number { value, unit } = arg else {
-            return Err(SassError::new(
-                ErrorKind::Builtins,
-                format!("{} is not a number.", arg.to_css()),
-            ));
-        };
-        if i > 0 {
-            let (_, u0) = &vals[0];
-            let compatible =
-                unit == u0 || convert_number(1.0, unit.as_deref(), u0.as_deref()).is_some();
-            if !compatible {
-                let suffix = if unit.is_some() != u0.is_some() {
-                    " (one has units and the other doesn't)"
-                } else {
-                    ""
-                };
-                return Err(SassError::new(
+    // validated collection folded left: each later unit must stay compatible
+    // with the first argument's (earliest clash, left to right, wins)
+    let vals: Vec<(f64, Option<String>)> = c
+        .positional
+        .iter()
+        .enumerate()
+        .try_fold(Vec::new(), |mut acc, (i, arg)| -> Or<Vec<(f64, Option<String>)>> {
+            match arg {
+                SassValue::Number { value, unit } => {
+                    let clash = (i > 0)
+                        .then(|| {
+                            acc.first().filter(|(_, u0)| {
+                                !(unit == u0
+                                    || convert_number(1.0, unit.as_deref(), u0.as_deref()).is_some())
+                            })
+                        })
+                        .flatten();
+                    match clash {
+                        Some((_, u0)) => {
+                            let suffix = if unit.is_some() != u0.is_some() {
+                                " (one has units and the other doesn't)"
+                            } else {
+                                ""
+                            };
+                            Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!(
+                                "$numbers[{}]: {} and $numbers[1]: {} have incompatible units{}.",
+                                i + 1,
+                                arg.to_css(),
+                                c.positional[0].to_css(),
+                                suffix,
+                            ),
+                        ))
+                        }
+                        None => {
+                            acc.push((*value, unit.clone()));
+                            Ok(acc)
+                        }
+                    }
+                }
+                _ => Err(SassError::new(
                     ErrorKind::Builtins,
-                    format!(
-                        "$numbers[{}]: {} and $numbers[1]: {} have incompatible units{}.",
-                        i + 1,
-                        arg.to_css(),
-                        c.positional[0].to_css(),
-                        suffix
-                    ),
-                ));
+                    format!("{} is not a number.", arg.to_css()),
+                )),
             }
-        }
-        vals.push((*value, unit.clone()));
-    }
+        })?;
     let u0 = vals[0].1.clone();
-    let mut sum = 0.0f64;
-    for (v, u) in &vals {
-        let cv = convert_number(*v, u.as_deref(), u0.as_deref()).unwrap_or(*v);
-        sum += cv * cv;
-    }
+    let sum: f64 = vals
+        .iter()
+        .map(|(v, u)| {
+            let cv = convert_number(*v, u.as_deref(), u0.as_deref()).unwrap_or(*v);
+            cv * cv
+        })
+        .sum();
     Ok(SassValue::Number {
         value: sum.sqrt(),
         unit: u0,

@@ -89,12 +89,7 @@ fn components_are_super(
         }
         Combinator::Descendant => {
             // Any sub combinator implies descendant; allow skipping sub compounds.
-            for k in (0..sub.len()).rev() {
-                if complex_prefix_is_super(sup, &sub[..k + 1]) {
-                    return true;
-                }
-            }
-            false
+            (0..sub.len()).rev().any(|k| complex_prefix_is_super(sup, &sub[..k + 1]))
         }
         Combinator::Sibling => {
             if !matches!(sub_comb, Some(Combinator::Sibling) | Some(Combinator::NextSibling))
@@ -104,12 +99,7 @@ fn components_are_super(
                 // relation for `~` to hold across it.
                 return false;
             }
-            for k in (0..sub.len()).rev() {
-                if complex_prefix_is_super(sup, &sub[..k + 1]) {
-                    return true;
-                }
-            }
-            false
+            (0..sub.len()).rev().any(|k| complex_prefix_is_super(sup, &sub[..k + 1]))
         }
     }
 }

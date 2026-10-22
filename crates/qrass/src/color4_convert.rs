@@ -342,19 +342,23 @@ impl Color4 {
                 | "prophoto-rgb" | "xyz" | "xyz-d50"
         );
         if src_tristimulus && dst_tristimulus {
-            for (i, comp) in self.comps.iter().enumerate() {
-                if comp.is_none() {
-                    out[i] = None;
-                }
-            }
+            self.comps
+                .iter()
+                .enumerate()
+                .filter(|(_, comp)| comp.is_none())
+                .for_each(|(i, _)| out[i] = None);
         } else {
-            for (i, ch) in target.channels.iter().enumerate() {
-                if let Some(j) = self.space.channels.iter().position(|c| c.name == ch.name)
-                    && self.comps[j].is_none()
-                {
+            target.channels.iter().enumerate().for_each(|(i, ch)| {
+                let none_at_src = self
+                    .space
+                    .channels
+                    .iter()
+                    .position(|c| c.name == ch.name)
+                    .is_some_and(|j| self.comps[j].is_none());
+                if none_at_src {
                     out[i] = None;
                 }
-            }
+            });
             // Perceptual pairs (`lab`/`lch` and `oklab`/`oklch`, including across
             // the two families). The chromatic channels (a/b, or chroma/hue) go
             // `none` only when BOTH of the source's second and third channels are

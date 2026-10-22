@@ -202,16 +202,17 @@ fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
             "At least one argument must be passed.",
         ));
     }
-    let mut nums: Vec<(f64, Option<String>)> = Vec::with_capacity(c.positional.len());
-    for arg in c.positional {
-        let SassValue::Number { value, unit } = arg else {
-            return Err(SassError::new(
+    let nums: Vec<(f64, Option<String>)> = c
+        .positional
+        .iter()
+        .map(|arg| match arg {
+            SassValue::Number { value, unit } => Ok((*value, unit.clone())),
+            _ => Err(SassError::new(
                 ErrorKind::Builtins,
                 format!("{} is not a number.", arg.to_css()),
-            ));
-        };
-        nums.push((*value, unit.clone()));
-    }
+            )),
+        })
+        .collect::<Or<Vec<(f64, Option<String>)>>>()?;
     // Reduce by comparing each candidate expressed in the current best's unit.
     let mut best = 0usize;
     for i in 1..nums.len() {
