@@ -421,6 +421,31 @@ impl Parser {
         out
     }
 
+    /// `pieces` for at-rule QUERY heads (`@media`/`@supports`): loud comments
+    /// re-enter as their source text there (function forms like
+    /// `@supports a(/**/ b)` keep them verbatim; `css/supports/comment`),
+    /// while the declaration-group tidy in `css::tidy_condition` strips them.
+    pub(crate) fn pieces_keeping_comments(&self, tokens: &[Spanned]) -> InterpText {
+        use crate::token::Piece;
+        let mut out = InterpText::new();
+        let mut prev_end: Option<BytePos> = None;
+        for s in tokens {
+            if let Some(end) = prev_end
+                && s.span.start.0 > end.0
+                && !matches!(s.token, Token::Comment(_))
+            {
+                out.push(Piece::Text(" ".into()));
+            }
+            if let Token::Comment(raw) = &s.token {
+                out.push(Piece::Text(raw.clone()));
+            } else {
+                token_to_pieces(&s.token, &mut out);
+            }
+            prev_end = Some(s.span.end);
+        }
+        out
+    }
+
     /// Span covering an owned token run.
     pub(crate) fn span_of(&self, tokens: &[Spanned]) -> Span {
         let start = tokens.first().map(|s| s.span.start).unwrap_or(BytePos(0));

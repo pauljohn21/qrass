@@ -278,3 +278,80 @@ pub(crate) fn is_bogus_combinator(seg: &str) -> bool {
     // trailing combinator: the segment ends on `+`/`~`/`>`
     prev_comb && chars.last().is_some_and(|c| is_comb(*c))
 }
+
+/// Re-serialize an `@supports`/`@media` query head like dart does: a
+/// *declaration-shaped* group (top-level `:` before any paren, no nesting)
+/// drops loud comments, trims its edges and never leaves a space before the
+/// `:`; every other form (`a(/**/ b)`, `selector(…)`, `(a b)`) is kept
+/// VERBATIM (`css/supports/comment` `function/*`, `syntax/*`).
+pub(crate) fn tidy_condition(q: &str) -> String {
+    let chars: Vec<char> = q.chars().collect();
+    let mut out: Vec<char> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '(' => {
+                out.push('(');
+                i += 1;
+                let start = i;
+                let mut depth = 1usize;
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth > 0 {
+                        i += 1;
+                    }
+                }
+                let inner: String = chars[start..i].iter().collect();
+                let inner = if is_declaration_group(&inner) {
+                    let inner = strip_loud_comments(&inner);
+                    let mut t = inner.trim_matches(' ').trim_matches('\t').to_string();
+                    if let Some(at) = t.find(':') {
+                        let head = t[..at].trim_end();
+                        t = format!("{}{}", head, &t[at..]);
+                    }
+                    t
+                } else {
+                    inner
+                };
+                out.extend(inner.chars());
+                if i < chars.len() {
+                    out.push(')');
+                    i += 1;
+                }
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Top-level `:` before any `(` and no parentheses at all inside.
+fn is_declaration_group(inner: &str) -> bool {
+    for c in inner.chars() {
+        match c {
+            '(' => return false,
+            ':' => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn strip_loud_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find("/*") {
+        out.push_str(&rest[..at]);
+        let close = rest[at..].find("*/").map(|c| at + c + 2).unwrap_or(rest.len());
+        rest = &rest[close.min(rest.len())..];
+    }
+    out.push_str(rest);
+    out
+}

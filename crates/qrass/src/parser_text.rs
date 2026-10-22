@@ -32,6 +32,9 @@ pub(crate) fn token_to_pieces(t: &Token, out: &mut InterpText) {
         Token::AtKeyword(a) => out.push(Piece::Text(format!("@{a}"))),
         Token::Interpolated { pieces, .. } => out.extend(pieces.iter().cloned()),
         Token::Punct(p) => out.push(Piece::Text(punct_text(*p).to_string())),
+        // Loud comments drop out of generic text streams; only the
+        // `@media`/`@supports` query heads re-collect them, via
+        // `Parser::pieces_keeping_comments`.
         Token::Comment(_) => {}
     }
 }

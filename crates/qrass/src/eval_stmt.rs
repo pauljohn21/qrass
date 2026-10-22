@@ -286,6 +286,16 @@ impl EvalState {
         out: &mut Vec<String>,
     ) -> Ev<()> {
         let query = self.render_interp(condition)?;
+        // `css/supports/comment` + `css/media/whitespace` goldens: a comment
+        // eaten from a query head/tail leaves its spacing behind, and dart
+        // re-serializes each parenthesized condition with trimmed edges and no
+        // space before the `:`. Apply only to at-rule query heads, never the
+        // body selectors.
+        let query = if header == "@supports" || header == "@media" {
+            crate::css::tidy_condition(&query)
+        } else {
+            query
+        };
         self.env.enter();
         let mut inner: Vec<String> = Vec::new();
         let mut decls: Vec<Item> = Vec::new();

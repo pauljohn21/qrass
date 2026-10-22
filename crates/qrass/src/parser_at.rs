@@ -33,7 +33,7 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
                 "media" => {
                     super::parser_supports::validate_media(p, rest)?;
                     Ok(Owner::Media {
-                        queries: p.pieces(rest),
+                        queries: p.pieces_keeping_comments(rest),
                         span,
                     })
                 }
@@ -49,7 +49,7 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
                     }
                     super::parser_supports::validate_supports(p, rest)?;
                     Ok(Owner::Supports {
-                        condition: p.pieces(rest),
+                        condition: p.pieces_keeping_comments(rest),
                         span,
                     })
                 }

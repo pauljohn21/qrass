@@ -1361,4 +1361,12 @@
 #     verbatim, adjacent doubles / trailing / paren-head (except `:has`) drop
 #     the rule; render_rule-level filter, warning via tracing::warn.
 # sass-spec 9177 floor, unit suite green (514 passed), clippy -D warnings green.
+#
+# OpenSpec M5 slice 2 (supports/media query condition heads): 9177 -> 9184
+#     (+8 net, 1 traded): declaration groups strip loud comments + tidy the
+#     `:`; function forms keep loud comments verbatim via
+#     pieces_keeping_comments (query heads ONLY — the global token_to_pieces
+#     attempt regressed import/mixin comment cases); css/supports/comment#17
+#     traded away (silent-newline whitespace fidelity in the golden).
+# sass-spec 9184 floor, unit suite green (514 passed), clippy -D warnings green.
 83.7
