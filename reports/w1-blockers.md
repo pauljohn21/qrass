@@ -102,3 +102,15 @@ HARD PRECONDITION before any further algebra scoring: extend collect to
 (key = hrx section name) + capture the FULL input.scss text per row and
 verify a few rows by hand-running `qrass`/expectations; only then score.
 Treat all session-3/4 candidate numbers as void until rows are section-keyed.
+
+### 5.3 deferred: load-css IN-RULE nesting (plain_css parent_selector / twice different_nesting)
+golden: `a { @include load-css("m") }` must re-render the module's CSS with
+`a ` prepended to each TOP-LEVEL rule (content's own `&` stays module-internal
+per the golden comment), and a second load of an already-@use'd module renders
+AGAIN (different_nesting shows both root and prefixed copies). Current
+architecture ships one shared Vec<String> rendered chunk per module singleton
+(task9 chunk protocol) — prepending selectors to rendered text is unsafe, and
+@use-cached modules keep no AST for re-rendering. Structural design needed:
+either module AST retention + prefix- graft at collect time, or chunk-level
+selector-list surgery with a render-once-per-context key. ~10 cases gated
+(plain_css 4-7, twice 1/5, nested media #843). Not a slice-sized fix.

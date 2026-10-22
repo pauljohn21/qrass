@@ -57,6 +57,16 @@ impl EvalState {
                         }
                         return Ok(());
                     }
+                    // A bare declaration at stylesheet root is an error in
+                    // dart (`load_css/error/load` `top_level`/`nesting`:
+                    // "Declarations may only be used within style rules.")
+                    // — never silently dropped.
+                    if sel_ctx.is_empty() {
+                        return Err(SassError::new(
+                            ErrorKind::Eval,
+                            "Declarations may only be used within style rules.",
+                        ));
+                    }
                 }
                 if let Some((prop, value)) = self.render_declaration(d)? {
                     decls.push(Item::Decl { prop, value });

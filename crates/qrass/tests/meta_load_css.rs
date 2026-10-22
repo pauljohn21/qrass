@@ -215,3 +215,32 @@ fn too_many_positional_args_is_arity_error() {
     assert!(err.contains("Only 2 arguments allowed, but 3 were passed."), "{err}");
     vfs::clear();
 }
+
+#[test]
+fn root_bare_declaration_errors() {
+    // dart rejects a bare declaration at stylesheet root — inside a loaded
+    // module too (`load_css/error/load` `top_level`: "Declarations may only
+    // be used within style rules."), never silently drop it.
+    vfs::clear();
+    vfs::register("/lc/_decl.scss", "x: y\n");
+    let err = compile_string(
+        "/lc/idx.scss".to_string(),
+        "@use \"sass:meta\";\n@include meta.load-css(\"decl\");\n".to_string(),
+        &Options::default(),
+    )
+    .expect_err("root declaration must fail");
+    assert!(
+        err.message.contains("Declarations may only be used within style rules."),
+        "{}",
+        err.message
+    );
+    // same at the entry sheet's own root
+    let err = compile_string(
+        "/lc/root.scss".to_string(),
+        "x: y\n".to_string(),
+        &Options::default(),
+    )
+    .expect_err("root declaration must fail in the entry too");
+    assert!(err.message.contains("Declarations may only be used"), "{err}");
+    vfs::clear();
+}
