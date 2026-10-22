@@ -16,8 +16,20 @@
 
 use crate::ast::{Block, InterpText, Stmt};
 use crate::ast_expr::{Arg, BinOp, Expr};
+use crate::drain::drain;
 use crate::error::{ErrorKind, SassError};
 use crate::token::Piece;
+use rxrust::prelude::*;
+
+/// Stream every owned item through the validator `f`, letting the drain's
+/// error union short-circuit on the first failure (the `?`-in-loop shape of
+/// the imperative walker, RFP contract R1/R2).
+fn all_items<X: 'static, F>(items: Vec<X>, f: F) -> Result<(), SassError>
+where
+    F: Fn(X) -> Result<(), SassError> + 'static,
+{
+    drain(Local::from_iter(items).map(f).box_it()).map(|_| ())
+}
 
 const AT_RULE: &str = "This at-rule isn't allowed in plain CSS.";
 const VARIABLE: &str = "Sass variables aren't allowed in plain CSS.";
@@ -52,10 +64,7 @@ pub(crate) fn is_css_grammar_error(err: &SassError) -> bool {
 
 /// Reject SCSS-only constructs in a parsed plain-CSS program.
 pub(crate) fn validate(program: &[Stmt]) -> Result<(), SassError> {
-    for stmt in program {
-        check_stmt(stmt, false)?;
-    }
-    Ok(())
+    all_items(program.to_vec(), |s| check_stmt(&s, false))
 }
 
 /// Concatenated literal text of an interpolated fragment, ignoring `#{…}`
@@ -76,33 +85,27 @@ fn plain_text(text: &InterpText) -> String {
 /// Keyframes steps (`50%`, `from`, `to`) match none of these, so they stay safe.
 fn check_selectors(text: &InterpText, nested: bool) -> Result<(), SassError> {
     let sel = plain_text(text);
-    for part in sel.split(',') {
-        let t = part.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if t.starts_with('%') {
-            return Err(scss_err(PLACEHOLDER));
-        }
-        if !nested && t.starts_with(['>', '+', '~']) {
-            return Err(scss_err(COMBINATOR));
-        }
-    }
+    all_items(
+        sel.split(',').map(|p| p.trim().to_string()).collect::<Vec<String>>(),
+        move |t| {
+            t.starts_with('%')
+                .then(|| Err(scss_err(PLACEHOLDER)))
+                .or_else(|| {
+                    (!nested && t.starts_with(['>', '+', '~'])).then(|| Err(scss_err(COMBINATOR)))
+                })
+                .unwrap_or(Ok(()))
+        },
+    )?;
     let bytes = sel.as_bytes();
-    for (i, b) in bytes.iter().enumerate() {
-        if *b == b'&'
-            && let Some(&next) = bytes.get(i + 1)
-            && (next.is_ascii_alphanumeric() || next == b'_' || next == b'-')
-        {
-            return Err(scss_err(PARENT_SUFFIX));
-        }
-    }
-    Ok(())
-}
-
-/// True when an interpolated text carries a real `#{…}` expression piece.
-fn has_interp(text: &InterpText) -> bool {
-    text.iter().any(|p| matches!(p, Piece::Expr(_)))
+    err_if(
+        bytes.iter().enumerate().any(|(i, b)| {
+            *b == b'&'
+                && bytes
+                    .get(i + 1)
+                    .is_some_and(|n| n.is_ascii_alphanumeric() || matches!(n, b'_' | b'-'))
+        }),
+        PARENT_SUFFIX,
+    )
 }
 
 /// SCSS-only arithmetic/logic operators. `/` (`Div`) and `=` (`Assign`) are
@@ -195,72 +198,61 @@ fn check_stmt(stmt: &Stmt, nested: bool) -> Result<(), SassError> {
 }
 
 fn check_block(body: &Block, nested: bool) -> Result<(), SassError> {
-    for stmt in body {
-        check_stmt(stmt, nested)?;
+    all_items(body.to_vec(), move |s| check_stmt(&s, nested))
+}
+
+/// Left-biased short-circuit: run `a`, then `b` unless `a` failed — the
+/// closure-chain shape of `a?; b` (contract R3 exception ②).
+fn left_or<T>(a: Result<(), SassError>, b: impl FnOnce() -> Result<T, SassError>) -> Result<T, SassError> {
+    a.and_then(|_| b())
+}
+
+/// A conditional SCSS-only error as a value (`Ok` when the guard is clean).
+/// The single binary branch lives here once; every call site stays a chain.
+fn err_if(cond: bool, msg: &'static str) -> Result<(), SassError> {
+    if cond {
+        Err(scss_err(msg))
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 fn check_expr(expr: &Expr) -> Result<(), SassError> {
     match expr {
         Expr::Variable(..) => Err(scss_err(VARIABLE)),
         Expr::Member { .. } => Err(scss_err(NAMESPACE)),
-        Expr::Interpolated { pieces, .. } => {
-            if pieces.iter().any(|p| matches!(p, Piece::Expr(_))) {
-                Err(scss_err(INTERP))
-            } else {
-                Ok(())
-            }
-        }
-        Expr::Binary { op, left, right, .. } => {
-            if is_scss_operator(*op) {
-                return Err(scss_err(OPERATOR));
-            }
-            check_expr(left)?;
-            check_expr(right)
-        }
+        Expr::Interpolated { pieces, .. } => left_or(interp_of(pieces), || Ok(())),
+        Expr::Binary { op, left, right, .. } => left_or(
+            err_if(is_scss_operator(*op), OPERATOR),
+            || check_expr(left).and_then(|_| check_expr(right)),
+        ),
         Expr::Unary { operand, .. } => check_expr(operand),
         Expr::Paren(inner, _) => check_expr(inner),
-        Expr::List { items, .. } => {
-            for item in items {
-                check_expr(item)?;
-            }
-            Ok(())
-        }
+        Expr::List { items, .. } => all_items(items.clone(), |e| check_expr(&e)),
         // A map literal is SCSS-only: `(k: v)` has no plain-CSS spelling.
         Expr::Map { .. } => Err(scss_err(EXPECT_PAREN)),
-        Expr::FunctionCall(call) => {
+        Expr::FunctionCall(call) => left_or(
             // `ns.fn(…)` uses a module namespace, which plain CSS forbids.
-            if call.namespace.is_some() {
-                return Err(scss_err(NAMESPACE));
-            }
-            // CSS math functions keep plain-CSS arithmetic (`*`/`/` are legal
-            // inside `calc()` per `css/plain/calculation`), but their operands
-            // still forbid interpolation, variables and namespaces
-            // (`css/plain/error/expression/calculation`).
-            if is_css_math_function(&call.name) {
-                for arg in &call.args {
-                    check_arg_calc(arg)?;
+            err_if(call.namespace.is_some(), NAMESPACE),
+            || {
+                // CSS math functions keep plain-CSS arithmetic (`*`/`/` are legal
+                // inside `calc()` per `css/plain/calculation`), but their operands
+                // still forbid interpolation, variables and namespaces
+                // (`css/plain/error/expression/calculation`).
+                match is_css_math_function(&call.name) {
+                    true => all_items(call.args.clone(), |a| check_arg_calc(&a)),
+                    false => all_items(call.args.clone(), |a| check_arg(&a)),
                 }
-                return Ok(());
-            }
-            for arg in &call.args {
-                check_arg(arg)?;
-            }
-            Ok(())
-        }
+            },
+        ),
         // Scalars (numbers, strings, colors, urls, bools, null, idents) are CSS.
         Expr::Literal(_) => Ok(()),
         // Modern `if()`: a plain-CSS file may use the raw CSS clause syntax, but
         // any Sass arm (`sass($x)` tests, `#{}` interpolation, `$var` values) is
         // still disallowed, so recurse over the whole clause tree.
-        Expr::IfCall(call) => {
-            for clause in &call.clauses {
-                check_if_cond(clause.cond.as_ref())?;
-                check_expr(&clause.value)?;
-            }
-            Ok(())
-        }
+        Expr::IfCall(call) => all_items(call.clauses.clone(), |clause| {
+            check_if_cond(clause.cond.as_ref()).and_then(|_| check_expr(&clause.value))
+        }),
     }
 }
 
@@ -282,10 +274,7 @@ fn check_if_cond(cond: Option<&crate::ast_expr::IfCond>) -> Result<(), SassError
         Some(IfCond::Not(inner)) => check_if_cond(Some(inner)),
         Some(IfCond::Paren(inner)) => check_if_cond(Some(inner)),
         Some(IfCond::Chain { parts, .. }) => {
-            for part in parts {
-                check_if_cond(Some(part))?;
-            }
-            Ok(())
+            all_items(parts.clone(), |p| check_if_cond(Some(&p)))
         }
     }
 }
@@ -305,11 +294,16 @@ fn check_arg(arg: &Arg) -> Result<(), SassError> {
 }
 
 fn interp(text: &InterpText) -> Result<(), SassError> {
-    if has_interp(text) {
-        Err(scss_err(INTERP))
-    } else {
-        Ok(())
-    }
+    left_or(interp_of(text), || Ok(()))
+}
+
+/// Interpolation guard as a value: `Err(INTERP)` when the fragment carries a
+/// real `#{…}` piece.
+fn interp_of(pieces: &[Piece]) -> Result<(), SassError> {
+    err_if(
+        pieces.iter().any(|p| matches!(p, Piece::Expr(_))),
+        INTERP,
+    )
 }
 
 fn scss_err(msg: &str) -> SassError {
@@ -324,38 +318,18 @@ fn check_expr_calc(expr: &Expr) -> Result<(), SassError> {
     match expr {
         Expr::Variable(..) => Err(scss_err(VARIABLE)),
         Expr::Member { .. } => Err(scss_err(NAMESPACE)),
-        Expr::Interpolated { pieces, .. } => {
-            if pieces.iter().any(|p| matches!(p, Piece::Expr(_))) {
-                Err(scss_err(INTERP))
-            } else {
-                Ok(())
-            }
-        }
+        Expr::Interpolated { pieces, .. } => left_or(interp_of(pieces), || Ok(())),
         Expr::Binary { left, right, .. } => {
-            check_expr_calc(left)?;
-            check_expr_calc(right)
+            check_expr_calc(left).and_then(|_| check_expr_calc(right))
         }
         Expr::Unary { operand, .. } => check_expr_calc(operand),
         Expr::Paren(inner, _) => check_expr_calc(inner),
-        Expr::List { items, .. } => {
-            for item in items {
-                check_expr_calc(item)?;
-            }
-            Ok(())
-        }
+        Expr::List { items, .. } => all_items(items.clone(), |e| check_expr_calc(&e)),
         Expr::Map { .. } => Err(scss_err(EXPECT_PAREN)),
-        Expr::FunctionCall(call) => {
-            if call.namespace.is_some() {
-                return Err(scss_err(NAMESPACE));
-            }
-            for arg in &call.args {
-                match arg {
-                    Arg::Positional(e) | Arg::Splat(e) => check_expr_calc(e)?,
-                    Arg::Named { .. } => return Err(scss_err(VARIABLE)),
-                }
-            }
-            Ok(())
-        }
+        Expr::FunctionCall(call) => left_or(
+            err_if(call.namespace.is_some(), NAMESPACE),
+            || all_items(call.args.clone(), |a| check_arg_calc(&a)),
+        ),
         Expr::Literal(_) => Ok(()),
         Expr::IfCall(_) => Err(scss_err(INTERP)),
     }

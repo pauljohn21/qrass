@@ -11,7 +11,7 @@
 
 - [x] 2.1 `css.rs`：`tidy_condition`/`is_bogus_combinator`/`split_top_commas`/`strip_loud_comments`/`normalize_selector` 及 render 族全链式化（`from_iter + scan_map + collect`，D2 终端规则），本 change 内未提交的命令式残留一并收编
 - [x] 2.2 `selector_unify_complex.rs` + `selector_unify.rs` 循环/条件链消除
-- [ ] 2.3 `builtins/selector.rs`（18 处）与 `plain_css.rs`（11 处）清洗
+- [x] 2.3 `builtins/selector.rs`（18 处）与 `plain_css.rs`（11 处）清洗
 - [ ] 2.4 S1 其余 ≤5 循环小文件清零（`value_number.rs`、`css` 邻族等，按 style_gate 报表逐项勾销）
 - [ ] 2.5 S1 验收：style_gate 对 S1 文件命中归零；e2e → 全量 A/B 0 回归 → unit/clippy/wasm 绿
 
