@@ -82,10 +82,10 @@ impl EvalState {
             }
             Expr::Paren(inner, _) => self.eval_expr(inner),
             Expr::List { items, sep, bracketed, .. } => {
-                let mut out = Vec::with_capacity(items.len());
-                for item in items {
-                    out.push(self.eval_expr(item)?);
-                }
+                let out = items
+                    .iter()
+                    .map(|item| self.eval_expr(item))
+                    .collect::<Ev<Vec<SassValue>>>()?;
                 Ok(SassValue::List {
                     items: out,
                     sep: *sep,
@@ -94,22 +94,30 @@ impl EvalState {
                 })
             }
             Expr::Map { pairs, .. } => {
-                let mut entries = Vec::with_capacity(pairs.len());
-                for (k, v) in pairs {
-                    entries.push((self.eval_expr(k)?, self.eval_expr(v)?));
-                }
+                let entries = pairs
+                    .iter()
+                    .map(|(k, v)| {
+                        Ok((self.eval_expr(k)?, self.eval_expr(v)?))
+                    })
+                    .collect::<Ev<Vec<(SassValue, SassValue)>>>()?;
                 Ok(SassValue::Map { entries })
             }
             Expr::Interpolated { quote, pieces, .. } => {
-                let mut text = String::new();
-                for p in pieces {
-                    match p {
-                        Piece::Text(t) => text.push_str(t),
-                        Piece::Expr(src) => {
-                            text.push_str(&self.eval_interp_source(src)?.interp_text())
+                let text = pieces
+                    .iter()
+                    .try_fold(String::new(), |mut text, p| {
+                        match p {
+                            Piece::Text(t) => {
+                                text.push_str(t);
+                                Ok(text)
+                            }
+                            Piece::Expr(src) => {
+                                let v = self.eval_interp_source(src)?;
+                                text.push_str(&v.interp_text());
+                                Ok(text)
+                            }
                         }
-                    }
-                }
+                    })?;
                 Ok(SassValue::Str {
                     text,
                     quoted: quote.is_some(),
@@ -275,14 +283,16 @@ impl EvalState {
         let url_is_call = call.args.iter().any(|arg| {
             matches!(arg, Arg::Positional(Expr::Variable(..)) | Arg::Splat(Expr::Variable(..)))
         });
-        let mut parts = Vec::with_capacity(call.args.len());
-        for arg in &call.args {
-            let text = match arg {
-                Arg::Positional(e) | Arg::Splat(e) => self.render_css(e)?,
-                Arg::Named { name, value } => format!("({name}: {})", self.render_css(value)?),
-            };
-            parts.push(text);
-        }
+        let parts: Vec<String> = call
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Positional(e) | Arg::Splat(e) => self.render_css(e),
+                Arg::Named { name, value } => {
+                    Ok(format!("({name}: {})", self.render_css(value)?))
+                }
+            })
+            .collect::<Ev<Vec<String>>>()?;
         Ok(format!(
             "{}({})",
             normalize_special_name(&call.name, url_is_call),
