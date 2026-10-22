@@ -28,11 +28,7 @@ fn xyz_of(col: &Color) -> ([f64; 3], f64) {
     match &col.c4 {
         Some(c4) => {
             let mut zeroed = c4.clone();
-            for slot in &mut zeroed.comps {
-                if slot.is_none() {
-                    *slot = Some(0.0);
-                }
-            }
+            zeroed.comps = c4.comps.map(|slot| slot.or(Some(0.0)));
             (zeroed.to_xyz_d65(), alpha)
         }
         None => {

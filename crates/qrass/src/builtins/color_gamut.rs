@@ -178,11 +178,15 @@ pub(crate) fn to_gamut(c: &super::Call) -> Or<SassValue> {
         // In gamut every method returns the color unchanged.
         return Ok(SassValue::Color(col));
     }
-    for (v, ch) in in_target.comps.iter_mut().zip(sp.channels.iter()) {
-        if let Some(x) = v {
-            *x = x.clamp(ch.lo, ch.hi);
-        }
-    }
+    in_target
+        .comps
+        .iter_mut()
+        .zip(sp.channels.iter())
+        .for_each(|(v, ch)| {
+            if let Some(x) = v {
+                *x = x.clamp(ch.lo, ch.hi);
+            }
+        });
     let back = in_target.convert(color4::lookup(src_space).expect("source space registered"));
     // The serialization follows the source color's kind: a Color 4 input
     // re-emits its own space (`to_gamut/space` `clip/out_of_gamut`: oklch in,

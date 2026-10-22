@@ -168,18 +168,12 @@ fn length(c: &super::Call) -> Or<SassValue> {
 /// Resolve a 1-based index (negatives count from the end) to a `0`-based slot.
 fn resolve_index(len: usize, raw: f64) -> Option<usize> {
     let n = raw as i64;
-    let idx = if n > 0 {
-        n
-    } else if n < 0 {
-        len as i64 + n + 1
-    } else {
-        return None;
+    let idx = match (n > 0, n < 0) {
+        (true, _) => n,
+        (_, true) => len as i64 + n + 1,
+        _ => return None,
     };
-    if idx >= 1 && idx <= len as i64 {
-        Some(idx as usize - 1)
-    } else {
-        None
-    }
+    (idx >= 1 && idx <= len as i64).then_some(idx as usize - 1)
 }
 
 /// Validate + resolve the `$n` index argument shared by `nth`/`set_nth`: a
