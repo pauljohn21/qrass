@@ -55,23 +55,21 @@ fn slot_kind(e: &Expr) -> Slot {
 /// Split a space-separated channel list into its channel ASTs plus the alpha
 /// pulled out of a trailing `channels / alpha` division (CSS color syntax).
 fn split_channels(items: &[Expr]) -> (Vec<&Expr>, Option<&Expr>) {
-    let mut channels: Vec<&Expr> = Vec::with_capacity(items.len());
-    let mut alpha: Option<&Expr> = None;
-    for item in items {
-        if let Expr::Binary {
-            op: BinOp::Div,
-            left,
-            right,
-            ..
-        } = item
-        {
-            channels.push(left);
-            alpha = Some(right);
-        } else {
-            channels.push(item);
+    items.iter().fold((Vec::new(), None), |(mut ch, mut al), item| {
+        match item {
+            Expr::Binary {
+                op: BinOp::Div,
+                left,
+                right,
+                ..
+            } => {
+                ch.push(left);
+                al = Some(right);
+            }
+            other => ch.push(other),
         }
-    }
-    (channels, alpha)
+        (ch, al)
+    })
 }
 impl EvalState {
     /// Handle the modern CSS `rgb(r g b / a)`, `hsl(…)` and `hwb(…)`
@@ -103,19 +101,16 @@ impl EvalState {
             return Ok(None);
         }
         let slash_msg = rgb_family || call.name == "hwb";
-        let channel_names: &[&str; 3] = if rgb_family {
-            &["red", "green", "blue"]
-        } else if call.name == "hwb" {
-            &["hue", "whiteness", "blackness"]
-        } else {
-            &["hue", "saturation", "lightness"]
+        let is_hwb = call.name == "hwb";
+        let channel_names: &[&str; 3] = match (rgb_family, is_hwb) {
+            (true, _) => &["red", "green", "blue"],
+            (false, true) => &["hue", "whiteness", "blackness"],
+            (false, false) => &["hue", "saturation", "lightness"],
         };
-        let space_label = if rgb_family {
-            "rgb"
-        } else if call.name == "hwb" {
-            "hwb"
-        } else {
-            "hsl"
+        let space_label = match (rgb_family, is_hwb) {
+            (true, _) => "rgb",
+            (false, true) => "hwb",
+            (false, false) => "hsl",
         };
         // Normalize the argument into channel ASTs plus the optional alpha, and
         // raise the shape errors dart raises before any channel is inspected.
@@ -256,24 +251,16 @@ impl EvalState {
         // symbolic/relative keeps the call verbatim, concrete non-numbers are
         // `$channels:` type errors, and a clean 3-channel list goes to strict
         // units and the legacy dispatch.
-        let mut first_concrete: Option<(usize, &Expr)> = None;
-        let mut verbatim = false;
-        for (i, e) in channels.iter().enumerate() {
-            match slot_kind(e) {
-                Slot::Number => {}
-                Slot::Verbatim => verbatim = true,
-                Slot::Concrete => {
-                    if i < 3 && first_concrete.is_none() {
-                        first_concrete = Some((i, e));
-                    }
-                }
-            }
-        }
-        if let Some(a) = alpha
-            && matches!(slot_kind(a), Slot::Verbatim)
-        {
-            verbatim = true;
-        }
+        let (verbatim, first_concrete) = channels.iter().enumerate().fold(
+            (false, None::<(usize, &Expr)>),
+            |(verb, first), (i, e)| match slot_kind(e) {
+                Slot::Number => (verb, first),
+                Slot::Verbatim => (true, first),
+                Slot::Concrete => (verb, first.or((i < 3).then_some((i, e)))),
+            },
+        );
+        let verbatim = verbatim
+            || alpha.is_some_and(|a| matches!(slot_kind(a), Slot::Verbatim));
         if !verbatim {
             if let Some((i, e)) = first_concrete {
                 let v = self.eval_expr(e)?;
@@ -289,10 +276,10 @@ impl EvalState {
             if channels.len() != 3 {
                 // A wrong channel count over an otherwise-concrete list; the
                 // alpha (when split out) joins the rendering after ` / `.
-                let mut shown: Vec<String> = Vec::with_capacity(channels.len());
-                for e in &channels {
-                    shown.push(self.render_css(e)?);
-                }
+                let shown: Vec<String> = channels
+                    .iter()
+                    .map(|e| self.render_css(e))
+                    .collect::<Ev<Vec<String>>>()?;
                 let shown = match alpha {
                     Some(a) => format!("{} / {}", shown.join(" "), self.render_css(a)?),
                     None => shown.join(" "),
@@ -306,18 +293,27 @@ impl EvalState {
                 ));
             }
             // `color.hwb(0 30 40%)`: hwb's w/b channels only accept `%` (or none).
-            if call.name == "hwb" {
-                for (i, key) in [(1usize, "whiteness"), (2, "blackness")] {
-                    if let Expr::Literal(Literal::Number { value, unit }) = channels[i]
-                        && unit.as_deref() != Some("%")
-                    {
-                        let shown = format!("{value}{}", unit.as_deref().unwrap_or(""));
-                        return Err(SassError::new(
-                            ErrorKind::Builtins,
-                            format!("${key}: Expected {shown} to have unit \"%\"."),
-                        ));
-                    }
-                }
+            let hwb_err = (call.name == "hwb")
+                .then(|| {
+                    [(1usize, "whiteness"), (2, "blackness")]
+                        .iter()
+                        .find_map(|(i, key)| match channels[*i] {
+                            Expr::Literal(Literal::Number { value, unit })
+                                if unit.as_deref() != Some("%") =>
+                            {
+                                let shown =
+                                    format!("{value}{}", unit.as_deref().unwrap_or(""));
+                                Some(SassError::new(
+                                    ErrorKind::Builtins,
+                                    format!("${key}: Expected {shown} to have unit \"%\"."),
+                                ))
+                            }
+                            _ => None,
+                        })
+                })
+                .flatten();
+            if let Some(e) = hwb_err {
+                return Err(e);
             }
         }
         if rgb_family {
@@ -341,20 +337,18 @@ impl EvalState {
         // Symbolic / relative colors render verbatim with the alpha slash kept
         // literal (`hwb(0 30% var(--c)/0.5)`). The hsl family only.
         let items = verbatim_items.unwrap_or(std::slice::from_ref(arg0));
-        let mut parts = Vec::with_capacity(items.len());
-        for item in items {
-            if let Expr::Binary {
-                op: BinOp::Div,
-                left,
-                right,
-                ..
-            } = item
-            {
-                parts.push(format!("{}/{}", self.render_css(left)?, self.render_css(right)?));
-            } else {
-                parts.push(self.render_css(item)?);
-            }
-        }
+        let parts: Vec<String> = items
+            .iter()
+            .map(|item| match item {
+                Expr::Binary {
+                    op: BinOp::Div,
+                    left,
+                    right,
+                    ..
+                } => Ok(format!("{}/{}", self.render_css(left)?, self.render_css(right)?)),
+                other => self.render_css(other),
+            })
+            .collect::<Ev<Vec<String>>>()?;
         let mut text = parts.join(" ");
         if alpha_via_pair
             && let Some(a) = alpha
@@ -375,22 +369,22 @@ impl EvalState {
         channels: &[&Expr],
         alpha: Option<&Expr>,
     ) -> Ev<Option<SassValue>> {
-        let mut positional: Vec<SassValue> = Vec::with_capacity(channels.len() + 1);
-        for e in channels {
-            positional.push(self.eval_expr(e)?);
-        }
-        if let Some(a) = alpha {
-            positional.push(match self.eval_expr(a)? {
-                SassValue::Number {
-                    value,
-                    unit: Some(u),
-                } if u == "%" => SassValue::Number {
-                    value: value / 100.0,
-                    unit: None,
-                },
-                other => other,
-            });
-        }
+        // percentage alpha normalizes to `0..=1` on its way into the slots
+        let pct = |v: SassValue| match v {
+            SassValue::Number {
+                value,
+                unit: Some(ref u),
+            } if u == "%" => SassValue::Number {
+                value: value / 100.0,
+                unit: None,
+            },
+            other => other,
+        };
+        let mut positional: Vec<SassValue> = channels
+            .iter()
+            .map(|e| self.eval_expr(e))
+            .collect::<Ev<Vec<SassValue>>>()?;
+        positional.extend(alpha.map(|a| self.eval_expr(a).map(pct)).transpose()?);
         let named = std::collections::HashMap::new();
         // A base name with no global builtin (e.g. bare `hwb`, which only
         // exists namespaced in dart) falls through to the Color4 literal /
