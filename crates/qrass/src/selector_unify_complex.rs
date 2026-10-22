@@ -147,13 +147,18 @@ fn lead_nodes(cs: &[Component]) -> Vec<Node> {
     let lead = &cs[..cs.len() - 1];
     let subject_comb = cs.last().unwrap().combinator;
     let n = lead.len();
-    let mut out = Vec::with_capacity(n);
-    for k in 0..n {
-        let idx = n - 1 - k;
-        let comb = if k == 0 { subject_comb } else { lead[idx + 1].combinator };
-        out.push((lead[idx].compound.clone(), comb));
-    }
-    out
+    // subject-first walk: `k` counts inward-out, the binding combinator is the
+    // neighbour one step further in (the subject's own for the first node)
+    (0..n)
+        .map(|k| {
+            let idx = n - 1 - k;
+            let comb = (k == 0)
+                .then_some(subject_comb)
+                .or_else(|| Some(lead[idx + 1].combinator))
+                .flatten();
+            (lead[idx].compound.clone(), comb)
+        })
+        .collect()
 }
 
 /// Enumerate the merged leading sequences (subject-first) for the two streams.
@@ -226,56 +231,55 @@ fn build(m1: &[Node], m2: &[Node]) -> Vec<Vec<Node>> {
     };
     let suppress_split =
         merge_ok && (ancestor_family || tight_both || (sibling_family && sibling_suppress));
-    let mut results: Vec<Vec<Node>> = Vec::new();
 
     // Emit the split orderings first (matching the goldens' left-to-right comma
     // order), then the merged reading last.
-    if !suppress_split {
-        // `k2` inner-most against the subject, `k1` floating outward.
-        if can_float(*c1, *c2) {
-            for rest in build(m1, &m2[1..]) {
-                let mut seq = vec![(k2.clone(), *c2)];
-                seq.extend(rest);
-                results.push(seq);
-            }
-        }
-        // `k1` inner-most, `k2` floating outward.
-        if can_float(*c2, *c1) {
-            for rest in build(&m1[1..], m2) {
-                let mut seq = vec![(k1.clone(), *c1)];
-                seq.extend(rest);
-                results.push(seq);
-            }
-        }
-    }
-
-    if merge_ok {
-        // The merged compound lists the *outer* partner's simples first: whichever
-        // side floats outward in the accompanying split sits left-most. A forced
-        // tight pair keeps `a` first; a shared-identity (`#id`/pseudo/root) merge
-        // takes `b` first (the goldens' canonical order).
-        let (mo, mi) = if !suppress_split {
-            if can_float(*c1, *c2) { (k1, k2) } else { (k2, k1) }
-        } else if id_or_pseudo_identity {
-            (k2, k1)
+    let prepend = |head: Node, rest: Vec<Vec<Node>>| {
+        rest.into_iter()
+            .map(|r| {
+                let mut s = vec![head.clone()];
+                s.extend(r);
+                s
+            })
+            .collect::<Vec<Vec<Node>>>()
+    };
+    let split_reads = (!suppress_split).then(|| {
+        // single binary value branches (not an if/else-if chain): the two float
+        // readings, each empty when its relation cannot float.
+        let k1_out = if can_float(*c1, *c2) {
+            prepend((k2.clone(), *c2), build(m1, &m2[1..]))
         } else {
-            (k1, k2)
+            Vec::new()
         };
-        match compound_unify(mo, mi) {
-            Some(pm) => {
-                let mc = meet.flatten().or(Some(Combinator::Descendant));
-                for rest in build(&m1[1..], &m2[1..]) {
-                    let mut seq = vec![(pm.clone(), mc)];
-                    seq.extend(rest);
-                    results.push(seq);
-                }
-            }
-            // Both pinned to one slot but the compounds cannot coexist: impossible.
-            None if tight_both => return Vec::new(),
-            None => {}
-        }
+        let k2_out = if can_float(*c2, *c1) {
+            prepend((k1.clone(), *c1), build(&m1[1..], m2))
+        } else {
+            Vec::new()
+        };
+        k1_out.into_iter().chain(k2_out).collect::<Vec<Vec<Node>>>()
+    });
+    let split_reads = split_reads.unwrap_or_default();
+
+    let (mo, mi) = match (!suppress_split, can_float(*c1, *c2), id_or_pseudo_identity) {
+        (true, true, _) | (false, _, false) => (k1, k2),
+        (true, false, _) | (false, _, true) => (k2, k1),
+    };
+    // The merged compound lists the *outer* partner's simples first: whichever
+    // side floats outward in the accompanying split sits left-most. A forced
+    // tight pair keeps `a` first; a shared-identity (`#id`/pseudo/root) merge
+    // takes `b` first (the goldens' canonical order).
+    let merged_probe2 = merge_ok.then(|| compound_unify(mo, mi)).flatten();
+    // Both pinned to one slot but the compounds cannot coexist: impossible.
+    if merge_ok && merged_probe2.is_none() && tight_both {
+        return Vec::new();
     }
-    dedup(results)
+    let merged_reads = merged_probe2
+        .map(|pm| {
+            let mc = meet.flatten().or(Some(Combinator::Descendant));
+            prepend((pm, mc), build(&m1[1..], &m2[1..]))
+        })
+        .unwrap_or_default();
+    dedup(split_reads.into_iter().chain(merged_reads).collect())
 }
 
 /// Can the two nodes denote one element (share a slot)? Mirrors the merge
@@ -305,26 +309,29 @@ fn slot_anchor(a: &Node, b: &Node) -> bool {
 fn next_anchor(m1: &[Node], m2: &[Node]) -> (usize, usize) {
     let n = m1.len();
     let mm = m2.len();
-    let mut dp = vec![vec![0usize; mm + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..mm).rev() {
-            let take =
-                if slot_anchor(&m1[i], &m2[j]) { dp[i + 1][j + 1] + 1 } else { 0 };
-            dp[i][j] = take.max(dp[i + 1][j]).max(dp[i][j + 1]);
-        }
-    }
+    // Suffix-LCS table built row-by-row inward-out: each row is a fold over the
+    // reversed columns seeded with the row below.
+    let dp: Vec<Vec<usize>> = (0..n).rev().fold(
+        vec![vec![0usize; mm + 1]; n + 1],
+        |mut acc, i| {
+            acc[i] = (0..mm).rev().fold(acc[i + 1].clone(), |mut row, j| {
+                let take =
+                    if slot_anchor(&m1[i], &m2[j]) { acc[i + 1][j + 1] + 1 } else { 0 };
+                row[j] = take.max(acc[i + 1][j]).max(row[j + 1]);
+                row
+            });
+            acc
+        },
+    );
     let full = dp[0][0];
     if full == 0 {
         return (n, mm);
     }
-    for i in 0..n {
-        for j in 0..mm {
-            if dp[i][j] == full && slot_anchor(&m1[i], &m2[j]) {
-                return (i, j);
-            }
-        }
-    }
-    (n, mm)
+    // the inner-most pair still on a longest chain
+    (0..n)
+        .flat_map(|i| (0..mm).map(move |j| (i, j)))
+        .find(|(i, j)| dp[*i][*j] == full && slot_anchor(&m1[*i], &m2[*j]))
+        .unwrap_or((n, mm))
 }
 
 /// Whole-block interleavings of two ancestor runs feeding a shared `tail`.
@@ -346,10 +353,8 @@ fn block_orders(a_run: &[Node], b_run: &[Node], tail: &[Vec<Node>]) -> Vec<Vec<N
     // `:root .e .c`). This is stricter than the old whole-run suppression, which
     // wrongly froze an unrooted sibling of the root as well.
     fn peel_outer_rooted(run: &[Node]) -> (Vec<Node>, Vec<Node>) {
-        let mut split = run.len();
-        while split > 0 && has_root(&run[split - 1].0) {
-            split -= 1;
-        }
+        // the outermost non-root position + 1 is the peel point (0 when all rooted)
+        let split = run.iter().rposition(|n| !has_root(&n.0)).map_or(0, |p| p + 1);
         (run[..split].to_vec(), run[split..].to_vec())
     }
     let (a_core, a_root) = peel_outer_rooted(a_run);
@@ -365,33 +370,33 @@ fn block_orders(a_run: &[Node], b_run: &[Node], tail: &[Vec<Node>]) -> Vec<Vec<N
     // sits outer-most) comes first, matching the goldens' left-to-right comma
     // order; each run's inner-most compound is relinked with a bare descendant so
     // the two chains stay contiguous when the other floats outward.
-    let mut variants: Vec<Vec<Node>> = Vec::new();
-    if a_core.is_empty() {
-        variants.push(b_core.to_vec());
-    } else if b_core.is_empty() {
-        variants.push(a_core.to_vec());
-    } else {
-        let mut v = b_core.to_vec();
-        v.extend(relink(&a_core));
-        variants.push(v);
-        let mut v2 = a_core.to_vec();
-        v2.extend(relink(&b_core));
-        variants.push(v2);
-    }
+    let variants: Vec<Vec<Node>> = match (a_core.is_empty(), b_core.is_empty()) {
+        (true, _) => vec![b_core.to_vec()],
+        (false, true) => vec![a_core.to_vec()],
+        (false, false) => {
+            let mut v = b_core.to_vec();
+            v.extend(relink(&a_core));
+            let mut v2 = a_core.to_vec();
+            v2.extend(relink(&b_core));
+            vec![v, v2]
+        }
+    };
     // The *outer* (tail) arrangements vary fastest and this inner block slowest,
     // mirroring the multi-block comma order in `lcs/non_contiguous`.
-    let mut out: Vec<Vec<Node>> = Vec::new();
-    for var in variants {
-        for rest in tail {
-            let mut s = var.clone();
-            s.extend(rest.iter().cloned());
-            // Re-pin the rooted suffixes at the global outermost.
-            s.extend(a_root.iter().cloned());
-            s.extend(b_root.iter().cloned());
-            out.push(s);
-        }
-    }
-    out
+    variants
+        .into_iter()
+        .flat_map(move |var| {
+            let (ar, br) = (a_root.clone(), b_root.clone());
+            tail.iter().cloned().map(move |rest| {
+                let mut s = var.clone();
+                s.extend(rest);
+                // Re-pin the rooted suffixes at the global outermost.
+                s.extend(ar.iter().cloned());
+                s.extend(br.iter().cloned());
+                s
+            })
+        })
+        .collect()
 }
 
 /// May the compound with relation `floated` to the subject be pushed outward so
@@ -417,14 +422,11 @@ fn can_float(floated: Option<Combinator>, inner: Option<Combinator>) -> bool {
 }
 
 /// Remove duplicate lead orderings that arise from identical compounds.
-fn dedup(mut seqs: Vec<Vec<Node>>) -> Vec<Vec<Node>> {
-    let mut out: Vec<Vec<Node>> = Vec::new();
-    for s in seqs.drain(..) {
-        if !out.contains(&s) {
-            out.push(s);
-        }
-    }
-    out
+fn dedup(seqs: Vec<Vec<Node>>) -> Vec<Vec<Node>> {
+    seqs.into_iter().fold(Vec::new(), |mut acc, s| {
+        acc.extend((!acc.contains(&s)).then_some(s));
+        acc
+    })
 }
 
 /// Do two leading compounds align (denote one element)? They align when one
@@ -460,21 +462,26 @@ fn find_id(c: &Compound) -> Option<&str> {
 
 /// Convert a subject-first merged lead into a final left→right complex, splicing
 /// the shared subject onto the end.
-fn finalize(mut lead: Vec<Node>, subject: &Compound) -> Complex {
-    lead.reverse(); // outer → inner (matches left→right output)
-    let mut comps: Vec<Component> = Vec::new();
-    for i in 0..lead.len() {
+fn finalize(lead: Vec<Node>, subject: &Compound) -> Complex {
+    // outer → inner (matches left→right output)
+    let lead: Vec<Node> = lead.into_iter().rev().collect();
+    let mut comps: Vec<Component> = lead
+        .iter()
+        .enumerate()
         // The AST combinator of an element records its relation to the LEFT
         // (outer) neighbour; that relation is stored as the outer neighbour's
         // combinator-to-inner, i.e. `lead[i - 1].1`. The outermost element has
         // none.
-        let combinator = if i == 0 { None } else { lead[i - 1].1 };
-        comps.push(Component { combinator, extras: Vec::new(), compound: lead[i].0.clone() });
-    }
+        .map(|(i, node)| Component {
+            combinator: (i > 0).then(|| lead[i - 1].1).flatten(),
+            extras: Vec::new(),
+            compound: node.0.clone(),
+        })
+        .collect();
     // The subject's combinator binds it to its parent (the inner-most lead).
-    let subject_comb = lead.last().and_then(|n| n.1);
+    let subject_comb = lead.last().and_then(|n| n.1).filter(|_| !comps.is_empty());
     comps.push(Component {
-        combinator: subject_comb.filter(|_| !comps.is_empty()),
+        combinator: subject_comb,
         extras: Vec::new(),
         compound: subject.clone(),
     });
