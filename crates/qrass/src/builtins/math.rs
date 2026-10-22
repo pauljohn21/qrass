@@ -203,7 +203,7 @@ fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
         ));
     }
     let mut nums: Vec<(f64, Option<String>)> = Vec::with_capacity(c.positional.len());
-    for arg in c.positional.iter() {
+    for arg in c.positional {
         let SassValue::Number { value, unit } = arg else {
             return Err(SassError::new(
                 ErrorKind::Builtins,

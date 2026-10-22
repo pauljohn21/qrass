@@ -13,6 +13,12 @@
 //! singleton payload itself stays a read-only `Arc<Module>` (shared data, not
 //! shared mutability).
 
+// OpenSpec refactor-rfp-strict task 1.2: the RFP contract's machine gate.
+// Range-indexed loops and explicit iterator loops are the imperative shapes
+// the contract forbids; deny keeps them from creeping back.
+#![deny(clippy::needless_range_loop, clippy::explicit_iter_loop)]
+#![allow(clippy::blocks_in_conditions)]
+
 use std::path::Path;
 
 mod clock;

@@ -207,7 +207,7 @@ fn nest(c: &super::Call) -> Or<SassValue> {
             "$selectors: At least one selector must be passed.",
         ));
     }
-    for arg in c.positional.iter() {
+    for arg in c.positional {
         let src = sel_source(arg).ok_or_else(|| {
             SassError::new(
                 ErrorKind::Builtins,

@@ -15,7 +15,7 @@ pub(super) fn pseudo_replace(
 ) -> Option<Complex> {
     let mut new_comps = sel.components.clone();
     let mut changed = false;
-    for comp in new_comps.iter_mut() {
+    for comp in &mut new_comps {
         if let Some(m) = extend_pseudo_compound(&comp.compound, extendee, extender) {
             comp.compound = m;
             changed = true;
@@ -38,7 +38,7 @@ fn extend_pseudo_compound(
     let mut simples = c.simples.clone();
     let mut extra_not: Vec<Simple> = Vec::new();
     let mut changed = false;
-    for simple in simples.iter_mut() {
+    for simple in &mut simples {
         let (name, list, anbn) = match simple {
             Simple::PseudoClass { name, arg }
             | Simple::PseudoElement { name, arg, .. } => match arg {
@@ -236,7 +236,7 @@ pub(super) fn pseudo_substitute(
 ) -> Option<Complex> {
     let mut new_comps = sel.components.clone();
     let mut changed = false;
-    for comp in new_comps.iter_mut() {
+    for comp in &mut new_comps {
         if let Some(m) = sub_pseudo_compound(&comp.compound, extendee, extender) {
             comp.compound = m;
             changed = true;
@@ -259,7 +259,7 @@ fn sub_pseudo_compound(
 ) -> Option<Compound> {
     let mut simples = c.simples.clone();
     let mut changed = false;
-    for simple in simples.iter_mut() {
+    for simple in &mut simples {
         let (name, anbn, list) = match simple {
             Simple::PseudoClass { name, arg }
             | Simple::PseudoElement { name, arg, .. } => match arg {

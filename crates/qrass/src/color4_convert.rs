@@ -369,9 +369,7 @@ impl Color4 {
             let perceptual = |n: &str| matches!(n, "lab" | "lch" | "oklab" | "oklch");
             if perceptual(self.space.name) && perceptual(target.name) {
                 if self.space.name == "lch" && target.name == "lab" && self.comps[0].is_none() {
-                    for slot in out.iter_mut() {
-                        *slot = None;
-                    }
+                    out.fill(None);
                 } else if self.comps[1].is_none() && self.comps[2].is_none() {
                     out[1] = None;
                     out[2] = None;

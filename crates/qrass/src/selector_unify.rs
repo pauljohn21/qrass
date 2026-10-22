@@ -131,7 +131,7 @@ fn merge_group(a: &[Simple], b: &[Simple]) -> Option<Vec<Simple>> {
 
     // Id: two different ids cannot co-occur.
     let mut id: Option<String> = None;
-    for s in all.iter() {
+    for s in &all {
         if let Simple::Id(v) = s {
             match &id {
                 None => id = Some(v.clone()),
@@ -146,7 +146,7 @@ fn merge_group(a: &[Simple], b: &[Simple]) -> Option<Vec<Simple>> {
     let mut pseudo_classes: Vec<Simple> = Vec::new();
     let mut seen_mid: Vec<Simple> = Vec::new();
     let mut seen_pc: Vec<Simple> = Vec::new();
-    for s in all.iter() {
+    for s in &all {
         match s {
             Simple::Universal { .. } | Simple::Type { .. } => {}
             Simple::Id(_) => {}
