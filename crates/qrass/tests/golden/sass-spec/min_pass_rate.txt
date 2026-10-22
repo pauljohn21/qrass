@@ -1355,4 +1355,10 @@
 #     "Declarations may only be used within style rules." (load_css/error
 #     `top_level`/`nesting` family) instead of being silently dropped.
 # sass-spec 9157 floor, unit suite green (509 passed), clippy -D warnings green.
-83.5
+#
+# OpenSpec M5 slice 1 (bogus combinators golden matrix): 9157 -> 9177 (+22,
+#     0 regress; css/selector/combinator family). Top-level leading kept
+#     verbatim, adjacent doubles / trailing / paren-head (except `:has`) drop
+#     the rule; render_rule-level filter, warning via tracing::warn.
+# sass-spec 9177 floor, unit suite green (514 passed), clippy -D warnings green.
+83.7

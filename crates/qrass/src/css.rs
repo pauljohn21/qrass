@@ -27,6 +27,25 @@ pub(crate) enum Item {
 /// Format one qualified rule (`selectors { items }`). Callers are responsible for
 /// dropping empty rules; a rule whose only content is comments still renders.
 pub(crate) fn render_rule(selectors: &[String], items: &[Item]) -> String {
+    // dart's bogus-combinators tolerance (`css/selector/combinator/*` ~27
+    // sections): a selector leading with a combinator (`+ a`, `:is(> a)`) or
+    // carrying adjacent combinators (`a > + b`) is INVALID — dart drops the
+    // selector (empty output when none survive) and warns. The shared
+    // lightningcss canonicalization lets an empty rule fall through harmlessly.
+    let selectors: Vec<String> = selectors
+        .iter()
+        .filter(|s| {
+            let bogus = split_top_commas(s).iter().all(|seg| is_bogus_combinator(seg));
+            if bogus {
+                tracing::warn!("DEPRECATION WARNING [bogus-combinators]: The selector \"{s}\" is invalid.");
+            }
+            !bogus
+        })
+        .cloned()
+        .collect();
+    if selectors.is_empty() {
+        return String::new();
+    }
     // the goldens' expanded output puts each comma-separated selector on its own line, the
     // `{` trailing the last one; the shared body indent keeps continuation lines
     // aligned, and a wrapping `@media`/`@supports` shifts them uniformly.
@@ -159,4 +178,103 @@ pub(crate) fn number_to_string(v: f64) -> String {
         s.pop();
     }
     s
+}
+
+/// Split a selector list on top-level commas (paren/bracket depth aware).
+pub(crate) fn split_top_commas(sel: &str) -> Vec<&str> {
+    let bytes: Vec<char> = sel.chars().collect();
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, c) in bytes.iter().enumerate() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&sel[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&sel[start..]);
+    parts
+}
+
+/// One selector segment is a bogus combinator form when it (a) starts with
+/// `+`, `~` or `>`, (b) carries two combinators adjacent (whitespace between
+/// them allowed), or (c) opens a parenthesis straight onto a combinator
+/// (`:is(+ a)`, `:has(> a)`).
+/// Does this selector segment carry a *dropped* bogus combinator form?
+/// Golden matrix (`css/selector/combinator/*`):
+/// * top-level leading (`+ a`, `> a` …) — KEPT with a warning;
+/// * adjacent combinators at any depth (`a > + b`) — dropped;
+/// * trailing combinator (`a +`) — dropped;
+/// * combinator straight after a parenthesis (`:is(+ a)`, `:has( > a)` …) —
+///   dropped everywhere EXCEPT inside `:has(…)` (relative selectors are the
+///   spec-sanctioned exception, `has.hrx` keeps `:has(+ a)` verbatim).
+pub(crate) fn is_bogus_combinator(seg: &str) -> bool {
+    let is_comb = |c: char| matches!(c, '+' | '~' | '>');
+    let chars: Vec<char> = seg.trim().chars().collect();
+    let mut prev_comb = false;
+    let mut depth = 0usize;
+    let mut expect_paren_head: Vec<bool> = vec![false]; // per open paren: combinator-next position armed
+    let mut has_exempt: Vec<bool> = vec![false];
+    let mut seen: String = String::new();
+    let mut non_ws_seen = false; // first real token of the whole segment (leading is kept)
+    for c in &chars {
+        match c {
+            '(' | '[' => {
+                depth += 1;
+                expect_paren_head.push(true);
+                // the pseudo directly before the paren decides the exemption
+                has_exempt.push(seen.ends_with(":has"));
+                prev_comb = false;
+            }
+            ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                expect_paren_head.pop();
+                has_exempt.pop();
+                prev_comb = false;
+                non_ws_seen = true;
+            }
+            ' ' | '\t' => {}
+            &c if is_comb(c) => {
+                if depth > 0
+                    && *expect_paren_head.last().unwrap_or(&false)
+                    && !*has_exempt.last().unwrap_or(&false)
+                {
+                    return true; // `:is(+ a)` / `( +a`; `:has(+ a)` is exempt
+                }
+                if prev_comb {
+                    return true; // adjacent `> +`
+                }
+                prev_comb = true;
+                non_ws_seen = true;
+                *expect_paren_head.last_mut().unwrap_or(&mut false) = false;
+            }
+            '&' => {
+                prev_comb = false;
+                non_ws_seen = true;
+                *expect_paren_head.last_mut().unwrap_or(&mut false) = false;
+            }
+            ':' => {
+                // scan the pseudo name for `has` to exempt its parentheses
+                prev_comb = false;
+                non_ws_seen = true;
+                *expect_paren_head.last_mut().unwrap_or(&mut false) = false;
+            }
+            c => {
+                if !c.is_whitespace() {
+                    prev_comb = false;
+                    non_ws_seen = true;
+                    *expect_paren_head.last_mut().unwrap_or(&mut false) = false;
+                }
+                let _ = non_ws_seen;
+            }
+        }
+        seen.push(*c);
+    }
+    // trailing combinator: the segment ends on `+`/`~`/`>`
+    prev_comb && chars.last().is_some_and(|c| is_comb(*c))
 }
