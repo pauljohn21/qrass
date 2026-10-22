@@ -98,16 +98,11 @@ fn compatible_arg(a: &PseudoArg, b: &PseudoArg) -> bool {
     match (a, b) {
         (PseudoArg::None, _) | (_, PseudoArg::None) => true,
         (PseudoArg::Text(x), PseudoArg::Text(y)) => x == y,
-        (PseudoArg::Selectors(x), PseudoArg::Selectors(y)) => {
-            for cx in &x.complexes {
-                for cy in &y.complexes {
-                    if !crate::selector_unify_complex::complex_unify(cx, cy).is_empty() {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
+        (PseudoArg::Selectors(x), PseudoArg::Selectors(y)) => x
+            .complexes
+            .iter()
+            .flat_map(|cx| y.complexes.iter().map(move |cy| (cx, cy)))
+            .any(|(cx, cy)| !crate::selector_unify_complex::complex_unify(cx, cy).is_empty()),
         _ => false,
     }
 }
@@ -116,63 +111,62 @@ fn compatible_arg(a: &PseudoArg, b: &PseudoArg) -> bool {
 /// single `#id`, dedupe, and emit in canonical order (type, class/id/attr,
 /// pseudo-class).
 fn merge_group(a: &[Simple], b: &[Simple]) -> Option<Vec<Simple>> {
-    let mut all: Vec<Simple> = Vec::new();
-    all.extend(a.iter().cloned());
-    all.extend(b.iter().cloned());
+    let all: Vec<Simple> = a.iter().chain(b.iter()).cloned().collect();
 
-    // Type/universal: at most one, unified across the two sources.
-    let mut ty: Option<Simple> = None;
-    for s in all.iter().filter(|s| s.is_type_like()) {
-        ty = Some(match ty {
-            None => s.clone(),
-            Some(prev) => unify_type(&prev, s)?,
-        });
-    }
+    // Type/universal: at most one, unified across the two sources (`?` on the
+    // folded Option short-circuits exactly where the imperative version did).
+    let types: Vec<&Simple> = all.iter().filter(|s| s.is_type_like()).collect();
+    let ty = match types.split_first() {
+        Some((first, rest)) => Some(rest.iter().try_fold((*first).clone(), |acc, s| unify_type(&acc, s))?),
+        None => None,
+    };
 
     // Id: two different ids cannot co-occur.
-    let mut id: Option<String> = None;
-    for s in &all {
-        if let Simple::Id(v) = s {
-            match &id {
-                None => id = Some(v.clone()),
-                Some(prev) if prev == v => {}
-                Some(_) => return None,
-            }
-        }
+    let ids: Vec<&String> = all
+        .iter()
+        .filter_map(|s| match s {
+            Simple::Id(v) => Some(v),
+            _ => None,
+        })
+        .collect();
+    if ids
+        .first()
+        .is_some_and(|first| ids.iter().skip(1).any(|v| v != first))
+    {
+        return None;
     }
+    let id = ids.first().map(|v| (*v).clone());
 
-    // Rank everything else.
-    let mut mid: Vec<Simple> = Vec::new();
-    let mut pseudo_classes: Vec<Simple> = Vec::new();
-    let mut seen_mid: Vec<Simple> = Vec::new();
-    let mut seen_pc: Vec<Simple> = Vec::new();
-    for s in &all {
-        match s {
-            Simple::Universal { .. } | Simple::Type { .. } => {}
-            Simple::Id(_) => {}
-            Simple::PseudoClass { .. } => {
-                if !seen_pc.contains(s) {
-                    seen_pc.push(s.clone());
-                    pseudo_classes.push(s.clone());
-                }
-            }
-            Simple::PseudoElement { .. } => {}
-            _ => {
-                if !seen_mid.contains(s) {
-                    seen_mid.push(s.clone());
-                    mid.push(s.clone());
-                }
-            }
-        }
-    }
+    // Rank everything else: pseudo-classes and the middle band, each deduped
+    // while keeping first-occurrence order (conditional push via `extend` +
+    // `then`).
+    let dedup = |xs: Vec<&Simple>| {
+        xs.into_iter().fold(Vec::new(), |mut acc, s| {
+            acc.extend((!acc.contains(s)).then(|| s.clone()));
+            acc
+        })
+    };
+    let (pc_src, rest_src): (Vec<&Simple>, Vec<&Simple>) =
+        all.iter().partition(|s| matches!(s, Simple::PseudoClass { .. }));
+    let mut pseudo_classes = dedup(pc_src);
+    let mid = dedup(
+        rest_src
+            .into_iter()
+            .filter(|s| {
+                !matches!(
+                    s,
+                    Simple::Universal { .. }
+                        | Simple::Type { .. }
+                        | Simple::Id(_)
+                        | Simple::PseudoElement { .. }
+                )
+            })
+            .collect(),
+    );
 
     let mut out: Vec<Simple> = Vec::new();
-    if let Some(t) = ty {
-        out.push(t);
-    }
-    if let Some(v) = id {
-        out.push(Simple::Id(v));
-    }
+    out.extend(ty);
+    out.extend(id.map(Simple::Id));
     out.extend(mid);
     // Pseudo-classes keep their merged source order, with one nudge: a `:host`
     // (family) that *led* the compound is shifted to sit just after the first

@@ -32,3 +32,16 @@ pub(crate) fn drain<T: 'static>(
         Err(err) => Err(err),
     })
 }
+
+/// Terminal for a single-emission fold stream (a `reduce_initial` chain emits
+/// exactly its final accumulator): drain it and take that one value.
+/// Panics only for a stream that breaks the one-emission contract, which the
+/// pure transforms feeding it never can.
+pub(crate) fn drain_one<T: 'static>(
+    stream: LocalBoxedObservable<'static, Result<T, SassError>, std::convert::Infallible>,
+) -> T {
+    drain(stream)
+        .ok()
+        .and_then(|mut items| items.pop())
+        .expect("a reduce_initial fold emits exactly once")
+}

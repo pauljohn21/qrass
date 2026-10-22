@@ -13,6 +13,8 @@
 //! yield one, two or three comma-separated selectors depending on the
 //! combinators involved.
 
+use rxrust::prelude::*;
+
 use crate::selector_ast::{Complex, Combinator, Component, Compound, SelectorList, Simple};
 use crate::selector_unify::{compound_unify, has_root, shares_pseudo_element};
 
@@ -31,20 +33,23 @@ pub fn unify_lists(lists: &[SelectorList]) -> Option<SelectorList> {
     if lists.iter().flat_map(|l| l.complexes.iter()).any(has_bogus_chain) {
         return None;
     }
-    let mut acc: Vec<Complex> = lists.first().map(|l| l.complexes.clone()).unwrap_or_default();
-    for list in lists.iter().skip(1) {
-        let mut next: Vec<Complex> = Vec::new();
-        for a in &acc {
-            for b in &list.complexes {
-                next.extend(complex_unify(a, b));
-            }
-        }
-        acc = next;
-    }
-    if acc.is_empty() {
-        return None;
-    }
-    Some(SelectorList::new(acc))
+    let acc: Vec<Complex> = lists.first().map(|l| l.complexes.clone()).unwrap_or_default();
+    let rest: Vec<SelectorList> = lists.iter().skip(1).cloned().collect();
+    // The cross-product fold: each owned list drives one `reduce_initial`
+    // step, its inner pairwise `flat_map` staying a pure closure chain.
+    let merged = crate::drain::drain_one(
+        Local::from_iter(rest)
+            .reduce_initial(acc, |acc, list| {
+                acc.into_iter().flat_map(move |a| {
+                    let right = list.complexes.clone();
+                    right.into_iter().flat_map(move |b| complex_unify(&a, &b))
+                })
+                .collect()
+            })
+            .map(Ok)
+            .box_it(),
+    );
+    (!merged.is_empty()).then(|| SelectorList::new(merged))
 }
 
 /// A complex carrying a doubled combinator edge (`Component.extras`) or a

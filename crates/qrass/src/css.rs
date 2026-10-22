@@ -78,15 +78,12 @@ use crate::error::SassError;
 use std::convert::Infallible;
 
 /// Drive a single-emission fold stream to its one value through the shared
-/// `drain` terminal (errors are unobservable here: pure transforms never fail,
-/// so the `Infallible` channel is never used).
+/// `drain_one` terminal (errors are unobservable here: pure transforms never
+/// fail, so the `Infallible` channel is never used).
 fn fold_once<T: 'static>(
     stream: LocalBoxedObservable<'static, Result<T, SassError>, Infallible>,
 ) -> T {
-    crate::drain::drain(stream)
-        .ok()
-        .and_then(|mut items| items.pop())
-        .expect("a reduce_initial fold emits exactly once")
+    crate::drain::drain_one(stream)
 }
 
 /// Normalize one selector to the goldens output form. Attribute-selector values
