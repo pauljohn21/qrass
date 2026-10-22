@@ -53,17 +53,19 @@ fn unique_id(_c: &super::Call) -> Or<SassValue> {
 
 /// Lowercase base-36 rendering of `n` (empty-safe). Digits then letters, so the
 /// result is a valid CSS identifier body.
-fn base36(mut n: u64) -> String {
+fn base36(n: u64) -> String {
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     if n == 0 {
-        return "0".to_string();
+        "0".to_string()
+    } else {
+        // least-significant digits streamed via the divide-successor chain
+        std::iter::successors(Some(n), |v| (*v / 36 > 0).then_some(v / 36))
+            .map(|v| DIGITS[(v % 36) as usize] as char)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect()
     }
-    let mut s = String::new();
-    while n > 0 {
-        s.push(DIGITS[(n % 36) as usize] as char);
-        n /= 36;
-    }
-    s.chars().rev().collect()
 }
 
 /// The string content of an argument (CSS text for non-strings).
@@ -111,17 +113,15 @@ fn split(c: &super::Call) -> Or<SassValue> {
         Some(other) => return Err(not_a("limit", other, "a number")),
     };
 
-    let parts: Vec<String> = if hay.is_empty() {
-        Vec::new()
-    } else if sep.is_empty() {
-        hay.chars().map(|ch| ch.to_string()).collect()
-    } else {
-        match limit {
-            // `$limit` counts separator matches consumed, so `k` splits → `k + 1`
-            // pieces: `splitn(k + 1)` keeps the remainder whole.
+    let parts: Vec<String> = match (hay.is_empty(), sep.is_empty()) {
+        (true, _) => Vec::new(),
+        (false, true) => hay.chars().map(|ch| ch.to_string()).collect(),
+        // `$limit` counts separator matches consumed, so `k` splits → `k + 1`
+        // pieces: `splitn(k + 1)` keeps the remainder whole.
+        (false, false) => match limit {
             Some(k) => hay.splitn(k + 1, sep.as_str()).map(str::to_string).collect(),
             None => hay.split(sep.as_str()).map(str::to_string).collect(),
-        }
+        },
     };
     Ok(SassValue::List {
         items: parts
