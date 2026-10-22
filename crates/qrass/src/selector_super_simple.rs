@@ -148,12 +148,10 @@ fn args_are_super(name: &str, super_arg: Option<&PseudoArg>, sub_arg: Option<&Ps
         (Some(PseudoArg::None), Some(PseudoArg::None)) => true,
         (Some(PseudoArg::Text(a)), Some(PseudoArg::Text(b))) => a == b,
         (Some(PseudoArg::Selectors(a)), Some(PseudoArg::Selectors(b))) => {
-            if is_not(name) {
-                list_is_super(b, a) // `:not(A)` ⊇ `:not(B)` iff B ⊇ A
-            } else if is_current(name) {
-                a == b // `:current` only subsumes an identical argument list
-            } else {
-                list_is_super(a, b)
+            match (is_not(name), is_current(name)) {
+                (true, _) => list_is_super(b, a), // `:not(A)` ⊇ `:not(B)` iff B ⊇ A
+                (false, true) => a == b, // `:current` only subsumes an identical argument list
+                (false, false) => list_is_super(a, b),
             }
         }
         (
@@ -241,13 +239,13 @@ fn is_current(name: &str) -> bool {
 /// arguments are not all selector lists, returns `None` (the caller falls back to
 /// the first argument).
 fn merge_pseudo_args(simps: &[&Simple]) -> Option<PseudoArg> {
-    let mut complexes = Vec::new();
-    for s in simps {
-        match arg_of(s) {
-            Some(PseudoArg::Selectors(list)) => complexes.extend(list.complexes.iter().cloned()),
-            _ => return None,
+    let complexes = simps.iter().try_fold(Vec::new(), |mut acc, s| match arg_of(s) {
+        Some(PseudoArg::Selectors(list)) => {
+            acc.extend(list.complexes.iter().cloned());
+            Some(acc)
         }
-    }
+        _ => None,
+    })?;
     Some(PseudoArg::Selectors(SelectorList::new(complexes)))
 }
 
@@ -286,30 +284,27 @@ pub(crate) fn pseudo_element_is_super(a: &Simple, b: &Simple) -> bool {
 /// list, so any simple common to *every* subject compound of the list is a real
 /// constraint the super can rely on (so `c` is a super of `:nth-child(n of c)`).
 fn nth_of_guaranteed(sub: &[Simple]) -> Vec<Simple> {
-    let mut acc: Option<Vec<Simple>> = None;
-    for s in sub {
-        let list = match s {
+    sub.iter()
+        .filter_map(|s| match s {
             Simple::PseudoClass {
                 arg: PseudoArg::Nth { of: Some(list), .. },
                 ..
-            } => list,
-            _ => continue,
-        };
-        for complex in &list.complexes {
-            let Some(subject) = complex.components.last() else {
-                continue;
-            };
+            } => Some(list),
+            _ => None,
+        })
+        .flat_map(|list| list.complexes.iter())
+        .filter_map(|complex| complex.components.last())
+        .fold(None::<Vec<Simple>>, |acc, subject| {
             let simples = subject.compound.simples.clone();
-            acc = Some(match acc {
+            Some(match acc {
                 None => simples,
                 Some(prev) => prev
                     .into_iter()
                     .filter(|x| simples.iter().any(|y| y == x))
                     .collect(),
-            });
-        }
-    }
-    acc.unwrap_or_default()
+            })
+        })
+        .unwrap_or_default()
 }
 
 /// Vendor-agnostic positive list pseudo-classes that fold over a bare sub.

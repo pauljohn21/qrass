@@ -102,23 +102,20 @@ pub(crate) fn snippet(message: &str, loc: &Located, markers: &[Marker], trace: &
         primary.line,
         loc.excerpt.as_deref().unwrap_or("")
     );
-    for m in markers {
-        if m.line != primary.line {
-            continue;
-        }
-        out.push_str("  |");
-        for _ in 0..m.col {
-            out.push(' ');
-        }
-        for _ in 0..m.len {
-            out.push(m.marker);
-        }
-        if let Some(label) = &m.label {
-            out.push(' ');
-            out.push_str(label);
-        }
-        out.push('\n');
-    }
+    out.push_str(
+        &markers
+            .iter()
+            .filter(|m| m.line == primary.line)
+            .map(|m| {
+                format!(
+                    "  |{}{}{}\n",
+                    " ".repeat(m.col as usize),
+                    m.marker.to_string().repeat(m.len as usize),
+                    m.label.as_ref().map_or(String::new(), |l| format!(" {l}"))
+                )
+            })
+            .collect::<String>(),
+    );
     out.push_str("  '\n");
     out.push_str(&footer(loc, primary.line, primary.col, trace));
     out

@@ -72,17 +72,19 @@ pub(super) fn weave_all(
             .all(|c| c.combinator.is_none_or(|x| x == Combinator::Descendant));
 
     if !floatable {
-        let mut pieces: Vec<Component> = comps[..start].to_vec();
-        for p in prefix {
-            let mut pc = p.clone();
-            pc.combinator = Some(Combinator::Descendant);
-            pc.extras.clear();
-            pieces.push(pc);
-        }
-        pinned.combinator = if pieces.is_empty() {
-            leading
-        } else {
-            Some(Combinator::Descendant)
+        let shifted = prefix.iter().map(|p| Component {
+            combinator: Some(Combinator::Descendant),
+            extras: Vec::new(),
+            ..p.clone()
+        });
+        let mut pieces: Vec<Component> = comps[..start]
+            .iter()
+            .cloned()
+            .chain(shifted)
+            .collect();
+        pinned.combinator = match pieces.is_empty() {
+            true => leading,
+            false => Some(Combinator::Descendant),
         };
         pieces.push(pinned);
         splice_tail(&mut pieces, tail, tail_comb);
@@ -160,18 +162,18 @@ fn interleave(a: &[Compound], b: &[Compound]) -> Vec<Vec<Compound>> {
     if b.is_empty() {
         return vec![a.to_vec()];
     }
-    let mut out: Vec<Vec<Compound>> = Vec::new();
-    for rest in interleave(&a[1..], b) {
-        let mut merged = Vec::with_capacity(1 + rest.len());
-        merged.push(a[0].clone());
-        merged.extend(rest);
-        out.push(merged);
-    }
-    for rest in interleave(a, &b[1..]) {
-        let mut merged = Vec::with_capacity(1 + rest.len());
-        merged.push(b[0].clone());
-        merged.extend(rest);
-        out.push(merged);
-    }
-    out
+    // order-preserving merges: take a's head first, or b's head first
+    let lead = |first: Compound, rest: Vec<Vec<Compound>>| {
+        rest.into_iter()
+            .map(|r| {
+                std::iter::once(first.clone())
+                    .chain(r)
+                    .collect::<Vec<Compound>>()
+            })
+            .collect::<Vec<Vec<Compound>>>()
+    };
+    lead(a[0].clone(), interleave(&a[1..], b))
+        .into_iter()
+        .chain(lead(b[0].clone(), interleave(a, &b[1..])))
+        .collect()
 }

@@ -16,7 +16,7 @@ builtins/selector_ops.rs	1	0	1
 builtins/string.rs	1	4	2
 color4.rs	0	1	1
 color4_convert.rs	0	2	3
-diag.rs	3	0	1
+diag.rs	0	0	1
 env.rs	2	0	2
 error.rs	1	0	1
 eval.rs	1	0	2
@@ -32,7 +32,7 @@ eval_control.rs	9	0	4
 eval_expr.rs	0	1	0
 eval_extend.rs	17	0	11
 eval_function.rs	6	0	2
-eval_if.rs	3	0	4
+eval_if.rs	0	0	2
 eval_load_css.rs	1	0	3
 eval_meta.rs	0	1	1
 eval_mixin.rs	7	3	6
@@ -59,9 +59,9 @@ selector_ast.rs	10	1	1
 selector_attr.rs	6	0	6
 selector_extend.rs	12	0	7
 selector_extend_pseudo.rs	0	0	2
-selector_extend_weave.rs	3	0	7
+selector_extend_weave.rs	0	0	3
 selector_parse.rs	9	2	13
-selector_super_simple.rs	3	1	3
+selector_super_simple.rs	0	0	1
 selector_unify.rs	0	0	4
 selector_unify_complex.rs	0	0	7
 span.rs	1	0	2
