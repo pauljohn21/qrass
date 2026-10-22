@@ -6,7 +6,11 @@
 
 use super::{Or, Registry};
 use super::selector_ops::{extend, is_superselector, replace, sel_arg, sel_source, unify};
+use rxrust::prelude::*;
+use std::iter;
+
 use crate::ast_expr::ListSep;
+use crate::drain::{drain, drain_one};
 use crate::error::{ErrorKind, SassError};
 use crate::selector_ast::{Complex, Component, Compound, Combinator, Ns, SelectorList, Simple};
 use crate::selector_parse::{self, SelParseError};
@@ -115,30 +119,46 @@ fn comb_symbol(combinator: Option<Combinator>) -> &'static str {
 }
 
 fn parsed_complex(c: &Complex) -> SassValue {
-    let mut items: Vec<SassValue> = Vec::new();
-    for comp in &c.components {
-        // A combinator edge sits before its compound; a leading one on the first
-        // component (`> .c`) is retained front-pinned, exactly as `Display` does.
-        let primary = comb_symbol(comp.combinator);
-        if !primary.is_empty() {
-            items.push(unquoted(primary.to_string()));
-        }
-        // A bogus doubled-combinator chain (`.c ~ ~ .d`) carries the extra edges.
-        for extra in &comp.extras {
-            let sym = comb_symbol(Some(*extra));
-            if !sym.is_empty() {
-                items.push(unquoted(sym.to_string()));
-            }
-        }
-        items.push(unquoted(comp.compound.to_string()));
+    // One stream carries both parts: each component (primary edge, bogus extra
+    // edges, then the compound) and each trailing combinator as its own item.
+    enum Piece {
+        Comp(Component),
+        Trail(Combinator),
     }
-    // A carried trailing combinator (e.g. an extend `carry` yielding `.d +`).
-    for comb in &c.trailing {
-        let sym = comb_symbol(Some(*comb));
-        if !sym.is_empty() {
-            items.push(unquoted(sym.to_string()));
-        }
-    }
+    let edge = |s: &str| (!s.is_empty()).then(|| unquoted(s.to_string()));
+    let items = drain(
+        Local::from_iter(
+            c.components
+                .clone()
+                .into_iter()
+                .map(Piece::Comp)
+                .chain(
+                    c.trailing
+                        .clone()
+                        .into_iter()
+                        .map(Piece::Trail),
+                )
+                .collect::<Vec<Piece>>(),
+        )
+        .flat_map(move |piece| {
+            let owneds: Vec<SassValue> = match piece {
+                // A combinator edge sits before its compound; a leading one on the
+                // first component (`> .c`) is retained front-pinned, exactly as
+                // `Display` does. A bogus doubled-combinator chain (`.c ~ ~ .d`)
+                // carries the extra edges, then the compound itself.
+                Piece::Comp(comp) => edge(comb_symbol(comp.combinator))
+                    .into_iter()
+                    .chain(comp.extras.iter().filter_map(|e| edge(comb_symbol(Some(*e)))))
+                    .chain(iter::once(unquoted(comp.compound.to_string())))
+                    .collect(),
+                // A carried trailing combinator (e.g. an extend `carry` → `.d +`).
+                Piece::Trail(t) => edge(comb_symbol(Some(t))).into_iter().collect(),
+            };
+            Local::from_iter(owneds).map(Ok).box_it()
+        })
+        .box_it(),
+    )
+    .unwrap_or_default();
     SassValue::List {
         items,
         sep: ListSep::Space,
@@ -148,32 +168,54 @@ fn parsed_complex(c: &Complex) -> SassValue {
 }
 
 /// Split a selector list on top-level commas (brackets/parens protected).
+/// The depth walk is an owned `reduce_initial` fold (EvalFold shape).
 pub(crate) fn split_commas(sel: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut cur = String::new();
-    for ch in sel.chars() {
-        match ch {
-            '(' | '[' => {
-                depth += 1;
-                cur.push(ch);
+    #[derive(Default)]
+    struct Split {
+        depth: i32,
+        cur: String,
+        parts: Vec<String>,
+    }
+    impl Split {
+        fn step(mut self, ch: char) -> Self {
+            match ch {
+                '(' | '[' => {
+                    self.depth += 1;
+                    self.cur.push(ch);
+                    self
+                }
+                ')' | ']' => {
+                    self.depth -= 1;
+                    self.cur.push(ch);
+                    self
+                }
+                ',' if self.depth <= 0 => {
+                    self.parts.push(self.cur.trim().to_string());
+                    Self {
+                        cur: String::new(),
+                        ..self
+                    }
+                }
+                c => {
+                    self.cur.push(c);
+                    self
+                }
             }
-            ')' | ']' => {
-                depth -= 1;
-                cur.push(ch);
-            }
-            ',' if depth <= 0 => {
-                parts.push(cur.trim().to_string());
-                cur = String::new();
-            }
-            _ => cur.push(ch),
         }
     }
-    let last = cur.trim().to_string();
-    if !last.is_empty() || parts.is_empty() {
-        parts.push(last);
-    }
-    parts
+    let split = drain_one(
+        Local::from_iter(sel.chars().collect::<Vec<char>>())
+            .reduce_initial(Split::default(), |st, ch| st.step(ch))
+            .map(Ok)
+            .box_it(),
+    );
+    let last = split.cur.trim().to_string();
+    let keep_last = !last.is_empty() || split.parts.is_empty();
+    split
+        .parts
+        .into_iter()
+        .chain(keep_last.then_some(last))
+        .collect()
 }
 
 /// Insert `parent` into `child` at each `&`, or append when `&` is absent.
@@ -207,34 +249,51 @@ fn nest(c: &super::Call) -> Or<SassValue> {
             "$selectors: At least one selector must be passed.",
         ));
     }
-    for arg in c.positional {
-        let src = sel_source(arg).ok_or_else(|| {
-            SassError::new(
-                ErrorKind::Builtins,
-                format!(
-                    "{} is not a valid selector: it must be a string,\na list of strings, or a list of lists of strings.",
-                    arg.to_css()
-                ),
-            )
-        })?;
-        // The `&`-bearing arguments are legitimate nesting parents the shared
-        // parser refuses, so only validate truncation on `&`-free arguments.
-        if !src.contains('&') {
-            selector_parse::parse_list(&src)
-                .map_err(|_| SassError::new(ErrorKind::Builtins, "expected more input."))?;
-        }
-    }
-    let mut acc: Vec<String> = split_commas(&text(&c.positional[0]));
-    for arg in &c.positional[1..] {
-        let children = split_commas(&text(arg));
-        let mut next = Vec::new();
-        for parent in &acc {
-            for child in &children {
-                next.push(combine(parent, child));
-            }
-        }
-        acc = next;
-    }
+    // Per-argument validation streams through the drain's error-union
+    // short-circuit (the `?` propagation of the original loop).
+    drain(
+        Local::from_iter(c.positional.to_vec())
+            .map(|arg| {
+                let src = sel_source(&arg).ok_or_else(|| {
+                    SassError::new(
+                        ErrorKind::Builtins,
+                        format!(
+                            "{} is not a valid selector: it must be a string,\na list of strings, or a list of lists of strings.",
+                            arg.to_css()
+                        ),
+                    )
+                })?;
+                // The `&`-bearing arguments are legitimate nesting parents the shared
+                // parser refuses, so only validate truncation on `&`-free arguments.
+                (!src.contains('&'))
+                    .then(|| {
+                        selector_parse::parse_list(&src)
+                            .map_err(|_| SassError::new(ErrorKind::Builtins, "expected more input."))
+                    })
+                    .transpose()
+                    .map(|_| ())
+            })
+            .box_it(),
+    )?;
+    let acc = drain_one(
+        Local::from_iter(c.positional[1..].to_vec())
+            .reduce_initial(split_commas(&text(&c.positional[0])), |acc, arg| {
+                let children = split_commas(&text(&arg));
+                drain(
+                    Local::from_iter(acc)
+                        .flat_map(move |p| {
+                            let children = children.clone();
+                            Local::from_iter(children)
+                                .map(move |ch| Ok(combine(&p, &ch)))
+                                .box_it()
+                        })
+                        .box_it(),
+                )
+                .unwrap_or_default()
+            })
+            .map(Ok)
+            .box_it(),
+    );
     Ok(comma(acc.into_iter().map(unquoted).collect()))
 }
 
@@ -252,14 +311,18 @@ fn append(c: &super::Call) -> Or<SassValue> {
             "$selectors: At least one selector must be passed.",
         ));
     }
-    let mut lists = Vec::with_capacity(c.positional.len());
-    for arg in c.positional {
-        lists.push(append_sel_list(arg)?);
-    }
-    let mut result = lists.remove(0);
-    for next in lists {
-        result = append_lists(result, next)?;
-    }
+    let mut lists = drain(
+        Local::from_iter(c.positional.to_vec())
+            .map(|arg| append_sel_list(&arg))
+            .box_it(),
+    )?;
+    let head = lists.remove(0);
+    let mut result = drain(
+        Local::from_iter(lists)
+            .reduce_initial(Ok(head), |acc, next| acc.and_then(|a| append_lists(a, next)))
+            .box_it(),
+    )?;
+    let result = result.remove(0);
     Ok(parsed_sel_list(&result))
 }
 
@@ -289,12 +352,18 @@ fn append_sel_list(v: &SassValue) -> Or<SelectorList> {
 /// Cross-product two selector lists by appending every `child` complex onto
 /// every `parent` complex (parent-major order, matching the goldens).
 fn append_lists(parent: SelectorList, child: SelectorList) -> Or<SelectorList> {
-    let mut out = Vec::new();
-    for p in &parent.complexes {
-        for ch in &child.complexes {
-            out.push(append_complex(p, ch)?);
-        }
-    }
+    // parent-major cross product (matching the goldens); the `?` short-circuit
+    // rides the drain's error union.
+    let out = drain(
+        Local::from_iter(parent.complexes.clone())
+            .flat_map(move |p| {
+                let child = child.complexes.clone();
+                Local::from_iter(child)
+                    .map(move |ch| append_complex(&p, &ch))
+                    .box_it()
+            })
+            .box_it(),
+    )?;
     Ok(SelectorList::new(out))
 }
 
