@@ -104,28 +104,29 @@ pub(crate) fn check_color_hwb_comma(call: &FunctionCall) -> Option<SassError> {
     if call.args.len() != 4 {
         return None;
     }
-    for (i, key) in [(1usize, "whiteness"), (2, "blackness")] {
-        let Arg::Positional(e) = &call.args[i] else {
-            continue;
-        };
-        if let Expr::Literal(Literal::Str { text, .. }) = e {
-            return Some(err(format!(
+    // quoted-string blame first (only a Str literal offends, per `type/error`)
+    let str_blame = [(1usize, "whiteness"), (2, "blackness")]
+        .iter()
+        .find_map(|(i, key)| match &call.args[*i] {
+            Arg::Positional(Expr::Literal(Literal::Str { text, .. })) => Some(err(format!(
                 "Expected {key} channel to be a number, was \"{text}\"."
-            )));
-        }
-        if !skip_slot(e) {
-            continue;
-        }
-    }
-    // w/b units: percent-forced (`$whiteness: Expected 30 to have unit "%".`).
-    for (i, key) in [(1usize, "whiteness"), (2, "blackness")] {
-        if let Arg::Positional(e @ Expr::Literal(Literal::Number { unit, .. })) = &call.args[i]
-            && unit.as_deref() != Some("%") {
-            return Some(err(format!(
-                "${key}: Expected {} to have unit \"%\".",
-                shown(e)
-            )));
-        }
-    }
-    None
+            ))),
+            _ => None,
+        });
+    str_blame.or_else(|| {
+        // w/b units: percent-forced (`$whiteness: Expected 30 to have unit "%".`).
+        [(1usize, "whiteness"), (2, "blackness")]
+            .iter()
+            .find_map(|(i, key)| match &call.args[*i] {
+                Arg::Positional(e @ Expr::Literal(Literal::Number { unit, .. }))
+                    if unit.as_deref() != Some("%") =>
+                {
+                    Some(err(format!(
+                        "${key}: Expected {} to have unit \"%\".",
+                        shown(e)
+                    )))
+                }
+                _ => None,
+            })
+    })
 }

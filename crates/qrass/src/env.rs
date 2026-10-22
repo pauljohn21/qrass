@@ -92,14 +92,8 @@ impl Env {
 
     /// Resolve `name` from the current scope up the parent chain.
     pub fn get(&self, name: &str) -> Option<&SassValue> {
-        let mut cur = Some(self.current);
-        while let Some(id) = cur {
-            if let Some(v) = self.scopes[id].vars.get(name) {
-                return Some(v);
-            }
-            cur = self.scopes[id].parent;
-        }
-        None
+        std::iter::successors(Some(self.current), |id| self.scopes[*id].parent)
+            .find_map(|id| self.scopes[id].vars.get(name))
     }
 
     /// True if `name` is bound in the current scope only (no parent search).
@@ -132,18 +126,12 @@ impl Env {
     /// but a name found only in the module-global scope is *shadowed* locally instead
     /// of mutated (that requires `!global`). When declared nowhere, it binds here.
     pub fn set_existing_or_local(&mut self, name: &str, value: SassValue) {
-        let mut cur = Some(self.current);
-        while let Some(id) = cur {
-            if id == 0 {
-                break; // never write through to the global scope from a plain assignment
-            }
-            if self.scopes[id].vars.contains_key(name) {
-                self.scopes[id].vars.insert(name.to_string(), value);
-                return;
-            }
-            cur = self.scopes[id].parent;
-        }
-        self.scopes[self.current]
+        // walk the parent chain below the global scope; bind here on a miss
+        let target = std::iter::successors(Some(self.current), |id| self.scopes[*id].parent)
+            .take_while(|id| *id != 0)
+            .find(|id| self.scopes[*id].vars.contains_key(name))
+            .unwrap_or(self.current);
+        self.scopes[target]
             .vars
             .insert(name.to_string(), value);
     }

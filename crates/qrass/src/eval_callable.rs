@@ -173,81 +173,82 @@ impl EvalState {
                     None => String::new(),
                 };
                 let members: Vec<(String, String)> =
-                    if let Some(module) = self.bound_modules.get(&ns) {
-                        if mixins {
-                            module.mixins.clone()
-                        } else {
-                            module.functions.clone()
+                    match (self.bound_modules.get(&ns), mixins) {
+                        (Some(module), true) => module.mixins.clone(),
+                        (Some(module), false) => module.functions.clone(),
+                        // built-in modules expose no user-member snapshot
+                        (None, _) if crate::builtins::has_module(&ns) => Vec::new(),
+                        (None, _) => {
+                            return Err(SassError::new(
+                                ErrorKind::UndefinedVariable,
+                                format!("There is no module with namespace \"{ns}\"."),
+                            ));
                         }
-                    } else if crate::builtins::has_module(&ns) {
-                        Vec::new()
-                    } else {
-                        return Err(SassError::new(
-                            ErrorKind::UndefinedVariable,
-                            format!("There is no module with namespace \"{ns}\"."),
-                        ));
                     };
-                let mut entries = Vec::with_capacity(members.len());
-                for (exported, defined) in members {
-                    // `bind_members` mirrors the registry under `{ns}.{exported}`
-                    // (forwarded renames included); the defining name keeps the
-                    // snapshot lookups working for plain members too.
-                    let key = format!("{ns}.{exported}");
-                    let value = if mixins {
-                        let Some(decl) =
-                            self.mixins.get(&key).or_else(|| self.mixins.get(&defined)).cloned()
-                        else
-                        {
-                            continue;
-                        };
-                        SassValue::Mixin(Rc::new(MixRef {
-                            name: exported.clone(),
-                            module: Some(ns.clone()),
-                            kind: MixKind::User {
-                                decl,
-                                owner: self
-                                    .mixin_module
-                                    .get(&key)
-                                    .or_else(|| self.mixin_module.get(&defined))
-                                    .cloned()
-                                    .unwrap_or_else(|| self.env_owner.clone()),
+                // `bind_members` mirrors the registry under `{ns}.{exported}`
+                // (forwarded renames included); the defining name keeps the
+                // snapshot lookups working for plain members too.
+                let entries: Vec<(SassValue, SassValue)> = members
+                    .into_iter()
+                    .filter_map(|(exported, defined)| {
+                        let key = format!("{ns}.{exported}");
+                        let value = match mixins {
+                            true => self
+                                .mixins
+                                .get(&key)
+                                .or_else(|| self.mixins.get(&defined))
+                                .cloned()
+                                .map(|decl| {
+                                    SassValue::Mixin(Rc::new(MixRef {
+                                        name: exported.clone(),
+                                        module: Some(ns.clone()),
+                                        kind: MixKind::User {
+                                            decl,
+                                            owner: self
+                                                .mixin_module
+                                                .get(&key)
+                                                .or_else(|| self.mixin_module.get(&defined))
+                                                .cloned()
+                                                .unwrap_or_else(|| self.env_owner.clone()),
+                                        },
+                                    }))
+                                }),
+                            false => self
+                                .functions
+                                .get(&key)
+                                .or_else(|| self.functions.get(&defined))
+                                .cloned()
+                                .map(|decl| {
+                                    let (env, owner) = self
+                                        .function_env
+                                        .get(&key)
+                                        .cloned()
+                                        .map(|e| (e, self.function_module.get(&key).cloned()))
+                                        .or_else(|| {
+                                            self.function_env.get(&defined).cloned().map(|e| {
+                                                (e, self.function_module.get(&defined).cloned())
+                                            })
+                                        })
+                                        .map_or_else(
+                                            || self.closure_snapshot(&key),
+                                            |(e, o)| (e, o.unwrap_or_else(|| self.env_owner.clone())),
+                                        );
+                                    SassValue::Function(Rc::new(FnRef {
+                                        name: exported.clone(),
+                                        module: Some(ns.clone()),
+                                        kind: FnKind::User { decl, env, owner },
+                                    }))
+                                }),
+                        }?;
+                        Some((
+                            SassValue::Str {
+                                text: exported,
+                                quoted: true,
                             },
-                        }))
-                    } else {
-                        let Some(decl) =
-                            self.functions.get(&key).or_else(|| self.functions.get(&defined)).cloned()
-                        else
-                        {
-                            continue;
-                        };
-                        let (env, owner) = self
-                            .function_env
-                            .get(&key)
-                            .cloned()
-                            .map(|e| (e, self.function_module.get(&key).cloned()))
-                            .or_else(|| {
-                                self.function_env.get(&defined).cloned().map(|e| {
-                                    (e, self.function_module.get(&defined).cloned())
-                                })
-                            })
-                            .map_or_else(
-                                || self.closure_snapshot(&key),
-                                |(e, o)| (e, o.unwrap_or_else(|| self.env_owner.clone())),
-                            );
-                        SassValue::Function(Rc::new(FnRef {
-                            name: exported.clone(),
-                            module: Some(ns.clone()),
-                            kind: FnKind::User { decl, env, owner },
-                        }))
-                    };
-                    entries.push((
-                        SassValue::Str {
-                            text: exported,
-                            quoted: true,
-                        },
-                        value,
-                    ));
-                }
+                            value,
+                        ))
+                    })
+                    .collect();
                 Ok(Some(SassValue::Map { entries }))
             }
             _ => Ok(None),
