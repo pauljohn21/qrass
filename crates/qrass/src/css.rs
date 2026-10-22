@@ -291,6 +291,33 @@ pub(crate) fn tidy_condition(q: &str) -> String {
     while i < chars.len() {
         match chars[i] {
             '(' => {
+                // `(…)` preceded by an identifier/`)`/`]` is a FUNCTION call
+                // argument list — verbatim; anything else is a condition GROUP
+                // whose leading position re-parses (loud comments dropped).
+                // Computed BEFORE pushing the paren itself.
+                let preceded_by_ident = {
+                    let rev: Vec<char> = out.iter().copied().rev().collect();
+                    let last = rev.iter().copied().find(|c| *c != ' ' && *c != '\t');
+                    // `take_while` is not `DoubleEndedIterator`, so the word
+                    // lands in a Vec before being flipped back to source order.
+                    let word: String = rev
+                        .iter()
+                        .skip_while(|c| **c == ' ' || **c == '\t')
+                        .take_while(|c| c.is_alphanumeric() || **c == '-' || **c == '_')
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    match last {
+                        // `not`/`and`/`or` are keywords: the paren after them is a GROUP
+                        Some(c) if c.is_alphanumeric() || c == '-' || c == '_' => {
+                            !matches!(word.as_str(), "not" | "and" | "or")
+                        }
+                        Some(')' | ']') => true,
+                        _ => false,
+                    }
+                };
                 out.push('(');
                 i += 1;
                 let start = i;
@@ -314,6 +341,17 @@ pub(crate) fn tidy_condition(q: &str) -> String {
                         t = format!("{}{}", head, &t[at..]);
                     }
                     t
+                } else if !preceded_by_ident {
+                    // a condition's OWN group re-parses in dart: only a LEADING
+                    // loud comment is gone before any token (`(/**/ a b)` →
+                    // `(a b)`); mid/trailing comments stay verbatim
+                    // (`(a /**/ b)`), inner argument parens untouched.
+                    let mut t = inner.as_str();
+                    while let Some(rest) = t.strip_prefix("/*") {
+                        t = rest.find("*/").map(|c| &rest[c + 2..]).unwrap_or("");
+                        t = t.trim_start_matches(' ').trim_start_matches('\t');
+                    }
+                    t.to_string()
                 } else {
                     inner
                 };

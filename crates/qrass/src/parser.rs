@@ -432,8 +432,9 @@ impl Parser {
         for s in tokens {
             if let Some(end) = prev_end
                 && s.span.start.0 > end.0
-                && !matches!(s.token, Token::Comment(_))
             {
+                // spacing around a kept comment is REAL (goldens `a(b /**/)`,
+                // `a(b/**/)`, `(a /**/ b)` — spaces only where the source has them)
                 out.push(Piece::Text(" ".into()));
             }
             if let Token::Comment(raw) = &s.token {
