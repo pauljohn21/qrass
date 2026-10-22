@@ -74,9 +74,7 @@ pub fn candidate_paths(url: &str, base_dir: &Path) -> Vec<PathBuf> {
             out.push(root.join(partial));
         }
         // 3. Directory index files.
-        for idx in ["_index.scss", "index.scss"] {
-            out.push(root.join(rel).join(idx));
-        }
+        out.extend(["_index.scss", "index.scss"].iter().map(|idx| root.join(rel).join(idx)));
         // 4. Plain CSS passthrough variants.
         let mut cssp = rel.to_path_buf();
         cssp.set_extension("css");

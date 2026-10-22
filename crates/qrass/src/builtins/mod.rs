@@ -259,55 +259,42 @@ fn fold_named(
     display: &str,
 ) -> Or<Vec<SassValue>> {
     let np = b.params.len();
-    let mut slots: Vec<Option<SassValue>> = vec![None; np];
     // Arguments past the declared parameters are the variadic tail (only
     // reachable when `max == None`; the arity check catches the non-variadic
     // over-application later).
-    let mut tail: Vec<SassValue> = Vec::new();
-    for (i, v) in positional.iter().enumerate() {
-        if i < np {
-            slots[i] = Some(v.clone());
-        } else {
-            tail.push(v.clone());
-        }
-    }
-    for (key, val) in named {
-        match b.params.iter().position(|p| *p == key) {
+    let slots: Vec<Option<SassValue>> = (0..np).map(|i| positional.get(i).cloned()).collect();
+    let tail: Vec<SassValue> = positional.iter().skip(np).cloned().collect();
+    // Named arguments claim their declared slot (a positional collision is a
+    // call error); a variadic builtin (`max == None`) lets unknown names pass
+    // through to `Call::named` — the golden's `@kwargs...` channel setters,
+    // e.g. `color.scale($lightness: 10%)` — while a fixed-arity one rejects.
+    let slots: Vec<Option<SassValue>> = named.iter().try_fold(slots, |mut slots, (key, val)| {
+        match b.params.iter().position(|p| p == key) {
+            Some(idx) if slots[idx].is_some() => Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("Argument ${key} was passed both by position and by name."),
+            )),
             Some(idx) => {
-                if slots[idx].is_some() {
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        format!("Argument ${key} was passed both by position and by name."),
-                    ));
-                }
                 slots[idx] = Some(val.clone());
+                Ok(slots)
             }
-            None => {
-                // A variadic function (`max == None`) accepts named arguments
-                // beyond its declared parameters — the golden's `@kwargs...` channel
-                // setters, e.g. `color.scale($lightness: 10%)`. Leave those for
-                // the implementation to read from `Call::named`; only a
-                // fixed-arity function rejects an unknown argument name.
-                if b.max.is_none() {
-                    continue;
-                }
-                return Err(SassError::new(
-                    ErrorKind::Builtins,
-                    format!("\"{display}\": No such argument \"${key}\""),
-                ));
-            }
+            None if b.max.is_none() => Ok(slots),
+            None => Err(SassError::new(
+                ErrorKind::Builtins,
+                format!("\"{display}\": No such argument \"${key}\""),
+            )),
         }
-    }
-    let mut out = Vec::with_capacity(np + tail.len());
+    })?;
     // Keep positional slots index-aligned for implementations that read by
     // index: fill interior gaps left by a named argument that targets a later
     // slot (e.g. `join($list1, $list2, $bracketed: false)` skips `$separator`)
     // with `Null` rather than truncating and dropping the trailing value.
-    if let Some(last) = slots.iter().rposition(|s| s.is_some()) {
-        for slot in slots.into_iter().take(last + 1) {
-            out.push(slot.unwrap_or(SassValue::Null));
-        }
-    }
+    let mut out: Vec<SassValue> = slots
+        .iter()
+        .rposition(|s| s.is_some())
+        .map_or(Vec::new(), |last| {
+            slots.into_iter().take(last + 1).map(|s| s.unwrap_or(SassValue::Null)).collect()
+        });
     out.extend(tail);
     Ok(out)
 }

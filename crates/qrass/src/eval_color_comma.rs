@@ -66,32 +66,37 @@ pub(crate) fn check_legacy_comma_color(call: &FunctionCall) -> Option<SassError>
         "rgb" | "rgba" => &["red", "green", "blue", "alpha"],
         _ => &["hue", "saturation", "lightness", "alpha"],
     };
-    for (i, arg) in call.args.iter().enumerate() {
+    // first offending slot wins (per-slot classification as a value)
+    call.args.iter().enumerate().find_map(|(i, arg)| {
         let Arg::Positional(e) = arg else {
-            continue;
+            return None;
         };
         // A quoted string is concrete in any slot: the type blame precedes the
         // skip filter (`four_args` `type/error`).
-        if let Expr::Literal(Literal::Str { text, .. }) = e {
-            return Some(err(format!(
+        match e {
+            Expr::Literal(Literal::Str { text, .. }) => Some(err(format!(
                 "${}: \"{text}\" is not a number.",
                 names[i.min(3)]
-            )));
+            ))),
+            _ => (!skip_slot(e))
+                .then(|| {
+                    // Slot 4 is alpha: `%` or unitless only.
+                    (i == 3).then(|| match e {
+                        Expr::Literal(Literal::Number { unit, .. })
+                            if !matches!(unit.as_deref(), None | Some("%")) =>
+                        {
+                            Some(err(format!(
+                                "$alpha: Expected {} to have unit \"%\" or no units.",
+                                shown(e)
+                            )))
+                        }
+                        _ => None,
+                    })
+                    .flatten()
+                })
+                .flatten(),
         }
-        if skip_slot(e) {
-            continue;
-        }
-        // Slot 4 is alpha: `%` or unitless only.
-        if i == 3
-            && let Expr::Literal(Literal::Number { unit, .. }) = e
-            && !matches!(unit.as_deref(), None | Some("%")) {
-            return Some(err(format!(
-                "$alpha: Expected {} to have unit \"%\" or no units.",
-                shown(e)
-            )));
-        }
-    }
-    None
+    })
 }
 
 /// Check a four-positional `color.hwb` comma call.

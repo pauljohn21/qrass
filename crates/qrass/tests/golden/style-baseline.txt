@@ -9,10 +9,9 @@ builtins/color_ops.rs	0	0	3
 builtins/color_same.rs	1	0	1
 builtins/color_transform.rs	1	2	2
 builtins/list.rs	0	1	4
-builtins/map.rs	4	0	2
 builtins/math.rs	2	0	2
 builtins/math_trig.rs	2	0	3
-builtins/mod.rs	3	0	4
+builtins/mod.rs	0	0	2
 builtins/selector.rs	6	0	6
 builtins/selector_ops.rs	1	0	1
 builtins/string.rs	1	4	2
@@ -26,10 +25,10 @@ eval_bind.rs	9	0	2
 eval_callable.rs	3	1	1
 eval_callable_call.rs	1	0	1
 eval_color4.rs	2	1	8
-eval_color_comma.rs	3	0	0
+eval_color_comma.rs	2	0	0
 eval_color_space.rs	6	3	10
 eval_color_space_symbolic.rs	1	0	1
-eval_config.rs	4	0	3
+eval_config.rs	0	0	1
 eval_control.rs	9	0	4
 eval_expr.rs	4	1	4
 eval_extend.rs	17	0	11
@@ -42,7 +41,7 @@ eval_module.rs	8	0	10
 eval_stmt.rs	7	0	7
 lexer.rs	4	1	1
 lexer_detail.rs	11	3	13
-loader.rs	3	0	7
+loader.rs	2	0	7
 main.rs	1	0	5
 parser.rs	3	1	7
 parser_args.rs	2	0	2

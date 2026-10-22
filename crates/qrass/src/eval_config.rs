@@ -38,11 +38,13 @@ impl EvalState {
     ) -> Ev<Vec<(String, usize)>> {
         let span = debug_span!("with_config", stage = "offer", module = %self.name, id = site.map_or(-1, |s| s as i64), entries = entries.len());
         let _entered = span.entered();
-        let mut view: Vec<(String, usize)> = Vec::new();
-        for e in entries {
-            let value = self.eval_config_value(e)?;
-            view.push(self.register_offer(config_key(&e.name), value, site, e));
-        }
+        let view: Vec<(String, usize)> = entries
+            .iter()
+            .try_fold(Vec::new(), |mut view, e| {
+                let value = self.eval_config_value(e)?;
+                view.push(self.register_offer(config_key(&e.name), value, site, e));
+                Ok(view)
+            })?;
         Ok(view)
     }
 
@@ -52,9 +54,8 @@ impl EvalState {
     /// dedicated message for that case, which is not implemented yet; staying
     /// silent keeps those cases at their previous outcome.
     pub(crate) fn settle_offers(&mut self, view: &[(String, usize)]) {
-        for (_, idx) in view {
-            self.config_offers[*idx].consumed = true;
-        }
+        view.iter()
+            .for_each(|(_, idx)| self.config_offers[*idx].consumed = true);
     }
 
     /// The view a `@forward` hands its target: the incoming offers that survive
@@ -70,17 +71,21 @@ impl EvalState {
         let span = debug_span!("with_config", stage = "forward", module = %self.name, url = %f.url, clauses = f.config.len());
         let _entered = span.entered();
         let incoming = self.config_stack.last().cloned().unwrap_or_default();
-        let mut view: Vec<(String, usize)> = Vec::new();
-        for (name, idx) in incoming {
-            let shown = f.shown.is_empty()
-                || f.shown.iter().any(|s| config_key(s) == name)
-                || f.shown.iter().any(|s| config_key(s) == stripped(&name, &f.prefix));
-            let hidden = f.hidden.iter().any(|s| config_key(s) == name);
-            if !hidden && shown {
-                view.push((stripped(&name, &f.prefix), idx));
-            }
-        }
-        for e in &f.config {
+        // the surviving offers, renamed to their forward-facing keys
+        let view: Vec<(String, usize)> = incoming
+            .into_iter()
+            .filter(|(name, _)| {
+                !f.hidden.iter().any(|s| config_key(s) == *name)
+                    && (f.shown.is_empty()
+                        || f.shown.iter().any(|s| config_key(s) == *name)
+                        || f.shown
+                            .iter()
+                            .any(|s| config_key(s) == stripped(name, &f.prefix)))
+            })
+            .map(|(name, idx)| (stripped(&name, &f.prefix), idx))
+            .collect();
+        // the `with (…)` clauses, folded left over the evolving view
+        let view = f.config.iter().try_fold(view, |mut view, e| {
             let key = config_key(&e.name);
             // A `!default` clause is pass-through: an incoming entry of the same
             // name is claimed here whichever value wins — `with/null.hrx` still
@@ -88,32 +93,26 @@ impl EvalState {
             // clause without `!default` is a hard value that leaves the
             // importer's entry unclaimed, which
             // `error/with/through_forward.hrx` `with` reports.
-            let upstream = if e.default {
-                view.iter().find(|(n, _)| *n == key).map(|(_, i)| *i)
-            } else {
-                None
-            };
-            let offered = match upstream {
-                Some(idx) => {
-                    let offer = &mut self.config_offers[idx];
-                    offer.consumed = true;
-                    Some(offer.value.clone())
-                }
-                None => None,
-            };
+            let upstream = e.default
+                .then(|| view.iter().find(|(n, _)| *n == key).map(|(_, i)| *i))
+                .flatten();
+            let offered = upstream.map(|idx| {
+                self.config_offers[idx].consumed = true;
+                self.config_offers[idx].value.clone()
+            });
             let value = match offered {
                 None | Some(SassValue::Null) => self.eval_config_value(e)?,
                 Some(value) => value,
             };
             let idx = self
-                .register_offer(key.clone(), value, if e.default { None } else { Some(site) }, e)
+                .register_offer(key.clone(), value, (!e.default).then_some(site), e)
                 .1;
-            if let Some(slot) = view.iter().position(|(n, _)| *n == key) {
-                view[slot].1 = idx;
-            } else {
-                view.push((key, idx));
+            match view.iter().position(|(n, _)| *n == key) {
+                Some(slot) => view[slot].1 = idx,
+                None => view.push((key, idx)),
             }
-        }
+            Ok(view)
+        })?;
         Ok(view)
     }
 

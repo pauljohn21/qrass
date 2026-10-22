@@ -4,8 +4,10 @@
 
 use super::{Or, Registry};
 use crate::ast_expr::ListSep;
+use crate::drain::drain_one;
 use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
+use rxrust::prelude::*;
 
 pub(crate) fn register(r: &mut Registry) {
     r.nsp("map", "get", 2, None, &["map", "key"], get);
@@ -49,39 +51,46 @@ fn get(c: &super::Call) -> Or<SassValue> {
 }
 
 /// Walk the nested-key path, returning `on_missing` when a step fails.
+/// The path is an owned stream fold; a failed step latches the `None` marker
+/// (every later key sees `None` and stays missing — the `?`/early-return shape).
 fn descend(c: &super::Call, on_missing: SassValue) -> Or<SassValue> {
-    let mut current = c.positional[0].clone();
-    for key in &c.positional[1..] {
-        let entries = match current {
-            SassValue::Map { entries } => entries,
-            SassValue::List { items, .. } if items.is_empty() => Vec::new(),
-            _ => return Ok(on_missing),
-        };
-        match entries.into_iter().find(|(k, _)| k == key) {
-            Some((_, value)) => current = value,
-            None => return Ok(on_missing),
-        }
+    let walked = drain_one(
+        Local::from_iter(c.positional[1..].to_vec())
+            .reduce_initial(Some(c.positional[0].clone()), |acc, key| {
+                acc.and_then(|current| step_into(&current, &key))
+            })
+            .map(Ok)
+            .box_it(),
+    );
+    Ok(walked.unwrap_or(on_missing))
+}
+
+/// One key step: map entries by key lookup; the empty list `()` walks as the
+/// empty map; anything else misses.
+fn step_into(current: &SassValue, key: &SassValue) -> Option<SassValue> {
+    match current {
+        SassValue::Map { entries } => entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone()),
+        SassValue::List { items, .. } if items.is_empty() => None,
+        _ => None,
     }
-    Ok(current)
 }
 
 fn has_key(c: &super::Call) -> Or<SassValue> {
     // `has-key($map, $key, $keys…)`: `$map` must be a map (type error names it).
     coerce_map(&c.positional[0], "map")?;
     // Walk the nested-key path; the key "exists" only if every step is found.
-    let mut current = c.positional[0].clone();
-    for key in &c.positional[1..] {
-        let entries = match current {
-            SassValue::Map { entries } => entries,
-            SassValue::List { items, .. } if items.is_empty() => Vec::new(),
-            _ => return Ok(SassValue::Bool(false)),
-        };
-        match entries.into_iter().find(|(k, _)| k == key) {
-            Some((_, value)) => current = value,
-            None => return Ok(SassValue::Bool(false)),
-        }
-    }
-    Ok(SassValue::Bool(true))
+    let walked = drain_one(
+        Local::from_iter(c.positional[1..].to_vec())
+            .reduce_initial(Some(c.positional[0].clone()), |acc, key| {
+                acc.and_then(|current| step_into(&current, &key))
+            })
+            .map(Ok)
+            .box_it(),
+    );
+    Ok(SassValue::Bool(walked.is_some()))
 }
 
 fn keys(c: &super::Call) -> Or<SassValue> {
@@ -148,16 +157,21 @@ fn set_at(
 
 /// Shallow merge: `right` overrides `left` on key collisions.
 fn shallow_merge(
-    mut left: Vec<(SassValue, SassValue)>,
+    left: Vec<(SassValue, SassValue)>,
     right: Vec<(SassValue, SassValue)>,
 ) -> Vec<(SassValue, SassValue)> {
-    for (k, v) in right {
-        match left.iter_mut().find(|(lk, _)| *lk == k) {
-            Some(slot) => slot.1 = v,
-            None => left.push((k, v)),
-        }
-    }
-    left
+    drain_one(
+        Local::from_iter(right)
+            .reduce_initial(left, |mut acc, (k, v)| {
+                match acc.iter_mut().find(|(lk, _)| *lk == k) {
+                    Some(slot) => slot.1 = v,
+                    None => acc.push((k, v)),
+                }
+                acc
+            })
+            .map(Ok)
+            .box_it(),
+    )
 }
 
 /// `map.merge($map1, $keys…, $map2)`: merge `$map2` (the final argument) into the
@@ -241,22 +255,26 @@ fn as_map_or_empty(v: &SassValue) -> Option<Vec<(SassValue, SassValue)>> {
 }
 
 fn deep_merge(
-    mut left: Vec<(SassValue, SassValue)>,
+    left: Vec<(SassValue, SassValue)>,
     right: Vec<(SassValue, SassValue)>,
 ) -> Vec<(SassValue, SassValue)> {
-    for (k, v) in right {
-        match left.iter_mut().find(|(lk, _)| *lk == k) {
-            Some(slot) => {
-                let merged = match (as_map_or_empty(&slot.1), as_map_or_empty(&v)) {
-                    (Some(a), Some(b)) => map_value(deep_merge(a, b)),
-                    _ => v.clone(),
-                };
-                slot.1 = merged;
-            }
-            None => left.push((k, v)),
-        }
-    }
-    left
+    drain_one(
+        Local::from_iter(right)
+            .reduce_initial(left, |mut acc, (k, v)| {
+                match acc.iter_mut().find(|(lk, _)| *lk == k) {
+                    Some(slot) => {
+                        slot.1 = match (as_map_or_empty(&slot.1), as_map_or_empty(&v)) {
+                            (Some(a), Some(b)) => map_value(deep_merge(a, b)),
+                            _ => v.clone(),
+                        };
+                    }
+                    None => acc.push((k, v)),
+                }
+                acc
+            })
+            .map(Ok)
+            .box_it(),
+    )
 }
 
 /// `map.remove($map, $keys…)`.
