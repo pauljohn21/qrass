@@ -74,25 +74,29 @@ pub(crate) fn channel_value(v: &SassValue, ch: &crate::color4::Channel) -> Optio
         } if text == "none" => Some(None),
         SassValue::Number { value, unit } => {
             let u = unit.as_deref();
-            let out = match ch.unit {
+            // per-unit coercion: `Some(_)` a converted channel, `None` a unit that
+            // can never be this channel (the caller falls through to plain CSS).
+            let out: Option<f64> = match ch.unit {
                 Unit::Pct => match u {
-                    None | Some("%") => *value,
-                    Some(_) => return None,
+                    None | Some("%") => Some(*value),
+                    Some(_) => None,
                 },
                 Unit::Deg => match u {
-                    None | Some("deg") => *value,
-                    Some("rad") => value.to_degrees(),
-                    Some("grad") => *value * 0.9,
-                    Some("turn") => *value * 360.0,
-                    Some(_) => return None,
+                    None | Some("deg") => Some(*value),
+                    Some("rad") => Some(value.to_degrees()),
+                    Some("grad") => Some(*value * 0.9),
+                    Some("turn") => Some(*value * 360.0),
+                    Some(_) => None,
                 },
                 Unit::Num => match u {
-                    None => *value,
-                    Some("%") => *value / 100.0,
-                    Some(_) => return None,
+                    None => Some(*value),
+                    Some("%") => Some(*value / 100.0),
+                    Some(_) => None,
                 },
             };
-            Some(Some(out))
+            // `out.map(Some)`: unit mismatch (None) stays the outer None, a coerced
+            // value becomes Some(Some(..)); the powerless `none` arm above is Some(None).
+            out.map(Some)
         }
         _ => None,
     }
