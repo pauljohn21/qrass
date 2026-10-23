@@ -24,6 +24,7 @@ pub(crate) mod color_gamut;
 pub(crate) mod color_legacy;
 pub(crate) mod color_mix;
 pub(crate) mod color_ops;
+pub(crate) mod color_ops_space;
 pub(crate) mod color_transform;
 pub(crate) mod color_edit_check;
 mod color_same;

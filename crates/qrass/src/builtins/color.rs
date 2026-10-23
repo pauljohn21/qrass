@@ -4,7 +4,7 @@
 //! Colors are RGBA f64 with on-demand HSL conversion (D2).
 
 use super::{Or, Registry};
-use super::color_ops::to_space;
+use super::color_ops_space::to_space;
 use crate::error::{ErrorKind, SassError};
 use crate::value::{Color, SassValue};
 

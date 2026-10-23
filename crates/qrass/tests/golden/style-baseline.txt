@@ -5,7 +5,8 @@ builtins/color_edit_check.rs	0	0	1	4
 builtins/color_gamut.rs	0	0	1	10
 builtins/color_legacy.rs	0	0	1	20
 builtins/color_mix.rs	0	0	0	11
-builtins/color_ops.rs	0	0	3	12
+builtins/color_ops.rs	0	0	2	4
+builtins/color_ops_space.rs	0	0	1	8
 builtins/color_same.rs	0	0	1	0
 builtins/color_transform.rs	1	0	2	13
 builtins/list.rs	0	0	4	8

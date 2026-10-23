@@ -1,4 +1,3 @@
 # files over the 500-line budget: file	lines
-builtins/color_ops.rs	533
-eval_module.rs	521
+eval_module.rs	520
 parser.rs	505
