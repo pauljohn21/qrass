@@ -36,7 +36,6 @@ eval_color_space_symbolic.rs	1	0	1	5
 eval_config.rs	0	0	1	2
 eval_control.rs	0	0	2	7
 eval_expr.rs	0	1	0	6
-eval_extend.rs	17	0	11	2
 eval_function.rs	6	0	2	19
 eval_if.rs	0	0	2	3
 eval_load_css.rs	1	0	3	19

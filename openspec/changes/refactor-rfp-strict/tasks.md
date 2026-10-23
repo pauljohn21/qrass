@@ -24,7 +24,7 @@
 
 ## 4. M3 S3 extend 引擎清洗
 
-- [ ] 4.1 `eval_extend.rs`（18 处）：占位符组收集/代换双层循环 → `scan_map` + `flat_map`
+- [x] 4.1 `eval_extend.rs`（18 处）：占位符组收集/代换双层循环 → `scan_map` + `flat_map`
 - [ ] 4.2 `selector_extend*.rs`（22 处）与 extend 计划族清洗
 - [ ] 4.3 style_gate S3 命中归零 + 0 回归验收（extend 金样组重点复核 escaping/round-trip 钉）
 

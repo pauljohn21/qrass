@@ -31,16 +31,20 @@ impl EvalState {
     /// sheet root (no enclosing rule) is an error.
     pub(super) fn run_extend(&mut self, e: &Extend, sel_ctx: &[String]) -> Ev<()> {
         let target = self.render_interp(&e.selector)?.trim().to_string();
-        if target.is_empty() || sel_ctx.is_empty() {
-            return Err(SassError::new(
+        // one eligibility check: an extend needs both a target and an enclosing
+        // rule's resolved selectors
+        let recordable = !target.is_empty() && !sel_ctx.is_empty();
+        recordable.then_some(()).ok_or_else(|| {
+            SassError::new(
                 ErrorKind::Eval,
                 "You may only extend a selector within a rule",
-            ));
-        }
-        for selector in sel_ctx {
-            self.extends
-                .push((target.clone(), selector.clone(), e.optional));
-        }
+            )
+        })?;
+        self.extends.extend(
+            sel_ctx
+                .iter()
+                .map(|selector| (target.clone(), selector.clone(), e.optional)),
+        );
         Ok(())
     }
 
@@ -52,35 +56,34 @@ impl EvalState {
     /// non-`!optional` extend whose target was never defined.
     pub(crate) fn extend_pass(&mut self, chunks: &mut Vec<String>) -> Ev<()> {
         // Placeholder tokens actually defined in this module.
-        let mut defined: HashSet<String> = HashSet::new();
-        for pr in &self.placeholder_rules {
-            for tok in placeholder_tokens(&pr.selector) {
-                defined.insert(tok);
-            }
-        }
+        let defined: HashSet<String> = self
+            .placeholder_rules
+            .iter()
+            .flat_map(|pr| placeholder_tokens(&pr.selector))
+            .collect();
 
         // Every non-optional extend must resolve to a defined placeholder.
-        for (target, _sel, optional) in &self.extends {
-            if !*optional && !defined.contains(target) {
-                return Err(SassError::new(
-                    ErrorKind::Eval,
-                    format!("\"{target}\" is not a known selector for @extend"),
-                ));
-            }
-        }
+        self.extends
+            .iter()
+            .filter(|(_, _, optional)| !*optional)
+            .try_fold((), |(), (target, _, _)| {
+                defined.contains(target).then_some(()).ok_or_else(|| {
+                    SassError::new(
+                        ErrorKind::Eval,
+                        format!("\"{target}\" is not a known selector for @extend"),
+                    )
+                })
+            })?;
 
         // Placeholder token -> concrete selectors that extend it, in reverse
         // source-of-extend order (dedup first, then reverse) to match the goldens.
-        let mut by_target: HashMap<String, Vec<String>> = HashMap::new();
-        for (target, concrete, _optional) in &self.extends {
-            let list = by_target.entry(target.clone()).or_default();
-            if !list.iter().any(|s| s == concrete) {
-                list.push(concrete.clone());
-            }
-        }
-        for list in by_target.values_mut() {
-            list.reverse();
-        }
+        let by_target: HashMap<String, Vec<String>> = self.extends.iter().fold(
+            HashMap::new(),
+            |mut acc, (target, concrete, _optional)| {
+                push_front_unique(acc.entry(target.clone()).or_default(), concrete);
+                acc
+            },
+        );
 
         // Aggregate placeholder rules by selector. The same placeholder can be
         // defined more than once (e.g. a share-rule `@include`d inside a mixin that
@@ -92,96 +95,49 @@ impl EvalState {
             slots: Vec<usize>,
             decls: Vec<(String, String)>,
         }
-        let mut order: Vec<String> = Vec::new();
-        let mut groups: HashMap<String, Group> = HashMap::new();
-        for pr in &self.placeholder_rules {
-            let g = groups.entry(pr.selector.clone()).or_insert_with(|| {
-                order.push(pr.selector.clone());
-                Group {
-                    primary: pr.slot,
-                    slots: Vec::new(),
-                    decls: Vec::new(),
-                }
+        let (order, groups): (Vec<String>, HashMap<String, Group>) = self
+            .placeholder_rules
+            .iter()
+            .fold((Vec::new(), HashMap::new()), |(mut order, mut groups), pr| {
+                let g = groups.entry(pr.selector.clone()).or_insert_with(|| {
+                    order.push(pr.selector.clone());
+                    Group {
+                        primary: pr.slot,
+                        slots: Vec::new(),
+                        decls: Vec::new(),
+                    }
+                });
+                g.slots.push(pr.slot);
+                let fresh: Vec<(String, String)> = pr
+                    .decls
+                    .iter()
+                    .filter(|d| !g.decls.contains(*d))
+                    .cloned()
+                    .collect();
+                g.decls.extend(fresh);
+                (order, groups)
             });
-            g.slots.push(pr.slot);
-            for d in &pr.decls {
-                if !g.decls.iter().any(|e| e == d) {
-                    g.decls.push(d.clone());
-                }
-            }
-        }
 
         // Resolve each unique placeholder selector into its grouped replacement.
-        for selector in &order {
+        order.iter().for_each(|selector| {
             let g = groups.get(selector).expect("group registered in order");
-            // Expand the selector by substituting each placeholder token with the
-            // concrete selectors that extend it (a cross product when several).
-            let mut expansions: Vec<String> = vec![selector.clone()];
-            let mut drop = false;
-            for tok in placeholder_tokens(selector) {
-                let Some(concretes) = by_target.get(&tok) else {
-                    drop = true;
-                    break;
-                };
-                let mut next: Vec<String> = Vec::new();
-                for sel in &expansions {
-                    for c in concretes {
-                        next.push(sel.replace(tok.as_str(), c.as_str()));
-                    }
-                }
-                expansions = next;
-            }
-
-            // A selector that expands to nothing (empty declarations, or a token no
-            // rule extends) contributes no CSS: strip all of its markers.
-            if drop || expansions.is_empty() || g.decls.is_empty() {
-                for slot in &g.slots {
-                    let m = extend_marker(*slot);
-                    if let Some(p) = chunks.iter().position(|c| *c == m) {
-                        chunks.remove(p);
-                    }
-                }
-                continue;
-            }
-
-            let items: Vec<crate::css::Item> = g
-                .decls
-                .iter()
-                .map(|(prop, value)| crate::css::Item::Decl {
-                    prop: prop.clone(),
-                    value: value.clone(),
-                })
-                .collect();
-            let primary_marker = extend_marker(g.primary);
-            match chunks.iter().position(|c| *c == primary_marker) {
-                Some(pos) => chunks[pos] = crate::css::render_rule(&expansions, &items),
-                None => {
-                    // Primary marker missing: fall back to the first surviving one.
-                    let mut emitted = false;
-                    for slot in &g.slots {
-                        let m = extend_marker(*slot);
-                        if let Some(p) = chunks.iter().position(|c| *c == m) {
-                            if emitted {
-                                chunks.remove(p);
-                            } else {
-                                chunks[p] = crate::css::render_rule(&expansions, &items);
-                                emitted = true;
-                            }
-                        }
-                    }
-                }
-            }
-            // Drop duplicate markers beyond the primary group emission.
-            for slot in &g.slots {
-                if *slot == g.primary {
-                    continue;
-                }
-                let m = extend_marker(*slot);
-                if let Some(p) = chunks.iter().position(|c| *c == m) {
-                    chunks.remove(p);
-                }
-            }
-        }
+            // A selector that expands to nothing (a token no rule extends, or
+            // empty declarations) contributes no CSS: every marker is dropped.
+            let rendered = expand_selector(selector, &by_target)
+                .filter(|expansions| !expansions.is_empty() && !g.decls.is_empty())
+                .map(|expansions| {
+                    let items: Vec<crate::css::Item> = g
+                        .decls
+                        .iter()
+                        .map(|(prop, value)| crate::css::Item::Decl {
+                            prop: prop.clone(),
+                            value: value.clone(),
+                        })
+                        .collect();
+                    crate::css::render_rule(&expansions, &items)
+                });
+            place_group(chunks, &g.slots, g.primary, rendered);
+        });
 
         // Defensive: strip any stray marker (e.g. a placeholder whose slot was
         // never reached) so no sentinel text can leak into the CSS output.
@@ -196,28 +152,71 @@ fn extend_marker(slot: usize) -> String {
     format!("\u{f0000}qrass_extend_slot {slot}\u{f0001}")
 }
 
+/// Prepend `concrete` unless already present: the goldens dedup by first
+/// occurrence and then read the list in reverse, so front insertion is exact.
+fn push_front_unique(list: &mut Vec<String>, concrete: &str) {
+    let present = list.iter().any(|s| s.as_str() == concrete);
+    if !present {
+        list.insert(0, concrete.to_string());
+    }
+}
+
+/// Cross-product substitution of `selector`'s placeholder tokens with the
+/// concrete selectors extending each; `None` when any token is unextended.
+fn expand_selector(
+    selector: &str,
+    by_target: &HashMap<String, Vec<String>>,
+) -> Option<Vec<String>> {
+    placeholder_tokens(selector)
+        .iter()
+        .try_fold(vec![selector.to_string()], |acc, tok| {
+            let concretes = by_target.get(tok)?;
+            Some(
+                acc.iter()
+                    .flat_map(|sel| {
+                        concretes
+                            .iter()
+                            .map(|c| sel.replace(tok.as_str(), c.as_str()))
+                    })
+                    .collect(),
+            )
+        })
+}
+
+/// Consume a group's slot markers: the rendering (when one exists) lands on the
+/// primary marker — or the first surviving one — and every marker is dropped.
+fn place_group(
+    chunks: &mut Vec<String>,
+    slots: &[usize],
+    primary: usize,
+    rendered: Option<String>,
+) {
+    let markers: Vec<String> = slots.iter().map(|slot| extend_marker(*slot)).collect();
+    let pos = chunks
+        .iter()
+        .position(|c| *c == extend_marker(primary))
+        .or_else(|| markers.iter().find_map(|m| chunks.iter().position(|c| c == m)));
+    rendered
+        .zip(pos)
+        .into_iter()
+        .for_each(|(rule, p)| chunks[p] = rule);
+    chunks.retain(|c| !markers.contains(c));
+}
+
 /// Extract the `%name` placeholder tokens from a selector (a `%` followed by
 /// identifier characters `[A-Za-z0-9_-]`). `%size:hover` yields `%size`;
 /// `%shared-box` yields `%shared-box`.
 fn placeholder_tokens(selector: &str) -> Vec<String> {
-    let chars: Vec<char> = selector.chars().collect();
-    let mut tokens = Vec::new();
-    let mut i = 0usize;
-    while i < chars.len() {
-        if chars[i] == '%' {
-            let mut j = i + 1;
-            while j < chars.len()
-                && (chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == '-')
-            {
-                j += 1;
-            }
-            if j > i + 1 {
-                tokens.push(chars[i..j].iter().collect());
-            }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-    tokens
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    selector
+        .split('%')
+        .skip(1)
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| is_ident(*c))
+                .collect::<String>()
+        })
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("%{name}"))
+        .collect()
 }
