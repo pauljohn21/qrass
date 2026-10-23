@@ -12,13 +12,13 @@
 - [x] 2.1 `css.rs`：`tidy_condition`/`is_bogus_combinator`/`split_top_commas`/`strip_loud_comments`/`normalize_selector` 及 render 族全链式化（`from_iter + scan_map + collect`，D2 终端规则），本 change 内未提交的命令式残留一并收编
 - [x] 2.2 `selector_unify_complex.rs` + `selector_unify.rs` 循环/条件链消除
 - [x] 2.3 `builtins/selector.rs`（18 处）与 `plain_css.rs`（11 处）清洗
-- [ ] 2.4 S1 其余 ≤5 循环小文件清零（`value_number.rs`、`css` 邻族等，按 style_gate 报表逐项勾销）
-- [ ] 2.5 S1 验收：style_gate 对 S1 文件命中归零；e2e → 全量 A/B 0 回归 → unit/clippy/wasm 绿
+- [x] 2.4 S1 其余 ≤5 循环小文件清零（`value_number.rs`、`css` 邻族等，按 style_gate 报表逐项勾销）
+- [x] 2.5 S1 验收：style_gate 对 S1 文件命中归零；e2e → 全量 A/B 0 回归 → unit/clippy/wasm 绿
 
 ## 3. M2 S2 eval 参数/内置层清洗
 
-- [ ] 3.1 `eval_bind.rs`/`eval_meta.rs` 残余循环（bind_ns_vars、config 视图、mixin-exists 族）链式化
-- [ ] 3.2 `builtins/color_*.rs` + `eval_color*.rs` 循环消除（校验矩阵已多为链式，清 for 收集残余）
+- [x] 3.1 `eval_bind.rs`/`eval_meta.rs` 残余循环（bind_ns_vars、config 视图、mixin-exists 族）链式化
+- [x] 3.2 `builtins/color_*.rs` + `eval_color*.rs` 循环消除（校验矩阵已多为链式，清 for 收集残余）
 - [ ] 3.3 `eval_control.rs`（12 处）清洗
 - [ ] 3.4 style_gate S2 文件命中归零 + 全套 0 回归验收
 

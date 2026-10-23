@@ -250,7 +250,7 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
         return super::color_transform::transform_c4(&base, c, mode);
     }
     super::color_edit_check::validate_legacy_channel_edits(c, mode)?;
-    let mut col = base.clone();
+    let col = base.clone();
     // Editing any channel invalidates the cached *keyword* identity (a named
     // color keeps `name: Some(..)`, which serialization would otherwise prefer
     // over the edited numeric channels) and routes the result through the
@@ -259,36 +259,42 @@ fn transform(c: &super::Call, mode: Mode) -> Or<SassValue> {
     // out-of-range ones fall back to the `hsl(…)` expression (`change/rgb`
     // `out_of_range`). Only bases actually edited here take the tag; HSL- and
     // alpha-edited colors keep their existing serialization untouched.
-    let mut rgb_edited = false;
     // RGB channels (independent of the HSL round-trip). The legacy channel
     // domain is 0..255 and is *not* clamped here: out-of-range edits survive in
     // the color and `legacy_to_css` re-emits them as the goldens' HSL
     // expression (`change/rgb` `out_of_range`), while a `none` edit makes the
     // whole color serialize as its Color-4 `rgb(…)` spelling (`red/none`).
     let mut missing: Option<usize> = None;
-    for (i, key) in ["red", "green", "blue"].iter().enumerate() {
-        let Some(v) = c.named.get(*key) else { continue };
-        match v {
-            SassValue::Number { value, .. } => {
-                rgb_edited = true;
-                let val = *value;
-                match i {
-                    0 => col.r = edit(base.r, val, mode, 0.0, 255.0),
-                    1 => col.g = edit(base.g, val, mode, 0.0, 255.0),
-                    _ => col.b = edit(base.b, val, mode, 0.0, 255.0),
+    let (mut col, rgb_edited) = ["red", "green", "blue"]
+        .iter()
+        .enumerate()
+        .try_fold((col, false), |(mut col, mut edited), (i, key)| {
+            Ok(match c.named.get(*key) {
+                None => (col, edited),
+                Some(SassValue::Number { value, .. }) => {
+                    edited = true;
+                    let val = *value;
+                    match i {
+                        0 => col.r = edit(base.r, val, mode, 0.0, 255.0),
+                        1 => col.g = edit(base.g, val, mode, 0.0, 255.0),
+                        _ => col.b = edit(base.b, val, mode, 0.0, 255.0),
+                    }
+                    (col, edited)
                 }
-            }
-            SassValue::Str { text, .. } if text == "none" && matches!(mode, Mode::Change) => {
-                missing = Some(i);
-            }
-            other => {
-                return Err(err(format!(
-                    "${key}: {} is not a number.",
-                    other.to_css()
-                )));
-            }
-        }
-    }
+                Some(SassValue::Str { text, .. })
+                    if text == "none" && matches!(mode, Mode::Change) =>
+                {
+                    missing = Some(i);
+                    (col, edited)
+                }
+                Some(other) => {
+                    return Err(err(format!(
+                        "${key}: {} is not a number.",
+                        other.to_css()
+                    )));
+                }
+            })
+        })?;
     if let Some(i) = missing {
         let show = |v: f64| crate::value_number::format_number(v);
         let ch = [

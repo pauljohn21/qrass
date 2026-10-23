@@ -217,15 +217,16 @@ impl EvalState {
                 // spelling, no `_`/`-` folding (`mixin_exists` `error/module/*`:
                 // an unbound or wrongly-spelled name raises dart's no-module
                 // error; a loaded built-in simply owns no mixins).
-                if let Some(m) = self.bound_modules.get(text) {
-                    m.mixins.iter().any(|(exported, _)| exported == &name)
-                } else if self.used_builtin_ns.iter().any(|u| u == text) {
-                    false
-                } else {
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        format!("There is no module with namespace \"{text}\"."),
-                    ));
+                let builtin = self.used_builtin_ns.iter().any(|u| u == text);
+                match (self.bound_modules.get(text), builtin) {
+                    (Some(m), _) => m.mixins.iter().any(|(exported, _)| exported == &name),
+                    (None, true) => false,
+                    (None, false) => {
+                        return Err(SassError::new(
+                            ErrorKind::Builtins,
+                            format!("There is no module with namespace \"{text}\"."),
+                        ));
+                    }
                 }
             }
             Some(SassValue::Module(m)) => match &m.module {
