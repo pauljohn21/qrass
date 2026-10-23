@@ -30,7 +30,7 @@ eval_bind.rs	0	0	2	0
 eval_callable.rs	0	0	0	24
 eval_callable_call.rs	0	0	0	3
 eval_color4.rs	0	0	3	17
-eval_color4_check.rs	0	0	0	16
+eval_color4_check.rs	0	0	0	3
 eval_color_comma.rs	0	0	0	3
 eval_color_space.rs	0	0	2	3
 eval_color_space_symbolic.rs	0	0	0	4

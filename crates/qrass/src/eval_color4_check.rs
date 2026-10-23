@@ -102,72 +102,84 @@ pub(crate) fn channel_value(v: &SassValue, ch: &crate::color4::Channel) -> Optio
 /// `$channels` argument; reject the malformed shapes the goldens name. `Ok(())`
 /// means "no structural complaint — continue the normal parse".
 pub(crate) fn guard_bare4(st: &mut EvalState, call: &FunctionCall) -> Ev<()> {
-    match call.args.len() {
-        0 => return Err(shape_err("Missing argument $channels.".into())),
-        n if n > 1 => {
-            return Err(shape_err(format!(
-                "Only 1 argument allowed, but {n} were passed."
-            )));
-        }
-        _ => {}
+    // arity gate first: 0 → missing, >1 → only-one-allowed; short-circuits before
+    // any argument is evaluated, exactly like the old guard `return`s.
+    (match call.args.len() {
+        0 => Some(shape_err("Missing argument $channels.".into())),
+        n if n > 1 => Some(shape_err(format!("Only 1 argument allowed, but {n} were passed."))),
+        _ => None,
+    })
+    .map_or(Ok(()), Err)?;
+    // the channel-shape gate: `?` propagation is R3's sanctioned early-failure
+    // carrier, so the whole body is one expression returning the match result.
+    match call.args.first() {
+        Some(Arg::Positional(e)) => bare4_channel(st, &call.name, e),
+        _ => Ok(()),
     }
-    if let Some(Arg::Positional(e)) = call.args.first() {
-        match e {
-            Expr::List { items, .. } if items.is_empty() => {
-                return Err(shape_err(
-                    "$channels: Color component list may not be empty.".into(),
-                ));
+}
+
+/// The single positional `$channels` shape check: each malformed form yields its
+/// golden error, well-formed shapes fall through to `Ok(())`.
+fn bare4_channel(st: &mut EvalState, name: &str, e: &Expr) -> Ev<()> {
+    match e {
+        Expr::List { items, .. } if items.is_empty() => {
+            Err(shape_err(
+                "$channels: Color component list may not be empty.".into(),
+            ))
+        }
+        Expr::List { bracketed: true, .. } => {
+            let v = st.eval_expr(e)?;
+            Err(shape_err(format!(
+                "$channels: Expected an unbracketed list, was {}",
+                v.to_css()
+            )))
+        }
+        Expr::List { sep: ListSep::Comma, .. } => {
+            let v = st.eval_expr(e)?;
+            Err(shape_err(format!(
+                "$channels: Expected a space- or slash-separated list, was ({})",
+                v.to_css()
+            )))
+        }
+        Expr::FunctionCall(inner) if inner.name == "slash" || inner.name == "list.slash" => {
+            let n = inner.args.len();
+            match n == 2 {
+                false => Err(shape_err(format!(
+                    "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                    if n == 1 { "was" } else { "were" }
+                ))),
+                true => Ok(()),
             }
-            Expr::List { bracketed: true, .. } => {
-                let v = st.eval_expr(e)?;
-                return Err(shape_err(format!(
-                    "$channels: Expected an unbracketed list, was {}",
-                    v.to_css()
-                )));
-            }
-            Expr::List { sep: ListSep::Comma, .. } => {
-                let v = st.eval_expr(e)?;
-                return Err(shape_err(format!(
-                    "$channels: Expected a space- or slash-separated list, was ({})",
-                    v.to_css()
-                )));
-            }
-            Expr::FunctionCall(inner) if inner.name == "slash" || inner.name == "list.slash" => {
-                let n = inner.args.len();
-                if n != 2 {
-                    return Err(shape_err(format!(
-                        "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                        if n == 1 { "was" } else { "were" }
-                    )));
-                }
-            }
-            Expr::List {
-                sep: ListSep::Space,
-                items,
-                ..
-            } if items.len() < 3 => {
-                let vals: Vec<SassValue> = items
-                    .iter()
-                    .map(|i| st.eval_expr(i))
-                    .collect::<Ev<_>>()?;
-                if vals.iter().all(|v| !is_symbolic(v)) {
+        }
+        Expr::List {
+            sep: ListSep::Space,
+            items,
+            ..
+        } if items.len() < 3 =>
+        {
+            let vals: Vec<SassValue> = items
+                .iter()
+                .map(|i| st.eval_expr(i))
+                .collect::<Ev<_>>()?;
+            match vals.iter().all(|v| !is_symbolic(v)) {
+                true => {
                     let shown = vals
                         .iter()
                         .map(|v| v.to_css())
                         .collect::<Vec<_>>()
                         .join(" ");
-                    let space = crate::color4::lookup(&call.name).expect("bare4 checked");
-                    return Err(shape_err(format!(
+                    let space = crate::color4::lookup(name).expect("bare4 checked");
+                    Err(shape_err(format!(
                         "$channels: The {} color space has 3 channels but ({shown}) has {}.",
                         space.name,
                         vals.len()
-                    )));
+                    )))
                 }
+                false => Ok(()),
             }
-            _ => {}
         }
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 /// The `color(…)` wrapper takes one `$description` argument and the goldens reject
@@ -176,51 +188,64 @@ pub(crate) fn guard_bare4(st: &mut EvalState, call: &FunctionCall) -> Ev<()> {
 /// call site; a plain-CSS `color(…)` filter is claimed by the passthrough
 /// layer before this code ever runs. `Ok(())` means "keep parsing".
 pub(crate) fn guard_wrapper(st: &mut EvalState, call: &FunctionCall) -> Ev<()> {
-    if call.args.is_empty() {
-        return Err(shape_err("Missing argument $description.".into()));
-    }
+    // empty args → missing $description (short-circuits before any eval)
+    (match call.args.is_empty() {
+        true => Some(shape_err("Missing argument $description.".into())),
+        false => None,
+    })
+    .map_or(Ok(()), Err)?;
     // A lone registered space name is a zero-channel description.
-    if let Some(Arg::Positional(Expr::Literal(crate::ast_expr::Literal::Ident(word)))) =
-        call.args.first()
-        && let Some(space) = crate::color4::lookup(word)
-    {
-        return Err(shape_err(format!(
-            "$description: The {} color space has 3 channels but {word} has 0.",
-            space.name
-        )));
-    }
-    if let Some(Arg::Positional(e)) = call.args.first() {
-        match e {
-            Expr::List { items, .. } if items.is_empty() => {
-                return Err(shape_err(
-                    "$description: Color component list may not be empty.".into(),
-                ));
-            }
-            Expr::List { bracketed: true, .. } => {
-                let v = st.eval_expr(e)?;
-                return Err(shape_err(format!(
-                    "$description: Expected an unbracketed list, was {}",
-                    v.to_css()
-                )));
-            }
-            Expr::List { sep: ListSep::Comma, .. } => {
-                let v = st.eval_expr(e)?;
-                return Err(shape_err(format!(
-                    "$description: Expected a space- or slash-separated list, was ({})",
-                    v.to_css()
-                )));
-            }
-            Expr::FunctionCall(inner) if inner.name == "slash" || inner.name == "list.slash" => {
-                let n = inner.args.len();
-                if n != 2 {
-                    return Err(shape_err(format!(
-                        "$description: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                        if n == 1 { "was" } else { "were" }
-                    )));
-                }
-            }
-            _ => {}
+    (match call.args.first() {
+        Some(Arg::Positional(Expr::Literal(crate::ast_expr::Literal::Ident(word)))) => {
+            crate::color4::lookup(word).map(|space| {
+                shape_err(format!(
+                    "$description: The {} color space has 3 channels but {word} has 0.",
+                    space.name
+                ))
+            })
         }
+        _ => None,
+    })
+    .map_or(Ok(()), Err)?;
+    match call.args.first() {
+        Some(Arg::Positional(e)) => wrapper_channel(st, e),
+        _ => Ok(()),
     }
-    Ok(())
+}
+
+/// The single positional `$description` list-shape check (empty / bracketed /
+/// comma / slash arity), mirroring the bare4 gate with the `$description:` prefix.
+fn wrapper_channel(st: &mut EvalState, e: &Expr) -> Ev<()> {
+    match e {
+        Expr::List { items, .. } if items.is_empty() => {
+            Err(shape_err(
+                "$description: Color component list may not be empty.".into(),
+            ))
+        }
+        Expr::List { bracketed: true, .. } => {
+            let v = st.eval_expr(e)?;
+            Err(shape_err(format!(
+                "$description: Expected an unbracketed list, was {}",
+                v.to_css()
+            )))
+        }
+        Expr::List { sep: ListSep::Comma, .. } => {
+            let v = st.eval_expr(e)?;
+            Err(shape_err(format!(
+                "$description: Expected a space- or slash-separated list, was ({})",
+                v.to_css()
+            )))
+        }
+        Expr::FunctionCall(inner) if inner.name == "slash" || inner.name == "list.slash" => {
+            let n = inner.args.len();
+            match n == 2 {
+                false => Err(shape_err(format!(
+                    "$description: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                    if n == 1 { "was" } else { "were" }
+                ))),
+                true => Ok(()),
+            }
+        }
+        _ => Ok(()),
+    }
 }
