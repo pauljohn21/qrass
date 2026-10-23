@@ -143,7 +143,7 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
             }
         }
         if mode == Mode::Scale && c4.comps[idx].is_none() {
-            // Scaling a MISSING channel is dart's unresolved-behavior guard
+            // Scaling a MISSING channel is the goldens' unresolved-behavior guard
             // (`scale/error/missing`); adjust floors at the channel minimum
             // (`change/unusual_numbers` `powerless_none_adjusts`, pinned in
             // tests/color4.rs) and change overwrites unconditionally.

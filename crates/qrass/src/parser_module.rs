@@ -26,7 +26,7 @@ pub(crate) fn strip_comments(rest: &[Spanned]) -> Vec<Spanned> {
 
 pub(crate) fn build_use(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt> {
     let rest = strip_comments(rest);
-    // dart validates the `@use` head at parse time, before any load:
+    // the goldens validate the `@use` head at parse time, before any load:
     // `directives/use/error/syntax/*` — a non-string URL (absent or bare,
     // `Expected string.`), an `as` without an identifier/`*`
     // (`Expected identifier.`), and a derived default namespace that is not
@@ -110,7 +110,7 @@ pub(crate) fn reject_builtin_config(
 }
 
 /// `@use`/`@forward` must sit at the file's top level *and* precede every
-/// non-module rule. dart raises both violations at parse time
+/// non-module rule. the goldens raise both violations at parse time
 /// (`directives/use/error/syntax/within.hrx` + `after.hrx`, and the placement
 /// sections of `directives/forward/error/syntax.hrx`). Comments stay neutral.
 pub(crate) fn check_module_placement(program: &[Stmt]) -> Or<()> {
@@ -131,7 +131,7 @@ pub(crate) fn check_module_placement(program: &[Stmt]) -> Or<()> {
                 ));
             }
             Stmt::Use(_) | Stmt::Forward(_) | Stmt::Comment(_) => {}
-            // A root-level variable declaration is not a *rule* for dart: it
+            // A root-level variable declaration is not a *rule* for the goldens: it
             // legally precedes `@use`/`@forward` and may even read a `with`'
             // configured value (`use|forward/with/from_variable` goldens).
             Stmt::Variable(_) => {}
@@ -297,7 +297,7 @@ pub(crate) fn with_config(p: &Parser, rest: &[Spanned], forward: bool) -> Or<Vec
             ));
         };
         if name.is_empty() {
-            // `$` with no name: dart reads the variable declaration as an
+            // `$` with no name: the goldens read the variable declaration as an
             // identifier expectation (`with/empty_variable_name` golden).
             return Err(p.err_marked(
                 "Expected identifier.",

@@ -101,7 +101,7 @@ pub fn canonicalize(url: &str, base_dir: &Path) -> Result<Resolved, SassError> {
 /// The first existing candidate wins; when nothing resolves the error lists the
 /// importer-relative candidates that were tried.
 /// The importer-relative search and its load-path retries share this order:
-/// the first root with a hit decides; nothing found raises dart's
+/// the first root with a hit decides; nothing found raises the goldens'
 /// `Can't find stylesheet to import.` (`use/error/load` `missing`), and two
 /// hits in one root — partial vs non-partial, `_index` vs `index` — are
 /// ambiguous: `It's not clear which file to import. Found:` lists the

@@ -32,7 +32,7 @@ pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt
 }
 
 
-/// dart parses `@forward` against a strict grammar and reports malformed
+/// the goldens parse `@forward` against a strict grammar and reports malformed
 /// spellings at the statement (before the URL is ever loaded). The
 /// `directives/forward/error/syntax.hrx` goldens pin each message:
 /// * the URL must be a quoted string — `Expected string.`;
@@ -40,7 +40,7 @@ pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt
 ///   identifier.`) and must run to a `*` (`expected "*".`);
 /// * `show`/`hide` take a non-empty list of variable/mixin/function names
 ///   (`Expected variable, mixin, or function name`), and a second config keyword
-///   where the statement should end is dart's `expected ";".`.
+///   where the statement should end is the goldens' `expected ";".`.
 ///
 /// Only clearly-invalid spellings are claimed; anything else keeps today's
 /// reconstruct-and-load behavior.
@@ -96,7 +96,7 @@ fn validate_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<()> {
                     if let Token::Ident(name) = &s.token {
                         match name.as_str() {
                             // A second config keyword (or `as`) where a member
-                            // name belongs: dart wanted the statement to end.
+                            // name belongs: the goldens wanted the statement to end.
                             "show" | "hide" | "as" => {
                                 return Err(p.err("expected \";\".", s.span.start));
                             }

@@ -204,7 +204,7 @@ impl EvalState {
         let entry = inc.span;
         tracing::Span::current().record("url", url.as_str());
 
-        // `$with:` — named first, then the second positional (dart's order).
+        // `$with:` — named first, then the second positional (the goldens' order).
         let with_v = raw
             .named()
             .get("with")
@@ -284,7 +284,7 @@ impl EvalState {
         let mut view: Vec<(String, usize)> = Vec::new();
         match &with_v {
             None | Some(SassValue::Null) => {}
-            // `()` parses as the empty comma-list but dart's `$with: ()` is
+            // `()` parses as the empty comma-list but the goldens' `$with: ()` is
             // the EMPTY MAP (`load_css/with/empty` goldens) — same value-layer
             // dualism `map.coerce_map` already accepts.
             Some(SassValue::List { items, .. }) if items.is_empty() => {}

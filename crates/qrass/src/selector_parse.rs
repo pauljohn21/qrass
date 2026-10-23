@@ -20,7 +20,7 @@ use crate::selector_ast::{
 };
 
 /// Why a selector failed to parse. The builtins turn these into the exact
-/// dart-sass wording (`expected more input.`, `Parent selectors aren't allowed
+/// the goldens' wording (`expected more input.`, `Parent selectors aren't allowed
 /// here.`); the parser only classifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelParseError {

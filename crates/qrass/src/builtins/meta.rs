@@ -30,7 +30,7 @@ fn type_of(c: &super::Call) -> Or<SassValue> {
 /// CSS form, including its own quotes, exactly like the goldens). Source form
 /// parenthesizes nested lists so their structure round-trips (`to_source`), unlike
 /// the flat CSS serialization. An unbracketed empty list carries no separator
-/// text, so dart's source form is the empty paren `()` — `to_source` would
+/// text, so the goldens' source form is the empty paren `()` — `to_source` would
 /// otherwise collapse a top-level one to "".
 fn inspect(c: &super::Call) -> Or<SassValue> {
     let text = match &c.positional[0] {

@@ -6,7 +6,7 @@
 //! goldens: shape errors (empty / bracketed / comma / slash-count) before any
 //! evaluation, then per-slot classification — symbolic (`var()`/`calc()`, a
 //! relative `from` anchor) renders the call verbatim with the alpha slash kept
-//! literal, concrete non-numbers raise dart `\`$channels:\`` type errors, wrong
+//! literal, concrete non-numbers raise the goldens `\`$channels:\`` type errors, wrong
 //! counts raise the space-count error, and a clean channel list dispatches to
 //! the legacy positional builtins.
 
@@ -24,7 +24,7 @@ enum Slot {
     /// `from` anchor) — the whole call stays verbatim CSS
     Verbatim,
     /// a concrete non-channel value (quoted string, bare word, color, …) —
-    /// dart raises a `$channels:` type error
+    /// the goldens raise a `$channels:` type error
     Concrete,
 }
 
@@ -75,7 +75,7 @@ impl EvalState {
     /// Handle the modern CSS `rgb(r g b / a)`, `hsl(…)` and `hwb(…)`
     /// space-separated single-argument forms — bare or under the `color`
     /// namespace (round-28 rgb mechanism, generalized in rounds 64/65 to the
-    /// dart `$channels` one_arg error family). Returns `Ok(None)` for every
+    /// the goldens `$channels` one_arg error family). Returns `Ok(None)` for every
     /// other shape so the caller falls through to ordinary builtin dispatch /
     /// passthrough unchanged.
     pub(super) fn eval_space_color(&mut self, call: &FunctionCall) -> Ev<Option<SassValue>> {
@@ -113,7 +113,7 @@ impl EvalState {
             (false, false) => "hsl",
         };
         // Normalize the argument into channel ASTs plus the optional alpha, and
-        // raise the shape errors dart raises before any channel is inspected.
+        // raise the shape errors the goldens raise before any channel is inspected.
         let channels: Vec<&Expr>;
         let alpha: Option<&Expr>;
         let verbatim_items: Option<&[Expr]>;
@@ -232,7 +232,7 @@ impl EvalState {
                 }
             }
             // A lone value: `rgb(1)` / `color.hwb(0)` are one-channel lists in
-            // dart's message (`but 1 has 1`, no parentheses); anything else
+            // the goldens' message (`but 1 has 1`, no parentheses); anything else
             // (variables, symbolic constructs) keeps today's routing.
             other => match slot_kind(other) {
                 Slot::Number => {
@@ -387,7 +387,7 @@ impl EvalState {
         positional.extend(alpha.map(|a| self.eval_expr(a).map(pct)).transpose()?);
         let named = std::collections::HashMap::new();
         // A base name with no global builtin (e.g. bare `hwb`, which only
-        // exists namespaced in dart) falls through to the Color4 literal /
+        // exists known-spelling) falls through to the Color4 literal /
         // passthrough layers rather than erroring.
         let Some(result) =
             crate::builtins::call(call.namespace.as_deref(), &call.name, &positional, &named)

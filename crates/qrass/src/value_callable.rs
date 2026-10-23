@@ -3,7 +3,7 @@
 //! `crate::value::{FnRef, FnKind, MixRef, MixKind}` keep resolving. The
 //! serialization and equality semantics are pinned by the
 //! `core_functions/meta/get_function/*`, `inspect/*` and `values/mixins.hrx`
-//! goldens — never by dart internals.
+//! goldens — sole evidence source: the local hrx goldens.
 
 /// Payload of a first-class function value. `module` anchors the defining
 /// module for the `meta.call` closure switch; `kind` distinguishes the user
@@ -21,7 +21,7 @@ pub struct FnRef {
 /// What a function value points at.
 #[derive(Clone, Debug)]
 pub enum FnKind {
-    /// A user `@function`; `Rc` identity backs dart's reference equality, and
+    /// A user `@function`; `Rc` identity backs the goldens' reference equality, and
     /// the captured `env`/`owner` are the definition-time closure snapshot
     /// `meta.call` re-enters (mirroring the by-name call path). Locked at
     /// `get-function` time — the `same_module/redefined` golden.

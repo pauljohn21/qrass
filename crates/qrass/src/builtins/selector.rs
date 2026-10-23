@@ -241,7 +241,7 @@ fn parse(c: &super::Call) -> Or<SassValue> {
 /// argument with no `&` must parse, surfacing `expected more input.`); arguments
 /// that use `&` skip the parse step so the combine below keeps working, since the
 /// shared selector parser rejects a bare parent selector. A call with no argument
-/// raises dart's own `$selectors:`-prefixed message (min lowered to 0).
+/// raises the goldens' own `$selectors:`-prefixed message (min lowered to 0).
 fn nest(c: &super::Call) -> Or<SassValue> {
     if c.positional.is_empty() {
         return Err(SassError::new(
@@ -367,7 +367,7 @@ fn append_lists(parent: SelectorList, child: SelectorList) -> Or<SelectorList> {
     Ok(SelectorList::new(out))
 }
 
-/// Append one complex onto another at the compound junction, enforcing dart's
+/// Append one complex onto another at the compound junction, enforcing the goldens'
 /// validity checks: the parent may not end in a dangling combinator, and the
 /// child's first compound — being spliced into the parent — may not open with a
 /// combinator chain, nor (into a non-empty compound) with a universal or a

@@ -95,7 +95,7 @@ impl PartialEq for SassValue {
             ) => a == b && ua == ub,
             (Self::Str { text: a, .. }, Self::Str { text: b, .. }) => a == b,
             (Self::Color(a), Self::Color(b)) => a == b,
-            // callable values compare the way dart's goldens spell it:
+            // callable values compare the way the goldens' goldens spell it:
             // builtins by (module, name) — two `get-function(lighten)` reads
             // are `==` (`equality/built_in/same`) while lighten vs darken is
             // not — and user definitions by reference identity, so a later
@@ -234,7 +234,7 @@ impl SassValue {
         self.render(None, false)
     }
 
-    /// Serialize the way `meta.inspect` (dart's `toSource`) does: identical to
+    /// Serialize the way `meta.inspect` (the goldens' `toSource`) does: identical to
     /// [`SassValue::to_css`] except that a nested unbracketed list is wrapped in
     /// parens whenever it would otherwise merge into its parent, so the value's
     /// list structure round-trips (`(1 2) (3 4)` instead of the flat CSS `1 2 3 4`).

@@ -1,4 +1,4 @@
-//! Dart-style source-snippet rendering for errors, matching the annotation
+//! golden-style source-snippet rendering for errors, matching the annotation
 //! blocks of the `expressions/if/error/*.hrx` goldens: a `,` corner, the
 //! numbered source line, one marker run per annotation with an optional
 //! trailing label, a `'` foot, and the module-load stack beneath it

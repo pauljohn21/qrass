@@ -38,7 +38,7 @@ pub(crate) fn build_owner(p: &Parser, run: Vec<Spanned>) -> Or<Owner> {
                     })
                 }
                 "supports" => {
-                    // A lone `$` never parses inside a supports condition — dart
+                    // A lone `$` never parses inside a supports condition — the goldens
                     // keeps demanding the declaration colon there
                     // (`css/supports/error` `syntax/anything/colon`, `expected ":".`).
                     if let Some(bad) = rest

@@ -33,7 +33,7 @@ impl EvalState {
             return Ok(None);
         }
         // The four bare perceptual spaces and the `color()` wrapper take exactly
-        // one argument each and dart rejects malformed shapes by *structure* —
+        // one argument each and the goldens reject malformed shapes by *structure* —
         // the sibling `eval_color4_check` guards fire only on shapes that can
         // never be a valid literal or a meaningful passthrough, evaluating
         // solely inside an already-rejected branch to render the message
@@ -106,7 +106,7 @@ impl EvalState {
             match self.eval_expr(first)? {
                 SassValue::Str { text, quoted: false } => match crate::color4::lookup(&text) {
                     Some(s) => s,
-                    // A concrete unknown word is dart's error, not a CSS
+                    // A concrete unknown word is the goldens' error, not a CSS
                     // passthrough (`Unknown color space "foo".`); symbolic
                     // constructs keep falling through.
                     None if wstrict && !text.contains('(') => {
@@ -116,7 +116,7 @@ impl EvalState {
                     }
                     None => return Ok(None),
                 },
-                // A quoted space slot is the relative-syntax spelling dart
+                // A quoted space slot is the relative-syntax spelling the goldens
                 // rejects verbatim; a number is simply not a string.
                 SassValue::Str { .. } if wstrict => {
                     let shown = self.eval_expr(first)?.to_css();
@@ -166,7 +166,7 @@ impl EvalState {
         if comps.len() != 3 {
             // The four bare names and the wrapper reach here only with a
             // wrong-length space list (shorter lists were rejected by the
-            // structural guards above); dart reports the mismatch as a
+            // structural guards above); the goldens report the mismatch as a
             // channel-count error over the whole list — the wrapper's copy
             // shows the space name as the first element.
             if (bare4 || wstrict) && !comps.iter().any(is_symbolic) {
@@ -195,7 +195,7 @@ impl EvalState {
             return Ok(None);
         }
         let alpha_expr = alpha_expr.or(extra_alpha);
-        // dart names the failing argument differently per spelling: the wrapper
+        // the goldens name the failing argument differently per spelling: the wrapper
         // reports its `$description` argument, bare forms the `$channels`.
         let arg_name = if wrapper { "description" } else { "channels" };
         // channel slots accumulate in an owned fold; a `None` latch marks the
@@ -230,7 +230,7 @@ impl EvalState {
                             }
                             _ => None,
                         },
-                        // a concrete-but-wrong channel raises dart's argument
+                        // a concrete-but-wrong channel raises the goldens' argument
                         // error (per-channel unit vs type)
                         (None, false) => {
                             return Err(SassError::new(
@@ -270,7 +270,7 @@ impl EvalState {
         let alpha = match alpha_v {
             None => None,
             Some(SassValue::Str { text, quoted: false }) if text == "none" => None,
-            // dart validates the `$alpha` slot: unitless or `%` only; a bare
+            // the goldens validate the `$alpha` slot: unitless or `%` only; a bare
             // string reports the `$channels:`-prefixed type error (golden
             // quirk), a symbolic construct keeps the passthrough.
             Some(v @ SassValue::Number { .. }) => match &v {

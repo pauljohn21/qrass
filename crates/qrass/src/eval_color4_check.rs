@@ -5,7 +5,7 @@
 //! The rule these encode (rounds 60/61): a guard may only fire on an argument
 //! shape that can *never* be a valid literal or a meaningful plain-CSS
 //! passthrough, and an argument is evaluated solely inside an already-rejected
-//! branch to render dart's message. The hot path — well-formed literals and
+//! branch to render the goldens' message. The hot path — well-formed literals and
 //! the symbolic (`var()`) passthrough family — is never touched (the W4b
 //! lesson: a pre-guard that evaluated every list regressed 273 goldens).
 
@@ -31,7 +31,7 @@ pub(crate) fn is_symbolic(v: &SassValue) -> bool {
     }
 }
 
-/// A dart-shaped argument error for a modern color literal (arity, list shape,
+/// A golden-shaped argument error for a modern color literal (arity, list shape,
 /// slash element count or channel count).
 pub(crate) fn shape_err(msg: String) -> SassError {
     SassError::new(ErrorKind::Builtins, msg)
@@ -170,7 +170,7 @@ pub(crate) fn guard_bare4(st: &mut EvalState, call: &FunctionCall) -> Ev<()> {
     Ok(())
 }
 
-/// The `color(…)` wrapper takes one `$description` argument and dart rejects
+/// The `color(…)` wrapper takes one `$description` argument and the goldens reject
 /// malformed shapes the same way, with the `$description:` prefix (round-60
 /// color/error goldens). Relative syntax (`color(from …)`) is exempt at the
 /// call site; a plain-CSS `color(…)` filter is claimed by the passthrough

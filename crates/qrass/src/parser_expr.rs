@@ -293,7 +293,7 @@ impl<'a> E<'a> {
 
     fn ident_value(&mut self, name: String, start: BytePos) -> Ex<Expr> {
         // A leading `.` glued onto the next word (the selector glue) still
-        // opens a *number* for dart's value parser: `a: .member()` errors with
+        // opens a *number* for the goldens' value parser: `a: .member()` errors with
         // `Expected digit.` (member.hrx `function/no_namespace`).
         if let Some(rest) = name.strip_prefix('.')
             && !rest.starts_with('.')
@@ -344,7 +344,7 @@ impl<'a> E<'a> {
                 .unwrap_or(self.last.end);
             let fname = match self.bump().map(|s| s.token) {
                 Some(Token::Ident(f)) => f,
-                // `namespace.()`: dart keeps asking for the identifier.
+                // `namespace.()`: the goldens keep asking for the identifier.
                 _ => return Err(self.p.err("Expected identifier.", fstart)),
             };
             return self.namespaced(name, start, fname);

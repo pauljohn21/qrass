@@ -215,7 +215,7 @@ impl EvalState {
             Some(SassValue::Str { text, .. }) => {
                 // The name must match a namespace actually in scope — exact
                 // spelling, no `_`/`-` folding (`mixin_exists` `error/module/*`:
-                // an unbound or wrongly-spelled name raises dart's no-module
+                // an unbound or wrongly-spelled name raises the goldens' no-module
                 // error; a loaded built-in simply owns no mixins).
                 let builtin = self.used_builtin_ns.iter().any(|u| u == text);
                 match (self.bound_modules.get(text), builtin) {

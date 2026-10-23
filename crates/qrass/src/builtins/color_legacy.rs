@@ -88,7 +88,7 @@ fn as_legacy_rgb(col: Color) -> SassValue {
 /// space, per the `color/complement.hrx` goldens: a non-string `$space` is
 /// `$space: … is not a string.`, a non-polar space is `Color space X doesn't
 /// have a hue channel.`, and a *missing hue* in the working space raises
-/// dart's missing-channels guard spelling the color in that space. A modern
+/// the goldens' missing-channels guard spelling the color in that space. A modern
 /// color rotated in its own space re-emits that space verbatim (a missing
 /// lightness etc. survives); legacy colors keep the historical HSL rotation.
 /// Cross-space rotations needing none-propagation conversions stay on the
@@ -192,7 +192,7 @@ fn grayscale(c: &super::Call) -> Or<SassValue> {
 fn invert(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
     if let Some(c4) = &col.c4 {
-        // dart's guard (invert/error goldens): channel-modifying operations
+        // the goldens' guard (invert/error goldens): channel-modifying operations
         // reject a color with a missing channel — in the modified space, so a
         // same-or-unspecified `$space` names the color's own channel.
         if let Some((i, _)) = c4.comps.iter().enumerate().find(|(_, v)| v.is_none()) {
@@ -244,7 +244,7 @@ fn not_legacy(fn_name: &str) -> SassError {
     ))
 }
 
-/// Render the raw amount for dart's bound message: `-0.001`, `100.001`, `50%`.
+/// Render the raw amount for the goldens' bound message: `-0.001`, `100.001`, `50%`.
 fn show_amount(value: f64, unit: Option<&str>) -> String {
     let num = crate::value::format_number(value);
     match unit {
@@ -357,7 +357,7 @@ fn saturate(c: &super::Call) -> Or<SassValue> {
         });
     }
     if c.positional.len() == 1 {
-        // a lone *color* is dart's `$amount: red is not a number.`
+        // a lone *color* is the goldens' `$amount: red is not a number.`
         let col = color_at(c, 0)?;
         return Err(err(format!(
             "$amount: {} is not a number.",

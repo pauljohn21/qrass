@@ -1,7 +1,7 @@
 //! Trigonometric, angle, and unit machinery for `math.*` builtins (task 8.2, round
 //! 62 budget split out of `builtins/math.rs`): the angle family
 //! (`sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`atan2`), `hypot`, `clamp`, `random`,
-//! and the dart-shaped `$name:` type/unit-compatibility error helpers (`num_as`,
+//! and the golden-shaped `$name:` type/unit-compatibility error helpers (`num_as`,
 //! `unit_clash`, `unitless_num`, `angle_rad`) the main file shares.
 
 use super::Or;
@@ -11,7 +11,7 @@ use crate::value::{SassValue, convert_number};
 
 /// Resolve an angle argument to radians: unitless means radians; `deg`/`grad`/
 /// `rad`/`turn` are converted through the degree base. A non-angle unit reads
-/// dart's `$number: Expected <value> to have an angle unit (deg, grad, rad, turn).`
+/// the goldens' `$number: Expected <value> to have an angle unit (deg, grad, rad, turn).`
 pub(super) fn angle_rad(c: &super::Call, i: usize) -> Or<f64> {
     let (v, u) = num_as(c, i, "number")?;
     match u.as_deref() {
@@ -75,7 +75,7 @@ pub(super) fn atan(c: &super::Call) -> Or<SassValue> {
     Ok(from_rad(unitless_num(c, 0, "number")?.atan()))
 }
 pub(super) fn atan2(c: &super::Call) -> Or<SassValue> {
-    // `atan2($y, $x)`: both must be numbers of *compatible* units — dart reduces
+    // `atan2($y, $x)`: both must be numbers of *compatible* units — the goldens reduce
     // `$x` into `$y`'s unit before taking the ratio (so `atan2(1cm, -10mm)` works),
     // and the result is a unitless angle regardless of the operands' unit. `$y` is
     // the reference: an incompatible `$x` names `$x: <val> and $y: <minval>`.
@@ -174,7 +174,7 @@ pub(super) fn hypot(c: &super::Call) -> Or<SassValue> {
 /// number is capped at `$max` (keeping the lower operand's unit) then raised to
 /// `$min`, so a value sitting on a boundary serializes in that bound's unit.
 pub(super) fn clamp(c: &super::Call) -> Or<SassValue> {
-    // Validation first, in dart's order: $min, then $number, then $max each must
+    // Validation first, in the goldens' order: $min, then $number, then $max each must
     // be a number (a non-number names the argument), and only then are the unit
     // compatibilities checked — $number vs $min before $max vs $min.
     let (mn, umn) = num_as(c, 0, "min")?;
@@ -229,7 +229,7 @@ pub(super) fn num_as(c: &super::Call, i: usize, name: &str) -> Or<(f64, Option<S
 
 /// The golden's incompatible-units message: `$<operand>: <value> and $<base>: <base>
 /// have incompatible units`, with a `(one has units and the other doesn't)` suffix
-/// when exactly one side is unitless. `base` is the operand dart reduces to — `$min`
+/// when exactly one side is unitless. `base` is the operand the goldens reduce to — `$min`
 /// for `clamp`, `$y` for `atan2`.
 pub(super) fn unit_clash(
     operand: &str,
@@ -254,11 +254,11 @@ pub(super) fn unit_clash(
     )
 }
 
-/// `math.random($limit: null)`. dart's *seeded* PRNG is not reproduced here (the
+/// `math.random($limit: null)`. the goldens' *seeded* PRNG is not reproduced here (the
 /// exact random-value goldens are out of scope), but the `$limit` validation is
 /// golden-accurate and runs before any value is produced: a non-number, a
 /// non-integer (beyond float tolerance), or a limit that is not greater than zero
-/// raise dart's messages. No argument / null yields a unitless fraction; a
+/// raise the goldens' messages. No argument / null yields a unitless fraction; a
 /// positive integer limit yields an integer in `[1, $limit]` (so `random(1)`
 /// deterministically returns `1`).
 pub(super) fn random(c: &super::Call) -> Or<SassValue> {

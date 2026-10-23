@@ -27,9 +27,9 @@ pub(crate) enum Item {
 /// Format one qualified rule (`selectors { items }`). Callers are responsible for
 /// dropping empty rules; a rule whose only content is comments still renders.
 pub(crate) fn render_rule(selectors: &[String], items: &[Item]) -> String {
-    // dart's bogus-combinators tolerance (`css/selector/combinator/*` ~27
+    // the goldens' bogus-combinators tolerance (`css/selector/combinator/*` ~27
     // sections): a selector leading with a combinator (`+ a`, `:is(> a)`) or
-    // carrying adjacent combinators (`a > + b`) is INVALID — dart drops the
+    // carrying adjacent combinators (`a > + b`) is INVALID — the goldens drop the
     // selector (empty output when none survive) and warns. The shared
     // lightningcss canonicalization lets an empty rule fall through harmlessly.
     let selectors: Vec<String> = selectors
@@ -303,7 +303,7 @@ pub(crate) fn is_bogus_combinator(seg: &str) -> bool {
         || (scan.prev_comb && scan.last.is_some_and(is_comb))
 }
 
-/// Re-serialize an `@supports`/`@media` query head like dart does: a
+/// Re-serialize an `@supports`/`@media` query head like the goldens doe: a
 /// *declaration-shaped* group (top-level `:` before any paren, no nesting)
 /// drops loud comments, trims its edges and never leaves a space before the
 /// `:`; a function call (`a(/**/ b)`, preceded by an identifier or `)`/`]`)

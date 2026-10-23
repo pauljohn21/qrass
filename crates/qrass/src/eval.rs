@@ -184,7 +184,7 @@ pub struct EvalState {
     /// (`meta/mixin_exists` `through_forward` families).
     pub(crate) wildcard_mixins: Vec<(String, String)>,
     /// Names exported from **two different origin files** through `as *`
-    /// modules — a bare reference fails with dart's `This {variable,
+    /// modules — a bare reference fails with the goldens' `This {variable,
     /// function,mixin} is available from multiple global modules.`
     /// (`directives/use/error/member/*`). Origin = Module::member_origins
     /// provenance, so one upstream forwarded twice is NOT a conflict.
@@ -194,7 +194,7 @@ pub struct EvalState {
     pub(crate) wildcard_fns: Vec<(String, String)>,
     pub(crate) wildcard_mixin_src: Vec<(String, String)>,
     /// Live module-variable cells keyed by `(origin module, var name)`
-    /// (OpenSpec M4 slice 3). dart module vars are shared-mutable: a
+    /// (OpenSpec M4 slice 3). the goldens module vars are shared-mutable: a
     /// namespaced write `ns.$a: value` updates the **defining module's**
     /// cell, visible to every read path (other importers, the module's own
     /// functions). Reads consult this store before any snapshot copy.

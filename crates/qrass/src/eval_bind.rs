@@ -19,7 +19,7 @@ impl EvalState {
     pub(super) fn bind_alias(&mut self, u: &Use, module: &std::rc::Rc<Module>, url: &str) {
         // Track loaded built-in namespaces by their *exact* bound spelling —
         // `meta.mixin-exists("c", "color")` answers false only when `sass:color`
-        // was actually `@use`d; an unbound name raises dart's no-module error
+        // was actually `@use`d; an unbound name raises the goldens' no-module error
         // (`meta/mixin_exists` `error/module/built_in_but_not_loaded`).
         if url.starts_with("sass:") {
             let bound = match &u.alias {
@@ -144,7 +144,7 @@ impl EvalState {
     /// Publish a module's vars under `ns` AND register the live-cell
     /// bookkeeping (OpenSpec M4 slice 3): `(ns, var) -> origin module` plus
     /// the initial `member_store` value, so `ns.$var: value` writes reach the
-    /// defining module and every read path sees the update (dart module vars
+    /// defining module and every read path sees the update (the goldens module vars
     /// are shared-mutable, not snapshot copies).
     fn bind_ns_vars(&mut self, ns: &str, module: &std::rc::Rc<Module>) {
         self.env.bind_namespace(ns, module.vars.clone());
@@ -160,7 +160,7 @@ impl EvalState {
             // `-`/`_` spellings of one member name are interchangeable for
             // reads and writes (`as` `different_separator`): route both
             // single-swap spellings through the origin map only — the ns view
-            // itself keeps dart's clean export set (`meta.module-variables`).
+            // itself keeps the goldens' clean export set (`meta.module-variables`).
             [name.replace('_', "-"), name.replace('-', "_")]
                 .into_iter()
                 .filter(|alt| alt != name)
@@ -211,7 +211,7 @@ pub(super) fn filter_forwarded(
     hidden: &[String],
     prefix: &str,
 ) -> Vec<(String, SassValue)> {
-    // dart applies `as prefix-*` FIRST and the `show`/`hide` lists name the
+    // the goldens applie `as prefix-*` FIRST and the `show`/`hide` lists name the
     // RENAMED members (`forward/member/as` `show/*`: `as b-* show b-a`
     // keeps; `as b-* hide a` hides nothing — `a` no longer names anything);
     // `-` and `_` are interchangeable in Sass member names (`d_* prefix +

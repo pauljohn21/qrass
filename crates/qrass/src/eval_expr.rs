@@ -276,7 +276,7 @@ impl EvalState {
 
     /// Render a whole passthrough call `name(arg, …)` from its argument AST.
     pub(crate) fn render_css_call(&mut self, call: &FunctionCall) -> Ev<String> {
-        // A `url($var)` argument makes dart parse the call as an *ordinary* Sass
+        // A `url($var)` argument makes the goldens parse the call as an *ordinary* Sass
         // function (resolving the variable and keeping the name verbatim, e.g.
         // `-E-URL($a)` → `-E-URL(b)`) rather than a raw url. A literal or
         // `#{…}`-interpolated argument keeps the special `url` form.
@@ -322,11 +322,11 @@ impl EvalState {
 
 // ─── Literals & interpolation helpers ────────────────────────────────────────
 
-/// dart lowercases the emitted name of every *special* plain-CSS function
+/// the goldens lowercase the emitted name of every *special* plain-CSS function
 /// (`calc`/`url`/`element`/`expression`/`progid:…`, optionally vendor-prefixed
 /// and in any case) and, uniquely for `url`, also strips the vendor prefix
 /// (`-C-URL(…)` → `url(…)`). `url` is skipped (name kept verbatim) when
-/// `url_is_call` marks a variable argument, which makes dart treat it as an
+/// `url_is_call` marks a variable argument, which makes the goldens treat it as an
 /// ordinary function. Any other passthrough call name is left verbatim, so
 /// non-special unknown functions keep their source spelling.
 fn normalize_special_name(name: &str, url_is_call: bool) -> String {

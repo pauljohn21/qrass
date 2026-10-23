@@ -38,7 +38,7 @@ pub(crate) fn register(r: &mut Registry) {
 }
 
 /// `string.unique-id()`: a fresh CSS identifier, unique per call within the
-/// process. dart draws a random one; a monotonic base-36 counter with a `u`
+/// process. the goldens draw a random one; a monotonic base-36 counter with a `u`
 /// prefix guarantees the two properties the goldens actually check — every id
 /// distinct, and every id a valid identifier (so `.#{id}` parses as a class).
 fn unique_id(_c: &super::Call) -> Or<SassValue> {
@@ -82,7 +82,7 @@ fn text(c: &super::Call, i: usize) -> String {
 /// `$separator` splits on Unicode codepoints; a `$limit` caps the number of
 /// splits (so the remainder stays whole). An empty `$string` yields the empty
 /// list, and a separator that never matches yields a one-element list holding
-/// the whole string. Arguments are strictly typed to the goldens' dart-shaped
+/// the whole string. Arguments are strictly typed to the goldens' golden-shaped
 /// errors (`$string: … is not a string.`, `$limit: … is not an int.`, etc.).
 fn split(c: &super::Call) -> Or<SassValue> {
     let (hay, quoted) = match c.positional.first() {
@@ -134,7 +134,7 @@ fn split(c: &super::Call) -> Or<SassValue> {
     })
 }
 
-/// A dart-shaped `${name}: {value} is not {ty}.` argument-type error.
+/// A golden-shaped `${name}: {value} is not {ty}.` argument-type error.
 fn not_a(name: &str, value: &SassValue, ty: &str) -> SassError {
     SassError::new(
         ErrorKind::Builtins,
@@ -184,7 +184,7 @@ fn length(c: &super::Call) -> Or<SassValue> {
 /// `start` (notably the default `end-at` of -1 against an empty string, or an
 /// explicit `end-at: 0`) yields the empty string. The result inherits `$string`'s
 /// quote style (a quoted input slices to a quoted output). Arguments are strictly
-/// typed to the goldens' dart-shaped errors.
+/// typed to the goldens' golden-shaped errors.
 fn slice(c: &super::Call) -> Or<SassValue> {
     let (src, quoted) = match c.positional.first() {
         Some(SassValue::Str { text, quoted }) => (text.clone(), *quoted),
@@ -224,7 +224,7 @@ fn slice(c: &super::Call) -> Or<SassValue> {
 }
 
 /// Read arg `i` as a required unitless integer index, producing the goldens'
-/// dart-shaped errors for a non-number, a value carrying units, or a decimal.
+/// golden-shaped errors for a non-number, a value carrying units, or a decimal.
 fn coord(c: &super::Call, i: usize, name: &str) -> Or<i64> {
     match &c.positional[i] {
         SassValue::Number { value, unit } => {
@@ -258,7 +258,7 @@ fn index(c: &super::Call) -> Or<SassValue> {
     })
 }
 
-/// `str-insert($string, $insert, $index)`: 1-based Dart-style insertion point.
+/// `str-insert($string, $insert, $index)`: 1-based golden-style insertion point.
 /// Sass indexes by Unicode codepoint (a `Vec<char>` matches exactly: an emoji is
 /// one char even when UTF-16 needs two units, while a base+combining pair is two
 /// chars). Out-of-range indices clamp to the nearest edge; index 0 inserts at the
@@ -307,7 +307,7 @@ fn lower(c: &super::Call) -> Or<SassValue> {
 }
 
 /// The `$string` argument as `(text, quoted)`, preserving whether it came quoted,
-/// or dart's `$string: <value> is not a string.` error for a non-string (the same
+/// or the goldens' `$string: <value> is not a string.` error for a non-string (the same
 /// quote-inheritance contract `split`/`slice` follow).
 fn string_arg(c: &super::Call, i: usize) -> Or<(String, bool)> {
     match &c.positional[i] {

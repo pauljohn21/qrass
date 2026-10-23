@@ -17,7 +17,7 @@ type Or<T> = Result<T, SassError>;
 /// for at-rule heads: a leading `.member` is an identifier expectation, a
 /// `_`-prefixed member is private to its module (a *parse-time* error), a
 /// trailing/empty member (`@include namespace.`) again wants the identifier,
-/// and a `.`-joined name on `@function`/`@mixin` means dart still expects the
+/// and a `.`-joined name on `@function`/`@mixin` means the goldens still expects the
 /// parameter list (`expected "(".`) or the block (`expected "{".`) — only
 /// `@include ns.member` is the legal namespaced spelling.
 pub(crate) fn check_atrule_member_syntax(
@@ -34,7 +34,7 @@ pub(crate) fn check_atrule_member_syntax(
     for (i, s) in name_run.iter().enumerate() {
         let Some(member) = dotish(s) else { continue };
         if i == 0 {
-            // a member with no namespace at all: `@include .member` — dart
+            // a member with no namespace at all: `@include .member` — the goldens
             // cannot open an identifier on the dot.
             return Err(p.err("Expected identifier.", s.span.start));
         }
@@ -70,7 +70,7 @@ pub(crate) fn check_atrule_member_syntax(
 pub(crate) fn variable_decl(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
     let name = match &run[0].token {
         Token::Variable(v) if v.is_empty() => {
-            // a lone `$` is not a declaration head: dart wants the name first
+            // a lone `$` is not a declaration head: the goldens want the name first
             return Err(p.err("Expected identifier.", run[0].span.start));
         }
         Token::Variable(v) => v.clone(),
@@ -110,7 +110,7 @@ pub(crate) fn declaration(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {
             span.start,
         ));
     }
-    // A lone `$` where the value belongs: dart's declaration parse never reaches
+    // A lone `$` where the value belongs: the goldens' declaration parse never reaches
     // an expression there and keeps demanding the colon (`@supports (a !:$)`,
     // `syntax/anything/colon` golden `expected ":".`).
     if val_run.len() == 1 && matches!(&val_run[0].token, Token::Variable(v) if v.is_empty()) {

@@ -2,11 +2,11 @@
 //! callable-values plan): `meta.get-function`, `meta.get-mixin`,
 //! `meta.is-function`, `meta.is-mixin` and `meta.feature-exists`. Every rule
 //! below is read off the `core_functions/meta/get_function/*`, `get_mixin/*`
-//! and `feature_exists.hrx` goldens — never off dart internals.
+//! and `feature_exists.hrx` goldens — never off any external implementation.
 //!
 //! The lookup order for a module-less read is local user functions first, then
 //! the global builtin table (`as *` merged exports arrive with W4); a
-//! `$module:` read consults that module's builtins and errors with dart's
+//! `$module:` read consults that module's builtins and errors with the goldens'
 //! namespace wording when the namespace was never bound.
 
 use std::rc::Rc;
@@ -285,7 +285,7 @@ impl EvalState {
     }
 
     /// `meta.get-function`/`get-mixin` per the error goldens: arity wording,
-    /// `$name`/`$module` type wording, local → builtin lookup, and dart's
+    /// `$name`/`$module` type wording, local → builtin lookup, and the goldens'
     /// `Function not found:` / `Mixin not found:` / namespace errors.
     pub(super) fn lookup_callable(&mut self, mixin: bool, raw: &RawArgs) -> Ev<SassValue> {
         let max = if mixin { 2 } else { 3 };

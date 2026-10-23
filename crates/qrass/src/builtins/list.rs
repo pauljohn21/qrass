@@ -111,11 +111,11 @@ fn append(c: &super::Call) -> Or<SassValue> {
 fn join(c: &super::Call) -> Or<SassValue> {
     let l1 = &c.positional[0];
     let l2 = &c.positional[1];
-    // dart validates the explicit `$separator`: it must be a string, and one of
+    // the goldens validate the explicit `$separator`: it must be a string, and one of
     // the four recognised keywords. An unquoted bareword is a (string) value, so
     // `e` fails the keyword set rather than the type check. A `Null` here is the
     // `fold_named` interior-gap filler (only `$bracketed` was passed) or an
-    // explicit null — dart's "auto", so it is not validated.
+    // explicit null — the goldens' "auto", so it is not validated.
     if let Some(sep) = c.positional.get(2)
         && !matches!(sep, SassValue::Null)
     {
@@ -177,7 +177,7 @@ fn resolve_index(len: usize, raw: f64) -> Option<usize> {
 }
 
 /// Validate + resolve the `$n` index argument shared by `nth`/`set_nth`: a
-/// non-number, `0`, or an out-of-range index each raise dart's `$n:`-prefixed
+/// non-number, `0`, or an out-of-range index each raise the goldens' `$n:`-prefixed
 /// message. Returns the resolved in-range (0-based) position otherwise.
 fn list_index(c: &super::Call, len: usize) -> Or<usize> {
     let arg = &c.positional[1];
@@ -256,7 +256,7 @@ fn slash(c: &super::Call) -> Or<SassValue> {
 }
 
 /// `list.zip($lists...)`: element-wise grouping into an outer comma list whose
-/// inner element lists are **space**-separated (dart renders `zip(1 2 3 4, c d)`
+/// inner element lists are **space**-separated (the goldens render `zip(1 2 3 4, c d)`
 /// as `1 c, 2 d`), regardless of the inputs' own separators; they are never
 /// bracketed. `zip()` with no arguments yields the empty comma list.
 fn zip(c: &super::Call) -> Or<SassValue> {

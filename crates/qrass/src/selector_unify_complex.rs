@@ -189,7 +189,7 @@ fn build(m1: &[Node], m2: &[Node]) -> Vec<Vec<Node>> {
 
     // Pure ancestor-chain blocks. When neither front can share a slot *and* both
     // relations are loose ancestors (a bare descendant, never `>` / `+` / `~`), the
-    // two remaining runs are strict ancestor chains that dart-sass only ever
+    // two remaining runs are strict ancestor chains that the goldens only ever
     // interleaves as whole contiguous blocks — `[B then A]` and `[A then B]`, never
     // a per-compound shuffle. Commit both blocks out to the next shared slot.
     if !merge_ok

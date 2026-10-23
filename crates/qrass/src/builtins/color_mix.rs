@@ -33,7 +33,7 @@ pub(crate) fn validate_mix_method(
             .map_or(Ok(()), Err);
     };
     // Flatten the method value into words. Quoted strings blame the whole
-    // text; Number items raise dart's not-a-string.
+    // text; Number items raise the goldens' not-a-string.
     let words: Vec<String> = match m {
         SassValue::Str { text, quoted: true } => {
             return Err(err(format!(

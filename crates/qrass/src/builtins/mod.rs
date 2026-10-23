@@ -77,7 +77,7 @@ impl Registry {
     }
 
     /// Like [`Registry::def`], declaring parameter names for named-argument
-    /// folding and dart's `Missing argument $x.` arity wording.
+    /// folding and the goldens' `Missing argument $x.` arity wording.
     fn def_p(
         &mut self,
         name: &str,
@@ -300,7 +300,7 @@ fn fold_named(
 }
 
 /// Build the sass-shaped arity error. When the shortfall/overflow names a
-/// declared parameter it mirrors dart-sass exactly (`Missing argument $x.` /
+/// declared parameter it matches the goldens exactly (`Missing argument $x.` /
 /// `Only N arguments allowed, but M were passed.`); a positional-only builtin
 /// (no parameter names) keeps the generic `(given for expected)` wording.
 fn arity(

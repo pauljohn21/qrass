@@ -8,9 +8,9 @@ use super::{Ev, EvalState};
 use crate::value::SassValue;
 
 impl EvalState {
-        /// The bare global `invert()`: dart disambiguates by argument kind — a
+        /// The bare global `invert()`: the goldens disambiguate by argument kind — a
         /// plain-CSS filter call (`invert(10%)`, `invert(var(--c))`) passes through
-        /// verbatim (two or more CSS-value arguments are dart's plain-CSS arity
+        /// verbatim (two or more CSS-value arguments are the goldens' plain-CSS arity
         /// note), while any Sass-side spelling (`invert(c)`, `invert(red)`, a named
         /// `$weight`/`$space`) routes to the `color.invert` builtin verbatim.
         pub(super) fn eval_plain_invert(&mut self, call: &FunctionCall) -> Ev<SassValue> {

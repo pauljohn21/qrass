@@ -79,7 +79,7 @@ pub(super) fn to_space(c: &super::Call) -> Or<SassValue> {
     } else {
         src.convert(target)
     };
-    // dart's lossy serialization: when the destination's *lightness* escapes
+    // the goldens' lossy serialization: when the destination's *lightness* escapes
     // its declared range, or the source already breaks its declared channel
     // bounds, the color prints as `color-mix(in {tgt}, color(xyz …) 100%,
     // black)` with the source's own XYZ verbatim inside (`to_space/*`
@@ -218,7 +218,7 @@ fn parse_percent(text: &str, default: f64) -> f64 {
     trimmed.parse::<f64>().unwrap_or(default)
 }
 
-/// Whether `to-space` must emit dart's lossy `color-mix(…, black)` form.
+/// Whether `to-space` must emit the goldens' lossy `color-mix(…, black)` form.
 /// Evidence (all 89 MIX sections of `to_space/*.hrx`): the trigger is the
 /// *destination lightness* escaping its declared range (`xyz 1 1 1` → L
 /// 100.115; prophoto `-1 .4 2` → negative L), plus an `xyz`/`xyz-d50`
@@ -298,7 +298,7 @@ fn rgb(c: &super::Call) -> Or<SassValue> {
     }
     // Legacy `rgb()` special-function passthrough: if a channel/alpha argument
     // is an *unresolvable* value (a `calc()`/`var()`/`env()`/`attr()` or an
-    // unquoted string) dart does NOT build a Color — it returns the `rgb(…)`
+    // unquoted string) the goldens doe NOT build a Color — it returns the `rgb(…)`
     // call verbatim (comma-joined, keeping the `rgb(` name even with an alpha).
     // `none` is NOT such a value: it resolves to 0 and produces a concrete color
     // (channel_byte maps it), so it must stay on the numeric path or it would

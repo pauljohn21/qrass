@@ -150,7 +150,7 @@ fn sqrt(c: &super::Call) -> Or<SassValue> {
 fn log(c: &super::Call) -> Or<SassValue> {
     let v = unitless_num(c, 0, "number")?;
     let value = match c.positional.get(1) {
-        // A missing or `null` base means the natural log (dart treats `null` as
+        // A missing or `null` base means the natural log (the goldens treat `null` as
         // "no base"), so it never reaches the `$base` unit check.
         None | Some(SassValue::Null) => v.ln(),
         Some(_) => {
@@ -191,7 +191,7 @@ fn max(c: &super::Call) -> Or<SassValue> {
 }
 
 fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
-    // `min/max($numbers…)`: dart-shaped errors — a non-number reads the bare
+    // `min/max($numbers…)`: golden-shaped errors — a non-number reads the bare
     // `<value> is not a number.`, no arguments reads "At least one argument must
     // be passed." (arity min lowered to 0 so this fires, as for `hypot`), and two
     // dimensioned operands of different, non-convertible units read
@@ -219,7 +219,7 @@ fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
         let (bv, bu) = &nums[best];
         let (cv, cu) = &nums[i];
         // Equal units, both unitless, or exactly one unitless: compare raw
-        // magnitudes (dart's min/max keeps the unit-bearing value as the larger).
+        // magnitudes (the goldens' min/max keeps the unit-bearing value as the larger).
         // Two different dimensioned units must be convertible or it is an error.
         let cand_eff = match (bu, cu) {
             (x, y) if x != y && x.is_some() && y.is_some() => {

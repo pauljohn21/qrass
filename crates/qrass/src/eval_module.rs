@@ -389,7 +389,7 @@ impl EvalState {
                 st.eval_top_level(stmt, &mut css)?;
             }
             let forwarded = st.forward_buf.last().cloned().unwrap_or_default();
-            // dart exports ONLY the module's own top-level assignments; vars
+            // the goldens export ONLY the module's own top-level assignments; vars
             // injected into the env by `@use … as *` are visible locally but
             // never re-exported (re-export needs `@forward`). The old
             // global-bindings export leaked upstream vars as own members,

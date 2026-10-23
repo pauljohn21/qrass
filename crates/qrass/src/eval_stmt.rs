@@ -58,7 +58,7 @@ impl EvalState {
                         return Ok(());
                     }
                     // A bare declaration at stylesheet root is an error in
-                    // dart (`load_css/error/load` `top_level`/`nesting`:
+                    // the goldens (`load_css/error/load` `top_level`/`nesting`:
                     // "Declarations may only be used within style rules.")
                     // — never silently dropped.
                     if sel_ctx.is_empty() {
@@ -287,7 +287,7 @@ impl EvalState {
     ) -> Ev<()> {
         let query = self.render_interp(condition)?;
         // `css/supports/comment` + `css/media/whitespace` goldens: a comment
-        // eaten from a query head/tail leaves its spacing behind, and dart
+        // eaten from a query head/tail leaves its spacing behind, and the goldens
         // re-serializes each parenthesized condition with trimmed edges and no
         // space before the `:`. Apply only to at-rule query heads, never the
         // body selectors.

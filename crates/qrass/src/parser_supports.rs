@@ -93,7 +93,7 @@ pub(crate) fn validate_supports(p: &Parser, rest: &[Spanned]) -> Or<()> {
     loop {
         let Some(s) = rest.get(i) else { return Ok(()) };
         if leading_not {
-            // dart closes the block right after a leading `not (…)` group:
+            // the goldens close the block right after a leading `not (…)` group:
             // an operator chain on it is an `expected "{".`
             return Err(p.err("expected \"{\".", s.span.start));
         }
@@ -209,7 +209,7 @@ pub(crate) fn validate_media(p: &Parser, rest: &[Spanned]) -> Or<()> {
                 k += 1;
             }
             // Media *ranges* allow at most two top-level comparators
-            // (`1 <= width <= 2`); a third reads to dart's grammar as garbage
+            // (`1 <= width <= 2`); a third reads to the goldens' grammar as garbage
             // inside the paren group (`css/media/range/error`
             // `invalid_binary_operator`: `expected ")".`).
             let mut cmp = 0usize;

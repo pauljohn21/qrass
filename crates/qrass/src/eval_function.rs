@@ -90,7 +90,7 @@ impl EvalState {
         }
 
         // The bare `invert()` is both a CSS filter function and — given Sass
-        // values — the `color.invert` builtin; dart splits on argument kind.
+        // values — the `color.invert` builtin; the goldens split on argument kind.
         if call.namespace.is_none() && call.name == "invert" {
             return self.eval_plain_invert(call);
         }
@@ -152,7 +152,7 @@ impl EvalState {
                 e.note(format!("during builtin `{key}` in module {}", self.name))
             });
         }
-        // dart's wording for a *module*-level miss (modules/color/error
+        // the goldens' wording for a *module*-level miss (modules/color/error
         // goldens): the hyphenated legacy spellings name the function and its
         // home module; the `*-color` compat spellings report the bare
         // `Undefined function.`.
