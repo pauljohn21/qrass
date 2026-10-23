@@ -147,12 +147,10 @@ fn srgb_hue(v: [f64; 3]) -> f64 {
     if d < 1e-6 {
         return 0.0;
     }
-    let h = if max == r {
-        ((g - b) / d) % 6.0
-    } else if max == g {
-        (b - r) / d + 2.0
-    } else {
-        (r - g) / d + 4.0
+    let h = match (max == r, max == g) {
+        (true, _) => ((g - b) / d) % 6.0,
+        (false, true) => (b - r) / d + 2.0,
+        (false, false) => (r - g) / d + 4.0,
     };
     let h = h * 60.0;
     if h < 0.0 { h + 360.0 } else { h }
@@ -372,11 +370,16 @@ impl Color4 {
             // direct LCh↔Lab path rather than the XYZ hub).
             let perceptual = |n: &str| matches!(n, "lab" | "lch" | "oklab" | "oklch");
             if perceptual(self.space.name) && perceptual(target.name) {
-                if self.space.name == "lch" && target.name == "lab" && self.comps[0].is_none() {
-                    out.fill(None);
-                } else if self.comps[1].is_none() && self.comps[2].is_none() {
-                    out[1] = None;
-                    out[2] = None;
+                let poison_all =
+                    self.space.name == "lch" && target.name == "lab" && self.comps[0].is_none();
+                let poison_ac = self.comps[1].is_none() && self.comps[2].is_none();
+                match (poison_all, poison_ac) {
+                    (true, _) => out.fill(None),
+                    (false, true) => {
+                        out[1] = None;
+                        out[2] = None;
+                    }
+                    (false, false) => {}
                 }
             }
         }

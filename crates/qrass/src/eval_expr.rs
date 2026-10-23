@@ -345,16 +345,14 @@ fn normalize_special_name(name: &str, url_is_call: bool) -> String {
     if !vendor_ok {
         return name.to_string();
     }
-    if base == "url" {
-        if url_is_call {
-            name.to_string()
-        } else {
-            "url".to_string()
-        }
-    } else if matches!(base, "calc" | "element" | "expression") || base.starts_with("progid:") {
-        lower
-    } else {
-        name.to_string()
+    match (
+        base == "url",
+        matches!(base, "calc" | "element" | "expression") || base.starts_with("progid:"),
+    ) {
+        // `url(...)` stays verbatim when it is a call, else normalizes to `url`
+        (true, _) => (if url_is_call { name } else { "url" }).to_string(),
+        (false, true) => lower,
+        (false, false) => name.to_string(),
     }
 }
 

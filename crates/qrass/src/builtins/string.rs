@@ -201,19 +201,17 @@ fn slice(c: &super::Call) -> Or<SassValue> {
         -1
     };
     // Map the 1-based Sass indices to inclusive 0-based bounds, clamped to range.
-    let lo = if start > 0 {
-        (start - 1).min(n)
-    } else if start < 0 {
-        (n + start).max(0)
-    } else {
-        0
+    let lo = match start {
+        s if s > 0 => (s - 1).min(n),
+        s if s < 0 => (n + s).max(0),
+        _ => 0,
     };
-    let hi = if end > 0 {
-        (end - 1).min(n - 1)
-    } else if end < 0 {
-        n + end // negative counts back from the last codepoint
-    } else {
-        -1 // end == 0 lands before the first codepoint → empty
+    let hi = match end {
+        e if e > 0 => (e - 1).min(n - 1),
+        // negative counts back from the last codepoint
+        e if e < 0 => n + e,
+        // end == 0 lands before the first codepoint → empty
+        _ => -1,
     };
     let out: String = if hi < lo {
         String::new()
@@ -273,12 +271,10 @@ fn insert(c: &super::Call) -> Or<SassValue> {
         .and_then(|a| a.as_number())
         .map(|(v, _)| v as i64)
         .unwrap_or(0);
-    let pos: usize = if index > 0 {
-        (index - 1).min(n)
-    } else if index < 0 {
-        (n + 1 + index).max(0)
-    } else {
-        0
+    let pos: usize = match index {
+        i if i > 0 => (i - 1).min(n),
+        i if i < 0 => (n + 1 + i).max(0),
+        _ => 0,
     } as usize;
     let mut out: String = chars[..pos].iter().collect();
     out.push_str(&insertion);

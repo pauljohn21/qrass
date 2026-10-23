@@ -153,11 +153,12 @@ impl Color4 {
             .collect();
         let mut args = parts.join(" ");
         let a = self.alpha();
-        if self.alpha_missing {
-            args.push_str(" / none");
-        } else if self.alpha.is_some() && a != 1.0 {
-            // An explicit `/ 1` round-trips without the alpha slot (the goldens).
-            args.push_str(&format!(" / {}", format_number(a)));
+        // explicit `/ none` wins; else a non-default numeric alpha rides along
+        // (an explicit `/ 1` round-trips without the alpha slot — the goldens).
+        match (self.alpha_missing, self.alpha.is_some() && a != 1.0) {
+            (true, _) => args.push_str(" / none"),
+            (false, true) => args.push_str(&format!(" / {}", format_number(a))),
+            (false, false) => {}
         }
         if self.space.wrapper {
             format!("color({} {})", self.space.name, args)
