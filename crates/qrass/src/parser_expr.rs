@@ -26,6 +26,31 @@ pub(crate) struct E<'a> {
 
 type Ex<T> = Result<T, SassError>;
 
+/// The lazy operator tail of a precedence-climbing parse: each `next` consumes
+/// one operator that binds at least `min` tightly, parses its right operand and
+/// yields the `(op, rhs, span)` triple the fold wraps into a `Binary`.
+struct BinTail<'e, 'p> {
+    e: &'e mut E<'p>,
+    min: u8,
+    start: BytePos,
+}
+
+impl Iterator for BinTail<'_, '_> {
+    type Item = Ex<(BinOp, Expr, Span)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (op, prec) = self.e.next_binop()?;
+        match prec >= self.min {
+            false => None,
+            true => {
+                self.e.bump();
+                let right = self.e.binary(prec + 1);
+                Some(right.map(|right| (op, right, self.e.span(self.start))))
+            }
+        }
+    }
+}
+
 // ─── Public entry points (each takes an owned run) ─────────────────────────────
 
 pub(crate) fn value_of(p: &Parser, run: Vec<Spanned>) -> Ex<Expr> {
@@ -132,23 +157,23 @@ impl<'a> E<'a> {
             return Err(self.p.err("expected a value", self.last.start));
         }
         let start = self.pk_start();
-        let mut items = vec![self.space_list()?];
-        while self.eat(Punct::Comma) {
-            if self.is(Punct::RParen) || self.it.peek().is_none() {
-                break; // tolerate a trailing comma
-            }
-            items.push(self.space_list()?);
-        }
-        Ok(if items.len() == 1 {
-            items.pop().unwrap()
-        } else {
-            Expr::List {
+        let first = self.space_list()?;
+        // a trailing comma before `)`/EOF is tolerated: consumed, no item parsed
+        let more = std::iter::from_fn(|| {
+            (self.eat(Punct::Comma) && !(self.is(Punct::RParen) || self.it.peek().is_none()))
+                .then(|| self.space_list())
+        })
+        .collect::<Ex<Vec<_>>>()?;
+        let items: Vec<Expr> = std::iter::once(first).chain(more).collect();
+        match items.len() {
+            1 => Ok(items.into_iter().next().expect("one item")),
+            _ => Ok(Expr::List {
                 items,
                 sep: ListSep::Comma,
                 bracketed: false,
                 span: self.span(start),
-            }
-        })
+            }),
+        }
     }
 
     pub(crate) fn pk_start(&mut self) -> BytePos {
@@ -161,42 +186,43 @@ impl<'a> E<'a> {
     /// A whitespace-separated operand run (`margin: 0 auto`).
     pub(crate) fn space_list(&mut self) -> Ex<Expr> {
         let start = self.pk_start();
-        let mut items = vec![self.binary(0)?];
-        while self.starts_value() && !self.is(Punct::Comma) {
-            items.push(self.binary(0)?);
-        }
-        Ok(if items.len() == 1 {
-            items.pop().unwrap()
-        } else {
-            Expr::List {
+        let first = self.binary(0)?;
+        let more = std::iter::from_fn(|| {
+            (self.starts_value() && !self.is(Punct::Comma)).then(|| self.binary(0))
+        })
+        .collect::<Ex<Vec<_>>>()?;
+        let items: Vec<Expr> = std::iter::once(first).chain(more).collect();
+        match items.len() {
+            1 => Ok(items.into_iter().next().expect("one item")),
+            _ => Ok(Expr::List {
                 items,
                 sep: ListSep::Space,
                 bracketed: false,
                 span: self.span(start),
-            }
-        })
+            }),
+        }
     }
 
     // ─── Operator precedence ───────────────────────────────────────────────
 
     fn binary(&mut self, min: u8) -> Ex<Expr> {
         let start = self.pk_start();
-        let mut left = self.unary()?;
-        while let Some((op, prec)) = self.next_binop() {
-            if prec < min {
-                break;
-            }
-            self.bump();
-            let right = self.binary(prec + 1)?;
-            let span = self.span(start);
-            left = Expr::Binary {
+        let left = self.unary()?;
+        // fold the operator tail: each accepted `op rhs` wraps the accumulated left
+        BinTail {
+            e: self,
+            min,
+            start,
+        }
+        .try_fold(left, |left, item| {
+            let (op, right, span) = item?;
+            Ok(Expr::Binary {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
                 span,
-            };
-        }
-        Ok(left)
+            })
+        })
     }
 
     fn next_binop(&mut self) -> Option<(BinOp, u8)> {

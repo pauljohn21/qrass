@@ -29,12 +29,18 @@ impl<'a> E<'a> {
         }
         let first = self.space_list()?;
         if self.eat(Punct::Colon) {
-            let mut pairs = vec![(first, self.space_list()?)];
-            while self.eat(Punct::Comma) && !self.is(Punct::RParen) {
-                let key = self.space_list()?;
-                self.expect(Punct::Colon, "expected ':' in map")?;
-                pairs.push((key, self.space_list()?));
-            }
+            let head = (first, self.space_list()?);
+            // each further pair is `, key: value`, up to the closing `)`
+            let more = std::iter::from_fn(|| {
+                (self.eat(Punct::Comma) && !self.is(Punct::RParen))
+                    .then(|| -> Ex<(Expr, Expr)> {
+                        let key = self.space_list()?;
+                        self.expect(Punct::Colon, "expected ':' in map")?;
+                        self.space_list().map(|value| (key, value))
+                    })
+            })
+            .collect::<Ex<Vec<_>>>()?;
+            let pairs: Vec<(Expr, Expr)> = std::iter::once(head).chain(more).collect();
             self.expect(Punct::RParen, "expected ')' to close map")?;
             return Ok(Expr::Map {
                 pairs,
@@ -42,10 +48,12 @@ impl<'a> E<'a> {
             });
         }
         if self.is(Punct::Comma) {
-            let mut items = vec![first];
-            while self.eat(Punct::Comma) && !self.is(Punct::RParen) {
-                items.push(self.space_list()?);
-            }
+            let more = std::iter::from_fn(|| {
+                (self.eat(Punct::Comma) && !self.is(Punct::RParen))
+                    .then(|| self.space_list())
+            })
+            .collect::<Ex<Vec<_>>>()?;
+            let items: Vec<Expr> = std::iter::once(first).chain(more).collect();
             self.expect(Punct::RParen, "expected ')'")?;
             return Ok(Expr::List {
                 items,
@@ -73,10 +81,12 @@ impl<'a> E<'a> {
         }
         let first = self.space_list()?;
         if self.is(Punct::Comma) {
-            let mut items = vec![first];
-            while self.eat(Punct::Comma) && !self.is(Punct::RBracket) {
-                items.push(self.space_list()?);
-            }
+            let more = std::iter::from_fn(|| {
+                (self.eat(Punct::Comma) && !self.is(Punct::RBracket))
+                    .then(|| self.space_list())
+            })
+            .collect::<Ex<Vec<_>>>()?;
+            let items: Vec<Expr> = std::iter::once(first).chain(more).collect();
             self.expect(Punct::RBracket, "expected ']' to close bracketed list")?;
             return Ok(Expr::List {
                 items,
