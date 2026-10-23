@@ -20,105 +20,126 @@ pub(super) fn weave_all(
     residual: &Compound,
     extender: &Complex,
 ) -> Vec<Complex> {
-    let xs = &extender.components;
-    let n = xs.len();
-    // A combinator-only extender (`>`): when the matched slot is fully consumed the
-    // bare trailing combinator *is* the reading (`extend(".c", ".c", ">")` -> `>`).
-    if n == 0 {
-        return if residual.simples.is_empty() {
-            vec![Complex {
+    match extender.components.is_empty() {
+        // A combinator-only extender (`>`): when the matched slot is fully consumed
+        // the bare trailing combinator *is* the reading (`extend(".c", ".c", ">")` -> `>`).
+        true => residual
+            .simples
+            .is_empty()
+            .then(|| Complex {
                 components: Vec::new(),
                 trailing: extender.trailing.clone(),
-            }]
-        } else {
-            Vec::new()
-        };
+            })
+            .into_iter()
+            .collect(),
+        false => spliced_readings(comps, start, end, residual, extender),
     }
-    let slot_comb = comps[start].combinator;
-    if n > 1 && matches!(slot_comb, Some(c) if c != Combinator::Descendant) {
-        return Vec::new();
-    }
-    let mut pinned = xs[n - 1].clone();
-    pinned.compound = match compound_unify(residual, &pinned.compound) {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
-    pinned.extras.clear();
-    // When the extender lands at the very front its leading and the selector's own
-    // leading combinator must agree; a clash makes the reading invalid.
-    let leading = if start == 0 {
-        match combine_leading(comps[0].combinator, xs[0].combinator) {
-            Some(l) => l,
-            None => return Vec::new(),
-        }
-    } else {
-        comps[0].combinator
-    };
+}
 
+/// The common splice: classify the slot/extender pairing, then build the one
+/// reading (or none) that pairing allows.
+fn spliced_readings(
+    comps: &[Component],
+    start: usize,
+    end: usize,
+    residual: &Compound,
+    extender: &Complex,
+) -> Vec<Complex> {
+    let xs = &extender.components;
+    let n = xs.len();
+    // a multi-compound extender only lands on a descendant edge
+    let slot_ok =
+        n == 1 || comps[start].combinator.is_none_or(|c| c == Combinator::Descendant);
+    // when the extender lands at the very front, its leading and the selector's
+    // own leading combinator must agree; a clash makes the reading invalid
+    let leading = match start {
+        0 => combine_leading(comps[0].combinator, xs[0].combinator),
+        _ => Some(comps[0].combinator),
+    };
+    let merged = compound_unify(residual, &xs[n - 1].compound);
+    match (slot_ok, leading, merged) {
+        (true, Some(leading), Some(compound)) => {
+            build_readings(comps, start, end, extender, compound, leading)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// One reading for the non-floating case; the floating case yields one reading
+/// per order-preserving merge of the grandparent run and the extender prefix.
+fn build_readings(
+    comps: &[Component],
+    start: usize,
+    end: usize,
+    extender: &Complex,
+    compound: Compound,
+    leading: Option<Combinator>,
+) -> Vec<Complex> {
+    let xs = &extender.components;
     let tail = &comps[end + 1..];
     // A single trailing combinator on the extender becomes the edge joining the
     // spliced extender to the following tail (`.e >` before tail `.d` -> `.e > .d`).
-    let tail_comb = if extender.trailing.len() == 1 && !tail.is_empty() {
-        Some(extender.trailing[0])
-    } else {
-        None
-    };
-    let prefix = &xs[..n - 1];
+    let tail_comb = (extender.trailing.len() == 1 && !tail.is_empty()).then(|| extender.trailing[0]);
+    let prefix = &xs[..xs.len() - 1];
     let floatable = start > 0
         && !prefix.is_empty()
         && is_descendant_run(&comps[..start])
         && prefix
             .iter()
             .all(|c| c.combinator.is_none_or(|x| x == Combinator::Descendant));
-
-    if !floatable {
-        let shifted = prefix.iter().map(|p| Component {
-            combinator: Some(Combinator::Descendant),
-            extras: Vec::new(),
-            ..p.clone()
-        });
-        let mut pieces: Vec<Component> = comps[..start]
-            .iter()
-            .cloned()
-            .chain(shifted)
-            .collect();
-        pinned.combinator = match pieces.is_empty() {
-            true => leading,
-            false => Some(Combinator::Descendant),
-        };
-        pieces.push(pinned);
-        splice_tail(&mut pieces, tail, tail_comb);
-        if let Some(f) = pieces.first_mut() {
-            f.combinator = leading;
-            f.extras.clear();
-        }
-        return vec![Complex::new(pieces)];
-    }
-
-    // Float the extender's outer compounds through the descendant grandparent run.
-    let gp: Vec<Compound> = comps[..start].iter().map(|c| c.compound.clone()).collect();
-    let pf: Vec<Compound> = prefix.iter().map(|c| c.compound.clone()).collect();
-    interleave(&gp, &pf)
-        .into_iter()
-        .map(|merged| {
-            let mut pieces: Vec<Component> = merged
-                .into_iter()
-                .enumerate()
-                .map(|(i, compound)| Component {
-                    combinator: if i == 0 { leading } else { Some(Combinator::Descendant) },
-                    extras: Vec::new(),
-                    compound,
-                })
-                .collect();
-            pieces.push(Component {
+    let pinned = |combinator: Option<Combinator>| Component {
+        combinator,
+        extras: Vec::new(),
+        compound: compound.clone(),
+    };
+    match floatable {
+        false => {
+            let shifted = prefix.iter().map(|p| Component {
                 combinator: Some(Combinator::Descendant),
                 extras: Vec::new(),
-                compound: pinned.compound.clone(),
+                ..p.clone()
             });
+            let mut pieces: Vec<Component> =
+                comps[..start].iter().cloned().chain(shifted).collect();
+            let comb = match pieces.is_empty() {
+                true => leading,
+                false => Some(Combinator::Descendant),
+            };
+            pieces.push(pinned(comb));
             splice_tail(&mut pieces, tail, tail_comb);
-            Complex::new(pieces)
-        })
-        .collect()
+            pieces.first_mut().into_iter().for_each(|f| {
+                f.combinator = leading;
+                f.extras.clear();
+            });
+            vec![Complex::new(pieces)]
+        }
+        true => {
+            // Float the extender's outer compounds through the descendant
+            // grandparent run.
+            let gp: Vec<Compound> = comps[..start].iter().map(|c| c.compound.clone()).collect();
+            let pf: Vec<Compound> = prefix.iter().map(|c| c.compound.clone()).collect();
+            interleave(&gp, &pf)
+                .into_iter()
+                .map(|merged| {
+                    let mut pieces: Vec<Component> = merged
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, compound)| Component {
+                            combinator: match i {
+                                0 => leading,
+                                _ => Some(Combinator::Descendant),
+                            },
+                            extras: Vec::new(),
+                            compound,
+                        })
+                        .collect();
+                    pieces.push(pinned(Some(Combinator::Descendant)));
+                    splice_tail(&mut pieces, tail, tail_comb);
+                    Complex::new(pieces)
+                })
+                .collect()
+        }
+    }
 }
 
 /// Append the preserved `tail` after the spliced extender, overriding the first
@@ -138,13 +159,7 @@ fn splice_tail(pieces: &mut Vec<Component>, tail: &[Component], tail_comb: Optio
 fn combine_leading(a: Option<Combinator>, b: Option<Combinator>) -> Option<Option<Combinator>> {
     match (a, b) {
         (None, x) | (x, None) => Some(x),
-        (Some(x), Some(y)) => {
-            if x == y {
-                Some(Some(x))
-            } else {
-                None
-            }
-        }
+        (Some(x), Some(y)) => (x == y).then_some(Some(x)),
     }
 }
 
@@ -156,14 +171,8 @@ fn is_descendant_run(run: &[Component]) -> bool {
 
 /// Every order-preserving merge of two compound sequences.
 fn interleave(a: &[Compound], b: &[Compound]) -> Vec<Vec<Compound>> {
-    if a.is_empty() {
-        return vec![b.to_vec()];
-    }
-    if b.is_empty() {
-        return vec![a.to_vec()];
-    }
     // order-preserving merges: take a's head first, or b's head first
-    let lead = |first: Compound, rest: Vec<Vec<Compound>>| {
+    let lead = |first: &Compound, rest: Vec<Vec<Compound>>| {
         rest.into_iter()
             .map(|r| {
                 std::iter::once(first.clone())
@@ -172,8 +181,12 @@ fn interleave(a: &[Compound], b: &[Compound]) -> Vec<Vec<Compound>> {
             })
             .collect::<Vec<Vec<Compound>>>()
     };
-    lead(a[0].clone(), interleave(&a[1..], b))
-        .into_iter()
-        .chain(lead(b[0].clone(), interleave(a, &b[1..])))
-        .collect()
+    match (a.split_first(), b.split_first()) {
+        (None, _) => vec![b.to_vec()],
+        (_, None) => vec![a.to_vec()],
+        (Some((ha, ra)), Some((hb, rb))) => lead(ha, interleave(ra, b))
+            .into_iter()
+            .chain(lead(hb, interleave(a, rb)))
+            .collect(),
+    }
 }

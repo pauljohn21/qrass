@@ -94,91 +94,99 @@ fn extend_pseudo_compound(
         fn step(mut self, s: Simple, ee: &SelectorList, ex: &SelectorList) -> Self {
             // owned snapshots feed the nested 'static streams below
             let (ee2, ex2) = (ee.clone(), ex.clone());
-            let Some((name, list, anbn)) = pseudo_list(&s) else {
-                self.simples.push(s);
-                return self;
-            };
-            let eligible = is_selector_pseudo(&name) || anbn.is_some();
-            let not_single =
-                eligible && name == "not" && list.complexes.len() == 1;
-            if not_single {
-                let variants = top_level(&list.complexes[0], &ee2, &ex2);
-                // an unextendable `:not(X)` stays untouched
-                let extras = if variants.is_empty() {
-                    Vec::new()
-                } else {
-                    drain(
-                        Local::from_iter(variants.clone())
-                            .flat_map(|v| Local::from_iter(expand_not(&v)).map(Ok).box_it())
-                            .box_it(),
-                    )
-                    .unwrap_or_default()
-                };
-                let fired = !extras.is_empty();
-                self.extra_not.extend(extras);
-                self.simples.push(s);
-                self.changed |= fired;
-                return self;
-            }
-            let keep_going = eligible.then(|| {
-                let grown = drain(
-                    Local::from_iter(list.complexes.clone())
-                        .reduce_initial(Vec::new(), {
-                            let (name, anbn, ee3, ex3) =
-                                (name.clone(), anbn.clone(), ee2.clone(), ex2.clone());
-                            move |mut acc, a| {
-                                push_unique(&mut acc, a.clone());
-                                let (name, anbn) = (name.clone(), anbn.clone());
-                                top_level(&a, &ee3, &ex3)
-                                    .into_iter()
-                                    .filter(move |v| {
-                                        name == "not"
-                                            || !is_bare_incompatible(v, &name, anbn.as_deref())
-                                    })
-                                    .fold(acc, |mut acc, v| {
-                                        push_unique(&mut acc, v);
-                                        acc
-                                    })
-                            }
-                        })
-                        .map(Ok)
-                        .box_it(),
-                )
-                .ok()
-                .and_then(|mut v| v.pop())
-                .unwrap_or_default();
-                // nothing grew → the simple stays as it was
-                (grown.len() != list.complexes.len()).then(|| {
-                    let flat = is_idempotent_pseudo(&name) || anbn.is_some();
-                let grown = if flat {
-                        flatten_same_pseudo(&name, anbn.as_deref(), grown)
-                    } else {
-                        grown
-                    };
-                    let mut s = s.clone();
-                    match &mut s {
-                        Simple::PseudoClass { arg, .. } | Simple::PseudoElement { arg, .. } => {
-                            *arg = match anbn {
-                                Some(a) => PseudoArg::Nth {
-                                    anbn: a,
-                                    of: Some(SelectorList::new(grown.clone())),
-                                },
-                                None => PseudoArg::Selectors(SelectorList::new(grown)),
-                            };
-                        }
-                        _ => {}
-                    }
-                    s
-                })
-            });
-            match keep_going.flatten() {
-                Some(s2) => {
-                    self.simples.push(s2);
-                    self.changed = true;
+            match pseudo_list(&s) {
+                // a simple carrying no selector-list pseudo passes through
+                None => {
+                    self.simples.push(s);
+                    self
                 }
-                None => self.simples.push(s),
+                Some((name, list, anbn)) => {
+                    let eligible = is_selector_pseudo(&name) || anbn.is_some();
+                    let not_single = eligible && name == "not" && list.complexes.len() == 1;
+                    match (eligible, not_single) {
+                        // `:not(X)` grows by appending `:not()` simples instead
+                        (_, true) => {
+                            let variants = top_level(&list.complexes[0], &ee2, &ex2);
+                            // an unextendable `:not(X)` stays untouched
+                            let extras = match variants.is_empty() {
+                                true => Vec::new(),
+                                false => drain(
+                                    Local::from_iter(variants.clone())
+                                        .flat_map(|v| {
+                                            Local::from_iter(expand_not(&v)).map(Ok).box_it()
+                                        })
+                                        .box_it(),
+                                )
+                                .unwrap_or_default(),
+                            };
+                            let fired = !extras.is_empty();
+                            self.extra_not.extend(extras);
+                            self.simples.push(s);
+                            self.changed |= fired;
+                            self
+                        }
+                        // a selector-list pseudo grows its argument list in place
+                        (true, false) => {
+                            let grown = drain(
+                                Local::from_iter(list.complexes.clone())
+                                    .reduce_initial(Vec::new(), {
+                                        let (name, anbn, ee3, ex3) = (
+                                            name.clone(),
+                                            anbn.clone(),
+                                            ee2.clone(),
+                                            ex2.clone(),
+                                        );
+                                        move |mut acc, a| {
+                                            push_unique(&mut acc, a.clone());
+                                            let (name, anbn) = (name.clone(), anbn.clone());
+                                            top_level(&a, &ee3, &ex3)
+                                                .into_iter()
+                                                .filter(move |v| {
+                                                    name == "not"
+                                                        || !is_bare_incompatible(
+                                                            v,
+                                                            &name,
+                                                            anbn.as_deref(),
+                                                        )
+                                                })
+                                                .fold(acc, |mut acc, v| {
+                                                    push_unique(&mut acc, v);
+                                                    acc
+                                                })
+                                        }
+                                    })
+                                    .map(Ok)
+                                    .box_it(),
+                            )
+                            .ok()
+                            .and_then(|mut v| v.pop())
+                            .unwrap_or_default();
+                            // nothing grew → the simple stays as it was
+                            match grown.len() != list.complexes.len() {
+                                true => {
+                                    let flat = is_idempotent_pseudo(&name) || anbn.is_some();
+                                    let grown = match flat {
+                                        true => {
+                                            flatten_same_pseudo(&name, anbn.as_deref(), grown)
+                                        }
+                                        false => grown,
+                                    };
+                                    self.simples
+                                        .push(with_arg(s, anbn, SelectorList::new(grown)));
+                                    self.changed = true;
+                                }
+                                false => self.simples.push(s),
+                            }
+                            self
+                        }
+                        // not a selector-list pseudo: pass through
+                        (false, false) => {
+                            self.simples.push(s);
+                            self
+                        }
+                    }
+                }
             }
-            self
         }
     }
     let (ee, ex) = (extendee.clone(), extender.clone());
@@ -226,28 +234,42 @@ fn not_of(sel: &Complex) -> Simple {
     }
 }
 
+/// Rewrite the pseudo argument of `s`, preserving an `nth-*`'s `<an+b>` shape.
+fn with_arg(mut s: Simple, anbn: Option<String>, list: SelectorList) -> Simple {
+    match &mut s {
+        Simple::PseudoClass { arg, .. } | Simple::PseudoElement { arg, .. } => {
+            *arg = match anbn {
+                Some(a) => PseudoArg::Nth {
+                    anbn: a,
+                    of: Some(list),
+                },
+                None => PseudoArg::Selectors(list),
+            };
+        }
+        _ => {}
+    }
+    s
+}
+
 /// Is `v` a bare compound whose only simple is a selector-list / `nth-*` pseudo
 /// that is *not* the same family as `target` (differing name, or, for `nth-*`,
 /// a differing `<an+b>`)? Such a variant cannot be merged into the argument list.
 fn is_bare_incompatible(v: &Complex, target: &str, target_anbn: Option<&str>) -> bool {
-    let [comp] = v.components.as_slice() else {
-        return false;
-    };
-    if comp.combinator.is_some() {
-        return false;
-    }
-    let [simple] = comp.compound.simples.as_slice() else {
-        return false;
-    };
-    match simple {
-        Simple::PseudoClass {
-            name,
-            arg: PseudoArg::Selectors(_),
-        } => name != target,
-        Simple::PseudoClass {
-            name,
-            arg: PseudoArg::Nth { anbn, of: Some(_) },
-        } => name != target || Some(anbn.as_str()) != target_anbn,
+    match v.components.as_slice() {
+        [comp] if comp.combinator.is_none() => match comp.compound.simples.as_slice() {
+            [simple] => match simple {
+                Simple::PseudoClass {
+                    name,
+                    arg: PseudoArg::Selectors(_),
+                } => name != target,
+                Simple::PseudoClass {
+                    name,
+                    arg: PseudoArg::Nth { anbn, of: Some(_) },
+                } => name != target || Some(anbn.as_str()) != target_anbn,
+                _ => false,
+            },
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -345,35 +367,25 @@ fn sub_pseudo_compound(
     let (simples, changed) = drain_one(
         Local::from_iter(c.simples.clone())
             .reduce_initial((Vec::new(), false), move |(mut acc, changed), s| {
-                let Some((name, list, anbn)) = pseudo_list(&s) else {
-                    acc.push(s);
-                    return (acc, changed);
-                };
-                if !is_selector_pseudo(&name) {
-                    acc.push(s);
-                    return (acc, changed);
-                }
-                let replaced = crate::selector_extend::replace_list(&list, &ee, &ex);
-                let grew = replaced.complexes != list.complexes;
-                if !grew {
-                    acc.push(s);
-                    return (acc, changed);
-                }
-                let mut s = s;
-                match &mut s {
-                    Simple::PseudoClass { arg, .. } | Simple::PseudoElement { arg, .. } => {
-                        *arg = match anbn {
-                            Some(a) => PseudoArg::Nth {
-                                anbn: a,
-                                of: Some(replaced.clone()),
-                            },
-                            None => PseudoArg::Selectors(replaced),
-                        };
+                match pseudo_list(&s) {
+                    Some((name, list, anbn)) if is_selector_pseudo(&name) => {
+                        let replaced = crate::selector_extend::replace_list(&list, &ee, &ex);
+                        match replaced.complexes != list.complexes {
+                            true => {
+                                acc.push(with_arg(s, anbn, replaced));
+                                (acc, true)
+                            }
+                            false => {
+                                acc.push(s);
+                                (acc, changed)
+                            }
+                        }
                     }
-                    _ => {}
+                    _ => {
+                        acc.push(s);
+                        (acc, changed)
+                    }
                 }
-                acc.push(s);
-                (acc, true)
             })
             .map(|(s, ch)| Ok((s, ch)))
             .box_it(),
