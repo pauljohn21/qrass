@@ -28,25 +28,24 @@ pub fn extend_list(
     extendee: &SelectorList,
     extender: &SelectorList,
 ) -> SelectorList {
-    let mut out: Vec<Complex> = Vec::new();
-    // Parallel flag: `true` marks a verbatim selector from the caller's input.
-    // `extend` is additive, so those always survive the subsumption trim; only
-    // extension / pseudo-growth results may be absorbed by a broader selector.
-    let mut verbatim: Vec<bool> = Vec::new();
-    for sel in &selectors.complexes {
-        let adds = top_level(sel, extendee, extender);
-        let repl = pseudo_replace(sel, extendee, extender);
-        // A pure in-place pseudo growth supersedes the verbatim selector.
-        if repl.is_none() || !adds.is_empty() {
-            push_marked(&mut out, &mut verbatim, sel.clone(), true);
-        }
-        for add in adds {
-            push_marked(&mut out, &mut verbatim, add, false);
-        }
-        if let Some(r) = repl {
-            push_marked(&mut out, &mut verbatim, r, false);
-        }
-    }
+    // each input selector contributes its verbatim form — unless a pure in-place
+    // pseudo growth supersedes it — plus the additive results and that growth
+    let (mut out, mut verbatim) = selectors.complexes.iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut out, mut verbatim), sel| {
+            let adds = top_level(sel, extendee, extender);
+            let repl = pseudo_replace(sel, extendee, extender);
+            (repl.is_none() || !adds.is_empty())
+                .then_some(sel)
+                .into_iter()
+                .for_each(|sel| push_marked(&mut out, &mut verbatim, sel.clone(), true));
+            adds.into_iter()
+                .for_each(|add| push_marked(&mut out, &mut verbatim, add, false));
+            repl.into_iter()
+                .for_each(|r| push_marked(&mut out, &mut verbatim, r, false));
+            (out, verbatim)
+        },
+    );
     trim_subsumed(&mut out, &mut verbatim);
     SelectorList::new(out)
 }
@@ -69,35 +68,31 @@ pub fn replace_list(
     extendee: &SelectorList,
     extender: &SelectorList,
 ) -> SelectorList {
-    let mut out: Vec<Complex> = Vec::new();
-    for sel in &selectors.complexes {
+    let out: Vec<Complex> = selectors.complexes.iter().fold(Vec::new(), |mut out, sel| {
         let adds = top_level(sel, extendee, extender);
         let sub = pseudo_substitute(sel, extendee, extender);
-        if adds.is_empty() && sub.is_none() {
-            push_unique(&mut out, sel.clone());
-        } else {
-            for add in adds {
-                push_unique(&mut out, add);
-            }
-            if let Some(s) = sub {
-                push_unique(&mut out, s);
-            }
-        }
-    }
+        (adds.is_empty() && sub.is_none())
+            .then_some(sel.clone())
+            .into_iter()
+            .chain(adds)
+            .chain(sub)
+            .for_each(|c| push_unique(&mut out, c));
+        out
+    });
     SelectorList::new(out)
 }
 
 /// Append `c` unless an identical complex already precedes it, tracking whether
 /// the entry is a verbatim input selector (a duplicate keeps the verbatim mark).
 fn push_marked(out: &mut Vec<Complex>, verbatim: &mut Vec<bool>, c: Complex, is_verbatim: bool) {
-    if let Some(pos) = out.iter().position(|x| x == &c) {
-        if is_verbatim {
-            verbatim[pos] = true;
+    match out.iter().position(|x| x == &c) {
+        // a duplicate keeps (and may upgrade) the verbatim mark
+        Some(pos) => verbatim[pos] |= is_verbatim,
+        None => {
+            out.push(c);
+            verbatim.push(is_verbatim);
         }
-        return;
     }
-    out.push(c);
-    verbatim.push(is_verbatim);
 }
 
 /// Additive selectors from a compound (top-level) match of `extendee` in `sel`.
@@ -106,54 +101,66 @@ pub(super) fn top_level(
     extendee: &SelectorList,
     extender: &SelectorList,
 ) -> Vec<Complex> {
-    let mut results = Vec::new();
     let comps = &sel.components;
-    let mut singles: Vec<&Compound> = Vec::new();
-    let mut multis: Vec<&Complex> = Vec::new();
-    for e in &extendee.complexes {
-        if e.components.len() == 1 {
-            singles.push(&e.components[0].compound);
-        } else {
-            multis.push(e);
-        }
-    }
+    // split the alternatives: single-compound needles vs multi-compound
+    // complexes (the latter anchor on their last compound)
+    let (singles, multis): (Vec<&Compound>, Vec<&Complex>) = extendee.complexes.iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut singles, mut multis), e| {
+            match e.components.split_first() {
+                Some((first, [])) => singles.push(&first.compound),
+                _ => multis.push(e),
+            }
+            (singles, multis)
+        },
+    );
+    let mut results = Vec::new();
     // Single-compound extendees: subtract the union of all alternatives a slot covers.
-    for (i, comp) in comps.iter().enumerate() {
+    comps.iter().enumerate().for_each(|(i, comp)| {
         let matched: Vec<&Compound> = singles
             .iter()
             .copied()
             .filter(|n| covers(&comp.compound, n))
             .collect();
-        if matched.is_empty() {
-            continue;
-        }
-        let residual = subtract_many(&comp.compound, &matched);
-        for ext_with in &extender.complexes {
-            results.extend(extend_slot(sel, i, i, &residual, ext_with));
-        }
-    }
+        (!matched.is_empty())
+            .then_some(matched)
+            .into_iter()
+            .for_each(|matched| {
+                let residual = subtract_many(&comp.compound, &matched);
+                results.extend(
+                    extender
+                        .complexes
+                        .iter()
+                        .flat_map(|ext_with| extend_slot(sel, i, i, &residual, ext_with)),
+                );
+            });
+    });
     // Multi-compound extendees: the last compound anchors, the prefix must line up.
-    for e in multis {
+    multis.iter().for_each(|e| {
         let last = e.components.len() - 1;
         let tail_needle = &e.components[last].compound;
-        for i in last..comps.len() {
-            if !covers(&comps[i].compound, tail_needle) {
-                continue;
-            }
-            let start = i - last;
-            if !e.components[..last]
-                .iter()
-                .zip(&comps[start..i])
-                .all(|(ee, c)| covers(&c.compound, &ee.compound))
-            {
-                continue;
-            }
-            let residual = subtract(&comps[i].compound, tail_needle);
-            for ext_with in &extender.complexes {
-                results.extend(extend_slot(sel, start, i, &residual, ext_with));
-            }
-        }
-    }
+        comps
+            .iter()
+            .enumerate()
+            .skip(last)
+            .filter(|(i, comp)| {
+                covers(&comp.compound, tail_needle)
+                    && e.components[..last]
+                        .iter()
+                        .zip(&comps[*i - last..*i])
+                        .all(|(ee, c)| covers(&c.compound, &ee.compound))
+            })
+            .for_each(|(i, _)| {
+                let start = i - last;
+                let residual = subtract(&comps[i].compound, tail_needle);
+                results.extend(
+                    extender
+                        .complexes
+                        .iter()
+                        .flat_map(|ext_with| extend_slot(sel, start, i, &residual, ext_with)),
+                );
+            });
+    });
     results
 }
 
@@ -169,19 +176,23 @@ fn extend_slot(
     residual: &Compound,
     ext_with: &Complex,
 ) -> Vec<Complex> {
-    if is_bogus(sel) || is_bogus(ext_with) {
-        return Vec::new();
-    }
-    if !sel.trailing.is_empty() && !ext_with.trailing.is_empty() {
-        return Vec::new();
-    }
-    let mut results = weave_all(&sel.components, start, end, residual, ext_with);
-    if sel.trailing.len() == 1 && ext_with.trailing.is_empty() {
-        for r in &mut results {
-            r.trailing = sel.trailing.clone();
-        }
-    }
-    results
+    let bogus = is_bogus(sel) || is_bogus(ext_with);
+    let tail_conflict = !sel.trailing.is_empty() && !ext_with.trailing.is_empty();
+    (!bogus && !tail_conflict)
+        .then(|| weave_all(&sel.components, start, end, residual, ext_with))
+        .map(|results| {
+            // a lone trailing combinator on the selector rides onto each reading
+            results
+                .into_iter()
+                .map(|mut r| {
+                    if sel.trailing.len() == 1 && ext_with.trailing.is_empty() {
+                        r.trailing = sel.trailing.clone();
+                    }
+                    r
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// A combinator chain with a doubled edge, or two or more dangling combinators.
@@ -198,23 +209,22 @@ fn trim_subsumed(out: &mut Vec<Complex>, verbatim: &mut Vec<bool>) {
     let snapshot = out.clone();
     let dropped: Vec<usize> = (0..out.len())
         .filter(|&i| {
-            if verbatim[i] {
-                return false;
-            }
-            let c = &out[i];
-            snapshot.iter().enumerate().any(|(j, d)| {
-                i != j
-                    && !has_dangling(d)
-                    && !has_dangling(c)
-                    && covers_complex(d, c)
-                    && !covers_complex(c, d)
-            })
+            // verbatim inputs survive; only generated selectors may be absorbed
+            !verbatim[i]
+                && snapshot.iter().enumerate().any(|(j, d)| {
+                    let c = &out[i];
+                    i != j
+                        && !has_dangling(d)
+                        && !has_dangling(c)
+                        && covers_complex(d, c)
+                        && !covers_complex(c, d)
+                })
         })
         .collect();
-    for i in dropped.into_iter().rev() {
+    dropped.into_iter().rev().for_each(|i| {
         out.remove(i);
         verbatim.remove(i);
-    }
+    });
 }
 
 /// Any dangling or doubled combinator structure.

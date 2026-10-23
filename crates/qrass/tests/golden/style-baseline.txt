@@ -63,7 +63,7 @@ parser_text.rs	0	0	1	0
 pipeline.rs	0	0	4	1
 selector_ast.rs	10	1	1	0
 selector_attr.rs	6	0	6	6
-selector_extend.rs	12	0	7	3
+selector_extend.rs	0	0	1	0
 selector_extend_pseudo.rs	0	0	2	8
 selector_extend_weave.rs	0	0	3	7
 selector_parse.rs	9	2	13	14
