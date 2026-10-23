@@ -164,17 +164,20 @@ fn complement(c: &super::Call) -> Or<SassValue> {
 /// space without a `hue` channel fails the same way regardless of the color's
 /// origin (`error/space/non_polar_angle`).
 fn validate_polar(target: &str) -> Or<()> {
-    let Some(space) = crate::color4::lookup(target) else {
-        return Err(err(format!(
+    crate::color4::lookup(target).map_or(
+        Err(err(format!(
             "$space: Unknown color space \"{target}\"."
-        )));
-    };
-    if !space.channels.iter().any(|ch| ch.name == "hue") {
-        return Err(err(format!(
-            "$space: Color space {target} doesn't have a hue channel."
-        )));
-    }
-    Ok(())
+        ))),
+        // present but with no `hue` channel fails the same way (non-polar space)
+        |space| {
+            match space.channels.iter().any(|ch| ch.name == "hue") {
+                true => Ok(()),
+                false => Err(err(format!(
+                    "$space: Color space {target} doesn't have a hue channel."
+                ))),
+            }
+        },
+    )
 }
 
 /// `color.grayscale($color)`: drop the HSL saturation to `0`, keeping lightness.
@@ -265,29 +268,31 @@ fn color_amount(
     percent_ok: bool,
 ) -> Or<(Color, f64)> {
     let col = color_at(c, 0)?;
-    if col.c4.is_some() {
-        return Err(not_legacy(fn_name));
-    }
-    let Some(amount) = c.opt(amount_param, Some(1)) else {
-        return Err(err(format!("Missing argument ${amount_param}.")));
-    };
-    match amount {
-        SassValue::Number { value, unit } => {
-            let unit = unit.as_deref();
-            let bad_unit = unit.is_some() && (unit == Some("%") && !percent_ok || unit != Some("%"));
-            if bad_unit || *value < 0.0 || *value > max {
-                return Err(err(format!(
-                    "${amount_param}: Expected {} to be within 0 and {}.",
-                    show_amount(*value, unit),
-                    crate::value::format_number(max)
-                )));
+    // a Color 4 input is rejected outright; a legacy one falls through to the
+    // amount gate (single-exit: each failure yields its error as a value, the
+    // whole chain is one expression)
+    match col.c4.is_some() {
+        true => Err(not_legacy(fn_name)),
+        false => match c.opt(amount_param, Some(1)) {
+            None => Err(err(format!("Missing argument ${amount_param}."))),
+            Some(SassValue::Number { value, unit }) => {
+                let unit = unit.as_deref();
+                let bad_unit =
+                    unit.is_some() && (unit == Some("%") && !percent_ok || unit != Some("%"));
+                match bad_unit || *value < 0.0 || *value > max {
+                    true => Err(err(format!(
+                        "${amount_param}: Expected {} to be within 0 and {}.",
+                        show_amount(*value, unit),
+                        crate::value::format_number(max)
+                    ))),
+                    false => Ok((col.clone(), *value)),
+                }
             }
-            Ok((col.clone(), *value))
-        }
-        other => Err(err(format!(
-            "${amount_param}: {} is not a number.",
-            other.to_css()
-        ))),
+            Some(other) => Err(err(format!(
+                "${amount_param}: {} is not a number.",
+                other.to_css()
+            ))),
+        },
     }
 }
 
@@ -409,30 +414,30 @@ fn fade(c: &super::Call, fn_name: &str, sign: f64) -> Or<SassValue> {
 /// are legal — no bound check here.
 fn adjust_hue(c: &super::Call) -> Or<SassValue> {
     let col = color_at(c, 0)?;
-    if col.c4.is_some() {
-        return Err(not_legacy("adjust-hue"));
-    }
-    let degrees = match c.opt("degrees", Some(1)) {
-        Some(SassValue::Number { value, unit }) => match unit.as_deref() {
-            None | Some("deg") | Some("in") | Some("px") => *value,
-            Some("grad") => *value * 360.0 / 400.0,
-            Some("rad") => *value * 180.0 / std::f64::consts::PI,
-            Some("turn") => *value * 360.0,
-            Some(u) => {
-                return Err(err(format!(
+    // a Color 4 input is rejected before the `$degrees` parse; the degrees then
+    // resolve through one classification expression (unit conversion, unknown
+    // unit, non-number, or missing) instead of stacked guard `return`s
+    let degrees: Or<f64> = match col.c4.is_some() {
+        true => Err(not_legacy("adjust-hue")),
+        false => match c.opt("degrees", Some(1)) {
+            Some(SassValue::Number { value, unit }) => match unit.as_deref() {
+                None | Some("deg") | Some("in") | Some("px") => Ok(*value),
+                Some("grad") => Ok(*value * 360.0 / 400.0),
+                Some("rad") => Ok(*value * 180.0 / std::f64::consts::PI),
+                Some("turn") => Ok(*value * 360.0),
+                Some(u) => Err(err(format!(
                     "$degrees: {} is not a number.",
                     show_amount(*value, Some(u))
-                )));
-            }
-        },
-        Some(other) => {
-            return Err(err(format!(
+                ))),
+            },
+            Some(other) => Err(err(format!(
                 "$degrees: {} is not a number.",
                 other.to_css()
-            )));
-        }
-        None => return Err(err("Missing argument $degrees.")),
+            ))),
+            None => Err(err("Missing argument $degrees.")),
+        },
     };
+    let degrees = degrees?;
     let hsl = col.to_hsl();
     Ok(hsl_adjusted(
         &col,
