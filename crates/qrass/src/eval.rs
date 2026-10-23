@@ -318,14 +318,17 @@ impl EvalState {
     /// `#{expr}` against the current environment. Used for selectors, property
     /// names and at-rule parameters.
     pub fn render_interp(&mut self, pieces: &[Piece]) -> Ev<String> {
-        let mut out = String::new();
-        for piece in pieces {
-            match piece {
-                Piece::Text(t) => out.push_str(t),
-                Piece::Expr(src) => out.push_str(&self.eval_source(src)?.interp_text()),
-            }
-        }
-        Ok(out)
+        // map each piece to its text and concatenate; the collect's `?` protocol
+        // aborts on the first failed expression exactly like the old loop
+        // (the `&mut self` borrow keeps it a chain closure — registered carrier)
+        pieces
+            .iter()
+            .map(|piece| match piece {
+                Piece::Text(t) => Ok(t.clone()),
+                Piece::Expr(src) => self.eval_source(src).map(|e| e.interp_text()),
+            })
+            .collect::<Ev<Vec<String>>>()
+            .map(|parts| parts.concat())
     }
 
     /// Re-lex/re-parse a raw `#{…}` source fragment as an expression value and

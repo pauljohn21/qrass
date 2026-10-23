@@ -67,11 +67,12 @@ impl EvalState {
             .collect();
         let value = match &f.kind {
             FnKind::Css => {
-                let mut parts: Vec<String> =
-                    positional.iter().map(|v| v.to_css()).collect();
-                for (k, v) in &named {
-                    parts.push(format!("{k}: {}", v.to_css()));
-                }
+                // positional arguments first, then each `name: value` pair
+                let parts: Vec<String> = positional
+                    .iter()
+                    .map(|v| v.to_css())
+                    .chain(named.iter().map(|(k, v)| format!("{k}: {}", v.to_css())))
+                    .collect();
                 return Ok(Some(SassValue::Str {
                     text: format!("{}({})", f.name, parts.join(", ")),
                     quoted: false,

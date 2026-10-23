@@ -289,28 +289,33 @@ impl EvalState {
             // dualism `map.coerce_map` already accepts.
             Some(SassValue::List { items, .. }) if items.is_empty() => {}
             Some(SassValue::Map { entries }) => {
-                let mut seen: Vec<String> = Vec::new();
-                for (k, v) in entries {
-                    let name = match k {
-                        SassValue::Str { text, .. } => text.clone(),
-                        other => {
-                            return Err(SassError::new(
-                                ErrorKind::Builtins,
-                                format!("$with key: {} is not a string.", other.to_css()),
-                            ));
+                // fold the entries, remembering which config keys were already
+                // offered so a second one raises the golden's double-configure error
+                entries
+                    .iter()
+                    .try_fold(Vec::new(), |mut seen, (k, v)| -> Result<Vec<String>, SassError> {
+                        let name = match k {
+                            SassValue::Str { text, .. } => text.clone(),
+                            other => {
+                                return Err(SassError::new(
+                                    ErrorKind::Builtins,
+                                    format!("$with key: {} is not a string.", other.to_css()),
+                                ));
+                            }
+                        };
+                        let key = crate::parser::config_key(&name);
+                        match seen.contains(&key) {
+                            true => Err(SassError::new(
+                                ErrorKind::Config,
+                                format!("The variable ${name} was configured twice."),
+                            )),
+                            false => {
+                                seen.push(key);
+                                view.push(self.offer_value(name, v.clone(), site, entry));
+                                Ok(seen)
+                            }
                         }
-                    };
-                    let key = crate::parser::config_key(&name);
-                    if seen.contains(&key) {
-                        return Err(SassError::new(
-                            ErrorKind::Config,
-                            format!("The variable ${name} was configured twice."),
-                        ));
-                    }
-                    seen.push(key.clone());
-                    let _ = key;
-                    view.push(self.offer_value(name, v.clone(), site, entry));
-                }
+                    })?;
             }
             Some(other) => {
                 return Err(SassError::new(

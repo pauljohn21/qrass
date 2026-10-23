@@ -214,8 +214,7 @@ fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
         })
         .collect::<Or<Vec<(f64, Option<String>)>>>()?;
     // Reduce by comparing each candidate expressed in the current best's unit.
-    let mut best = 0usize;
-    for i in 1..nums.len() {
+    let best = (1..nums.len()).try_fold(0usize, |best, i| -> Or<usize> {
         let (bv, bu) = &nums[best];
         let (cv, cu) = &nums[i];
         // Equal units, both unitless, or exactly one unitless: compare raw
@@ -236,10 +235,10 @@ fn extremum(c: &super::Call, want_min: bool) -> Or<SassValue> {
             }
             _ => *cv,
         };
-        let better = (want_min && cand_eff < *bv) || (!want_min && cand_eff > *bv);
-        if better {
-            best = i;
-        }
-    }
+        Ok(match (want_min && cand_eff < *bv) || (!want_min && cand_eff > *bv) {
+            true => i,
+            false => best,
+        })
+    })?;
     Ok(c.positional[best].clone())
 }

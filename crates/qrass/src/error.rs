@@ -204,9 +204,10 @@ impl fmt::Display for SassError {
                 write!(f, "\n   | {}", ex.trim_end())?;
             }
         }
-        for n in &self.notes {
-            write!(f, "\n   = {n}")?;
-        }
+        // each note rides its own annotated line, in order
+        self.notes
+            .iter()
+            .try_fold((), |(), n| write!(f, "\n   = {n}"))?;
         Ok(())
     }
 }

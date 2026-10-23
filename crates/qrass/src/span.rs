@@ -34,21 +34,16 @@ impl Span {
 
 /// Compute 1-based line/col of `pos` within `content`.
 pub fn line_col(content: &str, pos: BytePos) -> LineCol {
-    let mut line = 1u32;
-    let mut col = 1u32;
-    for (i, ch) in content.char_indices() {
-        if i >= pos.0 {
-            break;
-        }
-        match ch {
-            '\n' => {
-                line += 1;
-                col = 1;
-            }
-            '\r' => {}
-            _ => col += 1,
-        }
-    }
+    // fold the prefix up to `pos` into (line, col): `take_while` is the old
+    // boundary `break` expressed as an iterator limit
+    let (line, col) = content
+        .char_indices()
+        .take_while(|(i, _)| *i < pos.0)
+        .fold((1u32, 1u32), |(line, col), (_, ch)| match ch {
+            '\n' => (line + 1, 1),
+            '\r' => (line, col),
+            _ => (line, col + 1),
+        });
     LineCol { line, col }
 }
 
