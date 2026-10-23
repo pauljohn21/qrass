@@ -469,24 +469,28 @@ impl EvalState {
 ///   `color.alpha(c=d, e=f, g=h)`) re-emit verbatim in sorted-key form.
 pub(super) fn css_color_overload(raw: &super::eval_mixin::RawArgs, name: &str) -> Option<SassValue> {
     const PARAMS: [&str; 3] = ["color", "weight", "space"];
-    if raw.named().keys().any(|k| PARAMS.contains(&k.as_str())) {
-        return None;
-    }
-    let parts: Vec<String> = if raw.positional().is_empty() && !raw.named().is_empty() {
-        let mut keys: Vec<&String> = raw.named().keys().collect();
-        keys.sort();
-        keys.into_iter()
-            .map(|k| format!("{k}={}", raw.named()[k]))
-            .collect()
-    } else if raw.named().is_empty()
+    // Tuple-`match` classification (no else-if chain): the stray-keyword guard only
+    // matters on the named-only branch, so it folds into the first predicate.
+    let sorted_named = raw.positional().is_empty()
+        && !raw.named().is_empty()
+        && !raw.named().keys().any(|k| PARAMS.contains(&k.as_str()));
+    let lone_number = raw.named().is_empty()
         && raw.positional().len() == 1
         && matches!(&raw.positional()[0], SassValue::Number { .. })
-        && name != "alpha"
-    {
-        vec![raw.positional()[0].to_css()]
-    } else {
-        return None;
-    };
+        && name != "alpha";
+    let parts: Vec<String> = match (sorted_named, lone_number) {
+        (true, _) => {
+            let mut keys: Vec<&String> = raw.named().keys().collect();
+            keys.sort();
+            Some(
+                keys.into_iter()
+                    .map(|k| format!("{k}={}", raw.named()[k]))
+                    .collect(),
+            )
+        }
+        (false, true) => Some(vec![raw.positional()[0].to_css()]),
+        _ => None,
+    }?;
     Some(SassValue::Str {
         text: format!("{name}({})", parts.join(", ")),
         quoted: false,

@@ -30,10 +30,9 @@ pub(super) fn sel_source(v: &SassValue) -> Option<String> {
                 ListSep::Slash => " / ",
                 ListSep::Space => " ",
             };
-            let mut parts = Vec::with_capacity(items.len());
-            for item in items {
-                parts.push(sel_source(item)?);
-            }
+            // the collect's Option short-circuits exactly like the old `?` in
+            // the loop: the first non-string leaf drops the whole call to `None`
+            let parts = items.iter().map(sel_source).collect::<Option<Vec<_>>>()?;
             Some(parts.join(join))
         }
         _ => None,

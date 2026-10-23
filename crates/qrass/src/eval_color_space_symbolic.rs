@@ -66,16 +66,30 @@ impl EvalState {
                         .iter()
                         .any(|p| t.starts_with(p))
             };
-            let mut parts = Vec::with_capacity(4);
-            for e in channels.iter().copied().chain(alpha) {
-                match self.eval_expr(e)? {
-                    v @ SassValue::Number { .. } => parts.push(v.to_css()),
-                    SassValue::Str { text, quoted: false } if symbolic(&text) => {
-                        parts.push(text);
-                    }
-                    _ => return Ok(None),
-                }
-            }
-            Ok(Some(format!("{}({})", call.name, parts.join(", "))))
+            // Slots are consumed by a latched fold (the `&mut self` borrow keeps it
+            // out of an Observable stream — registered exemption carrier): a `None`
+            // accumulator marks the verbatim bail, and once latched the remaining
+            // slots stay unevaluated, exactly like the old early `return Ok(None)`.
+            let parts = channels
+                .iter()
+                .copied()
+                .chain(alpha)
+                .try_fold(Some(Vec::with_capacity(4)), |acc, e| -> Ev<Option<Vec<String>>> {
+                    Ok(match acc {
+                        None => None,
+                        Some(mut parts) => match self.eval_expr(e)? {
+                            v @ SassValue::Number { .. } => {
+                                parts.push(v.to_css());
+                                Some(parts)
+                            }
+                            SassValue::Str { text, quoted: false } if symbolic(&text) => {
+                                parts.push(text);
+                                Some(parts)
+                            }
+                            _ => None,
+                        },
+                    })
+                })?;
+            Ok(parts.map(|parts| format!("{}({})", call.name, parts.join(", "))))
         }
 }

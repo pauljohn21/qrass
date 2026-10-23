@@ -62,33 +62,18 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
         };
         let ch = &c4.space.channels[idx];
         let Some((v, unit)) = val.as_number() else {
-            // `change($channel: none)` writes the missing slot on a Color 4
-            // color (`change/hsl` `hue/none`: `hsl(none 100% 50%)`). Other
-            // modes blame the non-number (`scale/error/type` `none/error`).
-            if matches!(val, SassValue::Str { text, .. } if text == "none")
-                && matches!(mode, Mode::Change)
-            {
-                c4.comps[idx] = None;
-            } else if let SassValue::Str { text, quoted: false } = val
-                && text.to_ascii_lowercase().starts_with("calc(")
-            {
-                // `calc(NaN)` edits are a golden no-op (`change/unusual_numbers`
-                // `nan/linear`: value preserved); `calc(±infinity)` writes the
-                // verbatim *text* channel slot under `change` (`infinity/linear`:
-                // `lab(50% calc(infinity) 0)`).
-                if matches!(mode, Mode::Change)
-                    && crate::color4::degenerate_channel_text(text)
-                    && !text.to_ascii_lowercase().replace(" ", "").contains("nan")
-                {
+            // The non-number value is classified once (three golden classes) and
+            // routed by a single `match` — the loop body carries no else-if chain.
+            match classify_non_number(val, mode) {
+                NonNumber::Missing => c4.comps[idx] = None,
+                NonNumber::Calc { write: Some(text) } => {
                     c4.comps[idx] = Some(0.0);
                     c4.text[idx] = Some(text.trim().to_string());
                 }
-                continue;
-            } else {
-                return Err(err(format!(
-                    "${key}: {} is not a number.",
-                    val.to_css()
-                )));
+                NonNumber::Calc { write: None } => {}
+                NonNumber::NotNumber => {
+                    return Err(err(format!("${key}: {} is not a number.", val.to_css())));
+                }
             }
             continue;
         };
@@ -236,4 +221,45 @@ pub(super) fn transform_c4(base: &Color, c: &super::Call, mode: Mode) -> Or<Sass
         legacy: None,
             legacy_hsl: None,
     }))
+}
+
+/// One of the three golden classes a *non-number* `$channel:` edit value falls
+/// into (the edit loop routes them with a single `match`).
+enum NonNumber<'a> {
+    /// `change($channel: none)` writes the missing slot on a Color 4 color
+    /// (`change/hsl` `hue/none`: `hsl(none 100% 50%)`)
+    Missing,
+    /// an unquoted `calc(…)` spelling; `write` is the verbatim *text* channel
+    /// slot the goldens demand, or nothing at all
+    Calc { write: Option<&'a str> },
+    /// anything else — the `${key}: X is not a number.` blame
+    NotNumber,
+}
+
+/// Classification of a non-number edit value (`scale/error/type` `none/error`,
+/// `change/unusual_numbers` `nan/linear`, `infinity/linear`).
+fn classify_non_number(val: &SassValue, mode: Mode) -> NonNumber<'_> {
+    let calc = match val {
+        SassValue::Str { text, quoted: false }
+            if text.to_ascii_lowercase().starts_with("calc(") =>
+        {
+            Some(text.as_str())
+        }
+        _ => None,
+    };
+    let none_write = matches!(val, SassValue::Str { text, .. } if text == "none")
+        && matches!(mode, Mode::Change);
+    // `calc(NaN)` edits are a golden no-op (value preserved); a degenerate
+    // non-nan text writes its verbatim slot, and only under `change`.
+    let write = calc.filter(|text| {
+        matches!(mode, Mode::Change)
+            && crate::color4::degenerate_channel_text(text)
+            && !text.to_ascii_lowercase().replace(" ", "").contains("nan")
+    });
+    match (none_write, calc, write) {
+        (true, _, _) => NonNumber::Missing,
+        (false, Some(_), Some(text)) => NonNumber::Calc { write: Some(text) },
+        (false, Some(_), None) => NonNumber::Calc { write: None },
+        _ => NonNumber::NotNumber,
+    }
 }
