@@ -30,54 +30,58 @@ impl EvalState {
     /// membership; user modules ride their bound singleton (`bound_modules`).
     pub(crate) fn run_get_module(&mut self, raw: &super::eval_mixin::RawArgs) -> Ev<Option<SassValue>> {
         let given = raw.positional().len() + raw.named().len();
-        if given == 0 {
-            return Err(SassError::new(
+        // arity gate: short-circuits before the value is inspected, exactly like
+        // the old guard `return`s (`?` is R3's sanctioned early-failure carrier)
+        (match given {
+            0 => Some(SassError::new(
                 ErrorKind::Builtins,
                 "Missing argument $module.",
-            ));
-        }
-        if given > 1 {
-            return Err(SassError::new(
+            )),
+            n if n > 1 => Some(SassError::new(
                 ErrorKind::Builtins,
-                format!("Only 1 argument allowed, but {given} were passed."),
-            ));
-        }
+                format!("Only 1 argument allowed, but {n} were passed."),
+            )),
+            _ => None,
+        })
+        .map_or(Ok(()), Err)?;
         let v = raw
             .positional()
             .first()
             .or_else(|| raw.named().get("module"))
             .cloned()
             .expect("given checked");
-        let text = match &v {
-            SassValue::Module(m) => return Ok(Some(SassValue::Module(m.clone()))),
-            SassValue::Str { text, .. } => text.clone(),
-            other => {
-                return Err(SassError::new(
-                    ErrorKind::Builtins,
-                    format!(
-                        "$module: {} is neither a string nor a module reference.",
-                        other.to_css()
-                    ),
-                ));
+        match &v {
+            // a module reference passes through unchanged
+            SassValue::Module(m) => Ok(Some(SassValue::Module(m.clone()))),
+            // a namespace string resolves to a built-in, else a bound user module
+            SassValue::Str { text, .. } => {
+                let ns = text.replace("sass:", "").replace('_', "-");
+                let builtin = ns == "meta"
+                    || crate::builtins::has_module(&ns)
+                    || crate::builtins::is_const_ns(&ns);
+                match (builtin, self.bound_modules.get(&ns)) {
+                    (true, _) => Ok(Some(SassValue::Module(Rc::new(ModuleRef {
+                        builtin: Some(ns),
+                        module: None,
+                    })))),
+                    (false, Some(module)) => Ok(Some(SassValue::Module(Rc::new(ModuleRef {
+                        builtin: None,
+                        module: Some(module.clone()),
+                    })))),
+                    (false, None) => Err(SassError::new(
+                        ErrorKind::UndefinedVariable,
+                        format!("There is no module with namespace \"{ns}\"."),
+                    )),
+                }
             }
-        };
-        let ns = text.replace("sass:", "").replace('_', "-");
-        if ns == "meta" || crate::builtins::has_module(&ns) || crate::builtins::is_const_ns(&ns) {
-            return Ok(Some(SassValue::Module(Rc::new(ModuleRef {
-                builtin: Some(ns),
-                module: None,
-            }))));
+            other => Err(SassError::new(
+                ErrorKind::Builtins,
+                format!(
+                    "$module: {} is neither a string nor a module reference.",
+                    other.to_css()
+                ),
+            )),
         }
-        if let Some(module) = self.bound_modules.get(&ns) {
-            return Ok(Some(SassValue::Module(Rc::new(ModuleRef {
-                builtin: None,
-                module: Some(module.clone()),
-            }))));
-        }
-        Err(SassError::new(
-            ErrorKind::UndefinedVariable,
-            format!("There is no module with namespace \"{ns}\"."),
-        ))
     }
 
     /// `meta.load($url, $with:)` (`meta/load/*`): like `meta.load-css` but the
@@ -101,21 +105,19 @@ impl EvalState {
     }
 
     fn run_load_function_inner(&mut self, raw: &super::eval_mixin::RawArgs) -> Ev<Option<SassValue>> {
-        let url = match raw.positional().first().or_else(|| raw.named().get("url")) {
-            Some(SassValue::Str { text, .. }) => text.clone(),
-            None => {
-                return Err(SassError::new(
+        let url: Result<String, SassError> =
+            match raw.positional().first().or_else(|| raw.named().get("url")) {
+                Some(SassValue::Str { text, .. }) => Ok(text.clone()),
+                None => Err(SassError::new(
                     ErrorKind::Builtins,
                     "Missing argument $url.",
-                ));
-            }
-            Some(other) => {
-                return Err(SassError::new(
+                )),
+                Some(other) => Err(SassError::new(
                     ErrorKind::Builtins,
                     format!("$url: {} is not a string.", other.to_css()),
-                ));
-            }
-        };
+                )),
+            };
+        let url = url?;
         let entry = crate::span::Span::default();
         tracing::Span::current().record("url", url.as_str());
         let with_v = raw
