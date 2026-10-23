@@ -32,21 +32,17 @@ pub fn classify(op: &str) -> Option<AttrOp> {
 /// left to right and take the first complete operator, which is why a lone `=`
 /// only matches when not followed by another operator char that would extend it.
 pub fn find_operator(chars: &[char], from: usize) -> Option<(AttrOp, usize)> {
-    let mut i = from;
-    while i < chars.len() {
-        let rest: String = chars[i..].iter().collect();
-        for (op, token) in OPERATORS {
-            if rest.starts_with(token) {
-                // Guard `a==b`: the `|=`/`~=`/... two-char forms are unambiguous,
-                // but a bare `=` immediately followed by another `=` should be read
-                // as `=` with an empty-ish value, not skipped. We accept the first
-                // (longest) match, so this is well-defined.
-                return Some((*op, i + token.chars().count()));
-            }
-        }
-        i += 1;
-    }
-    None
+    // leftmost position that starts with any operator token, taking the table
+    // order within that position (the first complete match wins)
+    (from..chars.len())
+        .flat_map(|i| {
+            let rest: String = chars[i..].iter().collect();
+            OPERATORS
+                .iter()
+                .find(|(_, token)| rest.starts_with(*token))
+                .map(|(op, token)| (*op, i + token.chars().count()))
+        })
+        .next()
 }
 
 /// Parse one `[...]` group's inner text (without the brackets) into an
@@ -56,118 +52,114 @@ pub fn parse_attribute(inner: &str) -> Attribute {
     // Leading optional namespace on the attribute name is not consumed here —
     // `[ns|attr]` keeps the whole `ns|attr` as the name, matching how the raw
     // text is retained.
-    let mut name_end = 0;
-    while name_end < chars.len() && !matches!(chars[name_end], '=' | '~' | '|' | '^' | '$' | '*') {
-        name_end += 1;
-    }
+    let name_end = (0..chars.len())
+        .take_while(|&k| !matches!(chars[k], '=' | '~' | '|' | '^' | '$' | '*'))
+        .count();
     let name: String = chars[..name_end].iter().collect::<String>().trim().to_string();
-
-    let op_at = name_end;
-    let (op, value_start) = match find_operator(&chars, op_at) {
-        Some(pair) => pair,
-        None => {
-            return Attribute {
-                raw: format!("[{}]", inner.trim()),
+    let raw = format!("[{}]", inner.trim());
+    // no operator means a bare `[name]` group
+    match find_operator(&chars, name_end) {
+        None => Attribute {
+            raw,
+            name,
+            op: None,
+            value: None,
+            modifier: None,
+        },
+        Some((op, value_start)) => {
+            let tail: String = chars[value_start..]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_string();
+            // The value may be quoted, or a bare identifier; an optional trailing
+            // `i`/`s` modifier is separated from the value by whitespace.
+            let (value, modifier) = split_value_modifier(&tail);
+            Attribute {
+                raw,
                 name,
-                op: None,
-                value: None,
-                modifier: None,
-            };
+                op: Some(op),
+                value,
+                modifier,
+            }
         }
-    };
-
-    let tail: String = chars[value_start..]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_string();
-
-    // The value may be quoted, or a bare identifier; an optional trailing
-    // `i`/`s` modifier is separated from the value by whitespace.
-    let (value, modifier) = split_value_modifier(&tail);
-
-    Attribute {
-        raw: format!("[{}]", inner.trim()),
-        name,
-        op: Some(op),
-        value,
-        modifier,
     }
 }
 
 /// Split `[...=value i]` into its (unquoted) value and optional flag char.
 fn split_value_modifier(tail: &str) -> (Option<String>, Option<char>) {
     let chars: Vec<char> = tail.chars().collect();
-    if chars.is_empty() {
-        return (None, None);
+    match chars.first().copied() {
+        None => (None, None),
+        Some(first) => {
+            // a quoted value runs through its closing quote (an unterminated one
+            // to the end); a bare value stops at the first whitespace
+            let value_end = match first {
+                q @ ('"' | '\'') => {
+                    let run = (1..chars.len())
+                        .take_while(|&k| chars[k] != q)
+                        .count();
+                    match chars.get(run + 1) {
+                        Some(c) if *c == q => run + 2,
+                        _ => chars.len(),
+                    }
+                }
+                _ => (0..chars.len())
+                    .take_while(|&k| !chars[k].is_whitespace())
+                    .count(),
+            };
+            let value_raw: String = chars[..value_end].iter().collect();
+            let modifier = chars[value_end..]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .chars()
+                .next()
+                .map(|c| c.to_ascii_lowercase());
+            (Some(unquote(&value_raw)), modifier)
+        }
     }
-    let mut end = 0;
-    if chars[0] == '"' || chars[0] == '\'' {
-        let quote = chars[0];
-        end = 1;
-        while end < chars.len() && chars[end] != quote {
-            end += 1;
-        }
-        // include closing quote if present
-        if end < chars.len() {
-            end += 1;
-        }
-    } else {
-        while end < chars.len() && !chars[end].is_whitespace() {
-            end += 1;
-        }
-    }
-    let value_raw: String = chars[..end].iter().collect();
-    let value = Some(unquote(&value_raw));
-
-    let rest: String = chars[end..].iter().collect();
-    let modifier = rest
-        .trim()
-        .chars()
-        .next()
-        .map(|c| c.to_ascii_lowercase());
-    (value, modifier)
 }
 
 /// Strip surrounding single or double quotes from a token.
 pub fn unquote(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
-    if chars.len() >= 2 && (chars[0] == chars[chars.len() - 1])
-        && (chars[0] == '"' || chars[0] == '\'')
-    {
-        return chars[1..chars.len() - 1].iter().collect();
+    let quoted = chars.len() >= 2
+        && chars[0] == chars[chars.len() - 1]
+        && matches!(chars[0], '"' | '\'');
+    match quoted {
+        true => chars[1..chars.len() - 1].iter().collect(),
+        false => s.to_string(),
     }
-    s.to_string()
 }
 
 /// Split a selector list on top-level commas (parens/brackets protected).
 /// Shared with the parser's `:is(...)`/`:has(...)` argument splitting.
 pub fn split_top_commas(raw: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut cur = String::new();
-    for ch in raw.chars() {
-        match ch {
-            '(' | '[' => {
-                depth += 1;
+    // fold the char stream over (finished parts, open run, nesting depth)
+    let (parts, cur, _) = raw.chars().fold(
+        (Vec::new(), String::new(), 0i32),
+        |(mut parts, mut cur, depth), ch| match ch {
+            '(' | '[' | ')' | ']' => {
                 cur.push(ch);
-            }
-            ')' | ']' => {
-                depth -= 1;
-                cur.push(ch);
+                let step = matches!(ch, '(' | '[') as i32 * 2 - 1;
+                (parts, cur, depth + step)
             }
             ',' if depth <= 0 => {
                 parts.push(cur.trim().to_string());
-                cur = String::new();
+                (parts, String::new(), depth)
             }
-            _ => cur.push(ch),
-        }
-    }
+            _ => {
+                cur.push(ch);
+                (parts, cur, depth)
+            }
+        },
+    );
     let last = cur.trim().to_string();
-    if !last.is_empty() || parts.is_empty() {
-        parts.push(last);
+    match parts.is_empty() || !last.is_empty() {
+        true => parts.into_iter().chain([last]).collect(),
+        false => parts,
     }
-    parts
 }
 
 /// Split a qualified name `ns|local` into `(namespace, local)`. A leading `|`
@@ -193,15 +185,17 @@ pub fn split_ns(text: &str) -> (Option<String>, String) {
 /// name, operator, value and case-modifier all match (a `^=` does not subsume an
 /// `=` even for the same prefix, per the is_superselector/attribute goldens).
 pub fn covers(super_: &Attribute, sub: &Attribute) -> bool {
-    if super_.name != sub.name {
-        return false;
+    match (super_.name == sub.name, super_.op.is_none()) {
+        // the attribute name has to agree at all
+        (false, _) => false,
+        // A presence test `[c]` covers any `[c...]` on the same attribute.
+        (true, true) => true,
+        // A valued operator covers only an identical one (name, operator, value
+        // and case-modifier all equal; a `^=` does not subsume an `=`).
+        (true, false) => {
+            super_.op == sub.op
+                && super_.value == sub.value
+                && super_.modifier == sub.modifier
+        }
     }
-    // A presence test `[c]` covers any `[c...]` on the same attribute.
-    if super_.op.is_none() {
-        return true;
-    }
-    // A valued operator covers only an identical one.
-    super_.op == sub.op
-        && super_.value == sub.value
-        && super_.modifier == sub.modifier
 }
