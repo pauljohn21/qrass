@@ -43,7 +43,7 @@
 ## 6. M5 收口
 
 - [ ] 6.1 style_gate 全库报表终态（迭代循环 = 0 ± 豁免）贴入 `reports/rfp-refactor-closeout.md`，与 spec R2/R3 逐条对账
-- [ ] 6.2 `openspec/config.yaml` 的 context 增补「RFP 契约生效」一句话约束（防未来 change 不知情违约）
+- [x] 6.2 `openspec/config.yaml` 的 context 增补「RFP 契约生效」一句话约束（防未来 change 不知情违约）——`context:` 键已写入并经 `openspec instructions apply` 回显（声明 Observable 链唯一形态 / 禁 for-while-loop-else-if-多 guard return / style_gate+exemptions 强制）
 - [ ] 6.3 全量验证梯（hrx + e2e + unit + clippy + wasm32 目标）终绿，归档建议 `/opsx:archive`
 
 ## 7. R3 收紧批（用户裁决：守卫 return + 评论署名）

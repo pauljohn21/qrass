@@ -9,6 +9,19 @@ schema: spec-driven
 #     Designs and tasks must cover Windows, macOS, and Linux
 #     Write all artifacts in Spanish
 
+# Active project context — constraints an agent cannot infer by reading code alone.
+context: |
+  RFP style contract (capability `rfp-style-contract`, OpenSpec change
+  `refactor-rfp-strict`) is IN EFFECT for every change from approval onward: all
+  `crates/qrass/src` code MUST express iteration / state-transition / batch-transform /
+  stage-orchestration as rxrust Observable chains — no `for`/`while`/`loop`, no
+  `if`/`else if` chains, and no multi guard-`return` stacking in a function body (fold to
+  a single-exit `match`); synchronous-vs-async is never a reason to use std chains.
+  Enforced by `tests/style_gate.rs` against `tests/golden/style-baseline.txt`
+  (per-file, only-shrink ratchet) with the only sanctioned imperatives whitelisted in
+  `tests/golden/style-exemptions.md` (four-field sealed-pure-function entries). New
+  proposals/designs/tasks MUST account for this; regressions block the batch.
+
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 # Example:
