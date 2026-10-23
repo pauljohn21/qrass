@@ -41,7 +41,7 @@ eval_if.rs	0	0	2	3
 eval_load_css.rs	0	0	2	18
 eval_meta.rs	0	0	1	15
 eval_mixin.rs	0	0	1	8
-eval_module.rs	1	0	9	9
+eval_module.rs	0	0	9	9
 eval_stmt.rs	0	0	6	4
 lexer.rs	0	0	0	1
 lexer_detail.rs	3	1	7	3
@@ -55,7 +55,7 @@ parser_decl.rs	0	0	0	6
 parser_expr.rs	0	0	0	12
 parser_forward.rs	0	0	0	5
 parser_groups.rs	0	0	0	5
-parser_if.rs	4	1	8	19
+parser_if.rs	3	0	7	16
 parser_if_raw.rs	0	0	3	2
 parser_module.rs	0	0	4	16
 parser_supports.rs	0	0	0	4

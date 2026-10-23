@@ -32,8 +32,8 @@
 
 - [x] 5.1 `lexer_detail.rs` 残余 `while` 扫描 → `scan_map`/`take_while` 组合子（词干分派沿用 LexPunct 派宏）——loops 11→3、return 7→3、letmut 13→7；lex_string/lex_interp_raw 为递归引号状态机，已按 R4 四字段登记豁免
 - [x] 5.2 `parser_expr.rs`/`parser_groups.rs`/`parser_supports.rs`（16 mut 热点）游标消除——expr/groups 逗号收集转 `from_fn` 折叠，Pratt 尾部转 `BinTail` 迭代器；supports 头部转 `Head` 分类 enum、尾部转递归 `supports_tail`、`skip_group` 转闩式 `try_fold`、media 查询转 `Query` 递推状态机（7 loops / 6 else-if / 16 let-mut / 18 return → 0/0/0/4）
-- [ ] 5.3 `parser_at.rs`/`parser_decl.rs`/`parser.rs` 残余清洗；实测不可行者逐个登记豁免清单（sealed 纯函数形态，四字段齐全）
-- [ ] 5.4 style_gate 最终基线冻结为「仅豁免清单命中」+ 0 回归验收
+- [x] 5.3 `parser_at.rs`/`parser_decl.rs`/`parser.rs` 残余清洗；实测不可行者逐个登记豁免清单（sealed 纯函数形态，四字段齐全）——全库残余清扫 pt5→pt16 收官：`eval_module` for→`try_for_each`（loops 1→0）、`parser_if` 纯 peek `looks_like_modern_if`→`scan+find_map` 且 `and`/`or` 前瞻 else-if→元组 match（loops 4→3、else-if 1→0）；不可组合子化的 parser 游标族 `parser_if.rs`（modern_if/clause_value/if_cond）与 `main.rs` `parse_args` 按 R4 四字段登记入 `style-exemptions.md`（连同既有 selector/lexer_detail/color_transform/loader）
+- [x] 5.4 style_gate 最终基线冻结为「仅豁免清单命中」+ 0 回归验收——刷基线后残余 `loops/else-if>0` 恰为 6 个已登记豁免文件，清单外归零；每批 hrx A/B `regress=0 net=0`、e2e 4/4、clippy/wasm32 GREEN
 
 ## 5b. 文件预算守门（与 rust.md「单文件 ≤ 500 行」对齐）
 

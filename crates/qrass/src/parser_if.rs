@@ -48,23 +48,27 @@ impl E<'_> {
     /// before the first top-level `,` means the modern clause syntax;
     /// otherwise it stays the legacy three-argument builtin call.
     pub(crate) fn looks_like_modern_if(&mut self) -> bool {
-        let it = self.it.clone();
-        let mut depth = 0i32;
-        for s in it {
-            match &s.token {
-                Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-                Token::Punct(Punct::RParen | Punct::RBracket) => {
-                    depth -= 1;
-                    if depth <= 0 {
-                        return false; // closed before any clause colon
-                    }
-                }
-                Token::Punct(Punct::Colon | Punct::Semicolon) if depth == 1 => return true,
-                Token::Punct(Punct::Comma) if depth == 1 => return false,
-                _ => {}
-            }
-        }
-        false
+        // peek-only scan (a cloned iterator, `self` untouched): fold the running
+        // paren/bracket depth and take the first decisive token — a top-level
+        // `:`/`;` means modern clauses, a `,` or the call's own closing paren
+        // means the legacy builtin. `find_map` carries the old early `return`.
+        self.it
+            .clone()
+            .scan(0i32, |depth, s| {
+                *depth += match &s.token {
+                    Token::Punct(Punct::LParen | Punct::LBracket) => 1,
+                    Token::Punct(Punct::RParen | Punct::RBracket) => -1,
+                    _ => 0,
+                };
+                Some(match &s.token {
+                    Token::Punct(Punct::RParen | Punct::RBracket) if *depth <= 0 => Some(false),
+                    Token::Punct(Punct::Colon | Punct::Semicolon) if *depth == 1 => Some(true),
+                    Token::Punct(Punct::Comma) if *depth == 1 => Some(false),
+                    _ => None,
+                })
+            })
+            .find_map(std::convert::identity)
+            .unwrap_or(false)
     }
 
     // ─── Clause chain ───────────────────────────────────────────────────────
@@ -186,12 +190,12 @@ impl E<'_> {
                     .p
                     .err_marked(ws_required(&reported), at, vec![self.p.caret(at)]));
             }
-            let op = if self.peek_word("and") {
-                Some(Join::And)
-            } else if self.peek_word("or") {
-                Some(Join::Or)
-            } else {
-                None
+            // `and`/`or` lookahead — `peek_word` is an idempotent peek, so
+            // evaluating both predicates and matching the pair is equivalent
+            let op = match (self.peek_word("and"), self.peek_word("or")) {
+                (true, _) => Some(Join::And),
+                (false, true) => Some(Join::Or),
+                (false, false) => None,
             };
             if let Some(op) = op {
                 // Mixing `and` and `or` needs parentheses (`error/and.hrx`,

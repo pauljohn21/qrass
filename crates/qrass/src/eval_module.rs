@@ -399,9 +399,7 @@ impl EvalState {
             let local_var_names: Vec<String> = program
                 .iter()
                 .filter_map(|s| match s {
-                    crate::ast::Stmt::Variable(v) => {
-                        Some(v.name.trim_start_matches('$').to_string())
-                    }
+                    crate::ast::Stmt::Variable(v) => Some(v.name.trim_start_matches('$').to_string()),
                     _ => None,
                 })
                 .collect();
@@ -418,7 +416,7 @@ impl EvalState {
             let mut functions = Vec::new();
             let mut configurable = Vec::new();
             let mut local_members: Vec<String> = local_vars.iter().map(|(n, _)| n.clone()).collect();
-            for stmt in &program {
+            program.iter().try_for_each(|stmt| -> Ev<()> {
                 match stmt {
                     crate::ast::Stmt::Variable(v) if v.default => {
                         if !crate::module::is_private(&v.name) {
@@ -441,7 +439,8 @@ impl EvalState {
                     }
                     _ => {}
                 }
-            }
+                Ok(())
+            })?;
             Ok(Module {
                 css,
                 vars,
