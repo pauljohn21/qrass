@@ -46,4 +46,4 @@
 - [x] 7.1 src 全库 `dart` 评论署名清洗为 golden-only（102→0，cf5240c，ledger 验证 0/0）
 - [x] 7.2 守卫 return 消除试点：`eval_color_space.rs`（函数级 20 return → 单出口分类 match）
 - [ ] 7.3 `eval_color4.rs`/`builtins/color_transform.rs`/`eval_callable.rs` 等 return top 文件按 ledger 报表批次降量
-- [ ] 7.4 style_gate 新增 return-guard 计数维度（函数体内 ≥2 语句级提前 return 文件级计数），基线只降不升
+- [x] 7.4 style_gate 新增 return-guard 计数维度（函数体内 ≥2 语句级提前 return 文件级计数），基线只降不升

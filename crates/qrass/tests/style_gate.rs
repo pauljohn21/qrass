@@ -16,8 +16,11 @@ use std::{env, fs};
 
 const BASELINE: &str = "tests/golden/style-baseline.txt";
 
-/// One file's imperative-construct counts: (loops, else-if chains, `let mut`).
-type Counts = (u32, u32, u32);
+/// One file's imperative-construct counts: (loops, else-if chains, `let mut`,
+/// guard `return` statements). RFP contract R3/S2: a function's statement-level
+/// early returns are folded to single-exit `match`/`Shape` dispatch, so this
+/// count may only fall.
+type Counts = (u32, u32, u32, u32);
 
 /// Mask a source line to its code part: drop `//` comments and blank out the
 /// contents of string/char literals (doc comments included in the drop).
@@ -77,17 +80,18 @@ fn count_line(line: &str) -> Counts {
         kw("for ") + kw("while ") + kw("loop ") + kw("loop{"),
         kw("else if"),
         kw("let mut "),
+        kw("return "),
     )
 }
 
 fn scan_file(path: &Path) -> Option<Counts> {
     fs::read_to_string(path)
         .ok()
-        .map(|text| text.lines().map(count_line).fold((0, 0, 0), merge))
+        .map(|text| text.lines().map(count_line).fold((0, 0, 0, 0), merge))
 }
 
 const fn merge(a: Counts, b: Counts) -> Counts {
-    (a.0 + b.0, a.1 + b.1, a.2 + b.2)
+    (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
 }
 
 /// Recursively collect `.rs` files (fold over directory listings).
@@ -124,13 +128,13 @@ fn scan_all(root: &Path) -> BTreeMap<String, Counts> {
                 )
             })
         })
-        .filter(|(_, c)| *c != (0, 0, 0))
+        .filter(|(_, c)| *c != (0, 0, 0, 0))
         .collect()
 }
 
 fn render(map: &BTreeMap<String, Counts>) -> String {
     map.iter()
-        .map(|(f, c)| format!("{f}\t{}\t{}\t{}\n", c.0, c.1, c.2))
+        .map(|(f, c)| format!("{f}\t{}\t{}\t{}\t{}\n", c.0, c.1, c.2, c.3))
         .collect()
 }
 
@@ -145,6 +149,7 @@ fn parse_baseline(text: &str) -> BTreeMap<String, Counts> {
                     cols.next()?.parse().ok()?,
                     cols.next()?.parse().ok()?,
                     cols.next()?.parse().ok()?,
+                    cols.next()?.parse().ok().unwrap_or(0),
                 ),
             ))
         })
@@ -156,7 +161,7 @@ fn style_gate_counts_only_decrease() {
     let current = scan_all(Path::new("src"));
     let baseline_path = Path::new(BASELINE);
     if env::var("QRASS_STYLE_GATE_BLESS").is_ok_and(|v| v == "1") {
-        fs::write(baseline_path, format!("# style baseline: file\\tloops\\telseif\\tletmut\n{}", render(&current)))
+        fs::write(baseline_path, format!("# style baseline: file\\tloops\\telseif\\tletmut\\treturns\n{}", render(&current)))
             .expect("bless baseline");
         return;
     }
@@ -168,9 +173,9 @@ fn style_gate_counts_only_decrease() {
         .filter(|(f, c)| {
             baseline
                 .get(*f)
-                .is_none_or(|b| **c > *b)
+                .is_none_or(|b| c.0 > b.0 || c.1 > b.1 || c.2 > b.2 || c.3 > b.3)
         })
-        .map(|(f, c)| (f, *c, baseline.get(f).copied().unwrap_or((0, 0, 0))))
+        .map(|(f, c)| (f, *c, baseline.get(f).copied().unwrap_or((0, 0, 0, 0))))
         .collect();
     assert!(
         regressions.is_empty(),

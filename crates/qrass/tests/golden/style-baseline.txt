@@ -1,66 +1,77 @@
-# style baseline: file\tloops\telseif\tletmut
-branch_fanout.rs	5	0	6
-builtins/color.rs	0	0	4
-builtins/color_edit_check.rs	0	0	1
-builtins/color_gamut.rs	0	0	1
-builtins/color_legacy.rs	0	0	1
-builtins/color_ops.rs	0	0	3
-builtins/color_same.rs	0	0	1
-builtins/color_transform.rs	1	1	2
-builtins/list.rs	0	0	4
-builtins/math.rs	1	0	1
-builtins/math_trig.rs	0	0	1
-builtins/mod.rs	0	0	2
-builtins/selector.rs	6	0	6
-builtins/selector_ops.rs	1	0	1
-builtins/string.rs	0	3	1
-color4.rs	0	1	1
-color4_convert.rs	0	2	3
-diag.rs	0	0	1
-error.rs	1	0	1
-eval.rs	1	0	2
-eval_bind.rs	0	0	2
-eval_callable.rs	2	0	0
-eval_callable_call.rs	1	0	1
-eval_color4.rs	0	0	3
-eval_color_space.rs	0	1	2
-eval_color_space_symbolic.rs	1	0	1
-eval_config.rs	0	0	1
-eval_control.rs	9	0	4
-eval_expr.rs	0	1	0
-eval_extend.rs	17	0	11
-eval_function.rs	6	0	2
-eval_if.rs	0	0	2
-eval_load_css.rs	1	0	3
-eval_meta.rs	0	0	1
-eval_mixin.rs	7	3	6
-eval_module.rs	8	0	10
-eval_stmt.rs	7	0	7
-lexer.rs	4	1	1
-lexer_detail.rs	11	3	13
-loader.rs	2	0	7
-main.rs	1	0	5
-parser.rs	3	1	7
-parser_args.rs	2	0	2
-parser_at.rs	2	0	4
-parser_decl.rs	1	0	0
-parser_expr.rs	3	0	3
-parser_forward.rs	4	0	4
-parser_groups.rs	3	0	3
-parser_if.rs	4	1	8
-parser_if_raw.rs	7	0	14
-parser_module.rs	7	0	9
-parser_supports.rs	7	6	16
-parser_text.rs	0	0	1
-pipeline.rs	0	0	4
-selector_ast.rs	10	1	1
-selector_attr.rs	6	0	6
-selector_extend.rs	12	0	7
-selector_extend_pseudo.rs	0	0	2
-selector_extend_weave.rs	0	0	3
-selector_parse.rs	9	2	13
-selector_super_simple.rs	0	0	1
-selector_unify.rs	0	0	4
-selector_unify_complex.rs	0	0	7
-span.rs	1	0	2
-value.rs	0	4	0
+# style baseline: file\tloops\telseif\tletmut\treturns
+branch_fanout.rs	5	0	6	0
+builtins/color.rs	0	0	4	16
+builtins/color_edit_check.rs	0	0	1	4
+builtins/color_gamut.rs	0	0	1	10
+builtins/color_legacy.rs	0	0	1	20
+builtins/color_mix.rs	0	0	0	11
+builtins/color_ops.rs	0	0	3	12
+builtins/color_same.rs	0	0	1	0
+builtins/color_transform.rs	1	1	2	13
+builtins/list.rs	0	0	4	8
+builtins/map.rs	0	0	0	8
+builtins/math.rs	1	0	1	1
+builtins/math_trig.rs	0	0	1	8
+builtins/mod.rs	0	0	2	8
+builtins/selector.rs	6	0	6	4
+builtins/selector_ops.rs	1	0	1	2
+builtins/string.rs	0	3	1	11
+color4.rs	0	1	1	2
+color4_convert.rs	0	2	3	3
+color_css.rs	0	0	0	7
+css.rs	0	0	0	6
+diag.rs	0	0	1	1
+env.rs	0	0	0	1
+error.rs	1	0	1	1
+eval.rs	1	0	2	2
+eval_arith.rs	0	0	0	7
+eval_bind.rs	0	0	2	0
+eval_callable.rs	2	0	0	27
+eval_callable_call.rs	1	0	1	3
+eval_color4.rs	0	0	3	18
+eval_color4_check.rs	0	0	0	16
+eval_color_comma.rs	0	0	0	3
+eval_color_space.rs	0	1	2	5
+eval_color_space_symbolic.rs	1	0	1	5
+eval_config.rs	0	0	1	2
+eval_control.rs	9	0	4	6
+eval_expr.rs	0	1	0	6
+eval_extend.rs	17	0	11	2
+eval_function.rs	6	0	2	19
+eval_if.rs	0	0	2	3
+eval_load_css.rs	1	0	3	19
+eval_meta.rs	0	0	1	15
+eval_mixin.rs	7	3	6	9
+eval_module.rs	8	0	10	9
+eval_stmt.rs	7	0	7	10
+lexer.rs	4	1	1	3
+lexer_detail.rs	11	3	13	7
+loader.rs	2	0	7	9
+main.rs	1	0	5	5
+module_bus.rs	0	0	0	1
+parser.rs	3	1	7	8
+parser_args.rs	2	0	2	3
+parser_at.rs	2	0	4	7
+parser_decl.rs	1	0	0	9
+parser_expr.rs	3	0	3	12
+parser_forward.rs	4	0	4	15
+parser_groups.rs	3	0	3	5
+parser_if.rs	4	1	8	19
+parser_if_raw.rs	7	0	14	4
+parser_module.rs	7	0	9	20
+parser_supports.rs	7	6	16	18
+parser_text.rs	0	0	1	0
+pipeline.rs	0	0	4	1
+selector_ast.rs	10	1	1	0
+selector_attr.rs	6	0	6	6
+selector_extend.rs	12	0	7	3
+selector_extend_pseudo.rs	0	0	2	8
+selector_extend_weave.rs	0	0	3	7
+selector_parse.rs	9	2	13	14
+selector_super.rs	0	0	0	14
+selector_super_simple.rs	0	0	1	16
+selector_unify.rs	0	0	4	11
+selector_unify_complex.rs	0	0	7	16
+span.rs	1	0	2	0
+value.rs	0	4	0	1
+value_number.rs	0	0	0	9
