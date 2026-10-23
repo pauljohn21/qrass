@@ -25,11 +25,13 @@ impl EvalState {
     /// component that does not parse as a channel value, leaving the existing
     /// plain-CSS passthrough untouched.
     pub(crate) fn eval_color4_literal(&mut self, call: &FunctionCall) -> Ev<Option<SassValue>> {
-        if call.namespace.is_some() {
-            return Ok(None);
-        }
+        // Only the `color()` wrapper and registered bare space names in the
+        // global namespace are literal candidates; anything else keeps the
+        // plain-CSS passthrough (one eligibility guard, contract R3/S2).
         let wrapper = call.name == "color";
-        if !wrapper && crate::color4::lookup(&call.name).is_none() {
+        if call.namespace.is_some()
+            || !(wrapper || crate::color4::lookup(&call.name).is_some())
+        {
             return Ok(None);
         }
         // The four bare perceptual spaces and the `color()` wrapper take exactly
