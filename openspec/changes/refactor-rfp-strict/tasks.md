@@ -31,7 +31,7 @@
 ## 5. M4 S4 parser/lexer 游标组合子化
 
 - [x] 5.1 `lexer_detail.rs` 残余 `while` 扫描 → `scan_map`/`take_while` 组合子（词干分派沿用 LexPunct 派宏）——loops 11→3、return 7→3、letmut 13→7；lex_string/lex_interp_raw 为递归引号状态机，已按 R4 四字段登记豁免
-- [ ] 5.2 `parser_expr.rs`/`parser_groups.rs`/`parser_supports.rs`（16 mut 热点）游标消除
+- [x] 5.2 `parser_expr.rs`/`parser_groups.rs`/`parser_supports.rs`（16 mut 热点）游标消除——expr/groups 逗号收集转 `from_fn` 折叠，Pratt 尾部转 `BinTail` 迭代器；supports 头部转 `Head` 分类 enum、尾部转递归 `supports_tail`、`skip_group` 转闩式 `try_fold`、media 查询转 `Query` 递推状态机（7 loops / 6 else-if / 16 let-mut / 18 return → 0/0/0/4）
 - [ ] 5.3 `parser_at.rs`/`parser_decl.rs`/`parser.rs` 残余清洗；实测不可行者逐个登记豁免清单（sealed 纯函数形态，四字段齐全）
 - [ ] 5.4 style_gate 最终基线冻结为「仅豁免清单命中」+ 0 回归验收
 
