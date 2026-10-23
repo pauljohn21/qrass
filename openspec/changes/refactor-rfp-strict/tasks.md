@@ -19,7 +19,7 @@
 
 - [x] 3.1 `eval_bind.rs`/`eval_meta.rs` 残余循环（bind_ns_vars、config 视图、mixin-exists 族）链式化
 - [x] 3.2 `builtins/color_*.rs` + `eval_color*.rs` 循环消除（校验矩阵已多为链式，清 for 收集残余）
-- [ ] 3.3 `eval_control.rs`（12 处）清洗
+- [x] 3.3 `eval_control.rs`（12 处）清洗
 - [ ] 3.4 style_gate S2 文件命中归零 + 全套 0 回归验收
 
 ## 4. M3 S3 extend 引擎清洗

@@ -24,21 +24,31 @@ impl EvalState {
         decls: &mut Vec<crate::css::Item>,
         out: &mut Vec<String>,
     ) -> Ev<()> {
-        for clause in &i.clauses {
-            let take = match &clause.cond {
-                None => true,
-                Some(cond) => self.eval_expr(cond)?.is_truthy(),
-            };
-            if take {
+        // the first clause whose condition is truthy (or the unconditional
+        // `@else`) wins; conditions after the hit stay unevaluated, per the
+        // lazy `@if` chain the goldens pin (`if_exists/short_circuit` families)
+        let hit = i
+            .clauses
+            .iter()
+            .enumerate()
+            .try_fold(None::<usize>, |acc, (idx, c)| match (&acc, &c.cond) {
+                (Some(_), _) => Ok(acc),
+                (None, None) => Ok(Some(idx)),
+                (None, Some(cond)) => self.eval_expr(cond).map(|v| v.is_truthy().then_some(idx)),
+            })?;
+        match hit {
+            Some(idx) => {
+                let clause = &i.clauses[idx];
                 self.env.enter();
-                for s in &clause.body {
-                    self.collect_stmt(s, sel_ctx, decls, out)?;
-                }
+                clause
+                    .body
+                    .iter()
+                    .try_fold((), |(), s| self.collect_stmt(s, sel_ctx, decls, out))?;
                 self.env.leave();
-                return Ok(());
+                Ok(())
             }
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// `@each $a, $b in list`: iterate a list (or map as key/value pairs),
@@ -51,17 +61,19 @@ impl EvalState {
         out: &mut Vec<String>,
     ) -> Ev<()> {
         let value = self.eval_expr(&e.list)?;
-        for binding in each_elements(&value, e.vars.len()) {
-            self.env.enter();
-            for (var, val) in e.vars.iter().zip(binding) {
-                self.env.define(var, val, AssignFlags::default());
-            }
-            for s in &e.body {
-                self.collect_stmt(s, sel_ctx, decls, out)?;
-            }
-            self.env.leave();
-        }
-        Ok(())
+        each_elements(&value, e.vars.len())
+            .into_iter()
+            .try_fold((), |(), binding| {
+                self.env.enter();
+                e.vars.iter().zip(binding).for_each(|(var, val)| {
+                    self.env.define(var, val, AssignFlags::default());
+                });
+                e.body
+                    .iter()
+                    .try_fold((), |(), s| self.collect_stmt(s, sel_ctx, decls, out))?;
+                self.env.leave();
+                Ok(())
+            })
     }
 
     /// `@for $i from <a> to|through <b>`: step by ±1 over the integer range.
@@ -80,8 +92,13 @@ impl EvalState {
             to + if from <= to { -1 } else { 1 }
         };
         let step = if from <= last { 1 } else { -1 };
-        let mut i = from;
-        while (step > 0 && i <= last) || (step < 0 && i >= last) {
+        // the ±1 walk is the closed range read in the fitting direction
+        let mut range: Box<dyn Iterator<Item = i64>> = if step > 0 {
+            Box::new(from..=last)
+        } else {
+            Box::new((last..=from).rev())
+        };
+        range.try_fold((), |(), i| {
             self.env.enter();
             self.env.define(
                 &f.var,
@@ -91,13 +108,12 @@ impl EvalState {
                 },
                 AssignFlags::default(),
             );
-            for s in &f.body {
-                self.collect_stmt(s, sel_ctx, decls, out)?;
-            }
+            f.body
+                .iter()
+                .try_fold((), |(), s| self.collect_stmt(s, sel_ctx, decls, out))?;
             self.env.leave();
-            i += step;
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     /// `@while cond { … }`: repeat while the condition stays truthy. The whole
@@ -110,20 +126,29 @@ impl EvalState {
         decls: &mut Vec<crate::css::Item>,
         out: &mut Vec<String>,
     ) -> Ev<()> {
-        let mut guard = 0u32;
         self.env.enter();
-        while self.eval_expr(&w.cond)?.is_truthy() {
-            guard += 1;
-            if guard > WHILE_LIMIT {
-                self.env.leave();
-                return Err(SassError::new(
-                    ErrorKind::Eval,
-                    "@while loop exceeded the maximum number of iterations",
-                ));
-            }
-            for s in &w.body {
-                self.collect_stmt(s, sel_ctx, decls, out)?;
-            }
+        // the re-tested condition drives a latched fold (the whole loop shares
+        // one scope so a counter updated in the body persists across iterations);
+        // the bounded range carries the iteration cap of the old guard counter
+        let alive = (0..=WHILE_LIMIT)
+            .try_fold(true, |alive, _| -> Ev<bool> {
+                if !alive {
+                    return Ok(false);
+                }
+                if !self.eval_expr(&w.cond)?.is_truthy() {
+                    return Ok(false);
+                }
+                w.body
+                    .iter()
+                    .try_fold((), |(), s| self.collect_stmt(s, sel_ctx, decls, out))?;
+                Ok(true)
+            })?;
+        if alive {
+            self.env.leave();
+            return Err(SassError::new(
+                ErrorKind::Eval,
+                "@while loop exceeded the maximum number of iterations",
+            ));
         }
         self.env.leave();
         Ok(())
