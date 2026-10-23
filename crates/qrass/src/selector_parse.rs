@@ -89,6 +89,9 @@ pub fn parse_complex_str(src: &str) -> Result<Complex, SelParseError> {
     Ok(complex)
 }
 
+/// The `(components, trailing)` pair one complex link produces.
+type ComplexLink = (Vec<Component>, Vec<Combinator>);
+
 struct SelParser {
     chars: Vec<char>,
     pos: usize,
@@ -100,75 +103,110 @@ impl SelParser {
     }
 
     fn skip_ws(&mut self) {
-        while self.peek().is_some_and(char::is_whitespace) {
-            self.pos += 1;
-        }
+        self.pos += (self.pos..self.chars.len())
+            .take_while(|&k| self.chars[k].is_whitespace())
+            .count();
     }
 
     fn parse_list(&mut self) -> Result<SelectorList, SelParseError> {
-        let mut complexes = Vec::new();
-        loop {
-            self.skip_ws();
-            complexes.push(self.parse_complex()?);
-            self.skip_ws();
-            match self.peek() {
-                Some(',') => {
-                    self.pos += 1;
-                }
-                Some(_) => return Err(SelParseError::Truncated),
-                None => break,
+        self.skip_ws();
+        let head = self.parse_complex()?;
+        self.skip_ws();
+        // `,` continues the list; anything but end-of-input is trailing junk
+        let more = match self.peek() {
+            Some(',') => {
+                self.pos += 1;
+                Some(true)
             }
+            Some(_) => Some(false),
+            None => None,
+        };
+        match more {
+            Some(true) => Ok(SelectorList::new(
+                std::iter::once(head)
+                    .chain(self.parse_list()?.complexes)
+                    .collect(),
+            )),
+            Some(false) => Err(SelParseError::Truncated),
+            None => Ok(SelectorList::new(vec![head])),
         }
-        Ok(SelectorList::new(complexes))
     }
 
     fn parse_complex(&mut self) -> Result<Complex, SelParseError> {
-        let mut components: Vec<Component> = Vec::new();
-        let mut trailing: Vec<Combinator> = Vec::new();
-        loop {
-            // Collect the full run of combinators at the cursor. A valid selector
-            // has at most one; the bogus goldens stack them (`.c ~ ~ .d`, `> + .c`).
-            let mut chain: Vec<Combinator> = Vec::new();
-            while let Some(combinator) = self.parse_combinator() {
-                chain.push(combinator);
-            }
-            // No compound after the chain: the combinators dangle (`a >`, or a lone
-            // `+`). Keep them verbatim rather than erroring or silently downgrading.
-            if !is_compound_start(self.peek().unwrap_or(' ')) {
-                trailing = chain;
-                break;
-            }
-            let compound = self.parse_compound()?;
-            let combinator = if components.is_empty() {
-                // A leading combinator (`> c`) is retained on the first component so
-                // the superselector engine can reject the bogus chain; a descendant
-                // opening is meaningless and stays `None`.
-                chain.first().copied()
-            } else {
-                // No explicit combinator between two compounds is a descendant.
-                Some(chain.first().copied().unwrap_or(Combinator::Descendant))
-            };
-            let extras: Vec<Combinator> = chain.iter().skip(1).copied().collect();
-            components.push(Component {
-                combinator,
-                extras,
-                compound,
-            });
-            // Continue only when another compound or combinator follows; a comma or
-            // the end terminates the complex (any stray junk is caught by the list).
-            self.skip_ws();
-            if matches!(self.peek(), Some('>') | Some('+') | Some('~')) || self.peek().is_some_and(is_compound_start) {
-                continue;
-            }
-            break;
+        let (components, trailing) = self.complex_link(true)?;
+        match components.is_empty() && trailing.is_empty() {
+            true => Err(SelParseError::Truncated),
+            false => Ok(Complex {
+                components,
+                trailing,
+            }),
         }
-        if components.is_empty() && trailing.is_empty() {
-            return Err(SelParseError::Truncated);
+    }
+
+    /// One link of the chain: the combinator run at the cursor, then either the
+    /// dangling tail or a compound plus the rest of the complex.
+    fn complex_link(&mut self, first: bool) -> Result<ComplexLink, SelParseError> {
+        // Collect the full run of combinators at the cursor. A valid selector
+        // has at most one; the bogus goldens stack them (`.c ~ ~ .d`, `> + .c`).
+        let chain: Vec<Combinator> = std::iter::from_fn(|| self.parse_combinator()).collect();
+        // No compound after the chain: the combinators dangle (`a >`, or a lone
+        // `+`). Keep them verbatim rather than erroring or silently downgrading.
+        match is_compound_start(self.peek().unwrap_or(' ')) {
+            false => Ok((Vec::new(), chain)),
+            true => {
+                let compound = self.parse_compound()?;
+                let combinator = match (first, chain.first().copied()) {
+                    // A leading combinator (`> c`) is retained on the first
+                    // component so the superselector engine can reject the bogus
+                    // chain; a descendant opening is meaningless and stays `None`.
+                    (true, leading) => leading,
+                    // No explicit combinator between two compounds is a descendant.
+                    (false, leading) => Some(leading.unwrap_or(Combinator::Descendant)),
+                };
+                let extras: Vec<Combinator> = chain.iter().skip(1).copied().collect();
+                let component = Component {
+                    combinator,
+                    extras,
+                    compound,
+                };
+                // Continue only when another compound or combinator follows; a comma or
+                // the end terminates the complex (any stray junk is caught by the list).
+                self.skip_ws();
+                let continues = matches!(self.peek(), Some('>') | Some('+') | Some('~'))
+                    || self.peek().is_some_and(is_compound_start);
+                match continues {
+                    false => Ok((vec![component], Vec::new())),
+                    true => {
+                        let (mut rest, trailing) = self.complex_link(false)?;
+                        rest.insert(0, component);
+                        Ok((rest, trailing))
+                    }
+                }
+            }
         }
-        Ok(Complex {
-            components,
-            trailing,
-        })
+    }
+
+    /// One simple selector at the cursor; `None` ends the compound.
+    fn parse_simple(&mut self) -> Option<Result<Simple, SelParseError>> {
+        match self.peek() {
+            Some('.') => {
+                self.pos += 1;
+                Some(self.parse_name().map(Simple::Class))
+            }
+            Some('#') => {
+                self.pos += 1;
+                Some(self.parse_name().map(Simple::Id))
+            }
+            Some('%') => {
+                self.pos += 1;
+                Some(self.parse_name().map(Simple::Placeholder))
+            }
+            Some('[') => Some(self.parse_attribute()),
+            Some(':') => Some(self.parse_pseudo()),
+            Some('&') => Some(Err(SelParseError::Parent)),
+            Some(ch) if ch == '*' || ch == '|' || is_ident_start(ch) => Some(self.parse_qualified()),
+            _ => None,
+        }
     }
 
     /// Skip whitespace and consume an explicit combinator symbol if present.
@@ -190,34 +228,13 @@ impl SelParser {
     }
 
     fn parse_compound(&mut self) -> Result<Compound, SelParseError> {
-        let mut simples = Vec::new();
-        loop {
-            match self.peek() {
-                Some('.') => {
-                    self.pos += 1;
-                    simples.push(Simple::Class(self.parse_name()?));
-                }
-                Some('#') => {
-                    self.pos += 1;
-                    simples.push(Simple::Id(self.parse_name()?));
-                }
-                Some('%') => {
-                    self.pos += 1;
-                    simples.push(Simple::Placeholder(self.parse_name()?));
-                }
-                Some('[') => simples.push(self.parse_attribute()?),
-                Some(':') => simples.push(self.parse_pseudo()?),
-                Some('&') => return Err(SelParseError::Parent),
-                Some(ch) if ch == '*' || ch == '|' || is_ident_start(ch) => {
-                    simples.push(self.parse_qualified()?);
-                }
-                _ => break,
-            }
+        // collect until the cursor leaves the simple-selector grammar; the first
+        // error short-circuits exactly like the old `?` arms
+        let simples = std::iter::from_fn(|| self.parse_simple()).collect::<Result<Vec<Simple>, _>>()?;
+        match simples.is_empty() {
+            true => Err(SelParseError::Truncated),
+            false => Ok(Compound::new(simples)),
         }
-        if simples.is_empty() {
-            return Err(SelParseError::Truncated);
-        }
-        Ok(Compound::new(simples))
     }
 
     /// A namespace-qualified type/universal selector, or a bare one. `*`, `|`,
@@ -268,57 +285,57 @@ impl SelParser {
         // self.peek() == '['
         self.pos += 1;
         let start = self.pos;
+        // the closing `]` is where the depth, opened by that bracket, returns to zero
         let mut depth = 1i32;
-        while let Some(ch) = self.peek() {
-            self.pos += 1;
-            match ch {
-                '[' => depth += 1,
-                ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
+        let closed_at = self.chars[start..]
+            .iter()
+            .map(|&ch| {
+                depth += match ch {
+                    '[' => 1,
+                    ']' => -1,
+                    _ => 0,
+                };
+                depth
+            })
+            .position(|d| d == 0)
+            .map(|off| start + off);
+        match closed_at {
+            None => Err(SelParseError::Truncated),
+            Some(i) => {
+                self.pos = i + 1;
+                let inner: String = self.chars[start..i].iter().collect();
+                Ok(Simple::Attribute(crate::selector_attr::parse_attribute(
+                    &inner,
+                )))
             }
         }
-        if depth != 0 {
-            return Err(SelParseError::Truncated);
-        }
-        // self.pos is just past the closing ']'; inner excludes both brackets.
-        let inner: String = self.chars[start..self.pos - 1].iter().collect();
-        Ok(Simple::Attribute(crate::selector_attr::parse_attribute(
-            &inner,
-        )))
     }
 
     fn parse_pseudo(&mut self) -> Result<Simple, SelParseError> {
         self.pos += 1; // first ':'
         let double = self.peek() == Some(':');
-        if double {
-            self.pos += 1;
-        }
+        self.pos += usize::from(double);
         let name = self.parse_name()?;
         let arg = if self.peek() == Some('(') {
             self.parse_pseudo_arg(&name)?
         } else {
             PseudoArg::None
         };
-        if double {
-            Ok(Simple::PseudoElement {
+        // a single-colon legacy spelling is still an element for the goldens
+        let legacy = LEGACY_PSEUDO_ELEMENTS.contains(&name.as_str());
+        Ok(match (double, legacy) {
+            (true, _) => Simple::PseudoElement {
                 name,
                 arg,
                 legacy_colon: false,
-            })
-        } else if LEGACY_PSEUDO_ELEMENTS.contains(&name.as_str()) {
-            Ok(Simple::PseudoElement {
+            },
+            (false, true) => Simple::PseudoElement {
                 name,
                 arg,
                 legacy_colon: true,
-            })
-        } else {
-            Ok(Simple::PseudoClass { name, arg })
-        }
+            },
+            (false, false) => Simple::PseudoClass { name, arg },
+        })
     }
 
     fn parse_pseudo_arg(&mut self, name: &str) -> Result<PseudoArg, SelParseError> {
@@ -354,49 +371,53 @@ impl SelParser {
     /// confuse the depth counter.
     fn take_balanced(&mut self) -> Result<String, SelParseError> {
         self.pos += 1; // '('
+        let start = self.pos;
+        // the group ends where its running depth returns to zero
         let mut depth = 1i32;
-        let mut out = String::new();
-        while let Some(ch) = self.peek() {
-            self.pos += 1;
-            match ch {
-                '(' | '[' => {
-                    depth += 1;
-                    out.push(ch);
-                }
-                ')' | ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(out);
-                    }
-                    out.push(ch);
-                }
-                _ => out.push(ch),
+        let closed_at = self.chars[start..]
+            .iter()
+            .map(|&ch| {
+                depth += match ch {
+                    '(' | '[' => 1,
+                    ')' | ']' => -1,
+                    _ => 0,
+                };
+                depth
+            })
+            .position(|d| d == 0)
+            .map(|off| start + off);
+        match closed_at {
+            Some(i) => {
+                self.pos = i + 1;
+                Ok(self.chars[start..i].iter().collect())
             }
+            None => Err(SelParseError::Truncated),
         }
-        Err(SelParseError::Truncated)
     }
 
     fn parse_name(&mut self) -> Result<String, SelParseError> {
-        let mut out = String::new();
-        while let Some(ch) = self.peek() {
-            if ch == '\\' {
-                self.pos += 1;
-                out.push('\\');
-                if let Some(esc) = self.peek() {
-                    out.push(esc);
-                    self.pos += 1;
-                }
-            } else if is_ident_char(ch) {
-                out.push(ch);
-                self.pos += 1;
-            } else {
-                break;
-            }
+        let (end, name) = self.name_run(self.pos);
+        self.pos = end;
+        match name.is_empty() {
+            true => Err(SelParseError::Truncated),
+            false => Ok(name),
         }
-        if out.is_empty() {
-            return Err(SelParseError::Truncated);
-        }
-        Ok(out)
+    }
+
+    /// The identifier run at `from`: ident chars plus `\x` escapes, whose
+    /// escaped char is taken whatever it is (so `a\ b` keeps the space).
+    fn name_run(&self, from: usize) -> (usize, String) {
+        let mut escaped = false;
+        let end = from
+            + self.chars[from..]
+                .iter()
+                .take_while(|&&ch| {
+                    let take = escaped || is_ident_char(ch);
+                    escaped = ch == '\\';
+                    take
+                })
+                .count();
+        (end, self.chars[from..end].iter().collect())
     }
 }
 
@@ -405,31 +426,29 @@ impl SelParser {
 /// the first such window and the selector source after it.
 fn split_nth(raw: &str) -> Option<(String, String)> {
     let chars: Vec<char> = raw.chars().collect();
+    // pair each index with the depth in front of it, then cut at the first
+    // depth-0 ` of ` window
     let mut depth = 0i32;
-    let mut index = 0;
-    while index < chars.len() {
-        let ch = chars[index];
-        match ch {
-            '(' | '[' => {
-                depth += 1;
-                index += 1;
-            }
-            ')' | ']' => {
-                depth -= 1;
-                index += 1;
-            }
-            ' ' => {
-                if depth == 0 && is_of_window(&chars, index) {
-                    let anbn: String = chars[..index].iter().collect();
-                    let of: String = chars[index + 4..].iter().collect();
-                    return Some((anbn, of));
-                }
-                index += 1;
-            }
-            _ => index += 1,
-        }
-    }
-    None
+    let at = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &ch)| {
+            let level = depth;
+            depth += match ch {
+                '(' | '[' => 1,
+                ')' | ']' => -1,
+                _ => 0,
+            };
+            (i, level)
+        })
+        .find(|(i, level)| *level == 0 && is_of_window(&chars, *i))
+        .map(|(i, _)| i);
+    at.map(|index| {
+        (
+            chars[..index].iter().collect(),
+            chars[index + 4..].iter().collect(),
+        )
+    })
 }
 
 /// The canonical `<an+b>` text: internal whitespace is dropped (`2n + 1` ->
@@ -441,8 +460,8 @@ fn canonical_anbn(raw: &str) -> String {
 /// True when `chars[index..index+4]` is exactly the four-char window `" of "`
 /// (whitespace-delimited, case-insensitive on the letters).
 fn is_of_window(chars: &[char], index: usize) -> bool {
-    index + 4 <= chars.len()
-        && chars[index] == ' '
+    chars.get(index) == Some(&' ')
+        && index + 4 <= chars.len()
         && chars[index + 1].eq_ignore_ascii_case(&'o')
         && chars[index + 2].eq_ignore_ascii_case(&'f')
         && chars[index + 3] == ' '

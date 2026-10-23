@@ -64,7 +64,7 @@ pipeline.rs	0	0	4	1
 selector_attr.rs	6	0	6	6
 selector_extend.rs	0	0	1	0
 selector_extend_weave.rs	0	0	2	0
-selector_parse.rs	9	2	13	14
+selector_parse.rs	0	0	6	6
 selector_super.rs	0	0	0	14
 selector_super_simple.rs	0	0	1	16
 selector_unify.rs	0	0	4	11
