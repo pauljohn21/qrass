@@ -215,24 +215,23 @@ impl EvalState {
         let _guard = span.enter();
         let started = StopWatch::start();
         let base = parent_dir(&self.name);
-        let mut units: Vec<Unit> = Vec::new();
-        for stmt in program {
-            let url = match stmt {
-                Stmt::Use(u) => &u.url,
-                Stmt::Forward(f) => &f.url,
-                _ => continue,
-            };
+        let units: Vec<Unit> = program
+            .iter()
+            .filter_map(|stmt| match stmt {
+                Stmt::Use(u) => Some(&u.url),
+                Stmt::Forward(f) => Some(&f.url),
+                _ => None,
+            })
             // Built-in modules (`sass:math`, …) have no source file to acquire.
-            if url.starts_with("sass:") {
-                continue;
-            }
-            units.push(Unit {
-                idx: units.len(),
+            .filter(|url| !url.starts_with("sass:"))
+            .enumerate()
+            .map(|(idx, url)| Unit {
+                idx,
                 url: url.to_string(),
                 base: base.clone(),
                 resolved: None,
-            });
-        }
+            })
+            .collect();
         span.record("branches", units.len());
         if units.is_empty() {
             span.record("skipped", 0usize);
@@ -247,48 +246,61 @@ impl EvalState {
         // arena, so it sits between the two `Local` stages rather than inside a
         // stream closure. Resolutions are parked locally, not in `prepared`: the
         // cache holds whole acquisitions only.
-        let mut ready: Vec<Unit> = Vec::new();
-        let mut skipped = 0usize;
-        let mut failed: Vec<(usize, SassError)> = Vec::new();
-        for (idx, outcome) in fan_out::<Resolved>("resolve", units, paths.clone(), resolve_unit) {
-            match outcome {
-                Ok(resolved) => {
-                    let canonical = resolved.path.display().to_string();
-                    // Already a known singleton (a diamond's second parent joins
-                    // the multicast instead of loading) or on the cycle stack:
-                    // `load_module` returns before reading anything, so do not pay
-                    // for a read it would discard.
-                    if self.bus.is_open(&canonical) || self.stack.contains(&canonical) {
-                        skipped += 1;
-                        continue;
+        let (ready, skipped, failed) = fan_out::<Resolved>(
+            "resolve",
+            units,
+            paths.clone(),
+            resolve_unit,
+        )
+        .into_iter()
+        .fold(
+            (Vec::new(), 0usize, Vec::new()),
+            |(mut ready, skipped, mut failed), (idx, outcome)| {
+                match outcome {
+                    Ok(resolved) => {
+                        let canonical = resolved.path.display().to_string();
+                        // Already a known singleton (a diamond's second parent joins
+                        // the multicast instead of loading) or on the cycle stack:
+                        // `load_module` returns before reading anything, so do not pay
+                        // for a read it would discard.
+                        let joins_existing =
+                            self.bus.is_open(&canonical) || self.stack.contains(&canonical);
+                        match joins_existing {
+                            true => (ready, skipped + 1, failed),
+                            false => {
+                                ready.push(Unit {
+                                    resolved: Some(resolved),
+                                    ..all[idx].clone()
+                                });
+                                (ready, skipped, failed)
+                            }
+                        }
                     }
-                    ready.push(Unit {
-                        resolved: Some(resolved),
-                        ..all[idx].clone()
-                    });
+                    // Keep the failure as data: `load_module` re-emits it at its own
+                    // statement position instead of probing the file system again.
+                    Err(err) => {
+                        failed.push((idx, err));
+                        (ready, skipped, failed)
+                    }
                 }
-                // Keep the failure as data: `load_module` re-emits it at its own
-                // statement position instead of probing the file system again.
-                Err(err) => failed.push((idx, err)),
-            }
-        }
+            },
+        );
         span.record("skipped", skipped);
 
-        // Stage B — read + lex + parse the surviving branches.
-        let mut acquired: Vec<(usize, Result<Prepared, SassError>)> = Vec::new();
-        for (idx, outcome) in fan_out::<Prepared>("acquire", ready, paths.clone(), acquire_unit) {
-            acquired.push((idx, outcome));
-        }
-        for (idx, err) in failed {
-            acquired.push((idx, Err(err)));
-        }
+        // Stage B — read + lex + parse the surviving branches, then re-join the
+        // failures kept as data in stage A.
+        let acquired: Vec<(usize, Result<Prepared, SassError>)> =
+            fan_out::<Prepared>("acquire", ready, paths.clone(), acquire_unit)
+                .into_iter()
+                .chain(failed.into_iter().map(|(idx, err)| (idx, Err(err))))
+                .collect();
         // Commit in one pass: every `Result` is already in hand, so the map is
         // written once, after both `Local` stages have finished.
-        for (idx, outcome) in acquired {
+        acquired.into_iter().for_each(|(idx, outcome)| {
             let unit = &all[idx];
             self.prepared
                 .insert(branch_key(&unit.base, &unit.url), outcome);
-        }
+        });
         span.record("cached", self.prepared.len());
         span.record("elapsed_ms", tracing::field::debug(started.elapsed_ms()));
     }

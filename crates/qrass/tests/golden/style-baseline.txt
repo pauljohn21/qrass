@@ -1,5 +1,5 @@
 # style baseline: file\tloops\telseif\tletmut\treturns
-branch_fanout.rs	5	0	6	0
+branch_fanout.rs	0	0	1	0
 builtins/color.rs	0	0	4	16
 builtins/color_edit_check.rs	0	0	1	4
 builtins/color_gamut.rs	0	0	1	10
