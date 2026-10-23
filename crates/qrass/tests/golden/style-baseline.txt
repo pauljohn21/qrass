@@ -48,10 +48,10 @@ lexer_detail.rs	3	1	7	3
 loader.rs	2	0	7	9
 main.rs	1	0	5	5
 module_bus.rs	0	0	0	1
-parser.rs	3	1	7	8
+parser.rs	0	0	3	8
 parser_args.rs	2	0	2	3
-parser_at.rs	2	0	4	7
-parser_decl.rs	1	0	0	9
+parser_at.rs	0	0	1	5
+parser_decl.rs	0	0	0	6
 parser_expr.rs	0	0	0	12
 parser_forward.rs	4	0	4	15
 parser_groups.rs	0	0	0	5

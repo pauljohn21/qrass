@@ -31,40 +31,47 @@ pub(crate) fn check_atrule_member_syntax(
         Token::Ident(w) => w.strip_prefix('.').map(str::to_owned),
         _ => None,
     };
-    for (i, s) in name_run.iter().enumerate() {
-        let Some(member) = dotish(s) else { continue };
-        if i == 0 {
-            // a member with no namespace at all: `@include .member` — the goldens
-            // cannot open an identifier on the dot.
-            return Err(p.err("Expected identifier.", s.span.start));
-        }
-        let member = if member.is_empty() {
-            // bare `.`: the member name is the next token, if any
-            match name_run.get(i + 1) {
-                Some(n) => match &n.token {
-                    Token::Ident(w) => w.clone(),
-                    Token::Variable(w) => w.clone(),
-                    _ => return Err(p.err("Expected identifier.", n.span.start)),
-                },
-                None => return Err(p.err("Expected identifier.", s.span.start)),
+    // every `.`-member slot is classified independently (pure checks) and the
+    // first classified failure is the golden's error
+    name_run
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| dotish(s).map(|member| (i, s, member)))
+        .map(|(i, s, member)| -> Or<()> {
+            match i {
+                // a member with no namespace at all: `@include .member` — the
+                // goldens cannot open an identifier on the dot.
+                0 => Err(p.err("Expected identifier.", s.span.start)),
+                _ => {
+                    // bare `.`: the member name is the next token, if any
+                    let named = match member.is_empty() {
+                        false => member,
+                        true => match name_run.get(i + 1) {
+                            Some(n) => match &n.token {
+                                Token::Ident(w) => w.clone(),
+                                Token::Variable(w) => w.clone(),
+                                _ => return Err(p.err("Expected identifier.", n.span.start)),
+                            },
+                            None => return Err(p.err("Expected identifier.", s.span.start)),
+                        },
+                    };
+                    let hidden = named.is_empty() || named.starts_with('_');
+                    match (hidden, is_include) {
+                        (true, _) => Err(p.err(
+                            "Private members can't be accessed from outside their modules.",
+                            s.span.start,
+                        )),
+                        (false, false) => Err(p.err(
+                            if is_mixin { "expected \"{\"." } else { "expected \"(\"." },
+                            s.span.start,
+                        )),
+                        (false, true) => Ok(()),
+                    }
+                }
             }
-        } else {
-            member
-        };
-        if member.is_empty() || member.starts_with('_') {
-            return Err(p.err(
-                "Private members can't be accessed from outside their modules.",
-                s.span.start,
-            ));
-        }
-        if !is_include {
-            return Err(p.err(
-                if is_mixin { "expected \"{\"." } else { "expected \"(\"." },
-                s.span.start,
-            ));
-        }
-    }
-    Ok(())
+        })
+        .find(Result::is_err)
+        .unwrap_or(Ok(()))
 }
 
 pub(crate) fn variable_decl(p: &Parser, run: &[Spanned], span: Span) -> Or<Stmt> {

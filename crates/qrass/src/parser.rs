@@ -382,16 +382,13 @@ impl Parser {
     }
 
     pub(crate) fn line_col(&self, at: usize) -> (u32, u32) {
-        let (mut line, mut col) = (1u32, 1u32);
-        for &ch in &self.cs[..at.min(self.cs.len())] {
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else if ch != '\r' {
-                col += 1;
-            }
-        }
-        (line, col)
+        self.cs[..at.min(self.cs.len())]
+            .iter()
+            .fold((1u32, 1u32), |(line, col), &ch| match ch {
+                '\n' => (line + 1, 1),
+                '\r' => (line, col),
+                _ => (line, col + 1),
+            })
     }
 
     /// Render a token run into an interpolated text run (selectors / property
@@ -403,21 +400,21 @@ impl Parser {
     /// to preserve the original combinator structure.
     pub(crate) fn pieces(&self, tokens: &[Spanned]) -> InterpText {
         use crate::token::Piece;
-        let mut out = InterpText::new();
-        let mut prev_end: Option<BytePos> = None;
-        for s in tokens {
-            if let Some(end) = prev_end
-                && s.span.start.0 > end.0
-            {
+        let (out, _) = tokens.iter().fold(
+            (InterpText::new(), None::<BytePos>),
+            |(mut out, prev_end), s| {
                 // A gap in the source is whitespace (the lexer emits no other
                 // gap), but a comment token already carries its own spacing.
-                if !matches!(s.token, Token::Comment(_)) {
-                    out.push(Piece::Text(" ".into()));
+                match (prev_end, matches!(s.token, Token::Comment(_))) {
+                    (Some(end), false) if s.span.start.0 > end.0 => {
+                        out.push(Piece::Text(" ".into()));
+                    }
+                    _ => {}
                 }
-            }
-            token_to_pieces(&s.token, &mut out);
-            prev_end = Some(s.span.end);
-        }
+                token_to_pieces(&s.token, &mut out);
+                (out, Some(s.span.end))
+            },
+        );
         out
     }
 
@@ -427,23 +424,22 @@ impl Parser {
     /// while the declaration-group tidy in `css::tidy_condition` strips them.
     pub(crate) fn pieces_keeping_comments(&self, tokens: &[Spanned]) -> InterpText {
         use crate::token::Piece;
-        let mut out = InterpText::new();
-        let mut prev_end: Option<BytePos> = None;
-        for s in tokens {
-            if let Some(end) = prev_end
-                && s.span.start.0 > end.0
-            {
+        let (out, _) = tokens.iter().fold(
+            (InterpText::new(), None::<BytePos>),
+            |(mut out, prev_end), s| {
                 // spacing around a kept comment is REAL (goldens `a(b /**/)`,
                 // `a(b/**/)`, `(a /**/ b)` — spaces only where the source has them)
-                out.push(Piece::Text(" ".into()));
-            }
-            if let Token::Comment(raw) = &s.token {
-                out.push(Piece::Text(raw.clone()));
-            } else {
-                token_to_pieces(&s.token, &mut out);
-            }
-            prev_end = Some(s.span.end);
-        }
+                match prev_end {
+                    Some(end) if s.span.start.0 > end.0 => out.push(Piece::Text(" ".into())),
+                    _ => {}
+                }
+                match &s.token {
+                    Token::Comment(raw) => out.push(Piece::Text(raw.clone())),
+                    other => token_to_pieces(other, &mut out),
+                }
+                (out, Some(s.span.end))
+            },
+        );
         out
     }
 

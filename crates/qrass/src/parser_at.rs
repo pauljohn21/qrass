@@ -416,48 +416,57 @@ pub(crate) fn find_ident(run: &[Spanned], name: &str) -> Option<usize> {
 
 /// Split at the first depth-0 `(` … matching `)` run: `(prefix, Some(paren_run))`.
 pub(crate) fn split_paren(run: &[Spanned]) -> (&[Spanned], Option<Vec<Spanned>>) {
-    let open = match run
+    let open = run
         .iter()
-        .position(|s| matches!(s.token, Token::Punct(Punct::LParen)))
-    {
-        Some(i) => i,
-        None => return (run, None),
-    };
-    let mut depth = 0i32;
-    for i in open..run.len() {
-        match &run[i].token {
-            Token::Punct(Punct::LParen) => depth += 1,
-            Token::Punct(Punct::RParen) => {
-                depth -= 1;
-                if depth == 0 {
-                    return (&run[..open], Some(run[open..=i].to_vec()));
-                }
-            }
-            _ => {}
-        }
+        .position(|s| matches!(s.token, Token::Punct(Punct::LParen)));
+    // the matching `)` is where the running depth, started by that opener,
+    // comes back to zero
+    let close = open.and_then(|o| {
+        run[o..]
+            .iter()
+            .scan(0i32, |depth, s| {
+                *depth += match &s.token {
+                    Token::Punct(Punct::LParen) => 1,
+                    Token::Punct(Punct::RParen) => -1,
+                    _ => 0,
+                };
+                Some(*depth)
+            })
+            .position(|d| d == 0)
+            .map(|off| o + off)
+    });
+    match (open, close) {
+        (Some(o), Some(c)) => (&run[..o], Some(run[o..=c].to_vec())),
+        _ => (run, None),
     }
-    (run, None)
 }
 
 /// Peel trailing `!flag` pairs (Bang + Ident) off a value run.
 pub(crate) fn split_flags(run: &[Spanned]) -> (&[Spanned], Vec<String>) {
-    let mut flags = Vec::new();
-    let mut end = run.len();
-    while end >= 2 {
-        let bang = matches!(run[end - 2].token, Token::Punct(Punct::Bang));
-        let name = match &run[end - 1].token {
-            Token::Ident(w) => Some(w.clone()),
+    peel_flags(run, run.len(), Vec::new())
+}
+
+/// One peel step: the last two tokens are `! name` → keep peeling, otherwise
+/// the run is final.
+fn peel_flags(
+    run: &[Spanned],
+    end: usize,
+    mut flags: Vec<String>,
+) -> (&[Spanned], Vec<String>) {
+    let pair = match end >= 2 {
+        false => None,
+        true => match (&run[end - 2].token, &run[end - 1].token) {
+            (Token::Punct(Punct::Bang), Token::Ident(w)) => Some(w.clone()),
             _ => None,
-        };
-        match (bang, name) {
-            (true, Some(w)) => {
-                flags.push(w);
-                end -= 2;
-            }
-            _ => break,
+        },
+    };
+    match pair {
+        Some(w) => {
+            flags.push(w);
+            peel_flags(run, end - 2, flags)
         }
+        None => (&run[..end], flags),
     }
-    (&run[..end], flags)
 }
 
 fn join_ident(run: &[Spanned]) -> String {
