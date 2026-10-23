@@ -81,18 +81,19 @@ impl EvalState {
             n.strip_prefix(f.prefix.as_str()).unwrap_or(n).to_string()
         };
         if let Some(buf) = self.forward_buf.last_mut() {
-            for (name, _) in &members {
-                let (o, d) = origin_of_in(&strip(name));
-                buf.origins.push((name.clone(), o, d));
-            }
-            for (new, _) in &fwd_mixins {
-                let (o, d) = origin_of_in(&strip(new));
-                buf.origins.push((new.clone(), o, d));
-            }
-            for (new, _) in &fwd_functions {
-                let (o, d) = origin_of_in(&strip(new));
-                buf.origins.push((new.clone(), o, d));
-            }
+            // every exported name carries the origin of its defined spelling,
+            // read after the prefix strip (vars, then mixins, then functions)
+            let traced: Vec<(String, String, String)> = members
+                .iter()
+                .map(|(name, _)| name.clone())
+                .chain(fwd_mixins.iter().map(|(name, _)| name.clone()))
+                .chain(fwd_functions.iter().map(|(name, _)| name.clone()))
+                .map(|name| {
+                    let (o, d) = origin_of_in(&strip(&name));
+                    (name, o, d)
+                })
+                .collect();
+            buf.origins.extend(traced);
             buf.vars.extend(members);
             buf.mixins.extend(fwd_mixins);
             buf.functions.extend(fwd_functions);
@@ -145,9 +146,9 @@ impl EvalState {
             col: loc.col,
             label: self.links.last().expect("pushed link").keyword.to_string(),
         });
-        for i in (0..self.links.len()).rev() {
+        frames.extend((0..self.links.len()).rev().map(|i| {
             let link = &self.links[i];
-            frames.push(Frame {
+            Frame {
                 file: link.parent_file.clone(),
                 line: link.parent_line,
                 col: link.parent_col,
@@ -157,8 +158,8 @@ impl EvalState {
                     self.links[i - 1].keyword
                 }
                 .to_string(),
-            });
-        }
+            }
+        }));
         err.with_trace(frames)
     }
 
@@ -385,9 +386,9 @@ impl EvalState {
 
         let ran = (|st: &mut EvalState| -> Ev<Module> {
             let mut css = Vec::new();
-            for stmt in &program {
-                st.eval_top_level(stmt, &mut css)?;
-            }
+            program
+                .iter()
+                .try_fold((), |(), stmt| st.eval_top_level(stmt, &mut css))?;
             let forwarded = st.forward_buf.last().cloned().unwrap_or_default();
             // the goldens export ONLY the module's own top-level assignments; vars
             // injected into the env by `@use … as *` are visible locally but
@@ -453,15 +454,14 @@ impl EvalState {
                 // forwarder (`@forward …`) keeps a single origin (element-plus
                 // `common/var.scss` dual paths), while genuinely different
                 // definers differ (`use/error/member` goldens).
-                member_origins: {
-                    let mut o = forwarded.origins;
-                    for name in local_members {
-                        if !o.iter().any(|(e, _, _)| *e == name) {
-                            o.push((name.clone(), st.name.clone(), name));
-                        }
-                    }
-                    o
-                },
+                member_origins: local_members.into_iter().fold(
+                    forwarded.origins,
+                    |mut o, name| {
+                        let seen = o.iter().any(|(e, _, _)| *e == name);
+                        o.extend((!seen).then_some((name.clone(), st.name.clone(), name)));
+                        o
+                    },
+                ),
             })
         })(self);
 
@@ -508,13 +508,14 @@ pub(crate) fn parent_dir(path: &str) -> PathBuf {
 /// Merge a module's own member names with its `@forward`ed (exported, defining)
 /// pairs, first-wins on the exported name.
 fn dedup_members(
-    mut own: Vec<(String, String)>,
+    own: Vec<(String, String)>,
     forwarded: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
-    for pair in forwarded {
-        if !own.iter().any(|(n, _)| *n == pair.0) {
-            own.push(pair);
-        }
-    }
-    own
+    // first-wins against the *accumulating* list, so a duplicate inside
+    // `forwarded` is dropped as well
+    forwarded.into_iter().fold(own, |mut acc, pair| {
+        let seen = acc.iter().any(|(n, _)| n == &pair.0);
+        acc.extend((!seen).then_some(pair));
+        acc
+    })
 }

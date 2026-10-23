@@ -41,7 +41,7 @@ eval_if.rs	0	0	2	3
 eval_load_css.rs	1	0	3	19
 eval_meta.rs	0	0	1	15
 eval_mixin.rs	7	3	6	9
-eval_module.rs	8	0	10	9
+eval_module.rs	1	0	9	9
 eval_stmt.rs	7	0	7	10
 lexer.rs	0	0	0	1
 lexer_detail.rs	3	1	7	3

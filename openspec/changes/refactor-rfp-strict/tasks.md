@@ -35,6 +35,11 @@
 - [ ] 5.3 `parser_at.rs`/`parser_decl.rs`/`parser.rs` 残余清洗；实测不可行者逐个登记豁免清单（sealed 纯函数形态，四字段齐全）
 - [ ] 5.4 style_gate 最终基线冻结为「仅豁免清单命中」+ 0 回归验收
 
+## 5b. 文件预算守门（与 rust.md「单文件 ≤ 500 行」对齐）
+
+- [ ] 5b.1 style_gate 加第五维：`src/` 超 500 行文件清单写入基线（只降不升），现存越线：`builtins/color_ops.rs` 533、`eval_module.rs` 521、`eval_stmt.rs` 512、`parser.rs` 505、`value.rs` 501
+- [ ] 5b.2 按 sibling-module 惯例逐个拆出超预算文件（沿用 `parser_*` / `builtins/color_*` / `eval_color_space_symbolic` 的先例），行为零变动，拆完逐个 ledger 对拍
+
 ## 6. M5 收口
 
 - [ ] 6.1 style_gate 全库报表终态（迭代循环 = 0 ± 豁免）贴入 `reports/rfp-refactor-closeout.md`，与 spec R2/R3 逐条对账
