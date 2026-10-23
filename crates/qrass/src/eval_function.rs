@@ -196,12 +196,15 @@ impl EvalState {
 
     /// Run a function body, returning the first `@return` value if any.
     pub(crate) fn eval_fn_body(&mut self, block: &Block) -> Ev<Option<SassValue>> {
-        for s in block {
-            if let Some(v) = self.eval_fn_stmt(s)? {
-                return Ok(Some(v));
+        // fold the statements with the `@return` value latched in the accumulator:
+        // once set, the remaining statements stay unevaluated (the old early
+        // `return`), and an error aborts the walk
+        block.iter().try_fold(None, |acc, s| -> Ev<Option<SassValue>> {
+            match acc {
+                Some(v) => Ok(Some(v)),
+                None => self.eval_fn_stmt(s),
             }
-        }
-        Ok(None)
+        })
     }
 
     /// Evaluate one statement inside a function body for its bindings / return.
@@ -215,18 +218,24 @@ impl EvalState {
             Stmt::If(i) => self.eval_fn_if(i),
             Stmt::Each(e) => {
                 let value = self.eval_expr(&e.list)?;
-                for binding in each_elements(&value, e.vars.len()) {
-                    self.env.enter();
-                    for (var, val) in e.vars.iter().zip(binding) {
-                        self.env.define(var, val, AssignFlags::default());
-                    }
-                    let r = self.eval_fn_body(&e.body);
-                    self.env.leave();
-                    if let Some(v) = r? {
-                        return Ok(Some(v));
-                    }
-                }
-                Ok(None)
+                // one round per binding tuple: enter the scope, define the loop
+                // vars, run the body, leave; a `@return` latches the walk
+                each_elements(&value, e.vars.len())
+                    .into_iter()
+                    .try_fold(None, |acc, binding| -> Ev<Option<SassValue>> {
+                        match acc {
+                            Some(v) => Ok(Some(v)),
+                            None => {
+                                self.env.enter();
+                                e.vars.iter().zip(binding).for_each(|(var, val)| {
+                                    self.env.define(var, val, AssignFlags::default());
+                                });
+                                let r = self.eval_fn_body(&e.body);
+                                self.env.leave();
+                                r
+                            }
+                        }
+                    })
             }
             Stmt::For(f) => self.eval_fn_for(f),
             Stmt::While(w) => self.eval_fn_while(w),
@@ -248,19 +257,29 @@ impl EvalState {
     }
 
     fn eval_fn_if(&mut self, i: &If) -> Ev<Option<SassValue>> {
-        for clause in &i.clauses {
-            let take = match &clause.cond {
-                None => true,
-                Some(c) => self.eval_expr(c)?.is_truthy(),
-            };
-            if take {
+        // the first clause whose condition is truthy (or the unconditional
+        // `@else`) wins; conditions after the hit stay unevaluated
+        let hit = i
+            .clauses
+            .iter()
+            .enumerate()
+            .try_fold(None, |acc, (idx, c)| match (&acc, &c.cond) {
+                (Some(_), _) => Ok(acc),
+                (None, None) => Ok(Some(idx)),
+                (None, Some(cond)) => {
+                    self.eval_expr(cond).map(|v| v.is_truthy().then_some(idx))
+                }
+            })?;
+        match hit {
+            Some(idx) => {
+                let clause = &i.clauses[idx];
                 self.env.enter();
                 let r = self.eval_fn_body(&clause.body);
                 self.env.leave();
-                return r;
+                r
             }
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     fn eval_fn_for(&mut self, f: &For) -> Ev<Option<SassValue>> {
@@ -271,48 +290,56 @@ impl EvalState {
         } else {
             to + if from <= to { -1 } else { 1 }
         };
-        let step = if from <= last { 1 } else { -1 };
-        let mut i = from;
-        while (step > 0 && i <= last) || (step < 0 && i >= last) {
-            self.env.enter();
-            self.env.define(
-                &f.var,
-                SassValue::Number {
-                    value: i as f64,
-                    unit: None,
-                },
-                AssignFlags::default(),
-            );
-            let r = self.eval_fn_body(&f.body);
-            self.env.leave();
-            if let Some(v) = r? {
-                return Ok(Some(v));
+        // the closed range walks in the direction the bounds imply (the old
+        // `step` cursor with its `i += step` advance)
+        let rounds: Vec<i64> = match from <= last {
+            true => (from..=last).collect(),
+            false => (last..=from).rev().collect(),
+        };
+        rounds.into_iter().try_fold(None, |acc, i| -> Ev<Option<SassValue>> {
+            match acc {
+                Some(v) => Ok(Some(v)),
+                None => {
+                    self.env.enter();
+                    self.env.define(
+                        &f.var,
+                        SassValue::Number {
+                            value: i as f64,
+                            unit: None,
+                        },
+                        AssignFlags::default(),
+                    );
+                    let r = self.eval_fn_body(&f.body);
+                    self.env.leave();
+                    r
+                }
             }
-            i += step;
-        }
-        Ok(None)
+        })
     }
 
     fn eval_fn_while(&mut self, w: &While) -> Ev<Option<SassValue>> {
-        let mut guard = 0u32;
         self.env.enter();
-        while self.eval_expr(&w.cond)?.is_truthy() {
-            guard += 1;
-            if guard > 100_000 {
-                self.env.leave();
-                return Err(SassError::new(
-                    ErrorKind::Eval,
-                    "@while loop exceeded iteration limit",
-                ));
+        // the bounded fold carries the old guard counter: `acc` is `None` while
+        // the loop runs, `Some(None)` once the condition goes false and
+        // `Some(Some(v))` on a `@return`; reaching the bound with the condition
+        // still true is the golden's iteration-limit error
+        let ran = (0..100_000u32).try_fold(None, |acc, _| -> Ev<Option<Option<SassValue>>> {
+            match acc {
+                Some(done) => Ok(Some(done)),
+                None => match self.eval_expr(&w.cond).map(|c| c.is_truthy())? {
+                    false => Ok(Some(None)),
+                    true => self.eval_fn_body(&w.body).map(|v| v.map(Some)),
+                },
             }
-            let r = self.eval_fn_body(&w.body);
-            if let Some(v) = r? {
-                self.env.leave();
-                return Ok(Some(v));
-            }
-        }
+        })?;
         self.env.leave();
-        Ok(None)
+        match ran {
+            Some(v) => Ok(v),
+            None => Err(SassError::new(
+                ErrorKind::Eval,
+                "@while loop exceeded iteration limit",
+            )),
+        }
     }
 }
 

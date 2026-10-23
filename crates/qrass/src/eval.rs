@@ -69,6 +69,8 @@ mod eval_mixin;
 mod eval_module;
 #[path = "eval_stmt.rs"]
 mod eval_stmt;
+#[path = "eval_stmt_text.rs"]
+mod eval_stmt_text;
 
 /// One `with (…)` value on offer. A `@use … with` entry also gets recorded under
 /// its site (see [`EvalState::config_sites`]) so the statement can check it was

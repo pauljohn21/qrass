@@ -131,9 +131,10 @@ impl EvalState {
         self.env.enter();
         self.bind_params(&mixin.params, raw)?;
         self.in_mixin_body += 1;
-        for s in &mixin.body {
-            self.collect_stmt(s, sel_ctx, decls, out)?;
-        }
+        mixin
+            .body
+            .iter()
+            .try_for_each(|s| self.collect_stmt(s, sel_ctx, decls, out))?;
         self.in_mixin_body -= 1;
         self.env.leave();
         self.end_closure(swapped);
@@ -158,13 +159,14 @@ impl EvalState {
         }
 
         // Arguments are evaluated in the mixin-body scope (the `@content` site).
-        let mut vals: Vec<SassValue> = Vec::new();
-        for arg in &c.args {
-            match arg {
-                Arg::Positional(e) | Arg::Splat(e) => vals.push(self.eval_expr(e)?),
-                Arg::Named { value, .. } => vals.push(self.eval_expr(value)?),
-            }
-        }
+        let vals: Vec<SassValue> = c
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Positional(e) | Arg::Splat(e) => self.eval_expr(e),
+                Arg::Named { value, .. } => self.eval_expr(value),
+            })
+            .collect::<Ev<Vec<SassValue>>>()?;
 
         // Commit the mixin body's module env (holding `!global` writes like the BEM
         // `$B`) before switching to the include site to replay `@content`: any nested
@@ -175,15 +177,18 @@ impl EvalState {
         let saved_owner = std::mem::replace(&mut self.env_owner, ctx.site_owner);
         let prev = self.env.set_scope(ctx.site_scope);
         self.env.enter();
-        for (p, v) in ctx.params.iter().zip(vals) {
-            self.env.define(p, v, AssignFlags::default());
-        }
+        ctx.params
+            .iter()
+            .zip(vals)
+            .for_each(|(p, v)| {
+                self.env.define(p, v, AssignFlags::default());
+            });
         // The replay is lexically at the include site: `content-exists()`
         // inside it reads as outside-a-mixin (golden `error/in_content`).
         self.content_replay += 1;
-        for s in &ctx.block {
-            self.collect_stmt(s, sel_ctx, decls, out)?;
-        }
+        ctx.block
+            .iter()
+            .try_for_each(|s| self.collect_stmt(s, sel_ctx, decls, out))?;
         self.content_replay -= 1;
         self.env.leave();
         self.env.set_scope(prev);
@@ -192,6 +197,10 @@ impl EvalState {
         Ok(())
     }
 }
+
+/// The parameter-bind fold's state: the next positional index to consume and the
+/// rest parameter's deferred binding (`$args...` is defined after the fold).
+type BindAcc = (usize, Option<(String, Vec<SassValue>)>);
 
 /// Raw call arguments already evaluated in the caller's scope.
 pub(crate) struct RawArgs {
@@ -221,85 +230,114 @@ impl EvalState {
     /// Evaluate each argument expression in the current (caller) scope, expanding
     /// splats into positional values.
     pub(super) fn collect_args(&mut self, args: &[Arg]) -> Ev<RawArgs> {
-        let mut positional: Vec<SassValue> = Vec::new();
-        let mut named: HashMap<String, SassValue> = HashMap::new();
-        for arg in args {
-            match arg {
-                Arg::Positional(e) => {
-                    // CSS-style named argument (`f(c=d)`): the css color
-                    // overloads read these as keyword pairs, never as
-                    // assignment expressions (css_overloads golden
-                    // `color.alpha(c=d)` → `alpha(c=d)`).
-                    if let Expr::Binary {
-                        op: BinOp::Assign,
-                        left,
-                        right,
-                        ..
-                    } = e
-                        && let Expr::Literal(Literal::Ident(key)) = left.as_ref()
-                    {
-                        named.insert(key.clone(), self.eval_expr(right)?);
-                        continue;
-                    }
-                    positional.push(self.eval_expr(e)?);
-                }
-                Arg::Named { name, value } => {
-                    let v = self.eval_expr(value)?;
-                    named.insert(name.trim_start_matches('$').to_string(), v);
-                }
-                Arg::Splat(e) => match self.eval_expr(e)? {
-                    SassValue::List { items, .. } => positional.extend(items),
-                    // `$named...` where the value is a map feeds the *named* pool
-                    // (keys must be strings; a non-string key is a golden error we
-                    // surface as a stringified key).
-                    SassValue::Map { entries } => {
-                        for (k, v) in entries {
-                            let name = match k {
-                                SassValue::Str { text, .. } => text,
-                                other => other.to_css(),
-                            };
-                            named.insert(name.trim_start_matches('$').to_string(), v);
+        // one fold over the call's argument list: positional / named / splat each
+        // feed one of the two pools, first error aborts the whole collection
+        let (positional, named) = args.iter().try_fold(
+            (Vec::new(), HashMap::new()),
+            |(mut positional, mut named), arg|
+             -> Ev<(Vec<SassValue>, HashMap<String, SassValue>)> {
+                match arg {
+                    Arg::Positional(e) => {
+                        // CSS-style named argument (`f(c=d)`): the css color
+                        // overloads read these as keyword pairs, never as
+                        // assignment expressions (css_overloads golden
+                        // `color.alpha(c=d)` → `alpha(c=d)`).
+                        let css_pair = match e {
+                            Expr::Binary {
+                                op: BinOp::Assign,
+                                left,
+                                right,
+                                ..
+                            } => match left.as_ref() {
+                                Expr::Literal(Literal::Ident(key)) => {
+                                    Some((key.clone(), &**right))
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        match css_pair {
+                            Some((key, right)) => {
+                                named.insert(key, self.eval_expr(right)?);
+                            }
+                            None => positional.push(self.eval_expr(e)?),
                         }
                     }
-                    other => positional.push(other),
-                },
-            }
-        }
+                    Arg::Named { name, value } => {
+                        let v = self.eval_expr(value)?;
+                        named.insert(name.trim_start_matches('$').to_string(), v);
+                    }
+                    Arg::Splat(e) => match self.eval_expr(e)? {
+                        SassValue::List { items, .. } => positional.extend(items),
+                        // `$named...` where the value is a map feeds the *named* pool
+                        // (keys must be strings; a non-string key is a golden error we
+                        // surface as a stringified key).
+                        SassValue::Map { entries } => named.extend(entries.into_iter().map(
+                            |(k, v)| {
+                                let name = match k {
+                                    SassValue::Str { text, .. } => text,
+                                    other => other.to_css(),
+                                };
+                                (name.trim_start_matches('$').to_string(), v)
+                            },
+                        )),
+                        other => positional.push(other),
+                    },
+                }
+                Ok((positional, named))
+            },
+        )?;
         Ok(RawArgs { positional, named })
     }
 
     /// Bind a parameter list against [`RawArgs`], defining each binding in the
     /// current (callee) scope so later defaults can read earlier parameters.
     pub(super) fn bind_params(&mut self, params: &[Param], mut raw: RawArgs) -> Ev<()> {
-        let mut pi = 0usize;
-        // A rest parameter (`$args...`) is bound *after* the loop: it absorbs every
-        // leftover positional value and, crucially, every named argument that no
-        // earlier parameter consumed. Those named args become the ArgList's keyword
-        // part, read back by `meta.keywords` / `keyword-get`. Deferring the define
-        // lets ordinary named parameters claim their values from `raw.named` first.
-        let mut rest: Option<(String, Vec<SassValue>)> = None;
-        for p in params {
-            let value = if p.rest {
-                let leftover = raw.positional[pi..].to_vec();
-                pi = raw.positional.len();
-                rest = Some((p.name.clone(), leftover));
-                continue;
-            } else if let Some(v) = raw.named.remove(&p.name) {
-                v
-            } else if pi < raw.positional.len() {
-                let v = raw.positional[pi].clone();
-                pi += 1;
-                v
-            } else if let Some(default) = &p.default {
-                self.eval_expr(default)?
-            } else {
-                return Err(SassError::new(
-                    ErrorKind::Eval,
-                    format!("Missing argument `${}`", p.name),
-                ));
-            };
-            self.env.define(&p.name, value, AssignFlags::default());
-        }
+        // Fold the parameter list over the (next positional index, deferred rest
+        // binding) state. A rest parameter (`$args...`) is bound *after* the fold:
+        // it absorbs every leftover positional value and, crucially, every named
+        // argument that no earlier parameter consumed. Those named args become the
+        // ArgList's keyword part, read back by `meta.keywords` / `keyword-get`.
+        // Deferring the define lets ordinary named parameters claim their values
+        // from `raw.named` first.
+        let (pi, rest) = params.iter().try_fold(
+            (0usize, None),
+            |(pi, rest), p| -> Ev<BindAcc> {
+                match p.rest {
+                    true => Ok((
+                        raw.positional.len(),
+                        Some((p.name.clone(), raw.positional[pi..].to_vec())),
+                    )),
+                    false => {
+                        // a named argument wins, then the next positional value,
+                        // then the declared default; nothing at all is missing
+                        let named_hit = raw.named.remove(&p.name);
+                        let has_positional =
+                            named_hit.is_none() && pi < raw.positional.len();
+                        // indexing must stay behind the bound check, so this is a
+                        // value-selection `if` rather than `then_some`
+                        let position = if has_positional {
+                            Some(raw.positional[pi].clone())
+                        } else {
+                            None
+                        };
+                        let took_positional = position.is_some();
+                        let value = named_hit
+                            .or(position)
+                            .map(Ok)
+                            .or_else(|| p.default.as_ref().map(|d| self.eval_expr(d)))
+                            .unwrap_or_else(|| {
+                                Err(SassError::new(
+                                    ErrorKind::Eval,
+                                    format!("Missing argument `${}`", p.name),
+                                ))
+                            })?;
+                        self.env.define(&p.name, value, AssignFlags::default());
+                        Ok((pi + usize::from(took_positional), rest))
+                    }
+                }
+            },
+        )?;
 
         match rest {
             Some((name, positional)) => {

@@ -10,6 +10,9 @@ use crate::env::AssignFlags;
 use crate::error::{ErrorKind, SassError};
 use crate::value::SassValue;
 
+use super::eval_stmt_text::{
+    combine_at_root, combine_selectors, contains_placeholder, looks_like_css_import,
+};
 use super::{Ev, EvalState};
 
 impl EvalState {
@@ -243,14 +246,14 @@ impl EvalState {
         // a child block interrupts them) — see `collect_stmt`.
         let mut rule_decls: Vec<Item> = Vec::new();
         let saved_parents = std::mem::replace(&mut self.current_parents, resolved.clone());
-        for s in &rs.body {
-            self.collect_stmt(s, &resolved, &mut rule_decls, out)?;
-        }
+        rs.body
+            .iter()
+            .try_for_each(|s| self.collect_stmt(s, &resolved, &mut rule_decls, out))?;
         self.current_parents = saved_parents;
         if !rule_decls.is_empty() && !concrete.is_empty() {
             out.push(css::render_rule(&concrete, &rule_decls));
         }
-        for selector in placeholders {
+        placeholders.into_iter().for_each(|selector| {
             let pairs: Vec<(String, String)> = rule_decls
                 .iter()
                 .filter_map(|it| match it {
@@ -269,7 +272,7 @@ impl EvalState {
                 decls: pairs,
                 slot,
             });
-        }
+        });
         self.env.leave();
         Ok(())
     }
@@ -299,9 +302,8 @@ impl EvalState {
         self.env.enter();
         let mut inner: Vec<String> = Vec::new();
         let mut decls: Vec<Item> = Vec::new();
-        for s in body {
-            self.collect_stmt(s, sel_ctx, &mut decls, &mut inner)?;
-        }
+        body.iter()
+            .try_for_each(|s| self.collect_stmt(s, sel_ctx, &mut decls, &mut inner))?;
         // Declarations written directly under the query (no nested selector) apply
         // to the current nesting context, so render them as a leading rule inside
         // the block — the goldens emit `@media { .parent { … } }` for these.
@@ -325,9 +327,9 @@ impl EvalState {
         let name = self.render_interp(&k.name)?;
         self.env.enter();
         let mut inner: Vec<String> = Vec::new();
-        for s in &k.body {
-            self.collect_stmt(s, &[], &mut Vec::new(), &mut inner)?;
-        }
+        k.body
+            .iter()
+            .try_for_each(|s| self.collect_stmt(s, &[], &mut Vec::new(), &mut inner))?;
         self.env.leave();
         out.push(css::render_at_block(&format!("@keyframes {name}"), &inner));
         Ok(())
@@ -344,10 +346,10 @@ impl EvalState {
     ) -> Ev<()> {
         self.env.enter();
         let saved = std::mem::replace(&mut self.at_root, true);
-        for s in &ar.body {
+        ar.body.iter().try_for_each(|s| {
             self.at_root = true;
-            self.collect_stmt(s, sel_ctx, &mut Vec::new(), out)?;
-        }
+            self.collect_stmt(s, sel_ctx, &mut Vec::new(), out)
+        })?;
         self.at_root = saved;
         self.env.leave();
         Ok(())
@@ -385,9 +387,8 @@ impl EvalState {
                 self.flush_decls(sel_ctx, decls, out);
                 self.env.enter();
                 let mut inner: Vec<String> = Vec::new();
-                for s in body {
-                    self.collect_stmt(s, sel_ctx, &mut Vec::new(), &mut inner)?;
-                }
+                body.iter()
+                    .try_for_each(|s| self.collect_stmt(s, sel_ctx, &mut Vec::new(), &mut inner))?;
                 self.env.leave();
                 out.push(css::render_at_block(&header, &inner));
                 Ok(())
@@ -409,104 +410,4 @@ impl EvalState {
         }
         Ok(Some((prop, css)))
     }
-}
-
-/// A CSS `@import` target (passed through) is a `url(…)`, a quoted string whose
-/// URL ends in `.css`, or a quoted URL carrying a support condition (a media
-/// query, `layer`, `supports(…)`, or a bare ident/function after the URL — the
-/// condition makes it unambiguously CSS rather than an SCSS module reference).
-/// A bare `@import "a"` (nothing after the quote) stays an SCSS import (D3).
-fn looks_like_css_import(value: &str) -> bool {
-    if value.contains("url(") {
-        return true;
-    }
-    crate::builtins::selector::split_commas(value)
-        .into_iter()
-        .any(|spec| {
-            let s = spec.trim();
-            if s.trim_matches(|c| c == '"' || c == '\'').ends_with(".css") {
-                return true;
-            }
-            after_leading_quoted(s).is_some_and(|rest| !rest.trim().is_empty())
-        })
-}
-
-/// If `s` begins with a single- or double-quoted string, return the text after
-/// its closing quote (honoring backslash escapes); otherwise `None`.
-fn after_leading_quoted(s: &str) -> Option<&str> {
-    let bytes = s.as_bytes();
-    let open = *bytes.first()?;
-    if open != b'"' && open != b'\'' {
-        return None;
-    }
-    let mut i = 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 2,
-            c if c == open => return Some(&s[i + 1..]),
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// Combine a selector list for a `@at-root`-lifted ruleset. Like
-/// [`combine_selectors`] a `&` is replaced by the outer parent, but a child
-/// *without* `&` stands alone at the root instead of being descendant-prefixed.
-fn combine_at_root(parents: &[String], child_text: &str) -> Vec<String> {
-    let children: Vec<String> = crate::builtins::selector::split_commas(child_text)
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect();
-    if parents.is_empty() {
-        return children;
-    }
-    parents
-        .iter()
-        .flat_map(|p| {
-            children.iter().map(move |c| {
-                if c.contains('&') {
-                    c.replace('&', p)
-                } else {
-                    c.clone()
-                }
-            })
-        })
-        .collect()
-}
-
-/// Combine a selector list with its resolved parent list. A `&` in a child is
-/// replaced by the parent; otherwise the child is a descendant (space). At the
-/// root (no parent) the child selectors stand alone.
-fn combine_selectors(parents: &[String], child_text: &str) -> Vec<String> {
-    let children: Vec<String> = crate::builtins::selector::split_commas(child_text)
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect();
-    if parents.is_empty() {
-        return children;
-    }
-    parents
-        .iter()
-        .flat_map(|p| {
-            children.iter().map(move |c| {
-                if c.contains('&') {
-                    c.replace('&', p)
-                } else {
-                    format!("{p} {c}")
-                }
-            })
-        })
-        .collect()
-}
-
-/// Whether a resolved selector references a `%placeholder` (so it must be held
-/// back for the `@extend` pass). A placeholder is a `%` immediately followed by
-/// an identifier-start char (letter / `_` / non-ASCII); a trailing `%` (a
-/// keyframe percentage like `50%` or `100%`) is *not* a placeholder.
-fn contains_placeholder(sel: &str) -> bool {
-    let c: Vec<char> = sel.chars().collect();
-    c.windows(2).any(|w| {
-        w[0] == '%' && (w[1].is_alphabetic() || w[1] == '_' || !w[1].is_ascii())
-    })
 }
