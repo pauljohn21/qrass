@@ -26,7 +26,7 @@
 
 - [x] 4.1 `eval_extend.rs`（18 处）：占位符组收集/代换双层循环 → `scan_map` + `flat_map`
 - [x] 4.2 `selector_extend*.rs`（22 处）与 extend 计划族清洗
-- [ ] 4.3 style_gate S3 命中归零 + 0 回归验收（extend 金样组重点复核 escaping/round-trip 钉）
+- [x] 4.3 style_gate S3 命中归零 + 0 回归验收（extend 金样组重点复核 escaping/round-trip 钉）——gate: eval_extend/selector_extend/pseudo 已清零，weave 余 2 letmut；四组 extend 金样窄跑 ok，全量 ledger 0/0
 
 ## 5. M4 S4 parser/lexer 游标组合子化
 
