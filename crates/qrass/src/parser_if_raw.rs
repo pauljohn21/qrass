@@ -11,6 +11,7 @@ use crate::ast_expr::Expr;
 use crate::error::SassError;
 use crate::span::BytePos;
 use crate::token::{Punct, Piece, Spanned, Token};
+use std::ops::ControlFlow;
 
 use super::parser_expr::E;
 
@@ -47,23 +48,32 @@ impl E<'_> {
     /// The tokens of the condition about to be parsed: up to the first
     /// top-level `:`, `;` or the `)` closing the call.
     fn cond_region(&mut self) -> Vec<Spanned> {
-        let mut out: Vec<Spanned> = Vec::new();
-        let mut depth = 0i32;
-        for s in self.it.clone() {
-            match &s.token {
-                Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-                Token::Punct(Punct::RParen | Punct::RBracket) => {
-                    depth -= 1;
-                    if depth < 0 {
-                        break; // the `)` closing the if() call
+        // fold the cloned iterator with a `done` latch: the first top-level
+        // `:`/`;` or the unmatched `)` closing the call stops the collection
+        self.it
+            .clone()
+            .fold((Vec::new(), 0i32, false), |(mut out, depth, done), s| {
+                let (depth, stop) = match (done, &s.token) {
+                    (true, _) => (depth, true),
+                    (false, Token::Punct(Punct::LParen | Punct::LBracket)) => (depth + 1, false),
+                    (false, Token::Punct(Punct::RParen | Punct::RBracket)) if depth == 0 => {
+                        (depth, true)
+                    }
+                    (false, Token::Punct(Punct::RParen | Punct::RBracket)) => (depth - 1, false),
+                    (false, Token::Punct(Punct::Colon | Punct::Semicolon)) if depth == 0 => {
+                        (depth, true)
+                    }
+                    (false, _) => (depth, false),
+                };
+                match stop {
+                    true => (out, depth, true),
+                    false => {
+                        out.push(s);
+                        (out, depth, false)
                     }
                 }
-                Token::Punct(Punct::Colon | Punct::Semicolon) if depth == 0 => break,
-                _ => {}
-            }
-            out.push(s);
-        }
-        out
+            })
+            .0
     }
 
     /// Whether the pending condition holds a `var(…)`/`attr(…)` term at its own
@@ -77,21 +87,21 @@ impl E<'_> {
 
     /// `sass( … )` body: the inner tokens re-parsed as a Sass expression.
     pub(crate) fn sass_body(&mut self) -> Ex<Expr> {
-        let mut run: Vec<Spanned> = Vec::new();
+        // pull tokens while the running depth stays positive: the `)` that
+        // returns it to zero is consumed but not part of the body
         let mut depth = 1i32;
-        while let Some(s) = self.bump() {
-            match &s.token {
-                Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-                Token::Punct(Punct::RParen | Punct::RBracket) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break; // matching ')' consumed
-                    }
-                }
-                _ => {}
-            }
-            run.push(s);
-        }
+        let run: Vec<Spanned> = std::iter::from_fn(|| self.bump())
+            .map(|s| {
+                depth += match &s.token {
+                    Token::Punct(Punct::LParen | Punct::LBracket) => 1,
+                    Token::Punct(Punct::RParen | Punct::RBracket) => -1,
+                    _ => 0,
+                };
+                (s, depth)
+            })
+            .take_while(|(_, depth)| *depth > 0)
+            .map(|(s, _)| s)
+            .collect();
         let p = self.p;
         super::parser_expr::value_of(p, run)
     }
@@ -104,33 +114,13 @@ impl E<'_> {
             .bump()
             .ok_or_else(|| self.p.err("expected a condition term", self.last.start))?;
         let start = first.span.start;
-        let mut toks = vec![first];
         // An interpolation directly followed by `(` opens a call: `#{css}(…)`.
-        let call_open = if matches!(toks[0].token, Token::Punct(Punct::LParen)) {
-            false
-        } else {
-            self.is(Punct::LParen)
+        let call_open = !matches!(first.token, Token::Punct(Punct::LParen))
+            && self.is(Punct::LParen);
+        let (toks, end) = match call_open {
+            false => (vec![first.clone()], first.span.end),
+            true => walk_call_body(std::iter::from_fn(|| self.bump()), first.clone()),
         };
-        let mut end = toks[0].span.end;
-        if call_open {
-            let mut depth = 0i32;
-            while let Some(s) = self.bump() {
-                match &s.token {
-                    Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-                    Token::Punct(Punct::RParen | Punct::RBracket) => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = s.span.end;
-                            toks.push(s);
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                end = s.span.end;
-                toks.push(s);
-            }
-        }
         Ok(self.pieces_over(&toks, start, end))
     }
 
@@ -138,33 +128,47 @@ impl E<'_> {
     /// their `#{…}` runs evaluate at render time while everything else stays
     /// verbatim text.
     fn pieces_over(&self, toks: &[Spanned], start: BytePos, end: BytePos) -> Vec<Piece> {
-        let mut out: Vec<Piece> = Vec::new();
-        let mut cur = start;
-        let push_text = |from: BytePos, to: BytePos, out: &mut Vec<Piece>| {
-            if let Some(len) = to.0.checked_sub(from.0)
-                && len > 0
-            {
+        let (out, cur) = toks.iter().fold(
+            (Vec::new(), start),
+            |(out, cur), t| match &t.token {
+                Token::Interpolated { quote: None, pieces } => {
+                    let out = self.push_text(out, cur, t.span.start);
+                    let out = pieces.iter().fold(out, |mut out, pc| {
+                        match (pc, out.last()) {
+                            (Piece::Text(text), Some(Piece::Text(_))) => {
+                                if let Some(Piece::Text(prev)) = out.last_mut() {
+                                    prev.push_str(text);
+                                }
+                                out
+                            }
+                            _ => {
+                                out.push(pc.clone());
+                                out
+                            }
+                        }
+                    });
+                    (out, t.span.end)
+                }
+                _ => (out, cur),
+            },
+        );
+        self.push_text(out, cur, end)
+    }
+
+    /// Append the verbatim source slice `[from, to)`, merging into a preceding
+    /// text piece so adjacent runs stay a single piece.
+    fn push_text(&self, mut out: Vec<Piece>, from: BytePos, to: BytePos) -> Vec<Piece> {
+        match to.0.checked_sub(from.0).is_some_and(|len| len > 0) {
+            false => out,
+            true => {
                 let text = self.p.slice(from, to);
                 match out.last_mut() {
                     Some(Piece::Text(prev)) => prev.push_str(&text),
                     _ => out.push(Piece::Text(text)),
                 }
-            }
-        };
-        for t in toks {
-            if let Token::Interpolated { quote: None, pieces } = &t.token {
-                push_text(cur, t.span.start, &mut out);
-                for pc in pieces {
-                    match (pc, out.last_mut()) {
-                        (Piece::Text(text), Some(Piece::Text(prev))) => prev.push_str(text),
-                        _ => out.push(pc.clone()),
-                    }
-                }
-                cur = t.span.end;
+                out
             }
         }
-        push_text(cur, end, &mut out);
-        out
     }
 }
 
@@ -172,45 +176,79 @@ impl E<'_> {
 /// closing `)`. `any_depth` keeps calls nested in a `(`-group visible;
 /// otherwise only calls at the region's own level count.
 fn first_call(toks: &[Spanned], names: &[&str], any_depth: bool) -> Option<(BytePos, BytePos)> {
+    // pair each token with the depth in front of it (an identifier never moves
+    // the depth, so its own level is what the old cursor carried)
     let mut depth = 0i32;
-    let mut i = 0usize;
-    while i < toks.len() {
-        let s = &toks[i];
-        match &s.token {
-            Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-            Token::Punct(Punct::RParen | Punct::RBracket) => depth -= 1,
-            Token::Ident(word) => {
-                let opens = matches!(toks.get(i + 1).map(|n| &n.token), Some(Token::Punct(Punct::LParen)));
-                let named = names.iter().any(|n| word.eq_ignore_ascii_case(n));
-                if opens && named && (any_depth || depth == 0) {
-                    return Some((s.span.start, call_end(toks, i + 1)));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
+    toks.iter()
+        .map(|s| {
+            let level = depth;
+            depth += match &s.token {
+                Token::Punct(Punct::LParen | Punct::LBracket) => 1,
+                Token::Punct(Punct::RParen | Punct::RBracket) => -1,
+                _ => 0,
+            };
+            (s, level)
+        })
+        .enumerate()
+        .find(|(i, (s, level))| {
+            matches!(&s.token, Token::Ident(w) if names.iter().any(|n| w.eq_ignore_ascii_case(n)))
+                && matches!(
+                    toks.get(*i + 1).map(|n| &n.token),
+                    Some(Token::Punct(Punct::LParen))
+                )
+                && (any_depth || *level == 0)
+        })
+        .map(|(i, (s, _))| (s.span.start, call_end(toks, i + 1)))
 }
 
 /// End offset of the call body opened at `open` (a `(` token).
 fn call_end(toks: &[Spanned], open: usize) -> BytePos {
     let mut depth = 0i32;
-    let mut i = open;
-    let mut last = BytePos(0);
-    while let Some(s) = toks.get(i) {
-        last = s.span.end;
-        match &s.token {
-            Token::Punct(Punct::LParen | Punct::LBracket) => depth += 1,
-            Token::Punct(Punct::RParen | Punct::RBracket) => {
-                depth -= 1;
-                if depth == 0 {
-                    return s.span.end;
+    toks[open..]
+        .iter()
+        .map(|s| {
+            depth += match &s.token {
+                Token::Punct(Punct::LParen | Punct::LBracket) => 1,
+                Token::Punct(Punct::RParen | Punct::RBracket) => -1,
+                _ => 0,
+            };
+            (s.span.end, depth)
+        })
+        .find(|(_, depth)| *depth == 0)
+        .map_or_else(
+            || toks[open..].last().map_or(BytePos(0), |s| s.span.end),
+            |(end, _)| end,
+        )
+}
+
+/// Consume a call body from the cursor: the tokens (closing `)` included) plus
+/// the end offset. `try_fold` stops pulling, so the cursor sits right after the
+/// closer exactly like the old `break`.
+fn walk_call_body<I: Iterator<Item = Spanned>>(
+    cursor: I,
+    head: Spanned,
+) -> (Vec<Spanned>, BytePos) {
+    let reached = cursor
+        .scan(0i32, |depth, s| {
+            *depth += match &s.token {
+                Token::Punct(Punct::LParen | Punct::LBracket) => 1,
+                Token::Punct(Punct::RParen | Punct::RBracket) => -1,
+                _ => 0,
+            };
+            Some((s, *depth))
+        })
+        .try_fold(
+            (vec![head.clone()], head.span.end),
+            |(mut toks, _), (s, depth)| {
+                let end = s.span.end;
+                toks.push(s);
+                match depth {
+                    0 => ControlFlow::Break((toks, end)),
+                    _ => ControlFlow::Continue((toks, end)),
                 }
-            }
-            _ => {}
-        }
-        i += 1;
+            },
+        );
+    match reached {
+        ControlFlow::Break(v) | ControlFlow::Continue(v) => v,
     }
-    last
 }
