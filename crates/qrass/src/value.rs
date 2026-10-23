@@ -279,20 +279,18 @@ impl SassValue {
                     .map(|v| v.render(Some(*sep), source))
                     .collect::<Vec<_>>()
                     .join(join);
-                if *bracketed {
-                    format!("[{inner}]")
-                } else if source && items.is_empty() {
-                    // An empty unbracketed list has no flat form; `toSource` emits
-                    // `()` so it stays distinguishable from null/empty string.
-                    "()".to_string()
-                } else if source && *sep == ListSep::Comma && items.len() == 1 {
-                    // A lone comma element is indistinguishable from a scalar once
-                    // flattened, so `toSource` keeps it a round-trippable `(x,)`.
-                    format!("({inner},)")
-                } else if source && list_needs_parens(*sep, items.is_empty(), parent) {
-                    format!("({inner})")
-                } else {
-                    inner
+                // `toSource`-only wrapping shapes, classified once (bracketed wins,
+                // then empty `()`/lone-comma `(x,)`/needs-parens, else the bare text).
+                let shape = source.then(|| {
+                    (items.is_empty(), *sep == ListSep::Comma && items.len() == 1,
+                     list_needs_parens(*sep, items.is_empty(), parent))
+                });
+                match (*bracketed, shape) {
+                    (true, _) => format!("[{inner}]"),
+                    (false, Some((true, _, _))) => "()".to_string(),
+                    (false, Some((false, true, _))) => format!("({inner},)"),
+                    (false, Some((_, _, true))) => format!("({inner})"),
+                    _ => inner,
                 }
             }
             SassValue::Map { entries } => {
@@ -470,12 +468,10 @@ impl Color {
         let (h, s) = if delta == 0.0 {
             (0.0, 0.0)
         } else {
-            let h = if max == r {
-                60.0 * (((g - b) / delta) % 6.0)
-            } else if max == g {
-                60.0 * ((b - r) / delta + 2.0)
-            } else {
-                60.0 * ((r - g) / delta + 4.0)
+            let h = match (max == r, max == g) {
+                (true, _) => 60.0 * (((g - b) / delta) % 6.0),
+                (false, true) => 60.0 * ((b - r) / delta + 2.0),
+                (false, false) => 60.0 * ((r - g) / delta + 4.0),
             };
             let s = delta / (1.0 - (2.0 * l - 1.0).abs());
             (((h + 360.0) % 360.0), s)

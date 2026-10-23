@@ -68,5 +68,5 @@ selector_super.rs	0	0	0	14
 selector_super_simple.rs	0	0	1	16
 selector_unify.rs	0	0	4	11
 selector_unify_complex.rs	0	0	7	16
-value.rs	0	4	0	1
+value.rs	0	0	0	1
 value_number.rs	0	0	0	9
