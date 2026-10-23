@@ -61,7 +61,6 @@ parser_module.rs	7	0	9	20
 parser_supports.rs	0	0	0	4
 parser_text.rs	0	0	1	0
 pipeline.rs	0	0	4	1
-selector_ast.rs	10	1	1	0
 selector_attr.rs	6	0	6	6
 selector_extend.rs	0	0	1	0
 selector_extend_weave.rs	0	0	2	0

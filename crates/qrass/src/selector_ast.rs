@@ -38,27 +38,25 @@ impl SelectorList {
     /// `:is(...)`/`:where(...)`/`:has(...)`/`nth-* of ...` arguments. Used by
     /// `is-superselector` to recurse into functional pseudo-class arguments.
     pub fn selector_lists(&self) -> Vec<&SelectorList> {
-        let mut out = Vec::new();
-        for complex in &self.complexes {
-            for component in &complex.components {
-                for simple in &component.compound.simples {
-                    simple.visit_selector_lists(&mut out);
-                }
-            }
-        }
-        out
+        self.complexes
+            .iter()
+            .flat_map(|complex| complex.components.iter())
+            .flat_map(|component| component.compound.simples.iter())
+            .flat_map(|simple| simple.collect_selector_lists())
+            .collect()
     }
 }
 
 impl fmt::Display for SelectorList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, complex) in self.complexes.iter().enumerate() {
-            if i > 0 {
-                f.write_str(", ")?;
-            }
-            complex.fmt_render(f)?;
-        }
-        Ok(())
+        // comma-joined rendering in one write (an empty list is the empty text)
+        let text = self
+            .complexes
+            .iter()
+            .map(|complex| complex.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        f.write_str(&text)
     }
 }
 
@@ -145,38 +143,44 @@ impl Complex {
     }
 
     fn fmt_render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, component) in self.components.iter().enumerate() {
-            if i > 0 {
-                if let Some(combinator) = component.combinator {
-                    f.write_str(combinator.as_str())?;
-                } else {
-                    f.write_str(" ")?;
-                }
-                // Bogus extras following the primary combinator (`.c ~ ~ .d`).
-                for combinator in &component.extras {
-                    f.write_str(combinator.as_str())?;
-                }
-            } else if let Some(combinator) = component.combinator {
-                // A leading combinator retained by the parser for a bogus initial
-                // chain (`> .c`) renders in its front-pinned form.
-                f.write_str(combinator.as_leading_str())?;
-                for combinator in &component.extras {
-                    f.write_str(combinator.as_leading_str())?;
-                }
-            }
-            component.compound.fmt_render(f)?;
-        }
+        // each component renders as `edge + compound`, where the edge is the
+        // primary combinator plus any bogus extras; a leading edge uses the
+        // front-pinned form (`> .c`), the rest the spaced form (`.c ~ ~ .d`)
+        let chain = self
+            .components
+            .iter()
+            .enumerate()
+            .map(|(i, component)| {
+                let render: fn(Combinator) -> &'static str = match i {
+                    0 => Combinator::as_leading_str,
+                    _ => Combinator::as_str,
+                };
+                let edge = match (i, component.combinator) {
+                    (0, None) => String::new(),
+                    (_, Some(combinator)) => render(combinator).to_string(),
+                    (_, None) => " ".to_string(),
+                };
+                let extras: String = component.extras.iter().map(|c| render(*c)).collect();
+                edge + &extras + &component.compound.to_string()
+            })
+            .collect::<String>();
         // Dangling combinators after the last compound (`.c +`, or a lone `+`).
         // Each keeps one leading space but no trailing space, so a following comma
         // in the list stays tight (`.c +, .d +`).
-        for (j, combinator) in self.trailing.iter().enumerate() {
-            let symbol = combinator.as_str().trim();
-            if j > 0 || !self.components.is_empty() {
-                f.write_str(" ")?;
-            }
-            f.write_str(symbol)?;
-        }
-        Ok(())
+        let dangling = self
+            .trailing
+            .iter()
+            .enumerate()
+            .map(|(j, combinator)| {
+                let sep = if j > 0 || !self.components.is_empty() {
+                    " "
+                } else {
+                    ""
+                };
+                format!("{sep}{}", combinator.as_str().trim())
+            })
+            .collect::<String>();
+        f.write_str(&(chain + &dangling))
     }
 }
 
@@ -199,10 +203,10 @@ impl Compound {
     }
 
     fn fmt_render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for simple in &self.simples {
-            simple.fmt_render(f)?;
-        }
-        Ok(())
+        // sequential writes; the first error short-circuits the fold
+        self.simples
+            .iter()
+            .try_fold((), |(), simple| simple.fmt_render(f))
     }
 
     /// The type/element universal, if the compound opens with one — the "base"
@@ -364,20 +368,29 @@ impl Simple {
         matches!(self, Simple::Type { .. } | Simple::Universal { .. })
     }
 
-    /// Recurse into selector-list arguments to collect nested lists.
-    fn visit_selector_lists<'a>(&'a self, out: &mut Vec<&'a SelectorList>) {
+    /// Recurse into selector-list arguments to collect nested lists, in document
+    /// order (own arguments first, then the nested ones).
+    fn collect_selector_lists(&self) -> Vec<&SelectorList> {
         let arg = match self {
-            Simple::PseudoClass { arg, .. } | Simple::PseudoElement { arg, .. } => arg,
-            _ => return,
+            Simple::PseudoClass { arg, .. } | Simple::PseudoElement { arg, .. } => Some(arg),
+            _ => None,
         };
-        match arg {
-            PseudoArg::Selectors(list) => out.push(list),
-            PseudoArg::Nth { of: Some(list), .. } => out.push(list),
-            _ => {}
-        }
-        for nested in arg.nested_lists() {
-            out.extend(nested.selector_lists());
-        }
+        let own: Vec<&SelectorList> = match arg {
+            Some(PseudoArg::Selectors(list)) => vec![list],
+            Some(PseudoArg::Nth {
+                of: Some(list), ..
+            }) => vec![list],
+            _ => Vec::new(),
+        };
+        let nested: Vec<&SelectorList> = arg
+            .into_iter()
+            .flat_map(|a| {
+                a.nested_lists()
+                    .into_iter()
+                    .flat_map(|list| list.selector_lists())
+            })
+            .collect();
+        own.into_iter().chain(nested).collect()
     }
 
     fn fmt_render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
