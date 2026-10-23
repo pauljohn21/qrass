@@ -21,3 +21,5 @@ path = "src/main.rs"
 
 [dev-dependencies]
 lightningcss = "1.0.0-alpha.72"
+qrass-ledger = { path = "../qrass-ledger" }
+rusqlite = { version = "0.32", features = ["bundled"] }

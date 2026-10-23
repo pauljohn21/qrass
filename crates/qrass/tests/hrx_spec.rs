@@ -375,6 +375,17 @@ fn sass_spec_hrx_runner() {
             let _ = std::fs::write(&out, format!("{body}\n"));
         }
 
+    // Ledger write-through (`QRASS_HRX_RUN=<name>`): record this snapshot in
+    // the single SQLite ledger instead of growing another reports/*.tsv file.
+    let run = std::env::var("QRASS_HRX_RUN").unwrap_or_default();
+    if !run.is_empty() {
+        let db = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../reports/hrx.db");
+        match qrass_ledger::record(&run, &db, &tally.rows) {
+            Ok((total, pass)) => info!(target: "qrass", run, total, pass, "ledger recorded"),
+            Err(e) => warn!(target: "qrass", ?e, "ledger record failed"),
+        }
+    }
+
     // Regression floor: for a FULL modern-subset run (no `QRASS_HRX_DIR`
     // narrowing), fail only if the pass rate drops below the recorded value.
     // Single-directory convergence runs are informational and skip the floor.

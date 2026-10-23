@@ -1,0 +1,15 @@
+[package]
+name = "qrass-ledger"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "SQLite ledger for qrass sass-spec A/B snapshots (replaces per-round reports/*.tsv sprawl)"
+
+[[bin]]
+name = "ledger"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

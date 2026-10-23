@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use tracing::info;
 
 /// One clean evidence row: the channel list of the input literal and of the
 /// golden output, both parsed from the same section.
@@ -293,8 +294,15 @@ fn dump_pairs_and_fit() {
             p.src, p.tgt, p.ins, p.outs
         ));
     }
-    fs::write("../../reports/w1-golden-pairs.tsv", dump).expect("write pairs tsv");
-    println!("pairs total: {}", pairs.len());
+    // the pairs dump lives in the hrx ledger, not a loose tsv
+    let lines: Vec<String> = dump.lines().map(str::to_string).collect();
+    qrass_ledger::note_store(
+        "golden-pairs",
+        Path::new("../../reports/hrx.db"),
+        &lines,
+    )
+    .expect("store golden pairs");
+    info!("pairs total: {}", pairs.len());
     for ((src, tgt), group) in &by_group {
         println!("{src} → {tgt}: {} clean rows", group.len());
     }
@@ -396,8 +404,15 @@ fn dump_w2_matrix() {
     rows.sort();
     let mut out = String::from("file\tsec\tsurface\tspace\tmask\tgolden\n");
     out.push_str(&rows.join("\n"));
-    std::fs::write("../../reports/w2-surface-matrix.tsv", out).expect("write");
-    println!("w2 rows: {}", rows.len());
+    // the surface matrix also lands in the ledger (`ledger note-dump surface-matrix`)
+    let lines: Vec<String> = out.lines().map(str::to_string).collect();
+    qrass_ledger::note_store(
+        "surface-matrix",
+        Path::new("../../reports/hrx.db"),
+        &lines,
+    )
+    .expect("store surface matrix");
+    info!("w2 rows: {}", rows.len());
 }
 
 fn walk_color(dir: &Path, rows: &mut Vec<String>) {

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/qrass", "crates/qrass-macros", "crates/qrass-wasm"]
+members = ["crates/qrass", "crates/qrass-macros", "crates/qrass-wasm", "crates/qrass-ledger"]
 
 [workspace.package]
 edition = "2024"
