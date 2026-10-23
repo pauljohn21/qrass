@@ -16,6 +16,10 @@ use std::{env, fs};
 
 const BASELINE: &str = "tests/golden/style-baseline.txt";
 
+/// The repo rule (rust.md): no source file may exceed this many lines.
+const LINE_BUDGET: usize = 500;
+const LINE_BASELINE: &str = "tests/golden/line-budget.txt";
+
 /// One file's imperative-construct counts: (loops, else-if chains, `let mut`,
 /// guard `return` statements). RFP contract R3/S2: a function's statement-level
 /// early returns are folded to single-exit `match`/`Shape` dispatch, so this
@@ -180,5 +184,66 @@ fn style_gate_counts_only_decrease() {
     assert!(
         regressions.is_empty(),
         "style gate: imperative constructs grew: {regressions:?}"
+    );
+}
+
+/// Files currently over the line budget, keyed for a stable baseline.
+fn oversize(root: &Path) -> BTreeMap<String, usize> {
+    rs_tree(root, Vec::new())
+        .into_iter()
+        .filter_map(|p| {
+            let lines = fs::read_to_string(&p).ok()?.lines().count();
+            (lines > LINE_BUDGET).then(|| {
+                (
+                    p.strip_prefix(root)
+                        .unwrap_or(&p)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    lines,
+                )
+            })
+        })
+        .collect()
+}
+
+fn parse_line_budget(text: &str) -> BTreeMap<String, usize> {
+    text.lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut cols = l.split('\t');
+            Some((cols.next()?.to_string(), cols.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+/// OpenSpec refactor-rfp-strict task 5b.1: the 500-line rule as a gate. Each
+/// over-budget file may only SHRINK, and a file that crosses the budget for the
+/// first time fails until it is split (or explicitly blessed).
+#[test]
+fn line_budget_only_shrinks() {
+    let current = oversize(Path::new("src"));
+    let baseline_path = Path::new(LINE_BASELINE);
+    if env::var("QRASS_STYLE_GATE_BLESS").is_ok_and(|v| v == "1") {
+        let body = current.iter().fold(String::new(), |mut acc, (f, n)| {
+            acc.push_str(&format!("{f}\t{n}\n"));
+            acc
+        });
+        fs::write(
+            baseline_path,
+            format!("# files over the {LINE_BUDGET}-line budget: file\tlines\n{body}"),
+        )
+        .expect("bless line budget");
+        return;
+    }
+    let baseline = parse_line_budget(
+        &fs::read_to_string(baseline_path).expect("line budget baseline missing — bless one first"),
+    );
+    let offenders: Vec<(&String, &usize)> = current
+        .iter()
+        .filter(|(f, n)| baseline.get(*f).is_none_or(|b| *n > b))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "line budget: files grew past (or newly exceeded) the {LINE_BUDGET}-line rule: {offenders:?} — split them like the `parser_*` / `builtins/color_*` siblings"
     );
 }

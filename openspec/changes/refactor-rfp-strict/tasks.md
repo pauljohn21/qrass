@@ -37,7 +37,7 @@
 
 ## 5b. 文件预算守门（与 rust.md「单文件 ≤ 500 行」对齐）
 
-- [ ] 5b.1 style_gate 加第五维：`src/` 超 500 行文件清单写入基线（只降不升），现存越线：`builtins/color_ops.rs` 533、`eval_module.rs` 521、`eval_stmt.rs` 512、`parser.rs` 505、`value.rs` 501
+- [x] 5b.1 style_gate 加第五维：`src/` 超 500 行文件清单写入基线（只降不升），现存越线：`builtins/color_ops.rs` 533、`eval_module.rs` 521、`eval_stmt.rs` 512、`parser.rs` 505、`value.rs` 501——新增 `line_budget_only_shrinks` 测试 + `tests/golden/line-budget.txt`（首跑新文件越线即 fail）
 - [ ] 5b.2 按 sibling-module 惯例逐个拆出超预算文件（沿用 `parser_*` / `builtins/color_*` / `eval_color_space_symbolic` 的先例），行为零变动，拆完逐个 ledger 对拍
 
 ## 6. M5 收口
