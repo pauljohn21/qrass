@@ -7,14 +7,14 @@ builtins/color_legacy.rs	0	0	1	20
 builtins/color_mix.rs	0	0	0	11
 builtins/color_ops.rs	0	0	3	12
 builtins/color_same.rs	0	0	1	0
-builtins/color_transform.rs	1	1	2	13
+builtins/color_transform.rs	1	0	2	13
 builtins/list.rs	0	0	4	8
 builtins/map.rs	0	0	0	8
 builtins/math.rs	1	0	1	1
 builtins/math_trig.rs	0	0	1	8
 builtins/mod.rs	0	0	2	8
 builtins/selector.rs	6	0	6	4
-builtins/selector_ops.rs	1	0	1	2
+builtins/selector_ops.rs	0	0	0	2
 builtins/string.rs	0	3	1	11
 color4.rs	0	1	1	2
 color4_convert.rs	0	2	3	3
@@ -31,8 +31,8 @@ eval_callable_call.rs	1	0	1	3
 eval_color4.rs	0	0	3	17
 eval_color4_check.rs	0	0	0	16
 eval_color_comma.rs	0	0	0	3
-eval_color_space.rs	0	1	2	5
-eval_color_space_symbolic.rs	1	0	1	5
+eval_color_space.rs	0	0	2	3
+eval_color_space_symbolic.rs	0	0	0	4
 eval_config.rs	0	0	1	2
 eval_control.rs	0	0	2	7
 eval_expr.rs	0	1	0	6
