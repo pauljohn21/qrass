@@ -34,10 +34,17 @@
 
 `if`/`else if` 控制流链与守卫堆叠 MUST 消除：值选择以 `match` 单表达式（仅 enum/结果分派，见 Requirement.4）、组合子（`then_some`/`map_or`/`unwrap_or_else`/`filter`/`any`/`is_some_and`）与表达式返回承载；提前失败以 `ok_or_else(..)?`/`and_then`/`or_else` 错误链承载。嵌套 `if` 判定与布尔拼装不得以语句形态出现。
 
+函数体内的多路提前 `return Err(..)`/`return Ok(哨兵)` 守卫堆叠（同一函数 ≥2 条语句级提前 return 承载分支判定）MUST 消除：以返回域 enum 的 `match` 单表达式分类 + 尾部分派承载，值与错误在 `match` 臂内构造。合法例外：`?` 错误传播本身、闭包体内的提前 return（fold/map 错误联合载体）、单出口早退（整个函数只有一个 guard return，如arity过滤）。
+
 #### Scenario: S1 文案矩阵分派
 
 - **WHEN** 内置函数按参数形态分派多种错误文案
 - **THEN** 分派以链式闭包/单表达式 `match` 完成，不出现 `if .. else if .. else` 语句链
+
+#### Scenario: S2 守卫 return 堆叠
+
+- **WHEN** 一个函数用多条语句级 `return Err/return Ok(None)` 提前承载多路分支
+- **THEN** 分支收进 `match`（或返回域 enum）单表达式，函数只剩单一尾部出口；`?` 传播不受此限
 
 ### Requirement: R4 例外申请制（白名单、留痕）
 

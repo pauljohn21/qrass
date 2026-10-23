@@ -71,11 +71,78 @@ fn split_channels(items: &[Expr]) -> (Vec<&Expr>, Option<&Expr>) {
         (ch, al)
     })
 }
+/// Classification of the `eval_space_color` arg0 shape match: the channel
+/// tuple of a well-formed space list, a golden error to raise, or a
+/// passthrough. Keeps the dispatch single-exit (RFP contract R3/S2).
+enum Shape<'a> {
+    Good {
+        channels: Vec<&'a Expr>,
+        alpha: Option<&'a Expr>,
+        verbatim_items: Option<&'a [Expr]>,
+        via_pair: bool,
+    },
+    Fail(SassError),
+    Pass,
+}
+
+/// The golden's space label for the channel-count error text.
+fn space_label(rgb_family: bool, is_hwb: bool) -> &'static str {
+    match (rgb_family, is_hwb) {
+        (true, _) => "rgb",
+        (false, true) => "hwb",
+        (false, false) => "hsl",
+    }
+}
+
+/// `color.hwb(0 30 40%)`: hwb's w/b channels only accept `%` (or none).
+fn hwb_channel_err(channels: &[&Expr], is_hwb: bool) -> Option<SassError> {
+    is_hwb
+        .then(|| {
+            [(1usize, "whiteness"), (2, "blackness")]
+                .iter()
+                .find_map(|(i, key)| match channels.get(*i) {
+                    Some(Expr::Literal(Literal::Number { value, unit }))
+                        if unit.as_deref() != Some("%") =>
+                    {
+                        let shown = format!("{value}{}", unit.as_deref().unwrap_or(""));
+                        Some(SassError::new(
+                            ErrorKind::Builtins,
+                            format!("${key}: Expected {shown} to have unit \"%\"."),
+                        ))
+                    }
+                    _ => None,
+                })
+        })
+        .flatten()
+}
+
+/// `slash(…)` / `list.slash(…)` call shape: classify the channels argument
+/// against the trailing alpha slot.
+fn slash_call_shape<'a>(ch: &'a Expr, a: Option<&'a Expr>) -> Shape<'a> {
+    match ch {
+        Expr::List { items, .. } => {
+            let (c, inner_alpha) = split_channels(items);
+            Shape::Good {
+                channels: c,
+                alpha: inner_alpha.or(a),
+                verbatim_items: Some(items.as_slice()),
+                via_pair: inner_alpha.is_none() && a.is_some(),
+            }
+        }
+        other => Shape::Good {
+            channels: vec![other],
+            alpha: a,
+            verbatim_items: Some(std::slice::from_ref(other)),
+            via_pair: a.is_some(),
+        },
+    }
+}
+
 impl EvalState {
     /// Handle the modern CSS `rgb(r g b / a)`, `hsl(…)` and `hwb(…)`
     /// space-separated single-argument forms — bare or under the `color`
     /// namespace (round-28 rgb mechanism, generalized in rounds 64/65 to the
-    /// the goldens `$channels` one_arg error family). Returns `Ok(None)` for every
+    /// `$channels` one_arg golden error family). Returns `Ok(None)` for every
     /// other shape so the caller falls through to ordinary builtin dispatch /
     /// passthrough unchanged.
     pub(super) fn eval_space_color(&mut self, call: &FunctionCall) -> Ev<Option<SassValue>> {
@@ -88,111 +155,84 @@ impl EvalState {
         // slash-preserving passthrough.
         let hsl_family = matches!(call.name.as_str(), "hsl" | "hsla" | "hwb")
             && matches!(call.namespace.as_deref(), None | Some("color"));
-        if !rgb_family && !hsl_family {
-            return Ok(None);
-        }
-        // A single positional argument is the modern `$channels` spelling; every
-        // legacy comma-separated spelling (`rgb(1, 2, 3)`) keeps the plain
-        // builtins' own validation.
-        let Some(Arg::Positional(arg0)) = call.args.first() else {
-            return Ok(None);
+        // Single-exit arity filter (the contract's one-guard exemption): every
+        // non-modern spelling routes to ordinary dispatch.
+        let arg0 = match (
+            rgb_family || hsl_family,
+            call.args.len(),
+            call.args.first(),
+        ) {
+            (true, 1, Some(Arg::Positional(a))) => a,
+            _ => return Ok(None),
         };
-        if call.args.len() != 1 {
-            return Ok(None);
-        }
         let slash_msg = rgb_family || call.name == "hwb";
-        let is_hwb = call.name == "hwb";
-        let channel_names: &[&str; 3] = match (rgb_family, is_hwb) {
-            (true, _) => &["red", "green", "blue"],
-            (false, true) => &["hue", "whiteness", "blackness"],
-            (false, false) => &["hue", "saturation", "lightness"],
-        };
-        let space_label = match (rgb_family, is_hwb) {
-            (true, _) => "rgb",
-            (false, true) => "hwb",
-            (false, false) => "hsl",
-        };
-        // Normalize the argument into channel ASTs plus the optional alpha, and
-        // raise the shape errors the goldens raise before any channel is inspected.
-        let channels: Vec<&Expr>;
-        let alpha: Option<&Expr>;
-        let verbatim_items: Option<&[Expr]>;
-        // True when the alpha came as the second element of a slash *pair*
-        // (`list.slash(channels, α)`) rather than a `channels / α` division
-        // inside the space list: the pair's verbatim rendering keeps spaces
-        // around the slash, the division's is literal (`b/25%`).
-        let mut alpha_via_pair = false;
-        match arg0 {
+        let err = |m: String| SassError::new(ErrorKind::Builtins, m);
+        // Normalize the argument into channel ASTs plus the optional alpha and
+        // raise the golden shape errors before any channel is inspected.
+        let shape = match arg0 {
             Expr::List {
                 items,
                 sep,
                 bracketed,
                 ..
+            } if items.is_empty() => {
+                Shape::Fail(err("$channels: Color component list may not be empty.".into()))
+            }
+            Expr::List {
+                bracketed: true, ..
+            } => Shape::Fail(err(format!(
+                "$channels: Expected an unbracketed list, was {}",
+                self.eval_expr(arg0)?.to_css()
+            ))),
+            Expr::List {
+                sep: ListSep::Comma,
+                ..
+            } => Shape::Fail(err(format!(
+                "$channels: Expected a space-{}separated list, was ({})",
+                if slash_msg { " or slash-" } else { "-" },
+                self.eval_expr(arg0)?.to_css()
+            ))),
+            Expr::List {
+                sep: ListSep::Slash,
+                items,
+                ..
             } => {
-                if items.is_empty() {
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        "$channels: Color component list may not be empty.",
-                    ));
-                }
-                if *bracketed {
-                    let v = self.eval_expr(arg0)?;
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        format!(
-                            "$channels: Expected an unbracketed list, was {}",
-                            v.to_css()
-                        ),
-                    ));
-                }
-                match sep {
-                    ListSep::Comma => {
-                        let v = self.eval_expr(arg0)?;
-                        return Err(SassError::new(
-                            ErrorKind::Builtins,
-                            format!(
-                                "$channels: Expected a space-{}separated list, was ({})",
-                                if slash_msg { " or slash-" } else { "-" },
-                                v.to_css()
-                            ),
-                        ));
-                    }
-                    ListSep::Slash => {
-                        let n = items.len();
-                        if n != 2 {
-                            return Err(SassError::new(
-                                ErrorKind::Builtins,
-                                format!(
-                                    "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                                    if n == 1 { "was" } else { "were" }
-                                ),
-                            ));
-                        }
-                        // A top-level slash list (e.g. from `list.append(…, $separator:
-                        // slash)`) is the `(channels, alpha)` pair.
-                        let ch = &items[0];
-                        match ch {
-                            Expr::List { items: inner, .. } => {
-                                let (c, a) = split_channels(inner);
-                                channels = c;
-                                alpha = a.or(Some(&items[1]));
-                                alpha_via_pair = a.is_none();
-                                verbatim_items = Some(inner.as_slice());
-                            }
-                            other => {
-                                channels = vec![other];
-                                alpha = Some(&items[1]);
-                                alpha_via_pair = true;
-                                verbatim_items = Some(std::slice::from_ref(other));
+                let n = items.len();
+                if n != 2 {
+                    Shape::Fail(err(format!(
+                        "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                        if n == 1 { "was" } else { "were" }
+                    )))
+                } else {
+                    // A top-level slash list (e.g. from `list.append(…, $separator:
+                    // slash)`) is the `(channels, alpha)` pair.
+                    let ch = &items[0];
+                    match ch {
+                        Expr::List { items: inner, .. } => {
+                            let (c, a) = split_channels(inner);
+                            Shape::Good {
+                                channels: c,
+                                alpha: a.or(Some(&items[1])),
+                                verbatim_items: Some(inner.as_slice()),
+                                via_pair: a.is_none(),
                             }
                         }
+                        other => Shape::Good {
+                            channels: vec![other],
+                            alpha: Some(&items[1]),
+                            verbatim_items: Some(std::slice::from_ref(other)),
+                            via_pair: true,
+                        },
                     }
-                    ListSep::Space => {
-                        let (c, a) = split_channels(items);
-                        channels = c;
-                        alpha = a;
-                        verbatim_items = Some(items.as_slice());
-                    }
+                }
+            }
+            Expr::List { items, .. } => {
+                let (c, a) = split_channels(items);
+                Shape::Good {
+                    channels: c,
+                    alpha: a,
+                    verbatim_items: Some(items.as_slice()),
+                    via_pair: false,
                 }
             }
             Expr::FunctionCall(inner)
@@ -200,58 +240,70 @@ impl EvalState {
             {
                 let n = inner.args.len();
                 if n != 2 {
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        format!(
-                            "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
-                            if n == 1 { "was" } else { "were" }
-                        ),
-                    ));
-                }
-                let Arg::Positional(ch) = &inner.args[0] else {
-                    return Ok(None);
-                };
-                let a = match &inner.args[1] {
-                    Arg::Positional(a) => Some(a),
-                    _ => None,
-                };
-                match ch {
-                    Expr::List { items, .. } => {
-                        let (c, inner_alpha) = split_channels(items);
-                        channels = c;
-                        alpha = inner_alpha.or(a);
-                        alpha_via_pair = inner_alpha.is_none() && a.is_some();
-                        verbatim_items = Some(items.as_slice());
-                    }
-                    other => {
-                        channels = vec![other];
-                        alpha = a;
-                        alpha_via_pair = a.is_some();
-                        verbatim_items = Some(std::slice::from_ref(other));
+                    Shape::Fail(err(format!(
+                        "$channels: Only 2 slash-separated elements allowed, but {n} {} passed.",
+                        if n == 1 { "was" } else { "were" }
+                    )))
+                } else {
+                    match (&inner.args[0], &inner.args[1]) {
+                        (Arg::Positional(ch), Arg::Positional(a)) => slash_call_shape(ch, Some(a)),
+                        (Arg::Positional(ch), _) => slash_call_shape(ch, None),
+                        _ => Shape::Pass,
                     }
                 }
             }
             // A lone value: `rgb(1)` / `color.hwb(0)` are one-channel lists in
-            // the goldens' message (`but 1 has 1`, no parentheses); anything else
-            // (variables, symbolic constructs) keeps today's routing.
+            // the golden's message (`but 1 has 1`, no parentheses); anything
+            // else (variables, symbolic constructs) keeps today's routing.
             other => match slot_kind(other) {
-                Slot::Number => {
-                    let shown = self.eval_expr(other)?.to_css();
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        format!(
-                            "$channels: The {space_label} color space has 3 channels but {shown} has 1.",
-                        ),
-                    ));
-                }
-                _ => return Ok(None),
+                Slot::Number => Shape::Fail(err(format!(
+                    "$channels: The {} color space has 3 channels but {} has 1.",
+                    space_label(rgb_family, call.name == "hwb"),
+                    self.eval_expr(other)?.to_css()
+                ))),
+                _ => Shape::Pass,
             },
+        };
+        match shape {
+            Shape::Pass => Ok(None),
+            Shape::Fail(e) => Err(e),
+            good => self.finish_space_color(call, good, rgb_family, arg0),
         }
+    }
+
+    /// Validation + dispatch tail of the modern space-color form: the golden
+    /// error union is assembled lazily in the original order and the final
+    /// routing is one `match` (contract R3/S2 single exit).
+    fn finish_space_color<'a>(
+        &mut self,
+        call: &FunctionCall,
+        shape: Shape<'a>,
+        rgb_family: bool,
+        arg0: &'a Expr,
+    ) -> Ev<Option<SassValue>> {
+        // the upstream dispatch already claimed Pass/Fail; destructuring here
+        // keeps the arity budget and the single-exit shape
+        let (channels, alpha, verbatim_items, alpha_via_pair) = match shape {
+            Shape::Good {
+                channels,
+                alpha,
+                verbatim_items,
+                via_pair,
+            } => (channels, alpha, verbatim_items, via_pair),
+            _ => return Ok(None),
+        };
+        let is_hwb = call.name == "hwb";
+        let channel_names: &[&str; 3] = match (rgb_family, is_hwb) {
+            (true, _) => &["red", "green", "blue"],
+            (false, true) => &["hue", "whiteness", "blackness"],
+            (false, false) => &["hue", "saturation", "lightness"],
+        };
+        let space_label = space_label(rgb_family, is_hwb);
         // Slot classification drives the remaining errors (round-64 rules):
         // symbolic/relative keeps the call verbatim, concrete non-numbers are
         // `$channels:` type errors, and a clean 3-channel list goes to strict
         // units and the legacy dispatch.
-        let (verbatim, first_concrete) = channels.iter().enumerate().fold(
+        let (verb, first_concrete) = channels.iter().enumerate().fold(
             (false, None::<(usize, &Expr)>),
             |(verb, first), (i, e)| match slot_kind(e) {
                 Slot::Number => (verb, first),
@@ -259,106 +311,110 @@ impl EvalState {
                 Slot::Concrete => (verb, first.or((i < 3).then_some((i, e)))),
             },
         );
-        let verbatim = verbatim
-            || alpha.is_some_and(|a| matches!(slot_kind(a), Slot::Verbatim));
-        if !verbatim {
-            if let Some((i, e)) = first_concrete {
-                let v = self.eval_expr(e)?;
-                return Err(SassError::new(
-                    ErrorKind::Builtins,
-                    format!(
-                        "$channels: Expected {} channel to be a number, was {}.",
-                        channel_names[i],
-                        v.to_css()
-                    ),
-                ));
-            }
-            if channels.len() != 3 {
-                // A wrong channel count over an otherwise-concrete list; the
-                // alpha (when split out) joins the rendering after ` / `.
-                let shown: Vec<String> = channels
-                    .iter()
-                    .map(|e| self.render_css(e))
-                    .collect::<Ev<Vec<String>>>()?;
-                let shown = match alpha {
-                    Some(a) => format!("{} / {}", shown.join(" "), self.render_css(a)?),
-                    None => shown.join(" "),
-                };
-                return Err(SassError::new(
-                    ErrorKind::Builtins,
-                    format!(
-                        "$channels: The {space_label} color space has 3 channels but ({shown}) has {}.",
-                        channels.len()
-                    ),
-                ));
-            }
-            // `color.hwb(0 30 40%)`: hwb's w/b channels only accept `%` (or none).
-            let hwb_err = (call.name == "hwb")
-                .then(|| {
-                    [(1usize, "whiteness"), (2, "blackness")]
-                        .iter()
-                        .find_map(|(i, key)| match channels[*i] {
-                            Expr::Literal(Literal::Number { value, unit })
-                                if unit.as_deref() != Some("%") =>
-                            {
-                                let shown =
-                                    format!("{value}{}", unit.as_deref().unwrap_or(""));
-                                Some(SassError::new(
-                                    ErrorKind::Builtins,
-                                    format!("${key}: Expected {shown} to have unit \"%\"."),
-                                ))
-                            }
-                            _ => None,
+        let verbatim = verb || alpha.is_some_and(|a| matches!(slot_kind(a), Slot::Verbatim));
+        let err = |m: String| SassError::new(ErrorKind::Builtins, m);
+        let verdict = (!verbatim)
+            .then(|| -> Ev<Option<SassError>> {
+                let concrete = first_concrete
+                    .map(|(i, e)| {
+                        self.eval_expr(e).map(|v| {
+                            err(format!(
+                                "$channels: Expected {} channel to be a number, was {}.",
+                                channel_names[i],
+                                v.to_css()
+                            ))
                         })
-                })
-                .flatten();
-            if let Some(e) = hwb_err {
-                return Err(e);
-            }
-        }
-        if rgb_family {
+                    })
+                    .transpose()?;
+                let count = (concrete.is_none() && channels.len() != 3)
+                    .then(|| -> Ev<Option<SassError>> {
+                        // A wrong channel count over an otherwise-concrete list; the
+                        // alpha (when split out) joins the rendering after ` / `.
+                        let shown = channels
+                            .iter()
+                            .map(|e| self.render_css(e))
+                            .collect::<Ev<Vec<String>>>()?;
+                        let shown = match alpha {
+                            Some(a) => format!("{} / {}", shown.join(" "), self.render_css(a)?),
+                            None => shown.join(" "),
+                        };
+                        Ok(Some(err(format!(
+                            "$channels: The {space_label} color space has 3 channels but ({shown}) has {}.",
+                            channels.len()
+                        ))))
+                    })
+                    .transpose()?
+                    .flatten();
+                Ok(concrete.or(count).or_else(|| hwb_channel_err(&channels, is_hwb)))
+            })
+            .transpose()?
+            .flatten();
+        match verdict {
+            Some(e) => Err(e),
             // Shape/type errors above already claimed the concrete forms; what
             // remains (a clean list, symbolic channels, a wrong count) keeps the
             // historical builtins dispatch untouched.
-            return self.legacy_dispatch(call, &channels, alpha);
+            None if rgb_family => self.legacy_dispatch(call, &channels, alpha),
+            None if channels.len() == 3 && !verbatim => self.legacy_dispatch(call, &channels, alpha),
+            None => {
+                self.symbolic_color_tail(call, &channels, alpha, verbatim_items, alpha_via_pair, arg0)
+            }
         }
-        if channels.len() == 3 && !verbatim {
-            return self.legacy_dispatch(call, &channels, alpha);
-        }
+    }
+
+    /// hsl-family tail: a symbolic comma-serializable slot re-emits the legacy
+    /// COMMA form; anything else renders verbatim with a pair alpha keeping
+    /// the literal ` / ` slash.
+    fn symbolic_color_tail<'a>(
+        &mut self,
+        call: &FunctionCall,
+        channels: &[&'a Expr],
+        alpha: Option<&'a Expr>,
+        verbatim_items: Option<&'a [Expr]>,
+        alpha_via_pair: bool,
+        arg0: &'a Expr,
+    ) -> Ev<Option<SassValue>> {
         // A symbolic hsl/hsla slot (calc/var/env/attr) re-emits the call in
         // the legacy COMMA form — `hsl(1, calc(2%), 3%, 0.4)`
         // (`hsl/one_arg/special_functions/*`). `from` anchors and `/`-product
         // slots are not leaf-ok, so the verbatim slash form below keeps them.
-        if channels.len() == 3
-            && let Some(text) = self.try_comma_symbolic_color(call, &channels, alpha)?
-        {
-            return Ok(Some(SassValue::Str { text, quoted: false }));
+        let comma = (channels.len() == 3)
+            .then(|| self.try_comma_symbolic_color(call, channels, alpha))
+            .transpose()?
+            .flatten();
+        match comma {
+            Some(text) => Ok(Some(SassValue::Str { text, quoted: false })),
+            None => {
+                // Symbolic / relative colors render verbatim with the alpha slash
+                // kept literal (`hwb(0 30% var(--c)/0.5)`). The hsl family only.
+                let items = verbatim_items.unwrap_or(std::slice::from_ref(arg0));
+                let parts: Vec<String> = items
+                    .iter()
+                    .map(|item| match item {
+                        Expr::Binary {
+                            op: BinOp::Div,
+                            left,
+                            right,
+                            ..
+                        } => Ok(format!(
+                            "{}/{}",
+                            self.render_css(left)?,
+                            self.render_css(right)?
+                        )),
+                        other => self.render_css(other),
+                    })
+                    .collect::<Ev<Vec<String>>>()?;
+                let text = parts.join(" ");
+                let text = match (alpha_via_pair, alpha) {
+                    (true, Some(a)) => format!("{text} / {}", self.render_css(a)?),
+                    _ => text,
+                };
+                Ok(Some(SassValue::Str {
+                    text: format!("{}({})", call.name, text),
+                    quoted: false,
+                }))
+            }
         }
-        // Symbolic / relative colors render verbatim with the alpha slash kept
-        // literal (`hwb(0 30% var(--c)/0.5)`). The hsl family only.
-        let items = verbatim_items.unwrap_or(std::slice::from_ref(arg0));
-        let parts: Vec<String> = items
-            .iter()
-            .map(|item| match item {
-                Expr::Binary {
-                    op: BinOp::Div,
-                    left,
-                    right,
-                    ..
-                } => Ok(format!("{}/{}", self.render_css(left)?, self.render_css(right)?)),
-                other => self.render_css(other),
-            })
-            .collect::<Ev<Vec<String>>>()?;
-        let mut text = parts.join(" ");
-        if alpha_via_pair
-            && let Some(a) = alpha
-        {
-            text = format!("{text} / {}", self.render_css(a)?);
-        }
-        Ok(Some(SassValue::Str {
-            text: format!("{}({})", call.name, text),
-            quoted: false,
-        }))
     }
 
     /// positional builtins (which keep the goldens' serialization forms),

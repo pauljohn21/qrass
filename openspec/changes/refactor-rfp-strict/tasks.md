@@ -40,3 +40,10 @@
 - [ ] 6.1 style_gate 全库报表终态（迭代循环 = 0 ± 豁免）贴入 `reports/rfp-refactor-closeout.md`，与 spec R2/R3 逐条对账
 - [ ] 6.2 `openspec/config.yaml` 的 context 增补「RFP 契约生效」一句话约束（防未来 change 不知情违约）
 - [ ] 6.3 全量验证梯（hrx + e2e + unit + clippy + wasm32 目标）终绿，归档建议 `/opsx:archive`
+
+## 7. R3 收紧批（用户裁决：守卫 return + 评论署名）
+
+- [x] 7.1 src 全库 `dart` 评论署名清洗为 golden-only（102→0，cf5240c，ledger 验证 0/0）
+- [x] 7.2 守卫 return 消除试点：`eval_color_space.rs`（函数级 20 return → 单出口分类 match）
+- [ ] 7.3 `eval_color4.rs`/`builtins/color_transform.rs`/`eval_callable.rs` 等 return top 文件按 ledger 报表批次降量
+- [ ] 7.4 style_gate 新增 return-guard 计数维度（函数体内 ≥2 语句级提前 return 文件级计数），基线只降不升
