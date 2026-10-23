@@ -7,10 +7,14 @@
 //! export set. `@use … with` / `@forward … with` configures the target's
 //! `!default` variables; a supplied-but-unconsumed name is an error (design D3).
 
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use tracing::{Level, span};
+
+#[path = "eval_module_util.rs"]
+mod eval_module_util;
+pub(crate) use eval_module_util::parent_dir;
+use eval_module_util::{dedup_members, underline};
 
 use super::branch_fanout::{Prepared, acquire, branch_key};
 use super::eval_bind::{filter_forwarded, filter_forwarded_names};
@@ -19,7 +23,7 @@ use crate::clock::StopWatch;
 use crate::error::{ErrorKind, Frame, SassError};
 use crate::loader::{SourceKind, canonicalize_with};
 use crate::module::{Module, export_vars};
-use crate::span::{BytePos, Span, line_col};
+use crate::span::{Span, line_col};
 
 use super::{Ev, EvalState, LoadLink};
 
@@ -481,40 +485,6 @@ impl EvalState {
     }
 }
 
-/// The underlineable text of a `@use`/`@forward` statement: from its keyword to
-/// just before the terminating `;`, which the goldens never mark
-/// (`multi_configuration/one_file` underlines 31 of the 32 characters of
-/// `@use "other" as o2 with ($a: b);`).
-fn underline(content: &str, span: Span) -> (BytePos, BytePos) {
-    let start = span.start.0.min(content.len());
-    let end = span.end.0.clamp(start, content.len());
-    let text = &content[start..end];
-    (
-        span.start,
-        BytePos(start + text.trim_end_matches([';', ' ', '\t', '\n', '\r']).len()),
-    )
-}
-
-/// Directory containing `path` (empty for a bare relative name) — the base a
-/// relative `@use`/`@forward` URL resolves against.
-pub(crate) fn parent_dir(path: &str) -> PathBuf {
-    Path::new(path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_default()
-}
-
-/// Merge a module's own member names with its `@forward`ed (exported, defining)
-/// pairs, first-wins on the exported name.
-fn dedup_members(
-    own: Vec<(String, String)>,
-    forwarded: Vec<(String, String)>,
-) -> Vec<(String, String)> {
-    // first-wins against the *accumulating* list, so a duplicate inside
-    // `forwarded` is dropped as well
-    forwarded.into_iter().fold(own, |mut acc, pair| {
-        let seen = acc.iter().any(|(n, _)| n == &pair.0);
-        acc.extend((!seen).then_some(pair));
-        acc
-    })
-}
+// `underline` / `parent_dir` / `dedup_members` live in the child module
+// `eval_module_util` (task 5b.2 budget split); `parent_dir` is re-exported above so
+// `crate::eval::eval_module::parent_dir` still resolves for the module-graph callers.
