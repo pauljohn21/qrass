@@ -13,10 +13,6 @@
 //! [`parser_at`] — both consume an owned `Vec<Spanned>` run and return owned AST,
 //! never touching a shared cursor.
 
-use std::convert::Infallible;
-
-use rxrust::prelude::*;
-
 use crate::ast::{Block, IfClause, InterpText, Stmt};
 use crate::ast_expr::{Arg, Expr};
 use crate::error::{ErrorKind, Located, SassError};
@@ -50,6 +46,9 @@ pub(crate) use parser_module::check_module_placement;
 mod parser_text;
 pub(crate) use parser_text::token_to_pieces;
 pub(crate) use parser_module::config_key;
+#[path = "parser_run.rs"]
+mod parser_run;
+pub use parser_run::{parse, parse_stream};
 #[path = "named_colors.rs"]
 pub(crate) mod named_colors;
 
@@ -473,33 +472,5 @@ impl Parser {
     }
 }
 
-// ─── Public reactive API ─────────────────────────────────────────────────────
-
-/// Cold statement stream: tokens flow one at a time through `scan_map`; completed
-/// statements leave via `flat_map`. Errors ride the value channel.
-pub fn parse_stream(
-    file: FileId,
-    name: String,
-    content: String,
-    tokens: Vec<Spanned>,
-) -> LocalBoxedObservable<'static, PsResult, Infallible> {
-    Local::from_iter(tokens.into_iter().map(Some).chain(std::iter::once(None)))
-        .scan_map(Parser::new(file, name, content), |p, t| p.step(t))
-        .filter(|batch| !batch.is_empty())
-        .flat_map(Local::from_iter)
-        .box_it()
-}
-
-/// Synchronous convenience API: parse a full token vector into a program.
-/// Drains the very stream the pipeline runs, so there is one parsing fold in
-/// the crate.
-pub fn parse(
-    file: FileId,
-    name: String,
-    content: String,
-    tokens: Vec<Spanned>,
-) -> Result<Vec<Stmt>, SassError> {
-    let program = crate::drain::drain(parse_stream(file, name, content, tokens))?;
-    check_module_placement(&program)?;
-    Ok(program)
-}
+// `parse_stream` / `parse` live in the child module `parser_run` (task 5b.2 budget
+// split), re-exported at the top of this file as `crate::parser::{parse, parse_stream}`.
