@@ -57,7 +57,7 @@ parser_forward.rs	0	0	0	5
 parser_groups.rs	0	0	0	5
 parser_if.rs	4	1	8	19
 parser_if_raw.rs	0	0	3	2
-parser_module.rs	7	0	9	20
+parser_module.rs	0	0	4	16
 parser_supports.rs	0	0	0	4
 parser_text.rs	0	0	1	0
 pipeline.rs	0	0	4	1
