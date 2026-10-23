@@ -14,6 +14,10 @@ use crate::value::SassValue;
 
 use super::{Ev, EvalState};
 
+/// Channel slots accumulated by the literal fold: parsed values plus the
+/// degenerate-`calc` text overrides.
+type SlotPair = ([Option<f64>; 3], [Option<String>; 3]);
+
 impl EvalState {
     /// Parse CSS Color 4 space-separated literals into a Color 4 value:
     /// `color(<space> c1 c2 c3 [/ a])` plus the bare forms `lab`/`lch`/`oklab`/
@@ -131,22 +135,34 @@ impl EvalState {
         } else {
             crate::color4::lookup(&call.name).expect("checked above")
         };
-        let mut comps: Vec<SassValue> = Vec::new();
-        let mut alpha_expr: Option<&Expr> = None;
-        for item in iter {
-            if let Expr::Binary {
-                op: BinOp::Div,
-                left,
-                right,
-                ..
-            } = item
-            {
-                comps.push(self.eval_expr(left)?);
-                alpha_expr = Some(right);
-            } else {
-                comps.push(self.eval_expr(item)?);
-            }
-        }
+        // the wrapper branch consumed the leading item as the space name via
+        // `iter.next()`; bare forms keep all items as channels
+        let rest: &[Expr] = items.get(usize::from(wrapper)..).unwrap_or(&[]);
+        // the trailing `channels / alpha` division is located by the reverse
+        // find (last wins, mirroring the old overwrite-in-loop), channels
+        // evaluated through the collect's error union
+        let alpha_expr = rest
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                Expr::Binary {
+                    op: BinOp::Div,
+                    right,
+                    ..
+                } => Some(&**right),
+                _ => None,
+            });
+        let comps: Vec<SassValue> = rest
+            .iter()
+            .map(|item| match item {
+                Expr::Binary {
+                    op: BinOp::Div,
+                    left,
+                    ..
+                } => self.eval_expr(left),
+                other => self.eval_expr(other),
+            })
+            .collect::<Ev<Vec<SassValue>>>()?;
         if comps.len() != 3 {
             // The four bare names and the wrapper reach here only with a
             // wrong-length space list (shorter lists were rejected by the
@@ -182,97 +198,119 @@ impl EvalState {
         // dart names the failing argument differently per spelling: the wrapper
         // reports its `$description` argument, bare forms the `$channels`.
         let arg_name = if wrapper { "description" } else { "channels" };
-        let mut parsed: [Option<f64>; 3] = [None, None, None];
-        let mut text_slots: [Option<String>; 3] = [None, None, None];
-        for (idx, (v, ch)) in comps.iter().zip(&space.channels).enumerate() {
-            match channel_value(v, ch) {
-                Some(cv) => parsed[idx] = cv,
-                // A symbolic CSS value keeps the passthrough; a concrete-but-wrong
-                // channel raises dart's argument error (per-channel unit vs type).
-                None if is_symbolic(v) => {
-                    // Degenerate `calc(infinity)`/`calc(NaN)` spellings build a
-                    // *text* channel slot instead of passing through verbatim
-                    // (`change/unusual_numbers`: `lab(50% calc(infinity) 0)`).
-                    if let SassValue::Str { text, quoted: false } = v
-                        && crate::color4::degenerate_channel_text(text)
-                    {
-                        text_slots[idx] = Some(text.trim().to_string());
-                        parsed[idx] = Some(0.0);
-                        continue;
-                    }
-                    return Ok(None);
-                }
-                None => {
-                    return Err(SassError::new(
-                        ErrorKind::Builtins,
-                        match v {
-                            SassValue::Number { .. } if matches!(ch.unit, crate::color4::Unit::Deg) => {
-                                format!(
-                                    "${}: Expected {} to have an angle unit (deg, grad, rad, turn).",
-                                    ch.name,
-                                    v.to_css()
-                                )
-                            },
-                            SassValue::Number { .. } => format!(
-                                "${}: Expected {} to have unit \"%\" or no units.",
-                                ch.name,
-                                v.to_css()
-                            ),
-                            _ => format!(
-                                "${arg_name}: Expected {} channel to be a number, was {}.",
-                                ch.name,
-                                v.to_css()
-                            ),
-                        },
-                    ));
-                }
-            }
-        }
-        let mut alpha_missing = false;
-        let alpha = match alpha_expr {
-            Some(e) => match self.eval_expr(e)? {
-                SassValue::Str { text, quoted: false } if text == "none" => {
-                    alpha_missing = true;
-                    None
-                }
-                // dart validates the `$alpha` slot: unitless or `%` only; a bare
-                // string reports the `$channels:`-prefixed type error (golden
-                // quirk), a symbolic construct keeps the passthrough.
-                v @ SassValue::Number { .. } => match &v {
-                    SassValue::Number { value, unit } => match unit.as_deref() {
-                        None => Some(*value),
-                        Some("%") => Some(value / 100.0),
-                        Some(_) => {
-                            return Err(shape_err(format!(
-                                "$alpha: Expected {} to have unit \"%\" or no units.",
-                                v.to_css()
-                            )));
-                        }
-                    },
-                    _ => unreachable!(),
-                },
-                v @ SassValue::Str { .. } => {
-                    // Degenerate `calc(infinity)`/`calc(-infinity)`/`calc(NaN)`
-                    // alphas *concretize* rather than passing through verbatim:
-                    // the non-finite result clamps like a plain number
-                    // (`lab/alpha` `degenerate/*`: +inf → omitted 1 spelling,
-                    // -inf/NaN → `/ 0`).
-                    if let SassValue::Str { text, quoted: false } = &v
-                        && let Some(a) = degenerate_alpha(text)
-                    {
-                        Some(a)
-                    } else if is_symbolic(&v) {
+        // channel slots accumulate in an owned fold; a `None` latch marks the
+        // symbolic passthrough (the old early `return Ok(None)`)
+        let slots = comps
+            .iter()
+            .zip(space.channels.iter())
+            .enumerate()
+            .try_fold(
+                Some(([None, None, None], [None, None, None])),
+                |acc, (idx, (v, ch))| -> Ev<Option<SlotPair>> {
+                    let Some((mut parsed, mut text_slots)) = acc else {
                         return Ok(None);
-                    } else {
+                    };
+                    Ok(match (channel_value(v, ch), is_symbolic(v)) {
+                        (Some(cv), _) => {
+                            parsed[idx] = cv;
+                            Some((parsed, text_slots))
+                        }
+                        // A symbolic CSS value keeps the passthrough; degenerate
+                        // `calc(infinity)`/`calc(NaN)` spellings build a *text*
+                        // channel slot instead (`change/unusual_numbers`).
+                        (None, true) => match v {
+                            SassValue::Str {
+                                text,
+                                quoted: false,
+                            } if crate::color4::degenerate_channel_text(text) =>
+                            {
+                                text_slots[idx] = Some(text.trim().to_string());
+                                parsed[idx] = Some(0.0);
+                                Some((parsed, text_slots))
+                            }
+                            _ => None,
+                        },
+                        // a concrete-but-wrong channel raises dart's argument
+                        // error (per-channel unit vs type)
+                        (None, false) => {
+                            return Err(SassError::new(
+                                ErrorKind::Builtins,
+                                match v {
+                                    SassValue::Number { .. }
+                                        if matches!(ch.unit, crate::color4::Unit::Deg) =>
+                                    {
+                                        format!(
+                                            "${}: Expected {} to have an angle unit (deg, grad, rad, turn).",
+                                            ch.name,
+                                            v.to_css()
+                                        )
+                                    }
+                                    SassValue::Number { .. } => format!(
+                                        "${}: Expected {} to have unit \"%\" or no units.",
+                                        ch.name,
+                                        v.to_css()
+                                    ),
+                                    _ => format!(
+                                        "${arg_name}: Expected {} channel to be a number, was {}.",
+                                        ch.name,
+                                        v.to_css()
+                                    ),
+                                },
+                            ));
+                        }
+                    })
+                },
+            )?;
+        let Some((parsed, text_slots)) = slots else {
+            return Ok(None);
+        };
+        let alpha_v = alpha_expr.map(|e| self.eval_expr(e)).transpose()?;
+        let alpha_missing =
+            matches!(&alpha_v, Some(SassValue::Str { text, quoted: false }) if text == "none");
+        let alpha = match alpha_v {
+            None => None,
+            Some(SassValue::Str { text, quoted: false }) if text == "none" => None,
+            // dart validates the `$alpha` slot: unitless or `%` only; a bare
+            // string reports the `$channels:`-prefixed type error (golden
+            // quirk), a symbolic construct keeps the passthrough.
+            Some(v @ SassValue::Number { .. }) => match &v {
+                SassValue::Number { value, unit } => match unit.as_deref() {
+                    None => Some(*value),
+                    Some("%") => Some(value / 100.0),
+                    Some(_) => {
+                        return Err(shape_err(format!(
+                            "$alpha: Expected {} to have unit \"%\" or no units.",
+                            v.to_css()
+                        )));
+                    }
+                },
+                _ => unreachable!(),
+            },
+            Some(v @ SassValue::Str { .. }) => {
+                // Degenerate `calc(infinity)`/`calc(-infinity)`/`calc(NaN)`
+                // alphas *concretize* rather than passing through verbatim:
+                // the non-finite result clamps like a plain number
+                // (`lab/alpha` `degenerate/*`: +inf → omitted 1 spelling,
+                // -inf/NaN → `/ 0`).
+                let deg = match &v {
+                    SassValue::Str {
+                        text,
+                        quoted: false,
+                    } => degenerate_alpha(text),
+                    _ => None,
+                };
+                match deg {
+                    Some(a) => Some(a),
+                    _ if is_symbolic(&v) => return Ok(None),
+                    _ => {
                         return Err(shape_err(format!(
                             "${arg_name}: {} is not a number.",
                             v.to_css()
                         )));
                     }
                 }
-                _ => return Ok(None),
-            },
-            None => None,
+            }
+            Some(_) => return Ok(None),
         };
         let c4 = crate::color4::Color4 {
             space,
