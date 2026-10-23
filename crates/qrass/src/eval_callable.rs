@@ -407,28 +407,30 @@ impl EvalState {
             }
             return Ok(None);
         }
-        for key in [text, canon] {
-            if let Some(decl) = self.functions.get(key) {
+        // a user function is registered under the raw or the canonical spelling;
+        // the first hit wins (the old cursor `for` + early `return`)
+        let declared = [text, canon]
+            .into_iter()
+            .find_map(|key| self.functions.get(key).map(|decl| (key, decl.clone())));
+        let value = declared
+            .map(|(key, decl)| {
                 let (env, owner) = self.closure_snapshot(key);
-                return Ok(Some(SassValue::Function(Rc::new(FnRef {
+                Some(SassValue::Function(Rc::new(FnRef {
                     name: key.to_string(),
                     module: None,
-                    kind: FnKind::User {
-                        decl: decl.clone(),
-                        env,
-                        owner,
-                    },
-                }))));
-            }
-        }
-        if crate::builtins::contains(None, canon) {
-            return Ok(Some(SassValue::Function(Rc::new(FnRef {
-                name: canon.to_string(),
-                module: None,
-                kind: FnKind::Builtin { namespace: None },
-            }))));
-        }
-        Ok(None)
+                    kind: FnKind::User { decl, env, owner },
+                })))
+            })
+            .unwrap_or_else(|| {
+                crate::builtins::contains(None, canon).then(|| {
+                    SassValue::Function(Rc::new(FnRef {
+                        name: canon.to_string(),
+                        module: None,
+                        kind: FnKind::Builtin { namespace: None },
+                    }))
+                })
+            });
+        Ok(value)
     }
 
     fn find_mixin(&mut self, text: &str, canon: &str, ns: Option<&str>) -> Ev<Option<SassValue>> {
@@ -467,22 +469,23 @@ impl EvalState {
             }
             return Ok(None);
         }
-        for key in [text, canon] {
-            if let Some(decl) = self.mixins.get(key) {
-                return Ok(Some(SassValue::Mixin(Rc::new(MixRef {
-                    name: key.to_string(),
-                    module: None,
-                    kind: MixKind::User {
-                        decl: decl.clone(),
-                        owner: self
-                            .mixin_module
-                            .get(key)
-                            .cloned()
-                            .unwrap_or_else(|| self.env_owner.clone()),
-                    },
-                }))));
-            }
-        }
-        Ok(None)
+        // same two-spelling lookup for mixins, with the defining module owner
+        let declared = [text, canon]
+            .into_iter()
+            .find_map(|key| self.mixins.get(key).map(|decl| (key, decl.clone())));
+        Ok(declared.map(|(key, decl)| {
+            SassValue::Mixin(Rc::new(MixRef {
+                name: key.to_string(),
+                module: None,
+                kind: MixKind::User {
+                    decl,
+                    owner: self
+                        .mixin_module
+                        .get(key)
+                        .cloned()
+                        .unwrap_or_else(|| self.env_owner.clone()),
+                },
+            }))
+        }))
     }
 }

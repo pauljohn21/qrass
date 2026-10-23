@@ -233,22 +233,23 @@ pub fn canonicalize_with(
 /// exist, so it never resolves `..` past the true location.
 pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
     use std::path::Component;
-    let mut stack: Vec<Component<'_>> = Vec::new();
-    for c in path.components() {
+    // fold the component stream: `.` drops, `..` pops a preceding normal segment
+    // and is kept when there is none (a relative path reaching above its base)
+    let stack = path.components().fold(Vec::new(), |mut stack: Vec<Component<'_>>, c| {
         match c {
             Component::CurDir => {}
             Component::ParentDir => {
-                // Pop a preceding normal segment; keep a leading `..` when there is
-                // none (relative path reaching above its base).
-                if matches!(stack.last(), Some(Component::Normal(_))) {
-                    stack.pop();
-                } else {
-                    stack.push(c);
+                match matches!(stack.last(), Some(Component::Normal(_))) {
+                    true => {
+                        stack.pop();
+                    }
+                    false => stack.push(c),
                 }
             }
             other => stack.push(other),
         }
-    }
+        stack
+    });
     stack.into_iter().collect()
 }
 
