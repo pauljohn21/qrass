@@ -124,73 +124,95 @@ impl Lexer {
     /// before EOF is provisional (the closing delimiter of a comment/string may
     /// still be pending), so we rewind and wait rather than reporting it.
     fn try_emit(&mut self) -> Vec<LxResult> {
-        let mut out = Vec::new();
-        loop {
-            if self.i >= self.len {
-                break;
-            }
-            let saved = self.i;
-            self.provisional = false;
-            match self.next_token() {
-                Some(Ok(s)) if !self.provisional && (self.is_eof || self.i + 1 < self.len) => {
-                    out.push(Ok(s));
-                }
-                Some(Err(e)) if self.is_eof => {
-                    self.failed = true;
-                    out.push(Err(e));
-                    break;
-                }
-                // Not confirmable yet (or error awaiting more input): rewind & wait.
-                _ => {
-                    self.i = saved;
-                    break;
+        std::iter::from_fn(|| self.emit_step())
+            .flatten()
+            .collect()
+    }
+
+    /// One confirm-and-emit step. `None` ends the run exactly where the old
+    /// loop broke: nothing left, a fused error, or a token that is not
+    /// confirmable yet (then the cursor is rewound and we wait for more input).
+    fn emit_step(&mut self) -> Option<Vec<LxResult>> {
+        match self.failed || self.i >= self.len {
+            true => None,
+            false => {
+                let saved = self.i;
+                self.provisional = false;
+                match self.next_token() {
+                    Some(Ok(s))
+                        if !self.provisional && (self.is_eof || self.i + 1 < self.len) =>
+                    {
+                        Some(vec![Ok(s)])
+                    }
+                    Some(Err(e)) if self.is_eof => {
+                        self.failed = true;
+                        Some(vec![Err(e)])
+                    }
+                    // Not confirmable yet (or error awaiting more input): rewind & wait.
+                    _ => {
+                        self.i = saved;
+                        None
+                    }
                 }
             }
         }
-        out
+    }
+
+    /// Cursor after skipping whitespace and `//` line comments from `from`.
+    fn skip_blanks(&self, from: usize) -> usize {
+        let ws = (from..self.len)
+            .take_while(|&k| self.cs[k].is_whitespace())
+            .count();
+        let at = from + ws;
+        let line_comment = self.cs.get(at) == Some(&'/') && self.cs.get(at + 1) == Some(&'/');
+        match line_comment {
+            false => at,
+            true => {
+                let to = (at..self.len)
+                    .take_while(|&k| self.cs[k] != '\n')
+                    .count();
+                self.skip_blanks(at + to)
+            }
+        }
     }
 
     // ─── Tokenizer core ──────────────────────────────────────────────────────
 
     /// Produce the next token from the cursor, or `None` if only whitespace remains.
     pub fn next_token(&mut self) -> Option<LxResult> {
-        while self.i < self.len && self.cs[self.i].is_whitespace() {
-            self.i += 1;
+        self.i = self.skip_blanks(self.i);
+        match self.cs.get(self.i).copied() {
+            None => None,
+            Some(ch) => {
+                let start = self.i;
+                Some(match ch {
+                    '/' if self.peek(1) == Some('*') => self.lex_block_comment(start),
+                    '"' | '\'' => self.lex_string(start),
+                    '@' => self.lex_at_keyword(start),
+                    '$' => self.lex_variable(start),
+                    '#' if self.peek(1) == Some('{') => self.lex_word(start),
+                    '#' => self.lex_hash(start),
+                    '%' if self.peek(1).is_some_and(is_ident_start) => self.lex_placeholder(start),
+                    '&' => {
+                        self.i += 1;
+                        emit!(self, Token::Ampersand, start)
+                    }
+                    '0'..='9' => self.lex_number(start),
+                    '.' if self.peek(1).is_some_and(|n| n.is_ascii_digit()) => {
+                        self.lex_number(start)
+                    }
+                    '-' if self.peek(1).is_some_and(|n| n.is_ascii_digit()) => {
+                        self.lex_number(start)
+                    }
+                    '-' if self.peek(1).is_some_and(|n| is_ident_start(n) || n == '-') => {
+                        self.lex_word(start)
+                    }
+                    c if is_ident_start(c) => self.lex_word(start),
+                    '.' if self.peek(1).is_some_and(is_ident_start) => self.lex_word(start),
+                    _ => self.lex_punct(start),
+                })
+            }
         }
-        if self.i >= self.len {
-            return None;
-        }
-        let start = self.i;
-        let ch = self.cs[self.i];
-        let res = match ch {
-            '/' if self.peek(1) == Some('/') => {
-                while self.i < self.len && self.cs[self.i] != '\n' {
-                    self.i += 1;
-                }
-                return self.next_token();
-            }
-            '/' if self.peek(1) == Some('*') => self.lex_block_comment(start),
-            '"' | '\'' => self.lex_string(start),
-            '@' => self.lex_at_keyword(start),
-            '$' => self.lex_variable(start),
-            '#' if self.peek(1) == Some('{') => self.lex_word(start),
-            '#' => self.lex_hash(start),
-            '%' if self.peek(1).is_some_and(is_ident_start) => self.lex_placeholder(start),
-            '&' => {
-                self.i += 1;
-                emit!(self, Token::Ampersand, start)
-            }
-            '0'..='9' => self.lex_number(start),
-            '.' if self.peek(1).is_some_and(|n| n.is_ascii_digit()) => self.lex_number(start),
-            '-' if self.peek(1).is_some_and(|n| n.is_ascii_digit()) => self.lex_number(start),
-            '-' if self.peek(1).is_some_and(|n| is_ident_start(n) || n == '-') => {
-                self.lex_word(start)
-            }
-            c if is_ident_start(c) => self.lex_word(start),
-            '.' if self.peek(1).is_some_and(is_ident_start) => self.lex_word(start),
-            _ => self.lex_punct(start),
-        };
-        Some(res)
     }
 
     /// Fallback punct match, delegated to the generated `Punct::match_at`.
@@ -215,16 +237,13 @@ impl Lexer {
     }
 
     pub(crate) fn line_col(&self, at: usize) -> (u32, u32) {
-        let (mut line, mut col) = (1u32, 1u32);
-        for &ch in &self.cs[..at.min(self.len)] {
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else if ch != '\r' {
-                col += 1;
-            }
-        }
-        (line, col)
+        self.cs[..at.min(self.len)]
+            .iter()
+            .fold((1u32, 1u32), |(line, col), &ch| match ch {
+                '\n' => (line + 1, 1),
+                '\r' => (line, col),
+                _ => (line, col + 1),
+            })
     }
 
     #[inline]

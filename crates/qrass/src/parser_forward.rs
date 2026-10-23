@@ -6,7 +6,7 @@
 
 use crate::ast::Stmt;
 use crate::error::SassError;
-use crate::span::Span;
+use crate::span::{BytePos, Span};
 use crate::token::{Punct, Spanned, Token};
 
 use super::parser_at::find_ident;
@@ -45,12 +45,6 @@ pub(crate) fn build_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<Stmt
 /// Only clearly-invalid spellings are claimed; anything else keeps today's
 /// reconstruct-and-load behavior.
 fn validate_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<()> {
-    let at = |i: usize| {
-        rest.get(i)
-            .map(|s| s.span.start)
-            .unwrap_or(span.start)
-    };
-    let end = |t: &Token| matches!(t, Token::Punct(Punct::Semicolon) | Token::Punct(Punct::LBrace));
     // 1. The URL word.
     match rest.first() {
         None => return Err(p.err("Expected string.", span.start)),
@@ -58,72 +52,97 @@ fn validate_forward(p: &Parser, rest: &[Spanned], span: Span) -> Or<()> {
         Some(s) => return Err(p.err("Expected string.", s.span.start)),
     }
     // 2. `as <ident>(-|.)* *`
-    if let Some(i) = find_ident(rest, "as") {
+    find_ident(rest, "as").map_or(Ok(()), |i| {
+        // the prefix run stops at the first token that cannot belong to it
         let after = &rest[i + 1..];
+        let gap = after
+            .iter()
+            .skip(1)
+            .position(|s| {
+                !matches!(
+                    &s.token,
+                    Token::Ident(_) | Token::Punct(Punct::Minus) | Token::Punct(Punct::Dot)
+                )
+            })
+            .map(|off| off + 1);
         match after.first() {
-            None => return Err(p.err("Expected identifier.", at(i))),
-            Some(s) if end(&s.token) => return Err(p.err("Expected identifier.", s.span.start)),
-            Some(s) if matches!(s.token, Token::Ident(_)) => {}
-            Some(s) => return Err(p.err("Expected identifier.", s.span.start)),
+            None => Err(p.err("Expected identifier.", at_or(rest, span, i))),
+            Some(s) if !matches!(s.token, Token::Ident(_)) => {
+                Err(p.err("Expected identifier.", s.span.start))
+            }
+            Some(_) => match gap {
+                Some(g) if matches!(after[g].token, Token::Punct(Punct::Star)) => Ok(()),
+                Some(g) => Err(p.err("expected \"*\".", after[g].span.start)),
+                None => Err(p.err("expected \"*\".", at_or(rest, span, i))),
+            },
         }
-        let mut j = 1usize;
-        loop {
-            match after.get(j) {
-                None => return Err(p.err("expected \"*\".", at(i))),
-                Some(s) => match &s.token {
-                    Token::Punct(Punct::Star) => break,
-                    Token::Ident(_) | Token::Punct(Punct::Minus) | Token::Punct(Punct::Dot) => {
-                        j += 1
-                    }
-                    _ => return Err(p.err("expected \"*\".", s.span.start)),
-                },
+    })?;
+    // 3. `show` / `hide` member lists (the first failing list is reported).
+    ["show", "hide"]
+        .iter()
+        .filter_map(|kw| find_ident(rest, kw))
+        .try_fold((), |(), i| check_member_list(p, rest, span, i))
+}
+
+/// The offset the goldens blame for position `i`: the token's start, or the
+/// statement start once the run is exhausted.
+fn at_or(rest: &[Spanned], span: Span, i: usize) -> BytePos {
+    rest.get(i).map_or(span.start, |s| s.span.start)
+}
+
+/// Validate one `show`/`hide` member list: `name (, name)*` up to `with`, `;`,
+/// `{` or `(`.
+fn check_member_list(p: &Parser, rest: &[Spanned], span: Span, i: usize) -> Or<()> {
+    match member_walk(p, rest, i + 1, true) {
+        Walk::Fail(e) => Err(e),
+        // ran out (or ended right after a comma): a member name was still owed
+        Walk::Stopped(j, true) => Err(p.err(
+            "Expected variable, mixin, or function name",
+            at_or(rest, span, j),
+        )),
+        Walk::Stopped(_, false) => Ok(()),
+    }
+}
+
+/// One step of the member-list walk: `Stopped` ends it (the old `break`),
+/// `Fail` carries the golden's error (the old early `return Err`).
+enum Walk {
+    Stopped(usize, bool),
+    Fail(SassError),
+}
+
+fn member_walk(p: &Parser, rest: &[Spanned], j: usize, expect_name: bool) -> Walk {
+    let Some(s) = rest.get(j) else {
+        return Walk::Stopped(j, expect_name);
+    };
+    match &s.token {
+        // `with (…)` is owned by `with_config`
+        Token::Ident(name) if name == "with" => Walk::Stopped(j, expect_name),
+        // a lone `$` (no name after it) is not a member name
+        Token::Variable(name) if expect_name && name.is_empty() => {
+            Walk::Fail(p.err("Expected variable, mixin, or function name", s.span.start))
+        }
+        _ if expect_name && matches!(&s.token, Token::Variable(_) | Token::Ident(_)) => {
+            // A second config keyword (or `as`) where a member name belongs: the
+            // goldens wanted the statement to end.
+            let dup_kw = matches!(
+                &s.token,
+                Token::Ident(name) if matches!(name.as_str(), "show" | "hide" | "as")
+            );
+            match dup_kw {
+                true => Walk::Fail(p.err("expected \";\".", s.span.start)),
+                false => member_walk(p, rest, j + 1, false),
             }
         }
-    }
-    // 3. `show` / `hide` member lists.
-    for kw in ["show", "hide"] {
-        let Some(i) = find_ident(rest, kw) else { continue };
-        let mut j = i + 1;
-        let mut expect_name = true;
-        while let Some(s) = rest.get(j) {
-            match &s.token {
-                Token::Ident(name) if name == "with" => break, // `with (…)` handled by with_config
-                Token::Variable(name) if expect_name && name.is_empty() => {
-                    // a lone `$` (no name after it) is not a member name
-                    return Err(p.err("Expected variable, mixin, or function name", s.span.start));
-                }
-                _ if expect_name && matches!(&s.token, Token::Variable(_) | Token::Ident(_)) => {
-                    if let Token::Ident(name) = &s.token {
-                        match name.as_str() {
-                            // A second config keyword (or `as`) where a member
-                            // name belongs: the goldens wanted the statement to end.
-                            "show" | "hide" | "as" => {
-                                return Err(p.err("expected \";\".", s.span.start));
-                            }
-                            _ => {}
-                        }
-                    }
-                    expect_name = false;
-                    j += 1;
-                }
-                _ if expect_name => {
-                    return Err(p.err("Expected variable, mixin, or function name", s.span.start));
-                }
-                Token::Punct(Punct::Comma) => {
-                    expect_name = true;
-                    j += 1;
-                }
-                Token::Punct(Punct::Semicolon) | Token::Punct(Punct::LBrace) => break,
-                Token::Punct(Punct::LParen) => break, // `with (…` already broken above
-                _ => return Err(p.err("expected \";\".", s.span.start)),
-            }
+        _ if expect_name => {
+            Walk::Fail(p.err("Expected variable, mixin, or function name", s.span.start))
         }
-        if expect_name {
-            // ran out (or ended right after a comma): a member name was still owed
-            return Err(p.err("Expected variable, mixin, or function name", at(j)));
+        Token::Punct(Punct::Comma) => member_walk(p, rest, j + 1, true),
+        Token::Punct(Punct::Semicolon | Punct::LBrace | Punct::LParen) => {
+            Walk::Stopped(j, expect_name)
         }
+        _ => Walk::Fail(p.err("expected \";\".", s.span.start)),
     }
-    Ok(())
 }
 
 /// Reconstruct the `as <prefix>*` rename prefix. The lexer splits `c-*` into
@@ -133,17 +152,28 @@ fn forward_prefix(rest: &[Spanned]) -> String {
     let Some(as_i) = find_ident(rest, "as") else {
         return String::new();
     };
-    let mut out = String::new();
-    for s in &rest[as_i + 1..] {
-        match &s.token {
-            Token::Ident(t) => out.push_str(t),
-            Token::Punct(Punct::Minus) => out.push('-'),
-            Token::Punct(Punct::Dot) => out.push('.'),
-            Token::Punct(Punct::Star) => return out,
-            _ => break,
-        }
+    let tail = &rest[as_i + 1..];
+    // the run of prefix characters, accepted only when a `*` terminates it
+    let kept: Vec<&Spanned> = tail
+        .iter()
+        .take_while(|s| {
+            matches!(
+                &s.token,
+                Token::Ident(_) | Token::Punct(Punct::Minus) | Token::Punct(Punct::Dot)
+            )
+        })
+        .collect();
+    match kept.len() < tail.len() && matches!(tail[kept.len()].token, Token::Punct(Punct::Star)) {
+        true => kept.iter().fold(String::new(), |mut out, s| {
+            match &s.token {
+                Token::Ident(t) => out.push_str(t),
+                Token::Punct(Punct::Minus) => out.push('-'),
+                _ => out.push('.'),
+            }
+            out
+        }),
+        false => String::new(),
     }
-    String::new()
 }
 
 /// Collect the comma-separated member names after a `show`/`hide` keyword,

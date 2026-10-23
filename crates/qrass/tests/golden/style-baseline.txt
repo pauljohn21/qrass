@@ -43,7 +43,7 @@ eval_meta.rs	0	0	1	15
 eval_mixin.rs	7	3	6	9
 eval_module.rs	8	0	10	9
 eval_stmt.rs	7	0	7	10
-lexer.rs	4	1	1	3
+lexer.rs	0	0	0	1
 lexer_detail.rs	3	1	7	3
 loader.rs	2	0	7	9
 main.rs	1	0	5	5
@@ -53,7 +53,7 @@ parser_args.rs	2	0	2	3
 parser_at.rs	0	0	1	5
 parser_decl.rs	0	0	0	6
 parser_expr.rs	0	0	0	12
-parser_forward.rs	4	0	4	15
+parser_forward.rs	0	0	0	5
 parser_groups.rs	0	0	0	5
 parser_if.rs	4	1	8	19
 parser_if_raw.rs	0	0	3	2
