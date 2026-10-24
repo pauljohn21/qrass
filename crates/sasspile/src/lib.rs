@@ -13,11 +13,15 @@
 mod ast;
 mod error;
 mod eval;
+pub mod expr;
 mod lexer;
 mod parse;
 mod render;
+pub mod value;
 
 pub use error::{ErrorKind, SassError};
+pub use expr::{Env, Expr};
+pub use value::{Sep, Value};
 
 use std::sync::mpsc;
 
