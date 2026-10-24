@@ -52,6 +52,15 @@ fn parse_expr_string_functions() {
 }
 
 #[test]
+fn parse_expr_lazy_if_and_numeric() {
+    let env = Env::new();
+    assert_eq!(ev("if(true, 1px, 2px)", &env), "1px");
+    assert_eq!(ev("if(false, 1px, 2px)", &env), "2px");
+    assert_eq!(ev("math.sqrt(9)", &env), "3");
+    assert_eq!(ev("percentage(0.5)", &env), "50%");
+}
+
+#[test]
 fn parse_expr_unknown_function_errors() {
     let env = Env::new();
     // unknown -> Err, so render keeps the value verbatim (CSS functions untouched)

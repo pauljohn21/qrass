@@ -90,6 +90,19 @@ impl Expr {
             }
             Expr::Bin(op, l, r) => arith(*op, l.eval(env)?, r.eval(env)?),
             Expr::Func { name, args } => {
+                // `if()` is lazy: evaluate only the taken branch.
+                if name == "if" {
+                    return match (args.first(), args.get(1), args.get(2)) {
+                        (Some(c), Some(t), Some(e)) => {
+                            if c.eval(env)?.is_falsey() {
+                                e.eval(env)
+                            } else {
+                                t.eval(env)
+                            }
+                        }
+                        _ => Err("if() requires three arguments".to_string()),
+                    };
+                }
                 let vals: Result<Vec<Value>, String> = args.iter().map(|a| a.eval(env)).collect();
                 call_builtin(name, vals?)
             }
@@ -103,6 +116,11 @@ impl Expr {
 fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
     match (name, args.as_slice()) {
         ("math.div", [a, b]) => arith(Op::Div, a.clone(), b.clone()),
+        ("math.sqrt" | "sqrt", [Value::Number(n, _)]) => Ok(Value::Number(n.sqrt(), String::new())),
+        ("math.pow" | "pow", [Value::Number(b, _), Value::Number(e, _)]) => {
+            Ok(Value::Number(b.powf(*e), String::new()))
+        }
+        ("percentage", [Value::Number(n, _)]) => Ok(Value::Number(n * 100.0, "%".into())),
         ("abs", [Value::Number(n, u)]) => Ok(Value::Number(n.abs(), u.clone())),
         ("to-upper-case", [a]) => Ok(Value::Raw(a.to_css().to_uppercase())),
         ("to-lower-case", [a]) => Ok(Value::Raw(a.to_css().to_lowercase())),

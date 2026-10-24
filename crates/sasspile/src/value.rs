@@ -57,9 +57,16 @@ impl Value {
         }
     }
 
-    /// Sass truthiness: only `false` and `null` are falsy.
+    /// Sass truthiness: only `false` and `null` (and empty) are falsy.
     pub fn is_falsey(&self) -> bool {
-        matches!(self, Value::Bool(false) | Value::Null)
+        match self {
+            Value::Bool(false) | Value::Null => true,
+            Value::Raw(s) => {
+                let t = s.trim();
+                t.is_empty() || t == "false" || t == "null"
+            }
+            _ => false,
+        }
     }
 
     /// Parse a numeric literal with an optional unit (`"10px"` → `Number(10,"px")`,
