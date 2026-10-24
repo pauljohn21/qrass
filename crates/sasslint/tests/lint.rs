@@ -44,3 +44,29 @@ fn gate_sasspile_is_clean() {
     let findings = scan_dir(&root);
     assert!(findings.is_empty(), "sasspile has rule violations: {findings:#?}");
 }
+
+#[test]
+fn mcp_protocol_handshake_and_review() {
+    use serde_json::json;
+    use sasslint::handle_message;
+
+    let init = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})).unwrap();
+    assert_eq!(init["result"]["serverInfo"]["name"], "sasslint");
+
+    let list = handle_message(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).unwrap();
+    assert_eq!(list["result"]["tools"][0]["name"], "review");
+
+    assert!(handle_message(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none());
+
+    let dir = std::env::temp_dir().join("sasslint_mcp_probe");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("bad.rs"), "pub children: Vec<Rule>\n").unwrap();
+    let call = handle_message(&json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": { "name": "review", "arguments": { "path": dir.to_str().unwrap() } }
+    }))
+    .unwrap();
+    let text = call["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("no-tree"), "review tool missed violation: {text}");
+    fs::remove_dir_all(&dir).ok();
+}

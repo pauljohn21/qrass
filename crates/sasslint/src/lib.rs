@@ -90,10 +90,75 @@ fn rust_files(dir: &Path, acc: &mut Vec<PathBuf>) {
 }
 
 pub fn scan_dir(dir: &Path) -> Vec<Finding> {
+    if dir.is_file() {
+        return scan_file(dir);
+    }
     let mut files = Vec::new();
     rust_files(dir, &mut files);
     files
         .iter()
         .flat_map(|f| scan_file(f))
         .collect::<Vec<_>>()
+}
+
+/// Human-readable review report for a directory (used by the CLI and the MCP tool).
+pub fn review_report(dir: &Path) -> String {
+    let findings = scan_dir(dir);
+    if findings.is_empty() {
+        return format!("{}: no iron-rule violations", dir.display());
+    }
+    findings
+        .iter()
+        .fold(String::new(), |mut s, f| {
+            s.push_str(&format!("[{}] {}:{} — {}\n", f.rule, f.file, f.line, f.text));
+            s
+        })
+        + &format!("{} violation(s)", findings.len())
+}
+
+use serde_json::{Value, json};
+
+/// Handle one MCP/JSON-RPC message, returning the response (or `None` for
+/// notifications, which have no `id`). Implements the subset a tool client needs:
+/// `initialize`, `tools/list`, `tools/call`.
+pub fn handle_message(req: &Value) -> Option<Value> {
+    let id = req.get("id").cloned()?;
+    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+    let result = match method {
+        "initialize" => json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "sasslint", "version": env!("CARGO_PKG_VERSION") }
+        }),
+        "tools/list" => json!({
+            "tools": [{
+                "name": "review",
+                "description": "Scan a Rust source tree for sasspile iron-rule violations (tree/recursion/relay-Vec/string-machine/imperative loops).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "path": { "type": "string", "description": "directory to scan" } },
+                    "required": ["path"]
+                }
+            }]
+        }),
+        "tools/call" => {
+            let path = req
+                .pointer("/params/arguments/path")
+                .and_then(Value::as_str)
+                .unwrap_or("crates/sasspile/src");
+            json!({
+                "content": [{ "type": "text", "text": review_report(Path::new(path)) }],
+                "isError": false
+            })
+        }
+        "ping" => json!({}),
+        _ => {
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "method not found" }
+            }));
+        }
+    };
+    Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
 }
