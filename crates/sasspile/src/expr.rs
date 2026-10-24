@@ -127,6 +127,126 @@ fn is_var_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
 }
 
+#[derive(Debug, Clone)]
+enum Tk {
+    Num(f64, String),
+    Var(String),
+    Op(char),
+}
+
+fn prec(c: char) -> u8 {
+    match c {
+        '+' | '-' => 1,
+        '*' | '/' | '%' => 2,
+        _ => 0,
+    }
+}
+
+/// Tokenise an arithmetic expression. `None` (→ caller keeps the value verbatim) if it
+/// contains anything other than numbers, `$vars` and `+ - * / %` — so identifiers like
+/// `c - d`, `url(..)`, `calc(..)` and lists are never touched.
+fn lex_arith(src: &str) -> Option<Vec<Tk>> {
+    let cs: Vec<char> = src.chars().collect();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    while i < cs.len() {
+        let c = cs[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '$' {
+            let mut j = i + 1;
+            while j < cs.len() && is_var_char(cs[j]) {
+                j += 1;
+            }
+            toks.push(Tk::Var(cs[i + 1..j].iter().collect()));
+            i = j;
+            continue;
+        }
+        if c.is_ascii_digit() || c == '.' {
+            let mut j = i;
+            while j < cs.len() && (cs[j].is_ascii_digit() || cs[j] == '.') {
+                j += 1;
+            }
+            let mut k = j;
+            while k < cs.len() && cs[k].is_ascii_alphabetic() {
+                k += 1;
+            }
+            let num: String = cs[i..j].iter().collect();
+            let unit: String = cs[j..k].iter().collect();
+            let v: f64 = num.parse().ok()?;
+            toks.push(Tk::Num(v, unit));
+            i = k;
+            continue;
+        }
+        if matches!(c, '+' | '-' | '*' | '/' | '%') {
+            toks.push(Tk::Op(c));
+            i += 1;
+            continue;
+        }
+        return None; // any other char -> not arithmetic
+    }
+    if toks.is_empty() {
+        return None;
+    }
+    let ok = toks.iter().all(|t| !matches!(t, Tk::Op(_))) || toks.len() >= 3;
+    ok.then_some(toks)
+}
+
+/// Parse a value string into an `Expr`: arithmetic over numbers/`$vars` becomes a
+/// `Bin` tree; anything else stays `Lit(Raw)` (verbatim).
+pub fn parse_expr(src: &str) -> Expr {
+    let Some(toks) = lex_arith(src) else {
+        return Expr::Lit(Value::Raw(src.trim().to_string()));
+    };
+    // shunting-yard to postfix (two precedence levels, left-associative)
+    let mut out: Vec<Tk> = Vec::new();
+    let mut ops: Vec<char> = Vec::new();
+    for tk in toks {
+        match tk {
+            Tk::Num(..) | Tk::Var(_) => out.push(tk),
+            Tk::Op(c) => {
+                while ops.last().is_some_and(|&top| prec(top) >= prec(c)) {
+                    out.push(Tk::Op(ops.pop().unwrap()));
+                }
+                ops.push(c);
+            }
+        }
+    }
+    while let Some(o) = ops.pop() {
+        out.push(Tk::Op(o));
+    }
+    // fold postfix into a tree; bail to Raw on any shape error
+    let tree = out.into_iter().fold(Vec::<Expr>::new(), |mut st, tk| {
+        match tk {
+            Tk::Num(v, u) => st.push(Expr::Lit(Value::Number(v, u))),
+            Tk::Var(n) => st.push(Expr::Var(n)),
+            Tk::Op(o) => {
+                let op = match o {
+                    '+' => Op::Add,
+                    '-' => Op::Sub,
+                    '*' => Op::Mul,
+                    '/' => Op::Div,
+                    _ => Op::Mod,
+                };
+                let r = st.pop();
+                let l = st.pop();
+                match (l, r) {
+                    (Some(l), Some(r)) => st.push(Expr::Bin(op, Box::new(l), Box::new(r))),
+                    _ => st.push(Expr::Lit(Value::Raw(src.trim().to_string()))),
+                }
+            }
+        }
+        st
+    });
+    if tree.len() == 1 {
+        tree.into_iter().next().unwrap()
+    } else {
+        Expr::Lit(Value::Raw(src.trim().to_string()))
+    }
+}
+
 /// Canonicalise a raw declaration-value string to CSS, resolving `$name` references
 /// and `#{ … }` interpolation, and normalising whitespace/comma spacing the way Sass
 /// emits (`a,b`→`a, b`; runs of spaces collapse to one; interpolation glues to

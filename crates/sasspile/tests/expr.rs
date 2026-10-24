@@ -1,7 +1,36 @@
 //! Unit tests for the expression evaluator foundation (standalone; the pipeline is
 //! not yet wired to it, so these exercise `Expr::eval` directly).
 
-use sasspile::{Env, Expr, Op, Value, value_to_css};
+use sasspile::{Env, Expr, Op, Value, parse_expr, value_to_css};
+
+fn ev(src: &str, env: &Env) -> String {
+    parse_expr(src).eval(env).map(|v| v.to_css()).unwrap_or_default()
+}
+
+#[test]
+fn parse_expr_arithmetic() {
+    let env = Env::new();
+    assert_eq!(ev("1 + 2", &env), "3");
+    assert_eq!(ev("2 * 3px", &env), "6px");
+    assert_eq!(ev("10px - 3px", &env), "7px");
+    assert_eq!(ev("2 + 3 * 4", &env), "14"); // precedence
+    assert_eq!(ev("7 % 3", &env), "1");
+}
+
+#[test]
+fn parse_expr_leaves_non_numeric_verbatim() {
+    let env = Env::new();
+    assert_eq!(ev("c - d", &env), "c - d"); // identifiers untouched
+    assert_eq!(ev("url(http://x)", &env), "url(http://x)");
+    assert_eq!(ev("1px 2px", &env), "1px 2px"); // space list, not arithmetic
+}
+
+#[test]
+fn parse_expr_uses_variables() {
+    let mut env = Env::new();
+    env.insert("a".into(), Value::Number(2.0, "px".into()));
+    assert_eq!(ev("$a + 3px", &env), "5px");
+}
 
 #[test]
 fn parse_number_with_unit() {
