@@ -220,3 +220,23 @@ fn map_domain_functions() {
     // non-map arg -> Err -> None (verbatim)
     assert_eq!(cb("map.keys", vec![num("3")]), None);
 }
+
+#[test]
+fn color_domain_functions() {
+    let c = |s: &str| Value::Raw(s.into());
+    assert_eq!(cb("color.red", vec![c("#ff0000")]).as_deref(), Some("255"));
+    assert_eq!(cb("color.green", vec![c("#00ff00")]).as_deref(), Some("255"));
+    assert_eq!(cb("color.blue", vec![c("#0000ff")]).as_deref(), Some("255"));
+    assert_eq!(cb("red", vec![c("red")]).as_deref(), Some("255")); // named
+    assert_eq!(cb("color.red", vec![c("#f00")]).as_deref(), Some("255")); // short hex
+    assert_eq!(cb("color.alpha", vec![c("#00000000")]).as_deref(), Some("0"));
+    assert_eq!(cb("color.alpha", vec![c("#ff0000")]).as_deref(), Some("1"));
+    assert_eq!(cb("color.hue", vec![c("#ff0000")]).as_deref(), Some("0deg"));
+    assert_eq!(cb("color.saturation", vec![c("#ff0000")]).as_deref(), Some("100"));
+    assert_eq!(cb("color.lightness", vec![c("#ff0000")]).as_deref(), Some("50"));
+    assert_eq!(cb("color.mix", vec![c("red"), c("blue")]).as_deref(), Some("#800080"));
+    // rgb() form
+    assert_eq!(cb("color.blue", vec![c("rgb(0, 0, 200)")]).as_deref(), Some("200"));
+    // non-colour arg -> Err -> None
+    assert_eq!(cb("color.red", vec![c("nonsense")]), None);
+}
