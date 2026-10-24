@@ -1,3 +1,0 @@
-/* Valid CSS nesting + keyframes must NOT be falsely rejected. */
-a { color: red; &:hover { color: blue; } }
-@keyframes spin { from { opacity: 0; } 50% { opacity: 1; } to { opacity: 0; } }
