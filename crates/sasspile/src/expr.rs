@@ -246,56 +246,109 @@ fn prec(c: char) -> u8 {
     }
 }
 
-/// Tokenise an arithmetic expression. `None` (→ caller keeps the value verbatim) if it
-/// contains anything other than numbers, `$vars` and `+ - * / %` — so identifiers like
-/// `c - d`, `url(..)`, `calc(..)` and lists are never touched.
-fn lex_arith(src: &str) -> Option<Vec<Tk>> {
-    let cs: Vec<char> = src.chars().collect();
-    let mut toks = Vec::new();
-    let mut i = 0;
-    while i < cs.len() {
-        let c = cs[i];
-        if c.is_whitespace() {
-            i += 1;
-            continue;
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Idle,
+    Num,
+    Var,
+}
+
+struct Lx {
+    toks: Vec<Tk>,
+    num: String,
+    unit: String,
+    var: String,
+    mode: Mode,
+    bad: bool,
+}
+
+impl Lx {
+    fn finish_num(&mut self) {
+        let n = std::mem::take(&mut self.num);
+        let u = std::mem::take(&mut self.unit);
+        match n.parse::<f64>() {
+            Ok(v) => self.toks.push(Tk::Num(v, u)),
+            Err(_) => self.bad = true,
         }
-        if c == '$' {
-            let mut j = i + 1;
-            while j < cs.len() && is_var_char(cs[j]) {
-                j += 1;
-            }
-            toks.push(Tk::Var(cs[i + 1..j].iter().collect()));
-            i = j;
-            continue;
-        }
-        if c.is_ascii_digit() || c == '.' {
-            let mut j = i;
-            while j < cs.len() && (cs[j].is_ascii_digit() || cs[j] == '.') {
-                j += 1;
-            }
-            let mut k = j;
-            while k < cs.len() && cs[k].is_ascii_alphabetic() {
-                k += 1;
-            }
-            let num: String = cs[i..j].iter().collect();
-            let unit: String = cs[j..k].iter().collect();
-            let v: f64 = num.parse().ok()?;
-            toks.push(Tk::Num(v, unit));
-            i = k;
-            continue;
-        }
-        if matches!(c, '+' | '-' | '*' | '/' | '%') {
-            toks.push(Tk::Op(c));
-            i += 1;
-            continue;
-        }
-        return None; // any other char -> not arithmetic
     }
-    if toks.is_empty() {
+    fn finish_var(&mut self) {
+        self.toks.push(Tk::Var(std::mem::take(&mut self.var)));
+    }
+    fn idle(&mut self, c: char) {
+        if c.is_whitespace() {
+            // skip
+        } else if c == '$' {
+            self.mode = Mode::Var;
+        } else if c.is_ascii_digit() || c == '.' {
+            self.mode = Mode::Num;
+            self.num.push(c);
+        } else if matches!(c, '+' | '-' | '*' | '/' | '%') {
+            self.toks.push(Tk::Op(c));
+        } else {
+            self.bad = true;
+        }
+    }
+    fn step(&mut self, c: char) {
+        if self.bad {
+            return;
+        }
+        match self.mode {
+            Mode::Num => {
+                if (c.is_ascii_digit() || c == '.') && self.unit.is_empty() {
+                    self.num.push(c);
+                } else if c.is_ascii_alphabetic() {
+                    self.unit.push(c);
+                } else {
+                    self.finish_num();
+                    if self.bad {
+                        return;
+                    }
+                    self.mode = Mode::Idle;
+                    self.idle(c);
+                }
+            }
+            Mode::Var => {
+                if is_var_char(c) {
+                    self.var.push(c);
+                } else {
+                    self.finish_var();
+                    self.mode = Mode::Idle;
+                    self.idle(c);
+                }
+            }
+            Mode::Idle => self.idle(c),
+        }
+    }
+}
+
+/// Tokenise an arithmetic expression via a fold over chars (no index loop). `None` (→
+/// caller keeps the value verbatim) if it contains anything other than numbers, `$vars`
+/// and `+ - * / %`, so identifiers like `c - d`, `url(..)`, `calc(..)`, lists are safe.
+fn lex_arith(src: &str) -> Option<Vec<Tk>> {
+    let mut lx = src.chars().fold(
+        Lx {
+            toks: Vec::new(),
+            num: String::new(),
+            unit: String::new(),
+            var: String::new(),
+            mode: Mode::Idle,
+            bad: false,
+        },
+        |mut l, c| {
+            l.step(c);
+            l
+        },
+    );
+    match lx.mode {
+        Mode::Num => lx.finish_num(),
+        Mode::Var => lx.finish_var(),
+        Mode::Idle => {}
+    }
+    if lx.bad || lx.toks.is_empty() {
         return None;
     }
-    let ok = toks.iter().all(|t| !matches!(t, Tk::Op(_))) || toks.len() >= 3;
-    ok.then_some(toks)
+    let ok = lx.toks.iter().all(|t| !matches!(t, Tk::Op(_))) || lx.toks.len() >= 3;
+    ok.then_some(lx.toks)
 }
 
 /// Parse a value string into an `Expr`: arithmetic over numbers/`$vars` becomes a
