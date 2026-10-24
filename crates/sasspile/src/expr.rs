@@ -104,6 +104,15 @@ fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
     match (name, args.as_slice()) {
         ("math.div", [a, b]) => arith(Op::Div, a.clone(), b.clone()),
         ("abs", [Value::Number(n, u)]) => Ok(Value::Number(n.abs(), u.clone())),
+        ("to-upper-case", [a]) => Ok(Value::Raw(a.to_css().to_uppercase())),
+        ("to-lower-case", [a]) => Ok(Value::Raw(a.to_css().to_lowercase())),
+        ("quote", [a]) => {
+            let s = a.to_css();
+            Ok(Value::Raw(
+                if s.starts_with('"') && s.ends_with('"') { s } else { format!("\"{s}\"") },
+            ))
+        }
+        ("unquote", [a]) => Ok(Value::Raw(a.to_css().trim_matches('"').to_string())),
         (f, [Value::Number(n, u)]) if matches!(f, "ceil" | "floor" | "round") => {
             let r = match f {
                 "ceil" => n.ceil(),

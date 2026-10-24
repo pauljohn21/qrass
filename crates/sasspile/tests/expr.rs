@@ -43,6 +43,15 @@ fn parse_expr_builtin_functions() {
 }
 
 #[test]
+fn parse_expr_string_functions() {
+    let env = Env::new();
+    assert_eq!(ev("to-upper-case(\"foo\")", &env), "\"FOO\"");
+    assert_eq!(ev("to-lower-case(\"FOO\")", &env), "\"foo\"");
+    assert_eq!(ev("unquote(\"bar\")", &env), "bar");
+    assert_eq!(ev("quote(baz)", &env), "\"baz\"");
+}
+
+#[test]
 fn parse_expr_unknown_function_errors() {
     let env = Env::new();
     // unknown -> Err, so render keeps the value verbatim (CSS functions untouched)
