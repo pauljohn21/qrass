@@ -1,22 +1,21 @@
 //! sasspile — a clean-room SCSS→CSS compiler whose control flow IS a **lazy rxrust
-//! owned-value stream**.
-//!
-//! This is a fresh, minimal skeleton (the legacy tree/state-machine implementation was
-//! cleared). It is rebuilt from scratch per OpenSpec change
-//! `rebuild-sasspile-on-rxrust-lazy-stream`, governed by `.qoder/rules/rust.md` and
-//! `openspec/config.yaml`: every stage is a cold observable of owned values; nesting is
-//! data (not a walked tree); loops are `flat_map`; one-to-many is multicast; state/env is
-//! a stream-carried owned accumulator; errors ride in-stream `Result`; exactly one
-//! `subscribe` at the public edge materialises CSS. Behaviour oracle = `sass-spec/*.hrx`
+//! owned-value stream**. Every stage is an operator over owned values; nesting is data
+//! (not a walked tree); CSS is merged only at the single terminal `subscribe`. Rebuilt
+//! from scratch per OpenSpec `rebuild-sasspile-on-rxrust-lazy-stream`; governed by
+//! `.qoder/rules/rust.md` and `openspec/config.yaml`. Behaviour oracle = `sass-spec/*.hrx`
 //! + `element-plus`; every step gated by `ledger diff regress=0`.
-//!
-//! Nothing is implemented yet — `compile_string` is a stub so the workspace compiles.
 
 pub mod expr;
 pub mod lexer;
+mod parse;
+mod render;
 pub mod value;
 
 use std::fmt;
+
+use rxrust::prelude::*;
+
+use crate::lexer::token_stream;
 
 /// Compiler error carried as an in-stream value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +37,26 @@ impl fmt::Display for SassError {
 
 impl std::error::Error for SassError {}
 
-/// Compile SCSS/CSS text to expanded CSS. Currently a stub for the clean rebuild.
-pub fn compile_string(_content: impl Into<String>) -> Result<String, SassError> {
-    Ok(String::new())
+/// Compile SCSS/CSS text to expanded CSS. The whole compiler is the observable chain
+/// below: chars→tokens→(`scan_map`)structural messages→(`scan_map` owned `Acc`)flat
+/// leaves→(`map`)CSS blocks→(`reduce`)merged text, met by exactly ONE `subscribe`.
+pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
+    let _span = tracing::info_span!("compile").entered();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, SassError>>();
+    token_stream(content.into())
+        .scan_map(parse::MsgAcc::default(), |acc, tok| acc.feed(tok))
+        .flat_map(Local::from_iter)
+        .scan_map(parse::Acc::new(), |acc, msg| acc.feed(msg))
+        .flat_map(Local::from_iter)
+        .map(|leaf| render::leaf_block(&leaf))
+        .reduce_initial(String::new(), |mut css, chunk| {
+            css.push_str(&chunk);
+            css
+        })
+        .map(Ok::<_, SassError>)
+        .subscribe(move |out| {
+            tx.send(out).ok();
+        });
+    rx.recv()
+        .unwrap_or_else(|_| Err(SassError::new("no output")))
 }
