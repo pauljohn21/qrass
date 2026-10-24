@@ -36,6 +36,7 @@ impl Env {
             children: Vec::new(),
         };
         rule.decls.into_iter().for_each(|(prop, value)| {
+            tracing::debug!(prop = %prop, raw = %value, "decl");
             if prop.starts_with('$') {
                 let v = self.subst(&value);
                 self.vars.insert(prop, v);

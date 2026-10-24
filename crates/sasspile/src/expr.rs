@@ -87,6 +87,7 @@ fn is_var_char(c: char) -> bool {
 ///
 /// A single left-to-right `fold` over chars with an interpolation stack — no loop,
 /// no recursion, no per-case flags.
+#[tracing::instrument(level = "debug", skip(env), fields(src_len = src.len()))]
 pub fn value_to_css(src: &str, env: &Env) -> Option<String> {
     struct Vs {
         out: String,

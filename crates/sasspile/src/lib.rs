@@ -34,6 +34,8 @@ use crate::parse::Acc;
 /// chain below; this function is the one place a stream meets ordinary Rust (an
 /// `mpsc` sink fed by `subscribe`, non-timed sources running fully inline).
 pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
+    let span = tracing::info_span!("compile");
+    let _guard = span.enter();
     let (tx, rx) = mpsc::channel::<Result<String, SassError>>();
     token_stream(content.into())
         .reduce_initial(Acc::default(), |acc, tok| acc.step(tok))
@@ -57,4 +59,25 @@ pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
         });
     rx.recv()
         .unwrap_or_else(|_| Err(SassError::new(ErrorKind::Internal, "no output")))
+}
+
+/// Initialise a `tracing` → OpenTelemetry → stdout pipeline so a whole compile can
+/// be inspected as a span tree (lex/parse/eval/render + per-decl values). Available
+/// only with the `trace` feature; never compiled for the wasm target.
+#[cfg(feature = "trace")]
+pub fn init_trace() {
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::TracerProvider;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    let exporter = opentelemetry_stdout::SpanExporter::default();
+    let provider = TracerProvider::builder()
+        .with_simple_exporter(exporter)
+        .build();
+    let tracer = provider.tracer("sasspile");
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::filter::EnvFilter::try_from_default_env().unwrap_or_else(|_| "debug".into()))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 }

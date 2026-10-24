@@ -6,9 +6,25 @@ license.workspace = true
 rust-version.workspace = true
 description = "A clean-room SCSS->CSS compiler whose control flow IS an rxrust owned-value stream."
 
+[features]
+# Local-only distributed trace export (opentelemetry -> stdout). Off by default so
+# the crate keeps a lean dependency graph and the wasm32 target is unaffected.
+trace = [
+  "dep:tracing-opentelemetry",
+  "dep:tracing-subscriber",
+  "dep:opentelemetry",
+  "dep:opentelemetry_sdk",
+  "dep:opentelemetry-stdout",
+]
+
 [dependencies]
 rxrust = "=1.0.0-rc.6"
 tracing = "0.1"
+tracing-opentelemetry = { version = "0.28", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+opentelemetry = { version = "0.27", features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["trace"], optional = true }
+opentelemetry-stdout = { version = "0.27", features = ["trace"], optional = true }
 
 [dev-dependencies]
 ledger = { path = "../ledger" }
