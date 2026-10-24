@@ -5,6 +5,7 @@
 //! `.qoder/rules/rust.md` and `openspec/config.yaml`. Behaviour oracle = `sass-spec/*.hrx`
 //! + `element-plus`; every step gated by `ledger diff regress=0`.
 
+mod builtins;
 pub mod expr;
 pub mod lexer;
 mod parse;

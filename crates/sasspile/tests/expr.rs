@@ -1,9 +1,9 @@
 //! Expression rendering tests (from structured tokens).
 
 use sasspile::expr::Env;
-use sasspile::expr::{Expr, Op};
+use sasspile::expr::{call_builtin, Expr, Op};
 use sasspile::lexer::Tok;
-use sasspile::value::Value;
+use sasspile::value::{Sep, Value};
 use sasspile::value_parse;
 
 fn render(toks: &[Tok], env: &Env) -> Option<String> {
@@ -154,4 +154,39 @@ fn string_domain_functions() {
     assert_eq!(v("unquote(\"baz\")", &env).as_deref(), Some("baz"));
     assert_eq!(v("length(\"hello\")", &env).as_deref(), Some("5"));
     assert_eq!(v("string.length(hello)", &env).as_deref(), Some("5"));
+}
+
+fn raw(s: &str) -> Value {
+    Value::Raw(s.into())
+}
+fn list(items: &[&str], sep: Sep) -> Value {
+    Value::List(items.iter().map(|s| raw(s)).collect(), sep)
+}
+fn cb(name: &str, args: Vec<Value>) -> Option<String> {
+    call_builtin(name, args).ok().map(|v| v.to_css())
+}
+
+#[test]
+fn list_domain_functions() {
+    // gold semantics from sass-spec/spec/core_functions/list/nth.hrx etc.
+    let l = list(&["c", "d"], Sep::Space);
+    assert_eq!(cb("list.nth", vec![l.clone(), Value::Number(1.0, String::new())]).as_deref(), Some("c"));
+    assert_eq!(cb("list.nth", vec![l.clone(), Value::Number(2.0, String::new())]).as_deref(), Some("d"));
+    assert_eq!(cb("list.nth", vec![l.clone(), Value::Number(-1.0, String::new())]).as_deref(), Some("d"));
+    assert_eq!(cb("list.nth", vec![l.clone(), Value::Number(0.0, String::new())]), None); // out of range -> Err
+    assert_eq!(cb("list.length", vec![l.clone()]).as_deref(), Some("2"));
+    assert_eq!(cb("length", vec![l.clone()]).as_deref(), Some("2")); // dispatches on list
+    assert_eq!(
+        cb("list.set-nth", vec![l.clone(), Value::Number(1.0, String::new()), raw("x")]).as_deref(),
+        Some("x d")
+    );
+    assert_eq!(cb("list.append", vec![l.clone(), raw("e")]).as_deref(), Some("c d e"));
+    assert_eq!(
+        cb("list.join", vec![l.clone(), list(&["e", "f"], Sep::Space)]).as_deref(),
+        Some("c d e f")
+    );
+    assert_eq!(cb("list.index-of", vec![l.clone(), raw("d")]).as_deref(), Some("2"));
+    assert_eq!(cb("list.index-of", vec![l.clone(), raw("z")]).as_deref(), Some("")); // Null -> ""
+    assert_eq!(cb("list.separator", vec![l.clone()]).as_deref(), Some("space"));
+    assert_eq!(cb("list.separator", vec![list(&["a", "b"], Sep::Comma)]).as_deref(), Some("comma"));
 }

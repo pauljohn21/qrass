@@ -5,8 +5,9 @@
 //!
 //! Beyond literals/`$var`/`#{}`/concat, this layer models arithmetic (`Bin`), comparisons
 //! (`Cmp`), lazy boolean (`And`/`Or`), the 3-arg `if`, and function calls (`Func`) whose
-//! bodies resolve through the `call_builtin` allowlist. An unrecognised name → `Err`, so the
-//! caller keeps the value verbatim (CSS-native functions like `url`/`calc` are never evaluated).
+//! bodies resolve through the per-domain `builtins` allowlist. An unrecognised name → `Err`,
+//! so the caller keeps the value verbatim (CSS-native functions like `url`/`calc` are never
+//! evaluated). The unit algebra (`arith`) stays here because `eval`'s `Bin` uses it too.
 
 use std::collections::HashMap;
 
@@ -133,9 +134,15 @@ impl Expr {
     }
 }
 
+/// Entry point for builtin resolution; delegates to the per-domain `builtins` modules so
+/// each family lives in its own file rather than one growing `match` here.
+pub fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
+    crate::builtins::call(name, &args)
+}
+
 /// Sass numeric arithmetic with unit rules. Non-numeric operands or unit mismatches → `Err`,
 /// so the caller keeps the value verbatim (never a wrong CSS number).
-fn arith(op: Op, l: Value, r: Value) -> Result<Value, String> {
+pub(crate) fn arith(op: Op, l: Value, r: Value) -> Result<Value, String> {
     let (a, ua) = num(&l)?;
     let (b, ub) = num(&r)?;
     let out = match op {
@@ -154,7 +161,8 @@ fn arith(op: Op, l: Value, r: Value) -> Result<Value, String> {
     Ok(out)
 }
 
-fn num(v: &Value) -> Result<(f64, String), String> {
+/// Extract a `(value, unit)` pair from a numeric `Value`.
+pub(crate) fn num(v: &Value) -> Result<(f64, String), String> {
     match v {
         Value::Number(n, u) => Ok((*n, u.clone())),
         _ => Err(format!("{v:?} is not a number")),
@@ -193,7 +201,8 @@ fn div_unit(a: &str, b: &str) -> Result<String, String> {
     }
 }
 
-fn compare(l: Value, c: Cmp, r: Value) -> Result<Value, String> {
+/// Sass comparison; yields `Value::Bool`. Used by `Expr::Cmp` and by `builtins` min/max.
+pub(crate) fn compare(l: Value, c: Cmp, r: Value) -> Result<Value, String> {
     use std::cmp::Ordering;
     let ord = match (&l, &r) {
         (Value::Number(a, ua), Value::Number(b, ub)) => {
@@ -216,93 +225,6 @@ fn compare(l: Value, c: Cmp, r: Value) -> Result<Value, String> {
         Cmp::Le => ord != Ordering::Greater,
     };
     Ok(Value::Bool(b))
-}
-
-/// Allowlisted builtins (Sass-like). Unknown names → `Err`, so the pipeline keeps the value
-/// verbatim and CSS-native functions (`url`/`calc`/`min`/`max`…) are never mis-evaluated.
-/// Extended per domain in task 1.3.
-pub fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
-    let err = |m: &str| Err(format!("{name}: {m}"));
-    match (name, args.as_slice()) {
-        ("math.div", [a, b]) | ("divide", [a, b]) => arith(Op::Div, a.clone(), b.clone()),
-        ("abs", [a]) => num(a).map(|(n, u)| Value::Number(n.abs(), u)),
-        ("min", vs) => reduce_vals(vs, less),
-        ("max", vs) => reduce_vals(vs, greater),
-        ("if", [c, t, e]) => Ok(if c.is_falsey() { e.clone() } else { t.clone() }),
-        // math domain (Sass `math.*`); unit-preserving where Sass preserves it.
-        ("math.round", [a]) | ("round", [a]) => map_num(a, |n| (n + 0.5).floor()),
-        ("math.ceil", [a]) | ("ceil", [a]) => map_num(a, f64::ceil),
-        ("math.floor", [a]) | ("floor", [a]) => map_num(a, f64::floor),
-        ("math.sqrt", [a]) => unitless(a).map(|n| Value::Number(n.sqrt(), String::new())),
-        ("math.log", [a]) => unitless(a).map(|n| Value::Number(n.ln(), String::new())),
-        ("math.pow", [a, b]) => match (unitless(a), unitless(b)) {
-            (Ok(x), Ok(y)) => Ok(Value::Number(x.powf(y), String::new())),
-            (Err(e), _) | (_, Err(e)) => Err(e),
-        },
-        ("math.min", vs) => reduce_vals(vs, less),
-        ("math.max", vs) => reduce_vals(vs, greater),
-        ("math.abs", [a]) => num(a).map(|(n, u)| Value::Number(n.abs(), u)),
-        // string domain (Sass `string.*`)
-        ("to-upper-case", [a]) | ("string.to-upper-case", [a]) => {
-            Ok(Value::Str { text: str_of(a).to_uppercase(), quoted: true })
-        }
-        ("to-lower-case", [a]) | ("string.to-lower-case", [a]) => {
-            Ok(Value::Str { text: str_of(a).to_lowercase(), quoted: true })
-        }
-        ("quote", [a]) | ("string.quote", [a]) => {
-            Ok(Value::Str { text: str_of(a).to_string(), quoted: true })
-        }
-        ("unquote", [a]) | ("string.unquote", [a]) => {
-            Ok(Value::Str { text: str_of(a).to_string(), quoted: false })
-        }
-        ("length", [a]) | ("string.length", [a]) => {
-            Ok(Value::Number(str_of(a).chars().count() as f64, String::new()))
-        }
-        _ => err("unknown builtin"),
-    }
-}
-
-/// Fold a non-empty value list down with `pick`; empty → `Err`.
-fn reduce_vals(vs: &[Value], pick: fn(Value, Value) -> Value) -> Result<Value, String> {
-    let mut it = vs.iter().cloned();
-    match it.next() {
-        None => Err("requires at least one argument".to_string()),
-        Some(first) => Ok(it.fold(first, pick)),
-    }
-}
-
-/// The textual payload of a string-ish value (unquoted), for string builtins.
-fn str_of(v: &Value) -> String {
-    match v {
-        Value::Str { text, .. } => text.clone(),
-        Value::Raw(s) => s.clone(),
-        other => other.to_css(),
-    }
-}
-
-/// Apply a numeric transform, preserving the operand's unit.
-fn map_num(v: &Value, f: fn(f64) -> f64) -> Result<Value, String> {
-    num(v).map(|(n, u)| Value::Number(f(n), u))
-}
-
-/// Require a unitless number (`sqrt`/`log`/`pow` in Sass reject units).
-fn unitless(v: &Value) -> Result<f64, String> {
-    match v {
-        Value::Number(n, u) if u.is_empty() => Ok(*n),
-        Value::Number(_, u) => Err(format!("expected a unitless number, got unit \"{u}\"")),
-        _ => Err("expected a number".to_string()),
-    }
-}
-
-/// The numerically smaller of two values (falls back to lexicographic on non-numbers).
-fn less(a: Value, b: Value) -> Value {
-    if is_lt(&a, &b) { a } else { b }
-}
-fn greater(a: Value, b: Value) -> Value {
-    if is_lt(&a, &b) { b } else { a }
-}
-fn is_lt(a: &Value, b: &Value) -> bool {
-    matches!(compare(a.clone(), Cmp::Lt, b.clone()), Ok(Value::Bool(true)))
 }
 
 /// Normalise whitespace runs to single spaces (interpolation gluing is already exact
