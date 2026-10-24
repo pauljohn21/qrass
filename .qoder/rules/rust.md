@@ -25,3 +25,15 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 **严格 RFP 函数式风格**：逻辑写成 rxrust 组合子的一条表达式链 + 闭包（`FnMut`）；复杂构造用 fluent builder（`.field(v)….build()`）。例外仅：纯值 `Option/Result` 组合子与单个无 `else` 的 `if` guard。
 
 **验收/参照**：项目现为实现 `crates/sasspile`（clean-room，`crates/qrass` 已删除，不得以 qrass 代码为模板）；行为**唯一**参照 = 本地 `sass-spec/*.hrx`（input→output.css/error）+ `element-plus`，**严禁**参照 dart-sass 源码/文档推断行为；每步跑 hrx 快照 + `ledger diff <base> <run>` 守 **`regress=0`**。`'static`/GAT/`box` 的正解永远是"喂 owned 值进流（`from_iter` 给 owned `Vec`/`chars.collect`，跨签名用 `box_it`）"，不是 clone 凑数、不是退回命令式。
+
+## 🧾 反回归自查清单（每次写/改代码**动手前必过**；命中任一条 = 停手，先重构根再加功能，禁止往上补）
+根因认知：反复出现的违规都是同一个根——**核心管线不是"一条 owned 值流"**，于是每加功能就往命令式核心上补一个"字符串状态机 / 递归 / 树"。所以**先确认根是否已是流**；若在补症状，改为先把那块重构成流。
+
+逐条 grep 自查（命中即违规）：
+- **树 / 递归下降**：`Vec<Rule>`、字段 `children`、`.children` 遍历、`fn *(.*) -> Vec<..>` 形式的中转、render/eval 里函数**自调用**。→ 嵌套必须 parse fold 平展成文档序 `Vec<Leaf>`（深度=owned 栈，非调用栈）；render=`map(leaf)`；循环=`flat_map`；条件=`filter`。
+- **命令式循环 / 分支**：`for` / `while` / `loop`、`if/else if/else` 链、堆叠守卫 `return`。→ 换 `fold/reduce_initial/scan_map/try_fold/filter`；`and/or/if` 惰性短路用 `Expr`，不用 char 游标机。
+- **拿字符串凑值**：`stmt_text` 先拼串再 `split_once(':')` 拆、`subst`/`value_to_css`/`lex` 对字符串**二次 char 扫描**当数据流替身。→ 值从**结构化 token** 一次成型 `Vec<Tok>→Expr→eval(owned Env)→Value→to_css`；能 `Raw` 逐字兜底的只在**无歧义**时求值。
+- **GC/共享可变直觉**：`&mut self` 被闭包共享、手搓 `HashMap` 当单例总线、env 键约定不一致（`$`/去`$` 混用）。→ 状态=被 move 的 owned 累加子；一到多才用 `Subject`/`behavior_subject`+`peek`；一处定义键约定。
+- **自造框架层**：`Stage<T>/fail()/drain()/drain_one()`、把流逐叶压回值的中转。→ 直接用 rxrust 组合子。
+
+**接线纪律**：新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测**钉死，**不接 `compile_string`**；接线时**只在无歧义处触发**（含 `/ * %` 的值跳过护 CSS；函数走**白名单** `call_builtin`，未知名 `eval`→`Err`→原样兜底，`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。比较/布尔等**会动全局 truthiness** 的改动单列一步，先护住选择器（`a > b` 等 combinator 不得被当比较）。
