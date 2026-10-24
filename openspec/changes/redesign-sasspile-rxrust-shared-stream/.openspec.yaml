@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-24
+goal: 整体重新设计 sasspile 核心为 Shared 响应式流；需求与验收只来自 sass-spec 与 element-plus
