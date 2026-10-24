@@ -123,3 +123,35 @@ fn vars_in_arithmetic() {
     assert_eq!(v("$w + 2px", &env).as_deref(), Some("5px"));
     assert_eq!(v("$nope + 2px", &env), None); // unbound -> verbatim $name -> non-numeric -> None
 }
+
+#[test]
+fn math_domain_functions() {
+    // gold values from sass-spec/spec/core_functions/math/*.hrx
+    let env = Env::new();
+    assert_eq!(v("math.round(1)", &env).as_deref(), Some("1"));
+    assert_eq!(v("math.round(2.9)", &env).as_deref(), Some("3"));
+    assert_eq!(v("math.round(16.5)", &env).as_deref(), Some("17"));
+    assert_eq!(v("math.round(-5.4)", &env).as_deref(), Some("-5"));
+    assert_eq!(v("math.ceil(1.2)", &env).as_deref(), Some("2"));
+    assert_eq!(v("math.floor(1.9)", &env).as_deref(), Some("1"));
+    assert_eq!(v("math.round(10.5px)", &env).as_deref(), Some("11px")); // unit preserved
+    assert_eq!(v("math.sqrt(9)", &env).as_deref(), Some("3"));
+    assert_eq!(v("math.pow(2, 10)", &env).as_deref(), Some("1024"));
+    assert_eq!(v("math.abs(-3px)", &env).as_deref(), Some("3px"));
+    assert_eq!(v("math.min(3, 1, 2)", &env).as_deref(), Some("1"));
+    assert_eq!(v("math.max(1, 5, 2)", &env).as_deref(), Some("5"));
+    // sqrt rejects units (Sass semantics) -> None (verbatim)
+    assert_eq!(v("math.sqrt(9px)", &env), None);
+}
+
+#[test]
+fn string_domain_functions() {
+    // gold shapes from sass-spec/spec/core_functions/string/*.hrx
+    let env = Env::new();
+    assert_eq!(v("to-upper-case(\"foo\")", &env).as_deref(), Some("\"FOO\""));
+    assert_eq!(v("to-lower-case(\"FOO\")", &env).as_deref(), Some("\"foo\""));
+    assert_eq!(v("quote(bar)", &env).as_deref(), Some("\"bar\""));
+    assert_eq!(v("unquote(\"baz\")", &env).as_deref(), Some("baz"));
+    assert_eq!(v("length(\"hello\")", &env).as_deref(), Some("5"));
+    assert_eq!(v("string.length(hello)", &env).as_deref(), Some("5"));
+}
