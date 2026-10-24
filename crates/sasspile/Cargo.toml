@@ -13,6 +13,7 @@ tracing = "0.1"
 [dev-dependencies]
 ledger = { path = "../ledger" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [lib]
 name = "sasspile"

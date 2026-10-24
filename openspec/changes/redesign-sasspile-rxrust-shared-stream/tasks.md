@@ -8,7 +8,7 @@
 
 ## 2. `Shared` 流核心骨架（与旧核并行到 parity）
 
-- [ ] 2.1 引入 `tokio`（rt-multi-thread）依赖并加一个 `Shared`+`flat_map` 扇出/合并的最小可编译冒烟，验证 `cargo build -p sasspile` 通过
+- [x] 2.1 引入 `tokio`（rt-multi-thread）依赖并加一个 `Shared`+`flat_map` 扇出/合并的最小可编译冒烟，验证 `cargo build -p sasspile` 通过
 - [ ] 2.2 `structure`：`Shared` token 流折成 owned `Block`/`Stmt` 数据（含 `order` 文档序键），补结构断言 `#[test]`，验证不产 `Vec<Frame>`/`chain_taken`（`sasslint` 对该模块 0 命中）
 - [ ] 2.3 `stmt_stream(stmt, ctx) -> SharedBoxedObservable<Leaf>`：`flat_map` 下钻嵌套、`filter`+不可变链值选支、`concat_map`/`merge_all(1)` 保序、独立子图用 `merge_observables`，验证 `tests/compile.rs` 全绿（parity 旧核）
 - [ ] 2.4 D3 定序终点：`collect` 后按 `order` 稳定排序拼接，`Err=Infallible`+流内 `Result`，唯一终点 `subscribe`/`into_future` 收口（无 `drain`/`Stage`），验证 expanded CSS 与旧核逐字节一致
