@@ -115,6 +115,19 @@ fn numeric_arithmetic_in_value() {
 }
 
 #[test]
+fn variable_arithmetic_in_value() {
+    assert_eq!(
+        compile_string("$w: 3px; a { m: $w + 2px; }").unwrap(),
+        "a {\n  m: 5px;\n}\n"
+    );
+}
+
+#[test]
+fn bare_percent_variable_stays_verbatim() {
+    assert_eq!(compile_string("$p: 50%; a { w: $p; }").unwrap(), "a {\n  w: 50%;\n}\n");
+}
+
+#[test]
 fn global_variable_substitution() {
     assert_eq!(
         compile_string("$x: 3px; a { w: $x; }").unwrap(),

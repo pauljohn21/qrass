@@ -215,7 +215,10 @@ impl Env {
     fn value_env(&self) -> ValueEnv {
         self.vars
             .iter()
-            .map(|(k, v)| (k.clone(), Value::Raw(v.clone())))
+            .map(|(k, v)| {
+                let value = Value::parse_number(v).unwrap_or_else(|| Value::Raw(v.clone()));
+                (k.clone(), value)
+            })
             .collect()
     }
 
