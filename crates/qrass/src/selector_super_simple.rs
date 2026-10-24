@@ -191,23 +191,24 @@ fn complex_overlaps(a: &Complex, b: &Complex) -> bool {
 }
 
 fn compounds_compatible(a: &Compound, b: &Compound) -> bool {
-    // Type conflict: two concrete, different types cannot co-occur.
-    if let (Some(Simple::Type { name: n1, .. }), Some(Simple::Type { name: n2, .. })) = (
-        a.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
-        b.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
-    )
-        && n1 != n2 {
-            return false;
-        }
-    // Id conflict.
-    if let (Some(Simple::Id(i1)), Some(Simple::Id(i2))) = (
-        a.simples.iter().find(|s| matches!(s, Simple::Id(_))),
-        b.simples.iter().find(|s| matches!(s, Simple::Id(_))),
-    )
-        && i1 != i2 {
-            return false;
-        }
-    true
+    // Type conflict: two concrete, different types cannot co-occur. Id conflict:
+    // same rule for `#id`. Both are pure `matches!` guards, so the predicate is
+    // the negation of their disjunction (single expression, no guard `return`).
+    let type_conflict = matches!(
+        (
+            a.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
+            b.simples.iter().find(|s| matches!(s, Simple::Type { .. })),
+        ),
+        (Some(Simple::Type { name: n1, .. }), Some(Simple::Type { name: n2, .. })) if n1 != n2
+    );
+    let id_conflict = matches!(
+        (
+            a.simples.iter().find(|s| matches!(s, Simple::Id(_))),
+            b.simples.iter().find(|s| matches!(s, Simple::Id(_))),
+        ),
+        (Some(Simple::Id(i1)), Some(Simple::Id(i2))) if i1 != i2
+    );
+    !(type_conflict || id_conflict)
 }
 
 fn arg_of(s: &Simple) -> Option<&PseudoArg> {
@@ -253,29 +254,34 @@ fn merge_pseudo_args(simps: &[&Simple]) -> Option<PseudoArg> {
 /// names and legacy-colon spellings must match; a selector-list argument (the
 /// `::slotted(...)` case) compares by subsumption, a text argument by equality.
 pub(crate) fn pseudo_element_is_super(a: &Simple, b: &Simple) -> bool {
-    let (na, la, arga) = match a {
+    // Destructure both as pseudo-elements (name, legacy-colon spelling, arg);
+    // anything else, or a name/colon mismatch, is not a super (single tail match,
+    // no guard `return`s).
+    let pa = match a {
         Simple::PseudoElement {
             name,
             legacy_colon,
             arg,
-        } => (name, *legacy_colon, arg),
-        _ => return false,
+        } => Some((name, *legacy_colon, arg)),
+        _ => None,
     };
-    let (nb, lb, argb) = match b {
+    let pb = match b {
         Simple::PseudoElement {
             name,
             legacy_colon,
             arg,
-        } => (name, *legacy_colon, arg),
-        _ => return false,
+        } => Some((name, *legacy_colon, arg)),
+        _ => None,
     };
-    if na != nb || la != lb {
-        return false;
-    }
-    match (arga, argb) {
-        (PseudoArg::None, PseudoArg::None) => true,
-        (PseudoArg::Text(x), PseudoArg::Text(y)) => x == y,
-        (PseudoArg::Selectors(x), PseudoArg::Selectors(y)) => list_is_super(x, y),
+    match (pa, pb) {
+        (Some((na, la, arga)), Some((nb, lb, argb))) if na == nb && la == lb => {
+            match (arga, argb) {
+                (PseudoArg::None, PseudoArg::None) => true,
+                (PseudoArg::Text(x), PseudoArg::Text(y)) => x == y,
+                (PseudoArg::Selectors(x), PseudoArg::Selectors(y)) => list_is_super(x, y),
+                _ => false,
+            }
+        }
         _ => false,
     }
 }

@@ -65,7 +65,7 @@ selector_extend.rs	0	0	1	0
 selector_extend_weave.rs	0	0	2	0
 selector_parse.rs	0	0	6	6
 selector_super.rs	0	0	0	14
-selector_super_simple.rs	0	0	1	16
+selector_super_simple.rs	0	0	1	11
 selector_unify.rs	0	0	4	11
 selector_unify_complex.rs	0	0	7	16
 value.rs	0	0	0	1
