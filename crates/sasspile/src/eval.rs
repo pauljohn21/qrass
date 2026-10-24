@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 
 use crate::ast::Rule;
+use crate::expr::{Env as ValueEnv, value_to_css};
+use crate::value::Value;
 
 #[derive(Default)]
 pub(crate) struct Env {
@@ -27,25 +29,49 @@ impl Env {
         })
     }
 
-    /// Resolve one rule: bind its `$prop:` declarations, substitute ordinary
-    /// declaration values and its selector, and recurse children on the same env.
+    /// Resolve one rule: bind its `$prop:` declarations, canonicalise ordinary
+    /// declaration values and its selector (values with `#{ … }` go through
+    /// `value_to_css`; an unresolvable interpolation drops the declaration), and
+    /// recurse children on the same env.
     pub(crate) fn resolve(&mut self, rule: Rule) -> Rule {
         let mut env_rule = Rule {
-            selector: self.subst(&rule.selector),
+            selector: self
+                .render(&rule.selector)
+                .unwrap_or_else(|| rule.selector.clone()),
             decls: Vec::new(),
             children: Vec::new(),
         };
         rule.decls.into_iter().for_each(|(prop, value)| {
             tracing::debug!(prop = %prop, raw = %value, "decl");
             if prop.starts_with('$') {
-                let v = self.subst(&value);
-                self.vars.insert(prop, v);
-            } else {
-                env_rule.decls.push((prop, self.subst(&value)));
+                if let Some(v) = self.render(&value) {
+                    self.vars.insert(prop, v);
+                }
+            } else if let Some(v) = self.render(&value) {
+                env_rule.decls.push((prop, v));
             }
         });
         env_rule.children = rule.children.into_iter().map(|c| self.resolve(c)).collect();
         env_rule
+    }
+
+    /// Canonicalise a value/selector: only strings containing `#{ … }` are routed
+    /// through `value_to_css` (which returns `None` on an undefined interpolation);
+    /// everything else keeps the existing `$var` substitution, so already-correct
+    /// values are not re-processed.
+    fn render(&self, text: &str) -> Option<String> {
+        if text.contains("#{") {
+            value_to_css(text, &self.value_env())
+        } else {
+            Some(self.subst(text))
+        }
+    }
+
+    fn value_env(&self) -> ValueEnv {
+        self.vars
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::Raw(v.clone())))
+            .collect()
     }
 
     /// Replace each `$ident` with its bound value; leave it intact if undefined.
