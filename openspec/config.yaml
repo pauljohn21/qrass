@@ -11,18 +11,30 @@ schema: spec-driven
 
 # Active project context — constraints an agent cannot infer by reading code alone.
 context: |
-  RFP style contract (capability `rfp-style-contract`, OpenSpec change
-  `refactor-rfp-strict`) is IN EFFECT for every change from approval onward: all
-  `crates/qrass/src` code MUST express iteration / state-transition / batch-transform /
-  stage-orchestration as rxrust Observable chains — no `for`/`while`/`loop`, no
-  `if`/`else if` chains, and no multi guard-`return` stacking in a function body (fold to
-  a single-exit `match`); synchronous-vs-async is never a reason to use std chains.
-  Enforced by `tests/style_gate.rs` against `tests/golden/style-baseline.txt` (per-file,
-  only-shrink ratchet). There is NO exemption list (R4 zero-exemption): the residual
-  imperative constructs are an open conversion backlog in `tests/golden/style-exemptions.md`,
-  each of which MUST be rewritten as an Observable chain; a construct that truly cannot
-  be expressed is a blocking finding to escalate, never a waiver and never a std-chain
-  fallback. New proposals/designs/tasks MUST account for this; regressions block the batch.
+  Project = `crates/sasspile`: a clean-room SCSS→CSS compiler whose control flow IS an
+  rxrust owned-value stream. The old `crates/qrass` (and the `rfp-style-contract` /
+  `refactor-rfp-strict` / `converge-sass-spec-to-100` retrofit changes) are DEPRECATED
+  and DELETED — never model designs on qrass code or carry its conclusions.
+  rxrust-as-core (rc.6, edition 2024, toolchain 1.99, `Local` everywhere / wasm32 target):
+  data flow, state and stage orchestration MUST be expressed with rxrust operators
+  (`from_iter`/`create`→`map`/`filter_map`/`scan_map`/`reduce_initial`/`collect`→`flat_map`),
+  moving owned values; mutable state is a stream-carried owned accumulator (`scan_map`
+  `&mut acc` / `reduce_initial`), never `&mut self` shared mutable business data or
+  `Arc<Mutex<_>>`; errors ride in-stream `Result<T, SassError>` (`Err=Infallible`); exactly
+  ONE `subscribe` terminal at the public edge. FORBIDDEN: std iterator chains as data-flow
+  substitutes, per-leaf boxed-observable + `drain_one` helpers, a bespoke Stage/fail/drain
+  framework layer, `println!`/`eprintln!` (use `tracing`), inline `#[test]` in `src/` (all
+  tests live under `crates/sasspile/tests/`), source file > 500 lines.
+  Behavior authority = local `sass-spec/*.hrx` goldens (input.scss→output.css/error) and
+  the `element-plus` corpus ONLY. NEVER reference dart-sass source/docs to infer behavior
+  (it is only the golden generator / black-box oracle). Every capability added/changed MUST
+  be gated by the hrx A/B `ledger` diff with `regress=0` (and element-plus e2e once wired).
+  Write ALL OpenSpec artifacts (proposal / design / specs / tasks) in Chinese. Keep OpenSpec
+  structural keywords and RFC-2119 markers in English so `--strict` validation still passes:
+  `## ADDED/MODIFIED/REMOVED/RENAMED Requirements`, `### Requirement:`, `#### Scenario:`, the
+  `- **WHEN**` / `- **THEN**` bullets, and the `MUST`/`SHALL` keywords. Also keep code
+  identifiers, commands, file paths, and API/operator names (e.g. `scan_map`, `flat_map`,
+  `ledger diff`) verbatim in English.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
