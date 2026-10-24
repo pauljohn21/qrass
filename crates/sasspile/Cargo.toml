@@ -10,6 +10,10 @@ description = "A clean-room SCSS->CSS compiler whose control flow IS an rxrust o
 rxrust = "=1.0.0-rc.6"
 tracing = "0.1"
 
+[dev-dependencies]
+ledger = { path = "../ledger" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 [lib]
 name = "sasspile"
 path = "src/lib.rs"

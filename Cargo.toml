@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/qrass-ledger", "crates/sasspile"]
+members = ["crates/ledger", "crates/sasspile"]
 
 [workspace.package]
 edition = "2024"

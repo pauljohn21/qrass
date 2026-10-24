@@ -1,4 +1,4 @@
-//! qrass hrx ledger — one SQLite table set for all sass-spec A/B snapshots,
+//! hrx ledger — one SQLite table set for all sass-spec A/B snapshots,
 //! replacing the per-round `reports/hrx-*.tsv` sprawl (262 files / 154 MB).
 //!
 //! Model: PASS rows are implicit. `case` is the global key dictionary, `run`
@@ -6,7 +6,7 @@
 //! set per run. A/B semantics fall straight out of set differences:
 //!   regression = fails(b) − fails(a);  net gain = fails(a) − fails(b).
 //!
-//! RFP contract (refactor-rfp-strict): argument handling and row folds are
+//! RFP contract: argument handling and row folds are
 //! combinator chains; all output flows through `tracing` (no println).
 //!
 //! Usage:
@@ -189,7 +189,7 @@ fn note_dump(conn: &Connection, args: &[String]) -> QResult<()> {
         Ok(format!("{o}\t{t}"))
     })?;
     rows.for_each(|line| {
-        line.map(|l| info!(target: "qrass-ledger", "{l}")).ok();
+        line.map(|l| info!(target: "ledger", "{l}")).ok();
     });
     Ok(())
 }

@@ -162,6 +162,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
+name = "ledger"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,15 +236,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "qrass-ledger"
-version = "0.1.0"
-dependencies = [
- "rusqlite",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -314,8 +314,10 @@ dependencies = [
 name = "sasspile"
 version = "0.1.0"
 dependencies = [
+ "ledger",
  "rxrust",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

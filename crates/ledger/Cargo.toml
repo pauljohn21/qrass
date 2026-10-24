@@ -1,9 +1,9 @@
 [package]
-name = "qrass-ledger"
+name = "ledger"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "SQLite ledger for qrass sass-spec A/B snapshots (replaces per-round reports/*.tsv sprawl)"
+description = "SQLite ledger for sass-spec A/B snapshots (replaces per-round reports/*.tsv sprawl)"
 
 [[bin]]
 name = "ledger"
