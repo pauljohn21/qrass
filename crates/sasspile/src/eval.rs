@@ -29,17 +29,85 @@ impl Env {
         })
     }
 
+    /// Resolve a sibling list, folding consecutive `@if` / `@else if` / `@else`
+    /// directive rules into the single branch whose condition first holds (lazy:
+    /// later branches are skipped once one is taken). Non-conditional rules resolve
+    /// normally.
+    pub(crate) fn resolve_all(&mut self, rules: Vec<Rule>) -> Vec<Rule> {
+        struct St {
+            out: Vec<Rule>,
+            group: Option<(bool, Vec<Rule>)>,
+        }
+        let flush = |st: &mut St, env: &mut Self| {
+            if let Some((_, branch)) = st.group.take() {
+                st.out.extend(env.resolve_all(branch));
+            }
+        };
+        let st = rules.into_iter().fold(
+            St {
+                out: Vec::new(),
+                group: None,
+            },
+            |mut st, rule| {
+                match rule.directive.as_deref() {
+                    Some(d) if d.starts_with("@if ") => {
+                        flush(&mut st, self);
+                        let taken = self.truthy(&d[4..]);
+                        st.group = Some((taken, if taken { rule.children } else { Vec::new() }));
+                    }
+                    Some(d) if d.starts_with("@else if ") => {
+                        if let Some(g) = st.group.as_mut()
+                            && !g.0
+                            && self.truthy(&d[9..])
+                        {
+                            g.0 = true;
+                            g.1 = rule.children;
+                        }
+                    }
+                    Some("@else") => {
+                        if let Some(g) = st.group.as_mut()
+                            && !g.0
+                        {
+                            g.0 = true;
+                            g.1 = rule.children;
+                        }
+                    }
+                    _ => {
+                        flush(&mut st, self);
+                        st.out.push(self.resolve(rule));
+                    }
+                }
+                st
+            },
+        );
+        let mut st = st;
+        flush(&mut st, self);
+        st.out
+    }
+
+    /// Sass truthiness of a condition string: only `false` / empty (`null`) are falsy.
+    fn truthy(&mut self, cond: &str) -> bool {
+        let rendered = self.render(cond).unwrap_or_else(|| cond.to_string());
+        let t = rendered.trim();
+        !t.is_empty() && t != "false"
+    }
+
     /// Resolve one rule: bind its `$prop:` declarations, canonicalise ordinary
-    /// declaration values and its selector (values with `#{ … }` go through
-    /// `value_to_css`; an unresolvable interpolation drops the declaration), and
-    /// recurse children on the same env.
+    /// declaration values and its selector (an at-rule/directive block keeps its
+    /// inherited selector), and recurse children as a sibling list.
     pub(crate) fn resolve(&mut self, rule: Rule) -> Rule {
+        let directive = rule.directive.clone();
+        let selector = if directive.is_some() {
+            rule.selector.clone()
+        } else {
+            self.render(&rule.selector)
+                .unwrap_or_else(|| rule.selector.clone())
+        };
         let mut env_rule = Rule {
-            selector: self
-                .render(&rule.selector)
-                .unwrap_or_else(|| rule.selector.clone()),
+            selector,
             decls: Vec::new(),
             children: Vec::new(),
+            directive,
         };
         rule.decls.into_iter().for_each(|(prop, value)| {
             tracing::debug!(prop = %prop, raw = %value, "decl");
@@ -51,7 +119,7 @@ impl Env {
                 env_rule.decls.push((prop, v));
             }
         });
-        env_rule.children = rule.children.into_iter().map(|c| self.resolve(c)).collect();
+        env_rule.children = self.resolve_all(rule.children);
         env_rule
     }
 

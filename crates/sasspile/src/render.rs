@@ -18,8 +18,11 @@ fn own_block(rule: &Rule) -> String {
     }
 }
 
-/// Depth-first: write `rule`'s own block (if any) then recurse into children.
+/// Depth-first: emit `rule`'s own block (skipped for at-rule/directive blocks,
+/// which are transparent wrappers) then recurse into children.
 pub(crate) fn write_rule(out: &mut String, rule: &Rule) {
-    out.push_str(&own_block(rule));
+    if rule.directive.is_none() {
+        out.push_str(&own_block(rule));
+    }
     rule.children.iter().for_each(|child| write_rule(out, child));
 }

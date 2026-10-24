@@ -57,6 +57,35 @@ fn deep_nesting() {
 }
 
 #[test]
+fn if_true_branch_emitted() {
+    assert_eq!(
+        compile_string("@if true { a { b: c; } }").unwrap(),
+        "a {\n  b: c;\n}\n"
+    );
+}
+
+#[test]
+fn if_false_branch_dropped() {
+    assert_eq!(compile_string("@if false { a { b: c; } }").unwrap(), "");
+}
+
+#[test]
+fn if_else_picks_taken_branch() {
+    assert_eq!(
+        compile_string("@if false { x { y: 1; } } @else { z { w: 2; } }").unwrap(),
+        "z {\n  w: 2;\n}\n"
+    );
+}
+
+#[test]
+fn if_variable_condition() {
+    assert_eq!(
+        compile_string("$f: false; @if $f { a { b: c; } } @else { d { e: f; } }").unwrap(),
+        "d {\n  e: f;\n}\n"
+    );
+}
+
+#[test]
 fn global_variable_substitution() {
     assert_eq!(
         compile_string("$x: 3px; a { w: $x; }").unwrap(),

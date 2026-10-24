@@ -16,6 +16,7 @@ struct Frame {
     selector: String,
     decls: Vec<(String, String)>,
     children: Vec<Rule>,
+    directive: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -58,13 +59,23 @@ impl Acc {
     pub(crate) fn step(mut self, tok: Tok) -> Self {
         match tok {
             Tok::Punct('{') => {
-                let selector = stmt_text(&std::mem::take(&mut self.run));
+                let head = stmt_text(&std::mem::take(&mut self.run)).trim().to_string();
                 let parent = self.stack.last().map(|f| f.selector.as_str()).unwrap_or("");
-                let resolved = combine(parent, selector.trim());
+                // `@if` / `@else` are control-flow: selector-transparent blocks that
+                // eval folds away, so their children inherit the PARENT selector and
+                // the head is carried as `directive`. Other at-rules (`@media`,
+                // `@function`, …) stay ordinary blocks emitted as before.
+                let is_control_flow = head.starts_with("@if") || head.starts_with("@else");
+                let (selector, directive) = if is_control_flow {
+                    (parent.to_string(), Some(head))
+                } else {
+                    (combine(parent, &head), None)
+                };
                 self.stack.push(Frame {
-                    selector: resolved,
+                    selector,
                     decls: Vec::new(),
                     children: Vec::new(),
+                    directive,
                 });
             }
             Tok::Punct(';') => {
@@ -77,6 +88,7 @@ impl Acc {
                         selector: frame.selector,
                         decls: frame.decls,
                         children: frame.children,
+                        directive: frame.directive,
                     };
                     match self.stack.last_mut() {
                         Some(parent) => parent.children.push(rule),

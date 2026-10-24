@@ -42,9 +42,9 @@ pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
         .map(Acc::finish)
         .flat_map(|program| match program {
             Ok(program) => {
-                let env = eval::Env::from_globals(&program.globals);
-                Local::from_iter(program.rules)
-                    .scan_map(env, |env, rule| env.resolve(rule))
+                let mut env = eval::Env::from_globals(&program.globals);
+                let rules = env.resolve_all(program.rules);
+                Local::from_iter(rules)
                     .reduce_initial(String::new(), |mut css, rule| {
                         render::write_rule(&mut css, &rule);
                         css
