@@ -28,6 +28,9 @@ const SUBSTRING_BANS: &[(&str, &[&str])] = &[
     ),
     ("no-from-fn-driver", &["from_fn("]),
     ("no-work-queue", &["VecDeque<"]),
+    // heuristic: a mutable accumulator that DRIVES traversal (frame stack / @if chain),
+    // i.e. a state machine wearing operator clothing — banned even though it uses no loop
+    ("mutable-accumulator-drives", &["Vec<Frame>", "stack: Vec<", "chain_taken"]),
 ];
 
 /// Control-flow keywords banned when they START a (non-comment, non-`//`) line.

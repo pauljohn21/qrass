@@ -61,6 +61,19 @@ fn detects_state_machine_in_operator_clothing() {
 }
 
 #[test]
+fn detects_mutable_accumulator_drives() {
+    // a fold accumulator holding a frame stack / @if chain to DRIVE traversal
+    let path = std::env::temp_dir().join("sasslint_acc.rs");
+    fs::write(&path, "struct Acc { stack: Vec<Frame>, chain_taken: bool }\n").unwrap();
+    let f = scan_file(&path);
+    assert!(
+        has(&f, "mutable-accumulator-drives"),
+        "frame-stack/chain accumulator not caught: {f:?}"
+    );
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 fn mcp_protocol_handshake_and_review() {
     use serde_json::json;
     use sasslint::handle_message;

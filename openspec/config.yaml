@@ -14,8 +14,9 @@ context: |
     owned 值流。旧的 `crates/qrass` 已删除，其代码/结论一律不作模板或依据。
   - 配套 crate：`crates/ledger`（hrx 快照 + `ledger diff` 的 A/B 回归库）、
     `crates/sasslint`（把下面的铁律编码成确定性审核，CLI=CI 闸、并有 MCP `review` 工具）。
-  - 技术栈：Rust edition 2024、toolchain 1.99、rxrust `=1.0.0-rc.6`、全程 `Local`
-    （wasm32 为唯一可行目标）；对话用中文，代码/命令/文件名/注释用 English。
+  - 技术栈：Rust edition 2024、toolchain 1.99、rxrust `=1.0.0-rc.6`；**允许 `Shared`
+    算子与多线程**（wasm32 不再锁死架构，wasm 经 trunk 等仍可作产出）；对话用中文，
+    代码/命令/文件名/注释用 English。
 
   ## rxrust 铁律：以所有权为内核，rxrust 本身就是引擎
   - 自底向上，只问「哪条 owned 值流 → 经哪个算子 → 变成哪条值流」；MUST NOT 自顶向下先
@@ -24,12 +25,18 @@ context: |
   - 惰性求值：整条编译是冷 observable 描述；值/选择器以**待求值的 owned 值**（`Expr`/闭包）
     在流上传递，CSS 只在公开入口**唯一一次 `subscribe`** 合并时求值输出；严禁中途急切拼串。
   - 消费自身 / 线性所有权：值被 move 进流、下游消费一次；MUST NOT 用 `Arc<Mutex<_>>` 或
-    `&mut self` 对象承载跨元素共享可变业务数据。错误以流内 `Result<T, SassError>`
+    `&mut self` 对象承载跨元素共享可变业务数据。**跨线程只共享冻结的不可变值（`Arc<T>`
+    只读），绝不 `Arc<Mutex<业务态>>`**。错误以流内 `Result<T, SassError>`
     （`Err=Infallible`）下传、终点收口。
   - 循环交给算子：`@each`/`@for` = `from_iter(items).flat_map(|it| body_substream(it))`，
-    MUST NOT 缓冲 body 再用 `for`/`while`/`for_each` 重放。选择=`filter`。
+    MUST NOT 缓冲 body 再用 `for`/`while`/`for_each` 重放。选择=`filter`；嵌套/并发分支用
+    `merge_observables` 扇出后合并，把递归换成"流中流 + 合并"。
+  - **每一层都递归套用上面的问句**（不止顶层）：子问题的"状态"也要是流/被 move 累加子；
+    一旦想"先攒结构再遍历"或"用一个可变累加子/帧栈去驱动流程"即失守（哪怕 `sasslint`
+    不报），回到该层也用 `flat_map`/`merge`/`Subject` 表达。
   - 一到多交给多播：一份产出喂多消费者（模块单例被多处 `@use`、一段解析喂选择器+值）用
-    `Subject`/`share`/`publish().refCount()`/`behavior_subject`+`peek`（Local=`MutRc`）；
+    `Subject`/`share`/`publish().refCount()`/`behavior_subject`+`peek`（`Local` 用
+    `MutRc`，跨线程用 `Shared::subject`）；
     多播不是共享可变的挡箭牌，线性一次过仍用 `scan_map`/`reduce_initial` 的 owned 累加子。
   - 状态=算子携带的 owned 累加子（`scan_map` 的 `&mut acc` / `reduce_initial` 的 move acc）；
     嵌套深度是数据、不是调用栈。
