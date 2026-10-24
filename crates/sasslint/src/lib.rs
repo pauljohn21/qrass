@@ -26,6 +26,8 @@ const SUBSTRING_BANS: &[(&str, &[&str])] = &[
         "no-recursive-descent",
         &["fn write_rule", "fn resolve_all", "fn resolve("],
     ),
+    ("no-from-fn-driver", &["from_fn("]),
+    ("no-work-queue", &["VecDeque<"]),
 ];
 
 /// Control-flow keywords banned when they START a (non-comment, non-`//`) line.

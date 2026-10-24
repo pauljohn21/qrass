@@ -46,6 +46,21 @@ fn gate_sasspile_is_clean() {
 }
 
 #[test]
+fn detects_state_machine_in_operator_clothing() {
+    // the meta-error: a hand-rolled driver disguised as an iterator/rxrust operator
+    let path = std::env::temp_dir().join("sasslint_sm.rs");
+    fs::write(
+        &path,
+        "let q: VecDeque<Job> = VecDeque::new();\nstd::iter::from_fn(|| q.pop_front()).for_each(drop);\n",
+    )
+    .unwrap();
+    let f = scan_file(&path);
+    assert!(has(&f, "no-work-queue"), "VecDeque work-queue not caught: {f:?}");
+    assert!(has(&f, "no-from-fn-driver"), "from_fn driver not caught: {f:?}");
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 fn mcp_protocol_handshake_and_review() {
     use serde_json::json;
     use sasslint::handle_message;
