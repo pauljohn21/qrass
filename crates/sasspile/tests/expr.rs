@@ -240,3 +240,17 @@ fn color_domain_functions() {
     // non-colour arg -> Err -> None
     assert_eq!(cb("color.red", vec![c("nonsense")]), None);
 }
+
+#[test]
+fn meta_type_of() {
+    // gold: sass-spec/spec/core_functions/meta/type_of.hrx
+    let t = |v| cb("meta.type-of", vec![v]);
+    assert_eq!(t(Value::Bool(true)).as_deref(), Some("bool"));
+    assert_eq!(t(Value::Number(1.0, String::new())).as_deref(), Some("number"));
+    assert_eq!(t(Value::Color("red".into())).as_deref(), Some("color"));
+    assert_eq!(t(Value::Str { text: "x".into(), quoted: true }).as_deref(), Some("string"));
+    assert_eq!(t(Value::Null).as_deref(), Some("null"));
+    assert_eq!(t(list(&["a", "b"], Sep::Space)).as_deref(), Some("list"));
+    assert_eq!(t(map(&[("a", "b")])).as_deref(), Some("map"));
+    assert_eq!(t(Value::Raw("foo".into())).as_deref(), Some("string"));
+}

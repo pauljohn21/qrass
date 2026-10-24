@@ -8,6 +8,7 @@ mod color;
 mod list;
 mod map;
 mod math;
+mod meta;
 mod string;
 
 use crate::value::Value;
@@ -24,7 +25,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
     }
     // domain order matters only where bare names overlap; none collide across these domains.
     // `find_map` over the domain table (no imperative loop): first domain that owns `name` answers.
-    match [math::call, string::call, list::call, map::call, color::call]
+    match [math::call, string::call, list::call, map::call, color::call, meta::call]
         .into_iter()
         .find_map(|domain| domain(name, args))
     {
