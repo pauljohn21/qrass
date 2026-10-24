@@ -110,6 +110,11 @@ fn for_to_expands() {
 }
 
 #[test]
+fn numeric_arithmetic_in_value() {
+    assert_eq!(compile_string("a { m: 10px + 5px; }").unwrap(), "a {\n  m: 15px;\n}\n");
+}
+
+#[test]
 fn global_variable_substitution() {
     assert_eq!(
         compile_string("$x: 3px; a { w: $x; }").unwrap(),

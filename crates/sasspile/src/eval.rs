@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ast::Rule;
-use crate::expr::{Env as ValueEnv, value_to_css};
+use crate::expr::{Env as ValueEnv, Expr, parse_expr, value_to_css};
 use crate::value::Value;
 
 #[derive(Default)]
@@ -192,16 +192,24 @@ impl Env {
         env_rule
     }
 
-    /// Canonicalise a value/selector: only strings containing `#{ … }` are routed
-    /// through `value_to_css` (which returns `None` on an undefined interpolation);
-    /// everything else keeps the existing `$var` substitution, so already-correct
-    /// values are not re-processed.
+    /// Canonicalise a value/selector: `#{ … }` via `value_to_css`; a pure numeric
+    /// `+`/`-` arithmetic (no `/ * %`, which are ambiguous in CSS values like
+    /// `font: 12px/1.5` or `grid: 1 / 2`) via `parse_expr` + eval; everything else keeps
+    /// the existing `$var` substitution unchanged.
     fn render(&self, text: &str) -> Option<String> {
         if text.contains("#{") {
-            value_to_css(text, &self.value_env())
-        } else {
-            Some(self.subst(text))
+            return value_to_css(text, &self.value_env());
         }
+        if text.contains(['/', '*', '%']) {
+            return Some(self.subst(text));
+        }
+        let expr = parse_expr(text);
+        if matches!(expr, Expr::Bin(..))
+            && let Ok(v) = expr.eval(&self.value_env())
+        {
+            return Some(v.to_css());
+        }
+        Some(self.subst(text))
     }
 
     fn value_env(&self) -> ValueEnv {
