@@ -1,6 +1,7 @@
-//! Render: the mapping applied to each `Rule` in the pipeline. A rule with its own
-//! declarations becomes one expanded block, emitted before its nested children
-//! (document order); a rule with only children emits nothing for itself.
+//! Render: flatten the rule tree into CSS text with an OWNED explicit stack
+//! (`std::iter::from_fn`) — no recursion, no loop keywords. Pre-order (a rule's own
+//! block, then its children) preserves document order; at-rule/directive blocks are
+//! transparent wrappers (their own block is skipped, children still emitted).
 
 use crate::ast::Rule;
 
@@ -18,11 +19,14 @@ fn own_block(rule: &Rule) -> String {
     }
 }
 
-/// Depth-first: emit `rule`'s own block (skipped for at-rule/directive blocks,
-/// which are transparent wrappers) then recurse into children.
-pub(crate) fn write_rule(out: &mut String, rule: &Rule) {
-    if rule.directive.is_none() {
-        out.push_str(&own_block(rule));
-    }
-    rule.children.iter().for_each(|child| write_rule(out, child));
+pub(crate) fn to_css(rules: Vec<Rule>) -> String {
+    let mut stack: Vec<Rule> = rules.into_iter().rev().collect();
+    std::iter::from_fn(move || {
+        stack.pop().map(|rule| {
+            let block = if rule.directive.is_none() { own_block(&rule) } else { String::new() };
+            rule.children.into_iter().rev().for_each(|child| stack.push(child));
+            block
+        })
+    })
+    .collect()
 }

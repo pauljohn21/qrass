@@ -44,13 +44,7 @@ pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
             Ok(program) => {
                 let mut env = eval::Env::from_globals(&program.globals);
                 let rules = env.resolve_all(program.rules);
-                Local::from_iter(rules)
-                    .reduce_initial(String::new(), |mut css, rule| {
-                        render::write_rule(&mut css, &rule);
-                        css
-                    })
-                    .map(Ok::<_, SassError>)
-                    .box_it()
+                Local::of(Ok::<String, SassError>(render::to_css(rules))).box_it()
             }
             Err(err) => Local::of(Err::<String, SassError>(err)).box_it(),
         })
