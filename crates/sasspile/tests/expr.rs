@@ -190,3 +190,33 @@ fn list_domain_functions() {
     assert_eq!(cb("list.separator", vec![l.clone()]).as_deref(), Some("space"));
     assert_eq!(cb("list.separator", vec![list(&["a", "b"], Sep::Comma)]).as_deref(), Some("comma"));
 }
+
+fn num(s: &str) -> Value {
+    Value::Number(s.parse().unwrap(), String::new())
+}
+fn map(pairs: &[(&str, &str)]) -> Value {
+    Value::Map(pairs.iter().map(|(k, v)| (raw(k), raw(v))).collect())
+}
+
+#[test]
+fn map_domain_functions() {
+    // gold semantics from sass-spec/spec/core_functions/map/*.hrx
+    let m = map(&[("a", "1"), ("b", "2")]);
+    assert_eq!(cb("map.get", vec![m.clone(), raw("a")]).as_deref(), Some("1"));
+    assert_eq!(cb("map.get", vec![m.clone(), raw("z")]).as_deref(), Some("")); // missing -> null
+    assert_eq!(cb("map.has-key", vec![m.clone(), raw("b")]).as_deref(), Some("true"));
+    assert_eq!(cb("map.has-key", vec![m.clone(), raw("z")]).as_deref(), Some("false"));
+    assert_eq!(cb("map.keys", vec![m.clone()]).as_deref(), Some("a, b"));
+    assert_eq!(cb("map.values", vec![m.clone()]).as_deref(), Some("1, 2"));
+    assert_eq!(
+        cb("map.merge", vec![m.clone(), map(&[("a", "9"), ("c", "3")])]).as_deref(),
+        Some("(a: 9, b: 2, c: 3)")
+    );
+    assert_eq!(
+        cb("map.set", vec![m.clone(), raw("a"), raw("9")]).as_deref(),
+        Some("(a: 9, b: 2)")
+    );
+    assert_eq!(cb("map.remove", vec![m.clone(), raw("a")]).as_deref(), Some("(b: 2)"));
+    // non-map arg -> Err -> None (verbatim)
+    assert_eq!(cb("map.keys", vec![num("3")]), None);
+}
