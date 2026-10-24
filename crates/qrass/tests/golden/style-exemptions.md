@@ -26,7 +26,7 @@ step gated by a full hrx A/B `regress=0`.
 | C2 | `builtins/selector.rs` `simple_selectors` 6× cursor `while` over `&[char]` | `Local::from_iter(chars) .scan_map(CursorState, …)` stream-migrator (the `lexer.rs` `scan_map` + `LexPunct` precedent) |
 | C3 | `lexer_detail.rs` `lex_string` / `lex_interp_raw` `loop`/`while` | char-cursor `scan_map` migrator with owned quote/escape/interp state; recursion re-expressed as nested `flat_map`/owned buffers |
 | C4 | `parser_if.rs` `modern_if` / `clause_value` / `if_cond` token-cursor `loop` | `Local::from_iter(tokens) .scan_map(Parser-state, …)` + `flat_map` over the recursive-descent stages |
-| C5 | `builtins/color_transform.rs` channel-edit `loop` (local `c4` mutation, 6 golden early-exits) | `reduce_initial` over the channel list folding owned `c4` slots; the `classify_non_number` enum already de-chain'd the `else if`s |
+| ✅ C5 (done) | `builtins/color_transform.rs` channel-edit `for` → **done**: folded to `Local::from_iter(keys).reduce_initial((c4, latch-err), apply_channel_edit).map(Ok).box_it()` drained via `drain_one`; `named`/`base_css` moved into the `'static` closure, `apply_channel_edit` is a pure step fn, the Scale unit ladder is a tuple `match` (no else-if). loops 1→0, ledger A/B `regress=0` | — |
 | C6 | `&mut self`-mutating eval walks currently on std `try_fold`/`for_each` (loader resolution, eval_* statement walks, `eval_color_space_symbolic` slot fold …) | thread the mutated state as the stream's **owned accumulator** (`scan_map`/`reduce_initial`) instead of `&mut self` — `'static` closures then hold |
 
 C6 is tracked continuously: `style_gate.rs` counts `for`/`while`/`loop` per file, so any

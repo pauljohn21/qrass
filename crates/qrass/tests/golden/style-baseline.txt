@@ -8,7 +8,7 @@ builtins/color_mix.rs	0	0	0	11
 builtins/color_ops.rs	0	0	2	4
 builtins/color_ops_space.rs	0	0	1	8
 builtins/color_same.rs	0	0	1	0
-builtins/color_transform.rs	1	0	2	13
+builtins/color_transform.rs	0	0	1	13
 builtins/list.rs	0	0	4	8
 builtins/map.rs	0	0	0	8
 builtins/math.rs	0	0	0	1
