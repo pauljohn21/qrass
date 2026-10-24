@@ -74,3 +74,117 @@ impl Expr {
         }
     }
 }
+
+fn is_var_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+}
+
+/// Canonicalise a raw declaration-value string to CSS, resolving `$name` references
+/// and `#{ … }` interpolation, and normalising whitespace/comma spacing the way Sass
+/// emits (`a,b`→`a, b`; runs of spaces collapse to one; interpolation glues to
+/// adjacent text so `col-#{$k}`→`col-2`). `None` if an interpolation names an
+/// undefined variable (the caller then drops the declaration).
+///
+/// A single left-to-right `fold` over chars with an interpolation stack — no loop,
+/// no recursion, no per-case flags.
+pub fn value_to_css(src: &str, env: &Env) -> Option<String> {
+    struct Vs {
+        out: String,
+        stack: Vec<String>,
+        dollar: Option<String>,
+        pending: bool,
+        after_comma: bool,
+        failed: bool,
+    }
+    let final_state = src.chars().fold(
+        Vs {
+            out: String::new(),
+            stack: Vec::new(),
+            dollar: None,
+            pending: false,
+            after_comma: false,
+            failed: false,
+        },
+        |mut s, c| {
+            if s.failed {
+                return s;
+            }
+            if s.dollar.is_some() {
+                if is_var_char(c) {
+                    s.dollar.as_mut().unwrap().push(c);
+                    return s;
+                }
+                let name = s.dollar.take().unwrap();
+                match env.get(&name) {
+                    Some(v) => s.out.push_str(&v.to_css()),
+                    None if !s.stack.is_empty() => {
+                        s.failed = true;
+                        return s;
+                    }
+                    None => {
+                        s.out.push('$');
+                        s.out.push_str(&name);
+                    }
+                }
+            }
+            let emit = |s: &mut Vs, text: &str| {
+                if s.pending && !s.out.is_empty() {
+                    if s.after_comma {
+                        s.after_comma = false;
+                    } else {
+                        s.out.push(' ');
+                    }
+                }
+                s.pending = false;
+                s.out.push_str(text);
+            };
+            match c {
+                '{' if !s.stack.is_empty() => {}
+                '}' if !s.stack.is_empty() => {
+                    let inner = std::mem::take(&mut s.out);
+                    s.out = s.stack.pop().unwrap();
+                    s.out.push_str(&inner);
+                }
+                '#' => emit(&mut s, "#"),
+                '$' => s.dollar = Some(String::new()),
+                '{' if s.out.ends_with('#') => {
+                    s.out.pop();
+                    s.stack.push(std::mem::take(&mut s.out));
+                }
+                c if c.is_whitespace() => {
+                    if !s.out.is_empty() {
+                        s.pending = true;
+                    }
+                }
+                ',' => {
+                    s.out = std::mem::take(&mut s.out).trim_end().to_string();
+                    s.out.push_str(", ");
+                    s.pending = false;
+                    s.after_comma = true;
+                }
+                c => emit(&mut s, &c.to_string()),
+            }
+            s
+        },
+    );
+    let Vs {
+        mut out,
+        stack,
+        dollar,
+        failed,
+        ..
+    } = final_state;
+    if failed || !stack.is_empty() {
+        return None;
+    }
+    if let Some(name) = dollar {
+        match env.get(&name) {
+            Some(v) => out.push_str(&v.to_css()),
+            None => {
+                out.push('$');
+                out.push_str(&name);
+            }
+        }
+    }
+    Some(out.trim().to_string())
+}

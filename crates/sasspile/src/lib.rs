@@ -20,7 +20,7 @@ mod render;
 pub mod value;
 
 pub use error::{ErrorKind, SassError};
-pub use expr::{Env, Expr};
+pub use expr::{Env, Expr, value_to_css};
 pub use value::{Sep, Value};
 
 use std::sync::mpsc;

@@ -1,7 +1,7 @@
 //! Unit tests for the expression evaluator foundation (standalone; the pipeline is
 //! not yet wired to it, so these exercise `Expr::eval` directly).
 
-use sasspile::{Env, Expr, Value};
+use sasspile::{Env, Expr, Value, value_to_css};
 
 #[test]
 fn and_short_circuits_undefined_rhs() {
@@ -60,4 +60,44 @@ fn concat_joins_parts_with_spaces() {
         Expr::Interp(Box::new(Expr::Lit(Value::Raw("b".into())))),
     ]);
     assert_eq!(expr.eval(&env).unwrap().to_css(), "a b");
+}
+
+#[test]
+fn value_var_substitution() {
+    let mut env = Env::new();
+    env.insert("x".into(), Value::Raw("3px".into()));
+    assert_eq!(value_to_css("$x", &env).as_deref(), Some("3px"));
+}
+
+#[test]
+fn value_unknown_bare_var_passthrough() {
+    let env = Env::new();
+    assert_eq!(value_to_css("-a-calc($c)", &env).as_deref(), Some("-a-calc($c)"));
+}
+
+#[test]
+fn value_interp_glues_to_adjacent_text() {
+    let mut env = Env::new();
+    env.insert("k".into(), Value::Raw("2".into()));
+    assert_eq!(value_to_css("col-#{$k}", &env).as_deref(), Some("col-2"));
+}
+
+#[test]
+fn value_interp_unknown_var_is_none() {
+    let env = Env::new();
+    assert_eq!(value_to_css("#{$nope}", &env), None);
+}
+
+#[test]
+fn value_normalises_comma_spacing() {
+    let env = Env::new();
+    assert_eq!(value_to_css("var(--c ,)", &env).as_deref(), Some("var(--c, )"));
+    assert_eq!(value_to_css("a,b", &env).as_deref(), Some("a, b"));
+}
+
+#[test]
+fn value_collapses_whitespace_and_keeps_url() {
+    let env = Env::new();
+    assert_eq!(value_to_css("url(http://x)  y", &env).as_deref(), Some("url(http://x) y"));
+    assert_eq!(value_to_css("1px    2px", &env).as_deref(), Some("1px 2px"));
 }
