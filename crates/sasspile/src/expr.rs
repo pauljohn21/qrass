@@ -16,6 +16,16 @@ use crate::value::Value;
 
 pub type Env = HashMap<String, Value>;
 
+/// Binary arithmetic operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// a literal value (number/string/color/bool/null or verbatim CSS `Raw`)
@@ -32,6 +42,8 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
     /// `if(cond, then, else)` (lazy on the taken branch); `else` may be `Null`
     If(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// arithmetic on numeric values
+    Bin(Op, Box<Expr>, Box<Expr>),
 }
 
 impl Expr {
@@ -71,8 +83,44 @@ impl Expr {
                     then.eval(env)
                 }
             }
+            Expr::Bin(op, l, r) => arith(*op, l.eval(env)?, r.eval(env)?),
         }
     }
+}
+
+fn num(v: &Value) -> Result<(f64, String), String> {
+    match v {
+        Value::Number(n, u) => Ok((*n, u.clone())),
+        other => Err(format!("{other:?} is not a number")),
+    }
+}
+
+/// The unit of an add/sub result: the non-empty of the two (equal or one empty).
+fn add_unit(a: &str, b: &str) -> Result<String, String> {
+    match (a.is_empty(), b.is_empty()) {
+        _ if a == b => Ok(a.to_string()),
+        (false, true) | (true, false) => Ok(if a.is_empty() { b.to_string() } else { a.to_string() }),
+        _ => Err(format!("incompatible units {a} and {b}")),
+    }
+}
+
+fn arith(op: Op, lhs: Value, rhs: Value) -> Result<Value, String> {
+    let (x, xu) = num(&lhs)?;
+    let (y, yu) = num(&rhs)?;
+    let (v, unit) = match op {
+        Op::Add => (x + y, add_unit(&xu, &yu)?),
+        Op::Sub => (x - y, add_unit(&xu, &yu)?),
+        Op::Mul => (x * y, format!("{xu}{yu}")),
+        Op::Div => {
+            if xu == yu {
+                (x / y, String::new())
+            } else {
+                (x / y, add_unit(&xu, &yu)?)
+            }
+        }
+        Op::Mod => (x.rem_euclid(y), add_unit(&xu, &yu)?),
+    };
+    Ok(Value::Number(v, unit))
 }
 
 fn is_var_char(c: char) -> bool {

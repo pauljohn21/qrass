@@ -61,6 +61,17 @@ impl Value {
     pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Bool(false) | Value::Null)
     }
+
+    /// Parse a numeric literal with an optional unit (`"10px"` → `Number(10,"px")`,
+    /// `"-3"` → `Number(-3,"")`); `None` if the text is not a plain number.
+    pub fn parse_number(s: &str) -> Option<Value> {
+        let t = s.trim();
+        let end = t
+            .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+            .unwrap_or(t.len());
+        let (num, unit) = t.split_at(end);
+        num.parse::<f64>().ok().map(|n| Value::Number(n, unit.to_string()))
+    }
 }
 
 /// Numeric rendering: integers without a trailing `.0`, otherwise up to 10 sig

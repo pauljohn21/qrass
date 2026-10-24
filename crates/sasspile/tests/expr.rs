@@ -1,7 +1,47 @@
 //! Unit tests for the expression evaluator foundation (standalone; the pipeline is
 //! not yet wired to it, so these exercise `Expr::eval` directly).
 
-use sasspile::{Env, Expr, Value, value_to_css};
+use sasspile::{Env, Expr, Op, Value, value_to_css};
+
+#[test]
+fn parse_number_with_unit() {
+    assert_eq!(Value::parse_number("10px"), Some(Value::Number(10.0, "px".into())));
+    assert_eq!(Value::parse_number("-3"), Some(Value::Number(-3.0, String::new())));
+    assert_eq!(Value::parse_number("abc"), None);
+}
+
+#[test]
+fn arith_add_same_unit() {
+    let env = Env::new();
+    let e = Expr::Bin(
+        Op::Add,
+        Box::new(Expr::Lit(Value::Number(2.0, "px".into()))),
+        Box::new(Expr::Lit(Value::Number(3.0, "px".into()))),
+    );
+    assert_eq!(e.eval(&env).unwrap().to_css(), "5px");
+}
+
+#[test]
+fn arith_div_same_unit_is_unitless() {
+    let env = Env::new();
+    let e = Expr::Bin(
+        Op::Div,
+        Box::new(Expr::Lit(Value::Number(10.0, "px".into()))),
+        Box::new(Expr::Lit(Value::Number(2.0, "px".into()))),
+    );
+    assert_eq!(e.eval(&env).unwrap().to_css(), "5");
+}
+
+#[test]
+fn arith_incompatible_units_error() {
+    let env = Env::new();
+    let e = Expr::Bin(
+        Op::Add,
+        Box::new(Expr::Lit(Value::Number(1.0, "px".into()))),
+        Box::new(Expr::Lit(Value::Number(1.0, "em".into()))),
+    );
+    assert!(e.eval(&env).is_err());
+}
 
 #[test]
 fn and_short_circuits_undefined_rhs() {
