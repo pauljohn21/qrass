@@ -12,6 +12,8 @@
 //!
 //! Nothing is implemented yet — `compile_string` is a stub so the workspace compiles.
 
+pub mod lexer;
+
 use std::fmt;
 
 /// Compiler error carried as an in-stream value.
