@@ -1,59 +1,87 @@
 schema: spec-driven
 
-# Project context (optional)
-# Add only constraints that should guide OpenSpec artifacts and workflows.
-# Include constraints an agent cannot infer by reading the code.
-# Keep general project documentation and discoverable codebase facts out.
-# Example:
-#   context: |
-#     Designs and tasks must cover Windows, macOS, and Linux
-#     Write all artifacts in Spanish
+# Project context — the authoritative, always-on rules for this repo. These are
+# constraints an agent cannot infer from code alone; OpenSpec artifacts MUST honor them.
+# Language: write ALL artifacts (proposal / design / specs / tasks) in Chinese; keep
+# OpenSpec structure keywords + RFC-2119 markers + code identifiers/operators/paths/commands
+# verbatim in English so `openspec validate --strict` passes:
+#   `## ADDED/MODIFIED/REMOVED/RENAMED Requirements`, `### Requirement:`, `#### Scenario:`,
+#   `- **WHEN**` / `- **THEN**`, and `MUST`/`SHALL`.
 
-# Active project context — constraints an agent cannot infer by reading code alone.
 context: |
-  Project = `crates/sasspile`: a clean-room SCSS→CSS compiler whose control flow IS an
-  rxrust owned-value stream. The old `crates/qrass` (and the `rfp-style-contract` /
-  `refactor-rfp-strict` / `converge-sass-spec-to-100` retrofit changes) are DEPRECATED
-  and DELETED — never model designs on qrass code or carry its conclusions.
-  rxrust-as-core (rc.6, edition 2024, toolchain 1.99, `Local` everywhere / wasm32 target):
-  data flow, state and stage orchestration MUST be expressed with rxrust operators
-  (`from_iter`/`create`→`map`/`filter_map`/`scan_map`/`reduce_initial`/`collect`→`flat_map`),
-  moving owned values; mutable state is a stream-carried owned accumulator (`scan_map`
-  `&mut acc` / `reduce_initial`), never `&mut self` shared mutable business data or
-  `Arc<Mutex<_>>`; errors ride in-stream `Result<T, SassError>` (`Err=Infallible`); exactly
-  ONE `subscribe` terminal at the public edge. FORBIDDEN: std iterator chains as data-flow
-  substitutes, per-leaf boxed-observable + `drain_one` helpers, a bespoke Stage/fail/drain
-  framework layer, `println!`/`eprintln!` (use `tracing`), inline `#[test]` in `src/` (all
-  tests live under `crates/sasspile/tests/`), source file > 500 lines.
-  Behavior authority = local `sass-spec/*.hrx` goldens (input.scss→output.css/error) and
-  the `element-plus` corpus ONLY. NEVER reference dart-sass source/docs to infer behavior
-  (it is only the golden generator / black-box oracle). Every capability added/changed MUST
-  be gated by the hrx A/B `ledger` diff with `regress=0` (and element-plus e2e once wired).
-  Write ALL OpenSpec artifacts (proposal / design / specs / tasks) in Chinese. Keep OpenSpec
-  structural keywords and RFC-2119 markers in English so `--strict` validation still passes:
-  `## ADDED/MODIFIED/REMOVED/RENAMED Requirements`, `### Requirement:`, `#### Scenario:`, the
-  `- **WHEN**` / `- **THEN**` bullets, and the `MUST`/`SHALL` keywords. Also keep code
-  identifiers, commands, file paths, and API/operator names (e.g. `scan_map`, `flat_map`,
-  `ledger diff`) verbatim in English.
+  ## 项目
+  - 唯一实现 = `crates/sasspile`：clean-room SCSS→CSS 编译器，控制流本身就是一条 rxrust
+    owned 值流。旧的 `crates/qrass` 已删除，其代码/结论一律不作模板或依据。
+  - 配套 crate：`crates/ledger`（hrx 快照 + `ledger diff` 的 A/B 回归库）、
+    `crates/sasslint`（把下面的铁律编码成确定性审核，CLI=CI 闸、并有 MCP `review` 工具）。
+  - 技术栈：Rust edition 2024、toolchain 1.99、rxrust `=1.0.0-rc.6`、全程 `Local`
+    （wasm32 为唯一可行目标）；对话用中文，代码/命令/文件名/注释用 English。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always state what is out of scope
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  ## rxrust 铁律：以所有权为内核，rxrust 本身就是引擎
+  - 自底向上，只问「哪条 owned 值流 → 经哪个算子 → 变成哪条值流」；MUST NOT 自顶向下先
+    设计算法/物化结构（AST/树/`Vec<Rule>`/`Vec<Node>`/手搓 `Engine{work-queue,step}`）再把
+    算子套上去遍历。出现「先建结构、再处理结构」即分解错误，重造数据而非改造 rxrust。
+  - 惰性求值：整条编译是冷 observable 描述；值/选择器以**待求值的 owned 值**（`Expr`/闭包）
+    在流上传递，CSS 只在公开入口**唯一一次 `subscribe`** 合并时求值输出；严禁中途急切拼串。
+  - 消费自身 / 线性所有权：值被 move 进流、下游消费一次；MUST NOT 用 `Arc<Mutex<_>>` 或
+    `&mut self` 对象承载跨元素共享可变业务数据。错误以流内 `Result<T, SassError>`
+    （`Err=Infallible`）下传、终点收口。
+  - 循环交给算子：`@each`/`@for` = `from_iter(items).flat_map(|it| body_substream(it))`，
+    MUST NOT 缓冲 body 再用 `for`/`while`/`for_each` 重放。选择=`filter`。
+  - 一到多交给多播：一份产出喂多消费者（模块单例被多处 `@use`、一段解析喂选择器+值）用
+    `Subject`/`share`/`publish().refCount()`/`behavior_subject`+`peek`（Local=`MutRc`）；
+    多播不是共享可变的挡箭牌，线性一次过仍用 `scan_map`/`reduce_initial` 的 owned 累加子。
+  - 状态=算子携带的 owned 累加子（`scan_map` 的 `&mut acc` / `reduce_initial` 的 move acc）；
+    嵌套深度是数据、不是调用栈。
+  - 判据：想「绕过 rxrust 的不便」（`'static`/GAT/要 `box`/不能返回引用）时，先假设模型错——
+    正解是把状态改成被 move 的 owned 累加子、喂 owned 值进流（`from_iter` 给 owned 值、
+    跨签名用 `box_it`），不是 clone 凑数、不是退回命令式、不是加封装。
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  ## 禁止（违反=任务失败）
+  - 禁 Python/脚本；一律 Rust，测试用 `#[test]` 且放 `crates/sasspile/tests/`（`src/` 纯生产码，禁内联测试）。
+  - 禁 `println!`/`eprintln!`：一律 `tracing` 宏；跨函数/阶段管道 MUST 用 `tracing::span!`
+    记上下文与耗时（字段 `stage`/`module`/`id`/`elapsed_ms`），不得仅用单条 `event!`。
+  - 禁命令式控制流：`for`/`while`/`loop`、`if/else if/else` 链、多守卫 `return` 堆叠。
+  - 禁 std `.iter().map/fold/collect()` 当数据流替身；禁把 `from_fn`+可变 `VecDeque`/
+    `Vec<Frame>`、万能 `Acc` 当「流」（那是算子外衣下的手搓状态机）。
+  - 禁拿字符串凑值：先 `stmt_text` 拼串再 `split_once` 拆、`subst`/char 游标机对串二次扫描。
+    值 MUST 从结构化 token 一次成型 `Vec<Tok>→Expr→eval(owned Env)→Value→to_css`。
+  - 禁自造框架层（`Stage<T>`/`fail()`/`drain()`/`drain_one()` 之类把流压回值的中转）。
+  - 单文件 ≤ 500 行（源码/测试分别计），超出必拆。
+
+  ## 值与控制建模
+  - 值建模成 `Expr`（`Lit(Value)`/`Var`/`Interp`/`Concat`/`And`/`Or`/`If`/`Bin`/`Func`）与
+    `Value`（Number带单位/String引号态/Color/List/Map/Bool/Null），`eval(Expr, owned Env)` 惰性求，
+    `and`/`or`/`if` 惰性短路；`Value::to_css` 规范化（逗号 `, `、空白折叠、插值紧邻拼接）。
+  - env 键约定统一（一律去 `$`）。裸未定义 `$var` 逐字兜底；`#{…}` 内未定义变量→求值 `Err`→丢该声明。
+  - 内置函数走白名单 `call_builtin`；未知名→`Err`→上层原样兜底，使 `url/calc/min/max` 等 CSS
+    原生函数永不被当 Sass 内置求值；值含 `/ * %` 跳过算术（护 `font:12px/1.5`、`grid:1/2`）。
+  - 比较/布尔（`== != < > <= >=`）建模为 `Expr`→`Value::Bool`，只在条件上下文消费；MUST NOT
+    在值/选择器路径急切字符串判断，MUST NOT 把选择器 combinator `a > b` 当比较。
+  - 词法一次切结构化 token（`Var`/`Interp`/`Punct`/`Word`），`#{}` 数据栈嵌套、块注释剥离；
+    后续只消费 token，不再对字符串重扫。
+
+  ## 生长与合入纪律
+  - 新算子/函数先做 pub 独立件 + `sass-spec` 金样单测 钉死，不接 `compile_string`；再守门
+    接线（只在无歧义处触发），逐增量用 `ledger diff <base> <run>` 验证 MUST `regress=0` 才提交/
+    推送，达不到即回退到绿色基线。
+  - 行为 MUST 只由 `sass-spec/*.hrx`（input.scss→output.css/error）+ `element-plus` 语料决定；
+    MUST NOT 以 dart-sass 源码/文档推断行为，更 MUST NOT 以其「物化 AST→遍历→GC」的心智作架构参照。
+  - 反复回归同一个「先物化再遍历 / 手搓循环」的念头时：停手，回绿色基线，回到「惰性流 + 多播 +
+    消费自身」基本盘，不自顶向下强推新设计。
+
+  ## Git 规范
+  - 推送用 SSH：`git push github main`（remote `github` → `pauljohn21/qrass`）。
+  - 只提交不推送时：`commit` 后等用户确认再推。
+
+# Per-artifact rules
+rules:
+  proposal:
+    - 简明说明 Why / What Changes / Impact；标注是否为破坏性变更（`!`）。
+  design:
+    - 每条决策给「理由 + 被拒备选」，并显式对齐上面的 rxrust 铁律（惰性/消费自身/多播/禁物化树）。
+  specs:
+    - 每条 Requirement 用 `MUST`；配 `#### Scenario:` 的 WHEN/THEN；行为断言可回溯到具体 hrx 金样。
+    - 需求描述行为与架构约束，不写实现代码细节。
+  tasks:
+    - 按 capability 分阶段，每步含验收（`cargo test` + `ledger diff regress=0` + `sasslint` 命中数）。
