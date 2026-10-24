@@ -1,23 +1,59 @@
 //! sasspile — a clean-room SCSS→CSS compiler written **from rxrust outward**: the
-//! program *is* one owned-value stream. The core (`engine`) folds a flat `Vec<Msg>`
-//! through an owned work-stack (`std::iter::from_fn`) — no AST tree, no recursion,
-//! values built from structured tokens to CSS via `Expr`/`Value`. Behaviour is pinned
-//! only by the `sass-spec/*.hrx` goldens and the element-plus corpus.
+//! program *is* one owned-value stream (chars → tokens → parse-fold → render), and
+//! the public entry is the single `subscribe` at its edge. No intermediate
+//! "call a function, get a `Vec` back" relays, no bespoke stage/error framework —
+//! the rxrust operators themselves are the architecture. Behaviour is pinned only
+//! by the `sass-spec/*.hrx` goldens and the element-plus corpus.
+//!
+//! Current stage: rulesets with **nesting** and **variables** — `$x: …` binds and is
+//! never emitted, `$x` references resolve (document-order), selectors parent-combine
+//! (descendant + `&`), all to expanded CSS. `@use`/`@include`, value operators and
+//! builtins grow on top of this same stream, each new stage another operator.
 
+mod ast;
 mod error;
 pub mod engine;
+mod eval;
 pub mod expr;
 mod lexer;
+mod parse;
+mod render;
 pub mod value;
 
 pub use error::{ErrorKind, SassError};
 pub use expr::{Env, Expr, Op, parse_expr, value_to_css};
 pub use value::{Sep, Value};
 
-/// Compile SCSS/CSS text to expanded CSS via the flat-stream engine.
+use std::sync::mpsc;
+
+use rxrust::prelude::*;
+
+use crate::lexer::token_stream;
+use crate::parse::Acc;
+
+/// Compile SCSS/CSS text to expanded CSS. The whole compiler is the observable
+/// chain below; this function is the one place a stream meets ordinary Rust (an
+/// `mpsc` sink fed by `subscribe`, non-timed sources running fully inline).
 pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
-    let _span = tracing::info_span!("compile").entered();
-    engine::compile_engine(content)
+    let span = tracing::info_span!("compile");
+    let _guard = span.enter();
+    let (tx, rx) = mpsc::channel::<Result<String, SassError>>();
+    token_stream(content.into())
+        .reduce_initial(Acc::default(), |acc, tok| acc.step(tok))
+        .map(Acc::finish)
+        .flat_map(|program| match program {
+            Ok(program) => {
+                let mut env = eval::Env::from_globals(&program.globals);
+                let rules = env.resolve_all(program.rules);
+                Local::of(Ok::<String, SassError>(render::to_css(rules))).box_it()
+            }
+            Err(err) => Local::of(Err::<String, SassError>(err)).box_it(),
+        })
+        .subscribe(move |out| {
+            tx.send(out).ok();
+        });
+    rx.recv()
+        .unwrap_or_else(|_| Err(SassError::new(ErrorKind::Internal, "no output")))
 }
 
 /// Initialise a `tracing` → OpenTelemetry → stdout pipeline so a whole compile can
