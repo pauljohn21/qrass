@@ -1,9 +1,17 @@
-# rxrust 1.0.0-rc.5 reference (source-verified)
+# rxrust 1.0.0-rc.6 reference (source-verified)
 
 Deep API notes backing [SKILL.md](SKILL.md). Every signature below was read from
-`rxrust-1.0.0-rc.5` source (observable.rs / context.rs / factory.rs / observer.rs /
-ops/* / observable/boxed.rs). The project's parallel copy lives in
+`rxrust-1.0.0-rc.6` source (observable.rs / context.rs / factory.rs / observer.rs /
+ops/* / observable/boxed.rs / rc.rs / subject.rs). The project's parallel copy lives in
 `docs/rxrust-ai-manual.md`. If the rxrust version changes, re-verify against source.
+
+**rc.5 → rc.6 delta (verified against source):** the core model is unchanged — `Item<'a>`
+is still a GAT, `and_then` is still absent (use `flat_map`/`concat_map`), `subscribe(closure)`
+still swallows `error`/`complete`, and non-timed operators still run inline at `subscribe`.
+What is **new/renamed** is `src/rc.rs`: shared-mutable primitives are abstracted behind the
+`RcDeref`/`RcDerefMut`/`SharedCell` traits over `MutRc`/`MutArc`/`CellRc`/`CellArc` (built on
+the `rclite::{Rc, Arc}` crates, not `std`), and `Subject`/`behavior_subject` payloads now ride
+that layer (see §9 and the new §13). `collect_into(initial)` is added (§5.2).
 
 ## 1. Architecture: three trait layers + Context wrapper
 
@@ -102,7 +110,8 @@ scan(seed, F)            Output: Clone required; F: FnMut(Output, Item) -> Outpu
 scan_map(seed, F)        F: for<'a> FnMut(&mut Acc, Item<'a>) -> Output   ★ Acc needs NO Clone; emits Output each item
 reduce_initial(Out, F)   F: for<'a> FnMut(Out, Item<'a>) -> Out           ★ emits final Out once on complete
 reduce(F)                F: FnMut(Item<'a>, Item<'a>) -> Item<'a>         no seed; empty stream emits nothing
-collect::<C>()           C: Default (Vec<T>…); emits one C after complete  ★ single terminal item
+collect::<C>()           C: Default + Extend<Item>; emits one C after complete  ★ single terminal item
+collect_into(col)        rc.6: fold items into a pre-supplied owned collection (no C: Default needed)  ★ emits col
 last()                   emits only the final value
 pairwise()               emits (prev, cur) tuples
 ```
@@ -281,14 +290,19 @@ subject.complete();
 
 - `Subject` is the **framework's internal multicast plumbing**, not a business-state
   container. In qrass use it only when one stage's output must feed multiple downstream
-  chains simultaneously (e.g. future watch/HMR).
+  chains simultaneously (e.g. future watch/HMR). In rc.6 the subject payload is a
+  `SubjectPtr<…>` over the `rc.rs` shared handles: `Local::subject::<Item,Err>()` uses
+  `MutRc` (`Rc<RefCell<…>>`), the `Shared` form `MutArc` (`Arc<Mutex<…>>`); `Item: Clone`
+  is required by `behavior_subject`. This is the framework's own sharing — it is NOT
+  permission to wrap business data (tokens/AST/accumulators) in `Rc<RefCell>`/`Mutex`;
+  keep those as owned values moved through `scan_map`/`reduce_initial` (§11).
 - `behavior_subject(initial)` caches latest (Item: Clone).
 - `Connectable` / `ref_count` / `fork` (connectable.rs) exist for deferred multicast
   wiring; read them only when needed.
 
 ## 10. RxJS / rxrust 0.15 differences (guard against old habits)
 
-| Old habit | rc.5 reality |
+| Old habit | rc.6 reality |
 |---|---|
 | `pipe(op1, op2)` | no pipe; chain methods directly |
 | `and_then` operator | **DELETED.** Equivalent: `flat_map` / `concat_map` (same for sync sources) |
@@ -326,6 +340,29 @@ subject.complete();
 | `into_shared` Send not satisfied | Shared needs Send+Sync+'static across the chain | stay `Local` (qrass default) |
 | want to mutate inside `filter` | filter receives `&Item` | use `map`/`filter_map` for value semantics |
 | errors swallowed by `subscribe` | `FnMutObserver` drops error/complete | in-stream `Result` protocol / `subscribe_with` / `on_error` |
+
+## 13. Shared-state primitives (`rc.rs`, new in rc.6)
+
+rxrust abstracts its own shared-mutable bookkeeping behind three traits (all built on
+`rclite::{Rc, Arc}`, not `std::rc`/`std::sync`):
+
+```text
+RcDeref: Clone      { type Target; type Ref<'a>: Deref; fn rc_deref(&self) -> Ref<'_>; }
+RcDerefMut: RcDeref { type MutRef<'a>: DerefMut; fn rc_deref_mut(&self);
+                      fn try_rc_deref_mut(&self) -> Option<MutRef<'_>>; }  // None on re-entrancy
+SharedCell<T: Copy+Eq>: Clone+From<T> { get; set; compare_exchange; }
+
+MutRc<T>   = Rc<RefCell<T>>    Local shared-mutable state
+MutArc<T>  = Arc<Mutex<T>>     Shared (Send) shared-mutable state
+CellRc<T>/CellArc<T> = Rc<Cell<T>>/Arc<AtomicCell<T>>   Copy flags/counters (cheaper than RefCell)
+```
+
+`try_rc_deref_mut` returning `None` is how the framework detects synchronous re-entrancy
+and defers via the scheduler instead of panicking/deadlocking. **These are framework
+internals** (subject fan-out, `Connectable`, internal counters). qrass business data must
+stay move-only: if you reach for `MutRc`/`MutArc`/`Subject` to hold a token vector or an
+accumulator, that is the GC/shared-state smell R2/§11 forbid — carry it as the `scan_map`
+/`reduce_initial` owned accumulator instead.
 
 ## Subscription & RAII
 
