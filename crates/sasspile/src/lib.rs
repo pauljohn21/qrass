@@ -12,6 +12,7 @@
 //!
 //! Nothing is implemented yet — `compile_string` is a stub so the workspace compiles.
 
+pub mod expr;
 pub mod lexer;
 pub mod value;
 
