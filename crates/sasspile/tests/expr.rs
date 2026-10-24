@@ -254,3 +254,15 @@ fn meta_type_of() {
     assert_eq!(t(map(&[("a", "b")])).as_deref(), Some("map"));
     assert_eq!(t(Value::Raw("foo".into())).as_deref(), Some("string"));
 }
+
+#[test]
+fn selector_nest_and_parse() {
+    // gold: sass-spec/core_functions/selector/nest + parse
+    let s = |x: &str| Value::Raw(x.into());
+    assert_eq!(cb("selector.nest", vec![s("c, d e"), s("f")]).as_deref(), Some("c f, d e f"));
+    assert_eq!(cb("selector.nest", vec![s("a"), s("b"), s("c")]).as_deref(), Some("a b c"));
+    assert_eq!(cb("selector.parse", vec![s("a b")]).as_deref(), Some("a b"));
+    assert_eq!(cb("selector.parse", vec![s("a b, c")]).as_deref(), Some("a b, c"));
+    // parent selector not allowed in parse -> Err -> None
+    assert_eq!(cb("selector.parse", vec![s("&")]), None);
+}
