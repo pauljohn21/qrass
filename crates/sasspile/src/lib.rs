@@ -12,7 +12,6 @@
 
 mod ast;
 mod error;
-pub mod engine;
 mod eval;
 pub mod expr;
 mod lexer;

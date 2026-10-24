@@ -17,7 +17,6 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use sasspile::compile_string;
-use sasspile::engine::compile_engine;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -107,7 +106,6 @@ fn hrx_ab_baseline() {
     let root = repo_root();
     let spec = root.join("sass-spec/spec");
     let dir = std::env::var("SASSPILE_HRX_DIR").map(PathBuf::from).unwrap_or(spec);
-    let engine = std::env::var("SASSPILE_ENGINE").is_ok();
 
     let mut rows: Vec<String> = Vec::new();
     for file in hrx_files(&dir) {
@@ -126,7 +124,7 @@ fn hrx_ab_baseline() {
             let prefix = &input_key[..input_key.len() - "input.scss".len()];
             let want = map.get(&format!("{prefix}output.css"));
             let key = format!("{rel}#{i}");
-            match (if engine { compile_engine(input.clone()) } else { compile_string(input.clone()) }, want) {
+            match (compile_string(input.clone()), want) {
                 (Ok(got), Some(want)) if got.trim_end() == want.trim_end() => {
                     rows.push(format!("PASS\t{key}"))
                 }
