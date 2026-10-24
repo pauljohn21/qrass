@@ -223,30 +223,41 @@ impl Env {
     }
 
     /// Replace each `$ident` with its bound value (env keyed WITHOUT the `$`); leave
-    /// it intact if undefined.
+    /// it intact if undefined. A single fold over chars — no index loop.
     fn subst(&self, text: &str) -> String {
-        let chars: Vec<char> = text.chars().collect();
-        let mut out = String::new();
-        let mut i = 0;
-        while i < chars.len() {
-            if chars[i] == '$' {
-                let mut j = i + 1;
-                while j < chars.len()
-                    && (chars[j].is_ascii_alphanumeric() || chars[j] == '-' || chars[j] == '_')
-                {
-                    j += 1;
-                }
-                if j > i + 1 {
-                    let name: String = chars[i + 1..j].iter().collect();
-                    if let Some(value) = self.vars.get(&name) {
-                        out.push_str(value);
-                        i = j;
-                        continue;
+        let is_var = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        let (mut out, var) = text.chars().fold(
+            (String::new(), None::<String>),
+            |(mut o, mut v), c| {
+                let in_var = v.is_some();
+                if in_var && is_var(c) {
+                    v.as_mut().unwrap().push(c);
+                } else if in_var {
+                    let nm = v.take().unwrap_or_default();
+                    match self.vars.get(&nm) {
+                        Some(val) => o.push_str(val),
+                        None => {
+                            o.push('$');
+                            o.push_str(&nm);
+                        }
                     }
+                    o.push(c);
+                } else if c == '$' {
+                    v = Some(String::new());
+                } else {
+                    o.push(c);
+                }
+                (o, v)
+            },
+        );
+        if let Some(nm) = var {
+            match self.vars.get(&nm) {
+                Some(val) => out.push_str(val),
+                None => {
+                    out.push('$');
+                    out.push_str(&nm);
                 }
             }
-            out.push(chars[i]);
-            i += 1;
         }
         out
     }

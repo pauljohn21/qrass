@@ -307,23 +307,22 @@ pub fn parse_expr(src: &str) -> Expr {
     let Some(toks) = lex_arith(src) else {
         return Expr::Lit(Value::Raw(src.trim().to_string()));
     };
-    // shunting-yard to postfix (two precedence levels, left-associative)
-    let mut out: Vec<Tk> = Vec::new();
-    let mut ops: Vec<char> = Vec::new();
-    for tk in toks {
-        match tk {
-            Tk::Num(..) | Tk::Var(_) => out.push(tk),
-            Tk::Op(c) => {
-                while ops.last().is_some_and(|&top| prec(top) >= prec(c)) {
-                    out.push(Tk::Op(ops.pop().unwrap()));
+    // shunting-yard to postfix (two precedences, left-associative) — a fold, no loop
+    let (mut out, mut ops) = toks.into_iter().fold(
+        (Vec::<Tk>::new(), Vec::<char>::new()),
+        |(mut out, mut ops), tk| {
+            match tk {
+                Tk::Num(..) | Tk::Var(_) => out.push(tk),
+                Tk::Op(c) => {
+                    let cut = ops.iter().position(|&top| prec(top) < prec(c)).unwrap_or(ops.len());
+                    out.extend(ops.drain(..cut).map(Tk::Op));
+                    ops.push(c);
                 }
-                ops.push(c);
             }
-        }
-    }
-    while let Some(o) = ops.pop() {
-        out.push(Tk::Op(o));
-    }
+            (out, ops)
+        },
+    );
+    out.extend(ops.drain(..).rev().map(Tk::Op));
     // fold postfix into a tree; bail to Raw on any shape error
     let tree = out.into_iter().fold(Vec::<Expr>::new(), |mut st, tk| {
         match tk {
