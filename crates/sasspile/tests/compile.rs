@@ -86,6 +86,30 @@ fn if_variable_condition() {
 }
 
 #[test]
+fn each_comma_list_expands() {
+    assert_eq!(
+        compile_string("@each $a in b, c { .#{$a} { d: $a; } }").unwrap(),
+        ".b {\n  d: b;\n}\n.c {\n  d: c;\n}\n"
+    );
+}
+
+#[test]
+fn each_space_list_expands() {
+    assert_eq!(
+        compile_string("@each $x in 1 2 { a#{$x} { p: $x; } }").unwrap(),
+        "a1 {\n  p: 1;\n}\na2 {\n  p: 2;\n}\n"
+    );
+}
+
+#[test]
+fn for_to_expands() {
+    assert_eq!(
+        compile_string("@for $i from 1 to 3 { .c#{$i} { w: $i; } }").unwrap(),
+        ".c1 {\n  w: 1;\n}\n.c2 {\n  w: 2;\n}\n"
+    );
+}
+
+#[test]
 fn global_variable_substitution() {
     assert_eq!(
         compile_string("$x: 3px; a { w: $x; }").unwrap(),

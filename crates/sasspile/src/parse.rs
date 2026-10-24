@@ -65,7 +65,9 @@ impl Acc {
                 // eval folds away, so their children inherit the PARENT selector and
                 // the head is carried as `directive`. Other at-rules (`@media`,
                 // `@function`, …) stay ordinary blocks emitted as before.
-                let is_control_flow = head.starts_with("@if") || head.starts_with("@else");
+                let is_control_flow = ["@if", "@else", "@each", "@for"]
+                    .iter()
+                    .any(|kw| head.starts_with(kw));
                 let (selector, directive) = if is_control_flow {
                     (parent.to_string(), Some(head))
                 } else {

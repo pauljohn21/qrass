@@ -35,10 +35,9 @@ impl LexAcc {
                 }
                 '}' => {
                     self.idepth -= 1;
+                    self.interp.push('}');
                     if self.idepth == 0 {
                         out.push(Tok::Word(std::mem::take(&mut self.interp)));
-                    } else {
-                        self.interp.push(ch);
                     }
                 }
                 c => self.interp.push(c),
