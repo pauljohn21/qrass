@@ -23,3 +23,35 @@ fn multiple_rules_concatenate() {
         "a {\n  x: 1;\n}\nb {\n  y: 2;\n}\n"
     );
 }
+
+#[test]
+fn descendant_nesting() {
+    assert_eq!(
+        compile_string("a { b { c: d; } }").unwrap(),
+        "a b {\n  c: d;\n}\n"
+    );
+}
+
+#[test]
+fn parent_reference_nesting() {
+    assert_eq!(
+        compile_string(".a { &:hover { color: red; } }").unwrap(),
+        ".a:hover {\n  color: red;\n}\n"
+    );
+}
+
+#[test]
+fn parent_decls_precede_children() {
+    assert_eq!(
+        compile_string("a { x: 1; b { y: 2; } }").unwrap(),
+        "a {\n  x: 1;\n}\na b {\n  y: 2;\n}\n"
+    );
+}
+
+#[test]
+fn deep_nesting() {
+    assert_eq!(
+        compile_string("a { b { c { d: e; } } }").unwrap(),
+        "a b c {\n  d: e;\n}\n"
+    );
+}

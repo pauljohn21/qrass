@@ -10,9 +10,9 @@
 
 ## 1. 嵌套 + 选择器（spec：scss-parsing、css-output）
 
-- [ ] 1.1 扩展 parse 折叠以持有嵌套规则；组合嵌套选择器（后代 + `&`）
-- [ ] 1.2 多级 expanded 输出顺序；补测试
-- [ ] 1.3 `SASSPILE_HRX_RUN` 快照 + `ledger diff sasspile-base <run>` `regress=0`；瞄准用例翻 PASS
+- [x] 1.1 扩展 parse 折叠以持有嵌套规则；组合嵌套选择器（后代 + `&`）——owned `Frame` 栈建树，按分隔符缓冲区分伪类 `:` 与声明 `:`
+- [x] 1.2 多级 expanded 输出顺序；补测试（descendant/`&`/深嵌套/父声明先于子，共 7 测）
+- [x] 1.3 `SASSPILE_HRX_RUN` 快照 + `ledger diff sasspile-base sasspile-nest` → `regress=0 net=396`（pass 240→636）
 
 ## 2. 值与变量（spec：scss-values、scss-variables）
 

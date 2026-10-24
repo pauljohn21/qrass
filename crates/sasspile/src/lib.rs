@@ -5,10 +5,10 @@
 //! the rxrust operators themselves are the architecture. Behaviour is pinned only
 //! by the `sass-spec/*.hrx` goldens and the element-plus corpus.
 //!
-//! Current stage: a first vertical slice — flat rulesets `sel { prop: value; … }`
-//! compiled to expanded CSS (e.g. the `css/plain` golden `& {a: b}` → `& {\n  a: b;\n}`).
-//! Nesting, `@use`/`@include`, values/operations and builtins grow on top of this
-//! same stream, each new stage another operator on the chain.
+//! Current stage: rulesets with **nesting** — `sel { prop: value; … nested { … } }`
+//! compiled to expanded CSS, parent-combining nested selectors (descendant + `&`).
+//! `@use`/`@include`, values/operations and builtins grow on top of this same stream,
+//! each new stage another operator on the chain.
 
 mod ast;
 mod error;
@@ -36,7 +36,7 @@ pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
         .flat_map(|program| match program {
             Ok(program) => Local::from_iter(program.rules)
                 .reduce_initial(String::new(), |mut css, rule| {
-                    css.push_str(&render::rule_css(&rule));
+                    render::write_rule(&mut css, &rule);
                     css
                 })
                 .map(Ok::<_, SassError>)
