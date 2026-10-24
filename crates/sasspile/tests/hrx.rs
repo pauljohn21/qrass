@@ -26,11 +26,21 @@ fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Recursively collect `*.hrx` files under `dir`.
+/// Recursively collect `*.hrx` files under `dir`, skipping the out-of-scope
+/// `non_conformant` and `libsass*` trees (the modern suite excludes them).
 fn hrx_files(dir: &Path) -> Vec<PathBuf> {
+    fn excluded(path: &Path) -> bool {
+        path.components().any(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            s == "non_conformant" || s.starts_with("libsass")
+        })
+    }
     let mut stack = vec![dir.to_path_buf()];
     let mut out = Vec::new();
     while let Some(d) = stack.pop() {
+        if excluded(&d) {
+            continue;
+        }
         if let Ok(entries) = fs::read_dir(&d) {
             for e in entries.flatten() {
                 let p = e.path();

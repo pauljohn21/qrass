@@ -3,9 +3,10 @@
 ## ADDED Requirements
 
 ### Requirement: hrx 金样 runner
-工装 MUST 把每个 `sass-spec/**/*.hrx` 解析成段（块以 `<===> <relpath>` 界定，段之间由裸 `<===>`
-行或一串 `=` 分隔），把每段的 `input.scss` 经 `sasspile::compile_string` 编译，并与该段的
-`output.css` 比较（错误用例则与期望的 `Error:` 文本比较）。用例仅在精确匹配（尾随空白除外）时 PASS。
+工装 MUST 把 `sass-spec` 现代套件的每个 `.hrx`（排除套件外的 `non_conformant` 与
+`libsass*` 目录）解析成段（块以 `<===> <relpath>` 界定，段之间由裸 `<===>` 行或一串 `=` 分隔），把每段的
+`input.scss` 经 `sasspile::compile_string` 编译，并与该段的 `output.css` 比较（错误用例则与期望的
+`Error:` 文本比较）。用例仅在精确匹配（尾随空白除外）时 PASS。
 
 #### Scenario: 判定一个 css/plain 用例
 - **WHEN** 某段有 `input.scss` 与 `output.css`
