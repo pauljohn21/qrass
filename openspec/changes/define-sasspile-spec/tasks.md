@@ -16,7 +16,8 @@
 
 ## 2. 值与变量（spec：scss-values、scss-variables）
 
-- [ ] 2.1 值类型（Number+单位、String、List、Map、Bool、Null）作为 owned 流值
+- [x] 2.0（增量）变量绑定 + 文档序替换：`$x: …` 绑定且不发射、`$x` 引用解析、未知 `$` 原样；顶层 `$` 收进 `Program.globals` 种子。hrx `regress=0 net=14`（636→650），10 单测
+- [ ] 2.1 值类型（Number+单位、String、List、Map、Bool、Null）作为 owned 流值（当前值仍为文本，未类型化）
 - [ ] 2.2 运算符 + 单位代数 + 强制转换，错误走 in-stream Result
 - [ ] 2.3 `$var` 作用域、`!default`/`!global`
 - [ ] 2.4 每个子步都过 hrx A/B 闸

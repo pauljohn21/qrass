@@ -12,4 +12,8 @@ pub(crate) struct Rule {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Program {
     pub rules: Vec<Rule>,
+    /// Top-level `name: value` statements outside any block — variable bindings
+    /// (`$x: …`) and, later, root-level at-rule config. They seed the eval Env and
+    /// are never emitted as CSS declarations themselves.
+    pub globals: Vec<(String, String)>,
 }

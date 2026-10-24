@@ -5,13 +5,14 @@
 //! the rxrust operators themselves are the architecture. Behaviour is pinned only
 //! by the `sass-spec/*.hrx` goldens and the element-plus corpus.
 //!
-//! Current stage: rulesets with **nesting** — `sel { prop: value; … nested { … } }`
-//! compiled to expanded CSS, parent-combining nested selectors (descendant + `&`).
-//! `@use`/`@include`, values/operations and builtins grow on top of this same stream,
-//! each new stage another operator on the chain.
+//! Current stage: rulesets with **nesting** and **variables** — `$x: …` binds and is
+//! never emitted, `$x` references resolve (document-order), selectors parent-combine
+//! (descendant + `&`), all to expanded CSS. `@use`/`@include`, value operators and
+//! builtins grow on top of this same stream, each new stage another operator.
 
 mod ast;
 mod error;
+mod eval;
 mod lexer;
 mod parse;
 mod render;
@@ -34,13 +35,17 @@ pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
         .reduce_initial(Acc::default(), |acc, tok| acc.step(tok))
         .map(Acc::finish)
         .flat_map(|program| match program {
-            Ok(program) => Local::from_iter(program.rules)
-                .reduce_initial(String::new(), |mut css, rule| {
-                    render::write_rule(&mut css, &rule);
-                    css
-                })
-                .map(Ok::<_, SassError>)
-                .box_it(),
+            Ok(program) => {
+                let env = eval::Env::from_globals(&program.globals);
+                Local::from_iter(program.rules)
+                    .scan_map(env, |env, rule| env.resolve(rule))
+                    .reduce_initial(String::new(), |mut css, rule| {
+                        render::write_rule(&mut css, &rule);
+                        css
+                    })
+                    .map(Ok::<_, SassError>)
+                    .box_it()
+            }
             Err(err) => Local::of(Err::<String, SassError>(err)).box_it(),
         })
         .subscribe(move |out| {

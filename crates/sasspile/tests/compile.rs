@@ -55,3 +55,27 @@ fn deep_nesting() {
         "a b c {\n  d: e;\n}\n"
     );
 }
+
+#[test]
+fn global_variable_substitution() {
+    assert_eq!(
+        compile_string("$x: 3px; a { w: $x; }").unwrap(),
+        "a {\n  w: 3px;\n}\n"
+    );
+}
+
+#[test]
+fn block_variable_not_emitted() {
+    assert_eq!(
+        compile_string("a { $x: red; color: $x; }").unwrap(),
+        "a {\n  color: red;\n}\n"
+    );
+}
+
+#[test]
+fn variable_used_in_nested_child() {
+    assert_eq!(
+        compile_string(".c { $p: 1px; b { m: $p; } }").unwrap(),
+        ".c b {\n  m: 1px;\n}\n"
+    );
+}

@@ -95,8 +95,11 @@ impl Acc {
         let text = stmt_text(&std::mem::take(&mut self.run));
         if let Some((prop, value)) = text.split_once(':') {
             let (prop, value) = (prop.trim().to_string(), value.trim().to_string());
-            if !prop.is_empty() && let Some(frame) = self.stack.last_mut() {
-                frame.decls.push((prop, value));
+            if !prop.is_empty() {
+                match self.stack.last_mut() {
+                    Some(frame) => frame.decls.push((prop, value)),
+                    None => self.program.globals.push((prop, value)),
+                }
             }
         }
     }
