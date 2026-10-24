@@ -12,6 +12,9 @@ mod parse;
 mod render;
 pub mod value;
 pub mod value_parse;
+// Shared-stream core (OpenSpec redesign, tasks 2.2+); `compile_string` still uses the
+// `Local` `parse`/`render` core until parity (task 3.1), so `parse`/`render` stay for now.
+pub mod structure;
 
 use std::fmt;
 
