@@ -204,7 +204,7 @@ impl Env {
             return Some(self.subst(text));
         }
         let expr = parse_expr(text);
-        if matches!(expr, Expr::Bin(..))
+        if matches!(expr, Expr::Bin(..) | Expr::Func { .. })
             && let Ok(v) = expr.eval(&self.value_env())
         {
             return Some(v.to_css());

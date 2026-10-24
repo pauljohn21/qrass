@@ -21,8 +21,9 @@ fn parse_expr_arithmetic() {
 fn parse_expr_leaves_non_numeric_verbatim() {
     let env = Env::new();
     assert_eq!(ev("c - d", &env), "c - d"); // identifiers untouched
-    assert_eq!(ev("url(http://x)", &env), "url(http://x)");
     assert_eq!(ev("1px 2px", &env), "1px 2px"); // space list, not arithmetic
+    // a call parses to Func; unknown funcs Err here (render keeps them verbatim)
+    assert!(parse_expr("url(http://x)").eval(&env).is_err());
 }
 
 #[test]
@@ -30,6 +31,23 @@ fn parse_expr_uses_variables() {
     let mut env = Env::new();
     env.insert("a".into(), Value::Number(2.0, "px".into()));
     assert_eq!(ev("$a + 3px", &env), "5px");
+}
+
+#[test]
+fn parse_expr_builtin_functions() {
+    let env = Env::new();
+    assert_eq!(ev("math.div(6, 2)", &env), "3");
+    assert_eq!(ev("abs(5px)", &env), "5px");
+    assert_eq!(ev("ceil(1.2)", &env), "2");
+    assert_eq!(ev("floor(1.9)", &env), "1");
+}
+
+#[test]
+fn parse_expr_unknown_function_errors() {
+    let env = Env::new();
+    // unknown -> Err, so render keeps the value verbatim (CSS functions untouched)
+    assert!(parse_expr("url(a)").eval(&env).is_err());
+    assert!(parse_expr("calc(1 + 2)").eval(&env).is_err());
 }
 
 #[test]

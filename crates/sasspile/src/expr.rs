@@ -44,6 +44,11 @@ pub enum Expr {
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     /// arithmetic on numeric values
     Bin(Op, Box<Expr>, Box<Expr>),
+    /// a function call `name(args…)`
+    Func {
+        name: String,
+        args: Vec<Expr>,
+    },
 }
 
 impl Expr {
@@ -84,8 +89,80 @@ impl Expr {
                 }
             }
             Expr::Bin(op, l, r) => arith(*op, l.eval(env)?, r.eval(env)?),
+            Expr::Func { name, args } => {
+                let vals: Result<Vec<Value>, String> = args.iter().map(|a| a.eval(env)).collect();
+                call_builtin(name, vals?)
+            }
         }
     }
+}
+
+/// Evaluate a function call against a small allowlist of unambiguous numeric builtins.
+/// Unknown names error → the caller keeps the value verbatim, so CSS-native functions
+/// (`url`, `calc`, `min`, `max`, …) are never evaluated as Sass builtins.
+fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
+    match (name, args.as_slice()) {
+        ("math.div", [a, b]) => arith(Op::Div, a.clone(), b.clone()),
+        ("abs", [Value::Number(n, u)]) => Ok(Value::Number(n.abs(), u.clone())),
+        (f, [Value::Number(n, u)]) if matches!(f, "ceil" | "floor" | "round") => {
+            let r = match f {
+                "ceil" => n.ceil(),
+                "floor" => n.floor(),
+                _ => n.round(),
+            };
+            Ok(Value::Number(r, u.clone()))
+        }
+        _ => Err(format!("unsupported function {name}")),
+    }
+}
+
+/// Recognise `name(...)` as a function call; args split on top-level commas (fold).
+fn parse_call(src: &str) -> Option<Expr> {
+    let t = src.trim();
+    let open = t.find('(')?;
+    let name = &t[..open];
+    let is_ident = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    if !is_ident || !t.ends_with(')') {
+        return None;
+    }
+    let inner = &t[open + 1..t.len() - 1];
+    Some(Expr::Func {
+        name: name.trim().to_string(),
+        args: split_commas(inner).into_iter().map(|a| parse_expr(&a)).collect(),
+    })
+}
+
+fn split_commas(s: &str) -> Vec<String> {
+    let (mut parts, cur, _) = s.chars().fold(
+        (Vec::<String>::new(), String::new(), 0usize),
+        |(mut p, mut cur, d), c| match c {
+            '(' => {
+                cur.push(c);
+                (p, cur, d + 1)
+            }
+            ')' if d > 0 => {
+                cur.push(c);
+                (p, cur, d - 1)
+            }
+            ',' if d == 0 => {
+                p.push(std::mem::take(&mut cur));
+                (p, cur, d)
+            }
+            _ => {
+                cur.push(c);
+                (p, cur, d)
+            }
+        },
+    );
+    parts.push(cur);
+    parts
+        .into_iter()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+        .collect()
 }
 
 fn num(v: &Value) -> Result<(f64, String), String> {
@@ -197,6 +274,9 @@ fn lex_arith(src: &str) -> Option<Vec<Tk>> {
 /// Parse a value string into an `Expr`: arithmetic over numbers/`$vars` becomes a
 /// `Bin` tree; anything else stays `Lit(Raw)` (verbatim).
 pub fn parse_expr(src: &str) -> Expr {
+    if let Some(call) = parse_call(src) {
+        return call;
+    }
     let Some(toks) = lex_arith(src) else {
         return Expr::Lit(Value::Raw(src.trim().to_string()));
     };
