@@ -31,7 +31,7 @@
 - **S1 叶层纯函数**（无行为面，最廉价验证）：`css.rs`（tidy/bogus/split/strip 族，10 循环 21 mut）、`selector_unify_complex.rs`、`selector_unify.rs`、`builtins/selector.rs`（18）、`plain_css.rs`（11）、`value_number.rs` 等其余 ≤5 循环小文件清零。
 - **S2 eval 参数/内置层**：`eval_bind.rs`、`eval_meta.rs`、`builtins/color_*.rs`、`eval_color*.rs` 中循环（多数已是链式，清残余）、`eval_control.rs`（12）。
 - **S3 extend 引擎**：`eval_extend.rs`（18）、`selector_extend*.rs`（22）、`extend_plan` 族。
-- **S4 parser/lexer**：`parser*.rs`、`lexer_detail.rs` 游标 `while` → `scan_map`/组合子；**允许降级**：不可行者按 R3-④ 登记豁免（sealed 纯函数形态，函数体内 mut 合法）。
+- **S4 parser/lexer**：`parser*.rs`、`lexer_detail.rs` 游标 `while` → rxrust `Local::from_iter + scan_map`（把 per-char/per-token 游标做成流内 owned 累加器状态）；**零降级**：不再有“登记豁免”退路，确实不可等价表达者升级为阻塞项上报（R4）。
 
 每批内部再按文件切 commit，保持单 commit 可回退。
 
@@ -49,7 +49,7 @@
 
 ## Risks / Trade-offs
 
-- [S4 游标不可全数组合子化] → 预留 R3-④ 降级路径，不追求纸面 100%；豁免清单显式留痕可审计。
+- [S4 游标不可全数组合子化] → 零豁免（R4）：确实不可表达者为阻塞项，附证据暂停并上报，不追求纸面 100% 但也不以登记白名单或退回 std 链的方式掩盖。
 - [逐字符 Observable 的可读性劣于显式循环] → 用户裁决明确（风格契约优先于局部可读性）；以算子命名（`step`/`feed`）与 D1 表对照缓解。
 - [重构 commit 与收敛 commit 混叠污染归因] → D6 协议 + R6 违例拆分条款。
 - [热路径（如 `normalize_selector` 每规则调用）链式化后性能回退] → `from_iter` 同步 inline，发布前以既有大 fixture（element-plus 全量编译）计时抽查，不设性能预算红线（现状非性能敏感）。

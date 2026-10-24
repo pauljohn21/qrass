@@ -46,14 +46,14 @@
 - **WHEN** 一个函数用多条语句级 `return Err/return Ok(None)` 提前承载多路分支
 - **THEN** 分支收进 `match`（或返回域 enum）单表达式，函数只剩单一尾部出口；`?` 传播不受此限
 
-### Requirement: R4 例外申请制（白名单、留痕）
+### Requirement: R4 零豁免（rxrust 为唯一基底）
 
-仅两类构造可被保留：① 对 enum/`Result`/`Option` 的**单表达式 `match` 分派**（取值语义，非控制流）；② 对**单值**（非序列）的 `Option`/`Result` 组合子链。任何超出二者的命令式构造（如经实测无法以 Observable 链等价表达且代价不可接受的场景）MUST 经评审后登记于豁免清单（含文件、构造、理由、复审条件），未登记的例外视为违例。
+Observable 流是本代码库控制流的第一性基底，不是可选项。仅两类形态本就落在“非命令式”范畴、无需任何登记：① 对 enum/`Result`/`Option` 的**单表达式 `match` 分派**（取值语义，非控制流）；② 对**单值**（非序列）的 `Option`/`Result` 组合子链。除此之外，任何 `for`/`while`/`loop`、任何以 std 迭代器组合子链替代同型数据流的写法、任何 `if/else if` 链与守卫 `return` 堆叠，MUST 无条件改造为 rxrust `Local::from_iter` + `map`/`filter`/`filter_map`/`scan_map`/`flat_map`/`reduce_initial`/`collect` + 单一 `drain` 终端；把“原地 `&mut self`/游标”迁移为流内 **owned 累加器状态**（`scan_map(&mut acc, …)` / `reduce_initial`），把错误迁移为 in-stream `Result`。**不存在豁免清单**：若某构造经实测确实无法等价表达为 Observable 链，该事实是 MUST 上报的阻塞项（含最小复现证据与回归对照），MUST NOT 以登记白名单的方式放行，也 MUST NOT 以行为换取风格或以“同步/更清楚”为借口退回 std 链。
 
-#### Scenario: S1 parser 游标降级
+#### Scenario: S1 游标不可表达即阻塞上报
 
-- **WHEN** S4 批次实测表明某游标扫描组合子化将引入行为风险或不可接受的间接层
-- **THEN** 该构造以「sealed 纯函数（无副作用、mut 仅限函数体内部）」形态登记入豁免清单，清单外仍为零容忍
+- **WHEN** 某字符/token 游标经实测无法以 Observable 链等价表达且代价不可接受
+- **THEN** 该情形作为阻塞项写入报告并暂停该批次，附最小可复现证据；MUST NOT 登记为豁免、MUST NOT 悄悄降级为 std 链或裸循环
 
 ### Requirement: R5 持续防漂移（门禁可验证）
 
