@@ -10,6 +10,7 @@ pub mod lexer;
 mod parse;
 mod render;
 pub mod value;
+pub mod value_parse;
 
 use std::fmt;
 

@@ -3,9 +3,10 @@
 //! `eval`/`to_css` is asked). No string is rebuilt and re-scanned; the tokens carry the
 //! structure (`Var`, `Interp`) directly.
 //!
-//! This layer covers literals, `$var`, `#{ … }` interpolation and concatenation. Numeric
-//! arithmetic and function calls land after the value-tokenizer emits number/operator
-//! tokens (deferred so nothing here re-scans text).
+//! Beyond literals/`$var`/`#{}`/concat, this layer models arithmetic (`Bin`), comparisons
+//! (`Cmp`), lazy boolean (`And`/`Or`), the 3-arg `if`, and function calls (`Func`) whose
+//! bodies resolve through the `call_builtin` allowlist. An unrecognised name → `Err`, so the
+//! caller keeps the value verbatim (CSS-native functions like `url`/`calc` are never evaluated).
 
 use std::collections::HashMap;
 
@@ -14,12 +15,45 @@ use crate::value::Value;
 
 pub type Env = HashMap<String, Value>;
 
+/// Binary arithmetic operators (Sass `math` semantics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+/// Comparison operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmp {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Ge,
+    Le,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(Value),
     Var(String),
     Interp(Box<Expr>),
     Concat(Vec<Expr>),
+    /// `lhs op rhs` arithmetic
+    Bin(Box<Expr>, Op, Box<Expr>),
+    /// `lhs cmp rhs` comparison (yields `Value::Bool`)
+    Cmp(Box<Expr>, Cmp, Box<Expr>),
+    /// lazy `and` (short-circuits on a falsey lhs)
+    And(Box<Expr>, Box<Expr>),
+    /// lazy `or` (short-circuits on a truthy lhs)
+    Or(Box<Expr>, Box<Expr>),
+    /// `if(cond, then, else)` — evaluates only the taken branch
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `name(args…)`
+    Func { name: String, args: Vec<Expr> },
 }
 
 impl Expr {
@@ -51,7 +85,7 @@ impl Expr {
         Some(canon(&css))
     }
 
-    fn eval(&self, env: &Env) -> Result<Value, String> {
+    pub fn eval(&self, env: &Env) -> Result<Value, String> {
         Ok(match self {
             Expr::Lit(v) => v.clone(),
             Expr::Var(name) => env
@@ -65,6 +99,24 @@ impl Expr {
                     .map(|p| p.eval(env).map(|v| v.to_css()))
                     .collect::<Result<String, String>>()?,
             ),
+            Expr::Bin(l, op, r) => arith(*op, l.eval(env)?, r.eval(env)?)?,
+            Expr::Cmp(l, c, r) => compare(l.eval(env)?, *c, r.eval(env)?)?,
+            // lazy: the untaken side is never evaluated
+            Expr::And(l, r) => {
+                let v = l.eval(env)?;
+                if v.is_falsey() { v } else { r.eval(env)? }
+            }
+            Expr::Or(l, r) => {
+                let v = l.eval(env)?;
+                if v.is_falsey() { r.eval(env)? } else { v }
+            }
+            Expr::If(c, t, e) => {
+                if c.eval(env)?.is_falsey() { e.eval(env)? } else { t.eval(env)? }
+            }
+            Expr::Func { name, args } => {
+                let vals: Result<Vec<Value>, String> = args.iter().map(|a| a.eval(env)).collect();
+                call_builtin(name, vals?)?
+            }
         })
     }
 
@@ -79,6 +131,126 @@ impl Expr {
             other => other.eval(env).map(|v| v.to_css()),
         }
     }
+}
+
+/// Sass numeric arithmetic with unit rules. Non-numeric operands or unit mismatches → `Err`,
+/// so the caller keeps the value verbatim (never a wrong CSS number).
+fn arith(op: Op, l: Value, r: Value) -> Result<Value, String> {
+    let (a, ua) = num(&l)?;
+    let (b, ub) = num(&r)?;
+    let out = match op {
+        Op::Add | Op::Sub => {
+            let unit = combine_add_unit(&ua, &ub)?;
+            let n = if op == Op::Add { a + b } else { a - b };
+            Value::Number(n, unit)
+        }
+        Op::Mul => Value::Number(a * b, mul_unit(&ua, &ub)?),
+        Op::Div => Value::Number(a / b, div_unit(&ua, &ub)?),
+        Op::Mod => {
+            let unit = combine_add_unit(&ua, &ub)?;
+            Value::Number(a % b, unit)
+        }
+    };
+    Ok(out)
+}
+
+fn num(v: &Value) -> Result<(f64, String), String> {
+    match v {
+        Value::Number(n, u) => Ok((*n, u.clone())),
+        _ => Err(format!("{v:?} is not a number")),
+    }
+}
+
+fn combine_add_unit(a: &str, b: &str) -> Result<String, String> {
+    if a == b {
+        Ok(a.to_string())
+    } else if a.is_empty() {
+        Ok(b.to_string())
+    } else if b.is_empty() {
+        Ok(a.to_string())
+    } else {
+        Err(format!("Incompatible units \"{a}\" and \"{b}\"."))
+    }
+}
+
+fn mul_unit(a: &str, b: &str) -> Result<String, String> {
+    if a.is_empty() {
+        Ok(b.to_string())
+    } else if b.is_empty() || a == b {
+        Ok(a.to_string())
+    } else {
+        Ok(format!("{a}{b}"))
+    }
+}
+
+fn div_unit(a: &str, b: &str) -> Result<String, String> {
+    if a == b {
+        Ok(String::new())
+    } else if b.is_empty() {
+        Ok(a.to_string())
+    } else {
+        Err(format!("Cannot divide \"{a}\" by \"{b}\"."))
+    }
+}
+
+fn compare(l: Value, c: Cmp, r: Value) -> Result<Value, String> {
+    use std::cmp::Ordering;
+    let ord = match (&l, &r) {
+        (Value::Number(a, ua), Value::Number(b, ub)) => {
+            if ua != ub {
+                return Err(format!("Cannot compare \"{ua}\" with \"{ub}\"."));
+            }
+            a.partial_cmp(b)
+        }
+        (Value::Str { text: a, .. }, Value::Str { text: b, .. }) => Some(a.cmp(b)),
+        (Value::Raw(a), Value::Raw(b)) => Some(a.cmp(b)),
+        _ => None,
+    }
+    .ok_or_else(|| "Cannot compare these values.".to_string())?;
+    let b = match c {
+        Cmp::Eq => ord == Ordering::Equal,
+        Cmp::Ne => ord != Ordering::Equal,
+        Cmp::Gt => ord == Ordering::Greater,
+        Cmp::Lt => ord == Ordering::Less,
+        Cmp::Ge => ord != Ordering::Less,
+        Cmp::Le => ord != Ordering::Greater,
+    };
+    Ok(Value::Bool(b))
+}
+
+/// Allowlisted builtins (Sass-like). Unknown names → `Err`, so the pipeline keeps the value
+/// verbatim and CSS-native functions (`url`/`calc`/`min`/`max`…) are never mis-evaluated.
+/// Extended per domain in task 1.3.
+pub fn call_builtin(name: &str, args: Vec<Value>) -> Result<Value, String> {
+    let err = |m: &str| Err(format!("{name}: {m}"));
+    match (name, args.as_slice()) {
+        ("math.div", [a, b]) | ("divide", [a, b]) => arith(Op::Div, a.clone(), b.clone()),
+        ("abs", [a]) => num(a).map(|(n, u)| Value::Number(n.abs(), u)),
+        ("min", vs) => reduce_vals(vs, less),
+        ("max", vs) => reduce_vals(vs, greater),
+        ("if", [c, t, e]) => Ok(if c.is_falsey() { e.clone() } else { t.clone() }),
+        _ => err("unknown builtin"),
+    }
+}
+
+/// Fold a non-empty value list down with `pick`; empty → `Err`.
+fn reduce_vals(vs: &[Value], pick: fn(Value, Value) -> Value) -> Result<Value, String> {
+    let mut it = vs.iter().cloned();
+    match it.next() {
+        None => Err("requires at least one argument".to_string()),
+        Some(first) => Ok(it.fold(first, pick)),
+    }
+}
+
+/// The numerically smaller of two values (falls back to lexicographic on non-numbers).
+fn less(a: Value, b: Value) -> Value {
+    if is_lt(&a, &b) { a } else { b }
+}
+fn greater(a: Value, b: Value) -> Value {
+    if is_lt(&a, &b) { b } else { a }
+}
+fn is_lt(a: &Value, b: &Value) -> bool {
+    matches!(compare(a.clone(), Cmp::Lt, b.clone()), Ok(Value::Bool(true)))
 }
 
 /// Normalise whitespace runs to single spaces (interpolation gluing is already exact

@@ -15,6 +15,25 @@ fn to_css_forms() {
         "a, b"
     );
     assert_eq!(Value::Null.to_css(), "");
+    assert_eq!(Value::Color("#fff".into()).to_css(), "#fff");
+    // map: insertion order preserved, `(k: v, …)`
+    assert_eq!(
+        Value::Map(vec![
+            (Value::Raw("a".into()), Value::Number(1.0, String::new())),
+            (Value::Raw("b".into()), Value::Raw("2px".into())),
+        ])
+        .to_css(),
+        "(a: 1, b: 2px)"
+    );
+    // nested list inside a map value
+    assert_eq!(
+        Value::Map(vec![(
+            Value::Raw("l".into()),
+            Value::List(vec![Value::Raw("x".into()), Value::Raw("y".into())], Sep::Space)
+        )])
+        .to_css(),
+        "(l: x y)"
+    );
 }
 
 #[test]

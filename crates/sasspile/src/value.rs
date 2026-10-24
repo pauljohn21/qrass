@@ -22,6 +22,8 @@ pub enum Value {
     Bool(bool),
     Null,
     List(Vec<Value>, Sep),
+    /// an ordered Sass map: `(key: value, …)`; insertion order is preserved
+    Map(Vec<(Value, Value)>),
 }
 
 impl Value {
@@ -47,6 +49,14 @@ impl Value {
                     Sep::Slash => " / ",
                 };
                 items.iter().map(Value::to_css).collect::<Vec<_>>().join(join)
+            }
+            Value::Map(pairs) => {
+                let body = pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.to_css(), v.to_css()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({body})")
             }
         }
     }
