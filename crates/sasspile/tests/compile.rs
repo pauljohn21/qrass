@@ -39,3 +39,21 @@ fn multiple_rules_document_order() {
         "a {\n  x: 1;\n}\nb {\n  y: 2;\n}\n"
     );
 }
+
+#[test]
+fn if_control_flow() {
+    assert_eq!(cs("@if true { a { b: c; } }").unwrap(), "a {\n  b: c;\n}\n");
+    assert_eq!(cs("@if false { a { b: c; } }").unwrap(), "");
+    assert_eq!(
+        cs("@if false { x { y: 1; } } @else { z { w: 2; } }").unwrap(),
+        "z {\n  w: 2;\n}\n"
+    );
+    assert_eq!(
+        cs("@if false { a{b:c} } @else if true { d{e:f} } @else { g{h:i} }").unwrap(),
+        "d {\n  e: f;\n}\n"
+    );
+    assert_eq!(
+        cs("$f: false; @if $f { a { b: c; } } @else { d { e: f; } }").unwrap(),
+        "d {\n  e: f;\n}\n"
+    );
+}

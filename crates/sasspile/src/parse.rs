@@ -67,6 +67,8 @@ impl MsgAcc {
 struct Frame {
     selector: String,
     directive: bool,
+    /// `Some(active)` for an `@if`/`@else` branch frame (emit children only if active)
+    branch: Option<bool>,
     decls: Vec<(String, String)>,
     /// completed descendant leaves, flattened up when this frame closes
     pending: Vec<Leaf>,
@@ -76,6 +78,8 @@ struct Frame {
 pub struct Acc {
     env: Env,
     stack: Vec<Frame>,
+    /// whether the current `@if`/`@else if`/`@else` sibling chain already matched
+    chain_taken: bool,
 }
 
 fn combine(parent: &str, child: &str) -> String {
@@ -102,6 +106,25 @@ impl Acc {
             Msg::Open(head) => {
                 let head_text = Expr::render(&head, &self.env).unwrap_or_default();
                 let head_text = head_text.trim().to_string();
+                // control-flow branch: choose active via the running @if chain
+                let branch = if let Some(c) = head_text.strip_prefix("@if ") {
+                    Some(self.truthy(c))
+                } else if let Some(c) = head_text.strip_prefix("@else if ") {
+                    Some(!self.chain_taken && self.truthy(c))
+                } else if head_text == "@else" {
+                    Some(!self.chain_taken)
+                } else {
+                    None
+                };
+                match branch {
+                    Some(active) => self.chain_taken |= active,
+                    // reset the chain only for a sibling rule at the chain's own level,
+                    // NOT for a rule nested inside the current @if/@else branch
+                    None if !matches!(self.stack.last(), Some(f) if f.branch.is_some()) => {
+                        self.chain_taken = false
+                    }
+                    None => {}
+                }
                 let directive = head_text.starts_with('@');
                 let selector = if directive {
                     self.parent_selector()
@@ -111,6 +134,7 @@ impl Acc {
                 self.stack.push(Frame {
                     selector,
                     directive,
+                    branch,
                     decls: Vec::new(),
                     pending: Vec::new(),
                 });
@@ -140,8 +164,12 @@ impl Acc {
         let Some(f) = self.stack.pop() else {
             return Vec::new();
         };
+        // an @if/@else branch that was not taken contributes nothing
+        if f.branch == Some(false) {
+            return Vec::new();
+        }
         let mut produced = Vec::new();
-        if !f.directive && !f.decls.is_empty() {
+        if f.branch.is_none() && !f.directive && !f.decls.is_empty() {
             produced.push(Leaf {
                 selector: f.selector,
                 decls: f.decls,
@@ -155,5 +183,11 @@ impl Acc {
             }
             None => produced,
         }
+    }
+
+    /// Sass truthiness of a rendered condition: only `false`/`null`/empty are falsy.
+    fn truthy(&self, cond: &str) -> bool {
+        let t = cond.trim();
+        !t.is_empty() && t != "false" && t != "null"
     }
 }
