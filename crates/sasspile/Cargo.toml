@@ -9,7 +9,6 @@ description = "A clean-room SCSS->CSS compiler whose control flow IS a lazy rxru
 [dependencies]
 rxrust = { version = "=1.0.0-rc.6", features = ["scheduler"] }
 tracing = "0.1"
-futures = "0.3"
 
 [dev-dependencies]
 ledger = { path = "../ledger" }
