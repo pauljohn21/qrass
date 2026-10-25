@@ -109,6 +109,9 @@ fn import_rows(conn: &Connection, name: &str, lines: &[String]) -> QResult<(usiz
         params![name, total as i64, pass as i64],
     )?;
     let ref_run: i64 = tx.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| r.get(0))?;
+    // A re-import replaces the whole verdict for this run: only failures are stored, so without
+    // this delete a case that now PASSES keeps its old row and `diff` reports a phantom REGRESS.
+    tx.execute("DELETE FROM run_fail WHERE run_id = ?1", params![ref_run])?;
     let mut case_ins = tx.prepare("INSERT OR IGNORE INTO case_key(key) VALUES (?1)")?;
     let mut detail_ins = tx.prepare("INSERT OR IGNORE INTO fail_detail(text) VALUES (?1)")?;
     let mut fail_ins = tx.prepare(
