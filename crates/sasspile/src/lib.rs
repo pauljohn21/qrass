@@ -13,6 +13,7 @@ use std::fmt;
 use rxrust::prelude::*;
 
 mod exec;
+mod expr;
 mod lexer;
 mod value;
 

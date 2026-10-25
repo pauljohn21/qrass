@@ -10,6 +10,7 @@ use rxrust::prelude::*;
 
 use crate::lexer::{Event, Tok, render, render_raw};
 use crate::value::Value;
+use crate::expr;
 
 /// A resolved CSS rule in document order.
 #[derive(Debug, Clone)]
@@ -47,8 +48,8 @@ impl Exec {
             Event::Decl { prop, value } => {
                 if let Some(top) = self.scopes.last_mut() {
                     let name = render(&prop);
-                    let text = value_text(&name, &value);
-                    top.decls.push((name, Value::from_text(text)));
+                    let value = decl_value(&name, &value);
+                    top.decls.push((name, value));
                 }
                 Vec::new()
             }
@@ -62,13 +63,17 @@ impl Exec {
     }
 }
 
-/// Declaration value text: a custom property (`--x: …`) carries **raw CSS text**, so a `//`
-/// comment inside its value belongs to the value; any other declaration value drops silent
-/// comments, which Sass strips before output.
-fn value_text(prop: &str, value: &[Tok]) -> String {
+/// Build the declaration's owned value. A custom property (`--x: …`) carries **raw CSS
+/// text**, so a `//` comment inside its value belongs to the value. Any other value becomes a
+/// typed [`Value`] when — and only when — the run is unambiguous arithmetic; a run that does
+/// not parse, or whose evaluation errors (incompatible units), keeps its verbatim text for
+/// now, which is what protects slash-separated shorthands and CSS-native functions.
+fn decl_value(prop: &str, value: &[Tok]) -> Value {
     match prop {
-        p if p.starts_with("--") => render_raw(value),
-        _ => render(value),
+        p if p.starts_with("--") => Value::from_text(render_raw(value)),
+        _ => expr::from_tokens(value)
+            .and_then(|expr| expr.eval().ok())
+            .unwrap_or_else(|| Value::from_text(render(value))),
     }
 }
 

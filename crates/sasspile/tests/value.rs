@@ -40,3 +40,35 @@ async fn nested_scope_values_stay_with_their_own_scope() {
         "a {\n  b: 1;\n}\na c {\n  d: 2;\n}\n"
     );
 }
+
+#[tokio::test]
+async fn spaced_plus_minus_is_arithmetic() {
+    assert_eq!(css("a { w: 10px + 5px; }").await, "a {\n  w: 15px;\n}\n");
+    assert_eq!(css("a { w: 10px - 5px; }").await, "a {\n  w: 5px;\n}\n");
+    assert_eq!(css("a { w: 1 + 2; }").await, "a {\n  w: 3;\n}\n");
+}
+
+#[tokio::test]
+async fn unitless_operand_adopts_the_other_unit() {
+    assert_eq!(css("a { w: 10px + 3; }").await, "a {\n  w: 13px;\n}\n");
+    assert_eq!(css("a { w: 3 + 10px; }").await, "a {\n  w: 13px;\n}\n");
+}
+
+#[tokio::test]
+async fn convertible_units_normalise_into_the_left_operand_unit() {
+    assert_eq!(css("a { w: 1px + 1in; }").await, "a {\n  w: 97px;\n}\n");
+    assert_eq!(css("a { w: 10s - 500ms; }").await, "a {\n  w: 9.5s;\n}\n");
+}
+
+#[tokio::test]
+async fn unspaced_sign_is_a_list_item_not_subtraction() {
+    // Sass reads `10px -5px` as a two-item space list, so nothing may be evaluated.
+    assert_eq!(css("a { w: 10px -5px; }").await, "a {\n  w: 10px -5px;\n}\n");
+}
+
+#[tokio::test]
+async fn incompatible_units_keep_the_text_instead_of_guessing() {
+    // The Sass error travels once the stream carries `Result` (P1 next step); until then the
+    // run must survive verbatim rather than invent a number.
+    assert_eq!(css("a { w: 5px + 3s; }").await, "a {\n  w: 5px + 3s;\n}\n");
+}
