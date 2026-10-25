@@ -17,3 +17,7 @@
 | `where Self: 'a` | outlives 约束 | “实现者至少活得和借用一样久”；GAT 里少了它直接被编译器拒（missing required bound） | V0-02 |
 | HRTB | higher-ranked trait bound `for<'a>` | “对任意寿命都成立”的约束；rxrust `map` 用它接 `Self::Item<'a>` | V0-02 |
 | 结束契约 | `Option::None` | `take()` 返回 `None` 即“没有更多了”；缺了它消费者循环永不退出 | V0-02 |
+| 闭包三能力 | `Fn` / `FnMut` / `FnOnce` | 只读 / 可改环境 / 只能用一次；`next` 对应 `FnMut`，终止方法对应 `FnOnce` | V0-03 |
+| 闭包吞错 | `FnMutObserver` 的空 `error`/`complete` | 用 `subscribe(closure)` 时，错误与完成信号没有出口；它只该用于 `Err = Infallible` 的流 | V0-03 |
+| 镜像 trait | `DynObserver` / `box_error(self: Box<Self>)` | 把不可 object-safe 的消耗式方法改写成能通过 `dyn` 调用的形式，再 blanket impl 接回原协议 | V0-03 |
+| `take()` 语义 | `Option::take` | 把内部消费者取走并结束它；取走后 `Option` 变 `None`，后续信号自动 no-op | V0-03 |

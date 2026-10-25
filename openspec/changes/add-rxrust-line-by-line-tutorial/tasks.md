@@ -29,7 +29,7 @@
       `v0-foundations/00-02-traits-associated-types-and-gats.md`；代码外部验证（4 测通过、clippy 0 警）；
       报错链均为实测：E0119 → missing lifetime in associated type → missing required bound on `Row`，
       外加第一版被拦的 redundant closure 与多余 `mut`
-- [ ] 1.3 闭包三兄弟 `Fn/FnMut/FnOnce`：为什么 `next(&mut self)` 用 `FnMut`、终止方法为何消耗 `self`
+- [x] 1.3 闭包三兄弟 `Fn/FnMut/FnOnce`：为什么 `next(&mut self)` 用 `FnMut`、终止方法为何消耗 `self`
 - [ ] 1.4 `Rc/Arc/RefCell/Mutex` 与内部可变性：共享 vs 共享可变；object-safety 初探（为 V1 `DynObserver` 铺路）
 - [ ] 1.5 宏最小知识：`macro_rules!` 会展开成什么（用 `impl_observer_for_box!` 的真实形态做例子，只看不写）
 - [ ] 1.6 卷末：`docsizer words` 报告 + 术语表并入 + 读者自评清单（能独立回答每课三问）
