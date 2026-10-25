@@ -10,6 +10,13 @@
 
 use std::fmt;
 
+use rxrust::prelude::*;
+
+mod exec;
+mod lexer;
+
+use crate::exec::StyleRule;
+
 /// Compiler error carried as an in-stream value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SassError {
@@ -30,12 +37,31 @@ impl fmt::Display for SassError {
 
 impl std::error::Error for SassError {}
 
-/// The public entry — and the **only** external API. It is the head of one cold push stream
-/// that terminates in `into_future().await` (no synchronous `block_on`/`mpsc` facade; the
-/// caller supplies the runtime).
-///
-/// P0 skeleton: the push pipeline is not rebuilt yet, so this reports not-implemented rather
-/// than resurrect any pull-shaped logic.
-pub async fn compile(_content: impl Into<String>) -> Result<String, SassError> {
-    Err(SassError::new("sasspile: not implemented (push-model rebuild in progress — design P0–P8)"))
+/// The public entry — and the **only** external API. The whole compile is one cold **push**
+/// stream: `lexer::events` (chars→Tok→events) is consumed forward by `exec` (owned `scopes`
+/// accumulator pushes out `StyleRule`s on `Close`); rules are gathered once, stably sorted by
+/// their `order` key (document order), then pushed through render/reduce to a single
+/// `into_future().await` (no synchronous `block_on`/`mpsc` facade; caller supplies runtime).
+pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
+    let _span = tracing::info_span!("compile").entered();
+    exec::exec(lexer::events(content.into()))
+        .collect::<Vec<StyleRule>>()
+        .map(|mut rules| {
+            rules.sort_by_key(|r| r.order);
+            rules
+        })
+        .flat_map(Shared::from_iter)
+        .map(|rule| exec::render_rule(&rule))
+        .reduce_initial(String::new(), |mut css, chunk| {
+            css.push_str(&chunk);
+            css
+        })
+        .into_future()
+        .await
+        .or_else(|e| match e {
+            rxrust::IntoFutureError::Empty => Ok(Ok(String::new())),
+            other => Err(other),
+        })
+        .map_err(|_| SassError::new("no output"))?
+        .map_err(|_| SassError::new("reduce"))
 }

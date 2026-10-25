@@ -112,12 +112,6 @@ async fn hrx_snapshot() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sass-spec/spec");
     let _span = tracing::info_span!("hrx").entered();
     let _ = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).try_init();
-    // Skeleton guard: while `compile` is the not-implemented push-model stub, skip the
-    // harness (all cases would spuriously fail). Once P0 lands, real cases run again.
-    if compile("a { b: c; }").await.unwrap_err().message.contains("not implemented") {
-        tracing::info!(stage = "hrx", "skeleton: compile() not implemented — harness skipped (P0 rebuild pending)");
-        return;
-    }
     let mut files = Vec::new();
     SPEC_DIRS
         .iter()

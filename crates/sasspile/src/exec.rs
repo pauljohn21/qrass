@@ -1,0 +1,89 @@
+//! Exec (push): consume the structural `Event` stream forward with an **owned accumulator**
+//! whose nesting state is a *data* stack `scopes: Vec<Scope>` (moved through `scan_map`, not a
+//! `&mut self` object driving a tree walk, and not a call-stack recursion). A rule is **pushed
+//! out** when its `Close` fires; document order is recovered by an owned `order` key (assigned
+//! at `Open`, pre-order), not by re-walking anything.
+
+use std::convert::Infallible;
+
+use rxrust::prelude::*;
+
+use crate::lexer::{Event, render};
+
+/// A resolved CSS rule in document order.
+#[derive(Debug, Clone)]
+pub struct StyleRule {
+    pub selector: String,
+    pub decls: Vec<(String, String)>,
+    pub order: u32,
+}
+
+#[derive(Debug)]
+struct Scope {
+    selector: String,
+    decls: Vec<(String, String)>,
+    order: u32,
+}
+
+/// Owned `scan_map` accumulator: the open-scope stack is plain data living here.
+#[derive(Default)]
+pub struct Exec {
+    scopes: Vec<Scope>,
+    next: u32,
+}
+
+impl Exec {
+    fn advance(&mut self, ev: Event) -> Vec<StyleRule> {
+        match ev {
+            Event::Open(head) => {
+                let parent = self.scopes.last().map(|s| s.selector.clone()).unwrap_or_default();
+                let selector = combine(&parent, &render(&head));
+                let order = self.next;
+                self.next += 1;
+                self.scopes.push(Scope { selector, decls: Vec::new(), order });
+                Vec::new()
+            }
+            Event::Decl { prop, value } => {
+                if let Some(top) = self.scopes.last_mut() {
+                    top.decls.push((render(&prop), render(&value)));
+                }
+                Vec::new()
+            }
+            Event::Close => match self.scopes.pop() {
+                Some(s) if !s.decls.is_empty() && !s.selector.is_empty() => {
+                    vec![StyleRule { selector: s.selector, decls: s.decls, order: s.order }]
+                }
+                _ => Vec::new(),
+            },
+        }
+    }
+}
+
+/// Parent/child selector combination (Sass semantics): `&` replaces the parent, else descendant.
+fn combine(parent: &str, child: &str) -> String {
+    if parent.is_empty() {
+        child.to_string()
+    } else if child.contains('&') {
+        child.replace('&', parent)
+    } else {
+        format!("{parent} {child}")
+    }
+}
+
+/// The exec stage: `Event` stream → `StyleRule` stream (forward, owned accumulator).
+pub fn exec(events: SharedBoxedObservable<'static, Event, Infallible>) -> SharedBoxedObservable<'static, StyleRule, Infallible> {
+    events
+        .scan_map(Exec::default(), |ex, ev| ex.advance(ev))
+        .flat_map(Shared::from_iter)
+        .box_it()
+}
+
+/// Serialise one rule to an expanded CSS block.
+pub fn render_rule(rule: &StyleRule) -> String {
+    let body = rule
+        .decls
+        .iter()
+        .map(|(prop, value)| format!("  {prop}: {value};\n"))
+        .collect::<String>();
+    format!("{} {{\n{}}}\n", rule.selector, body)
+}
