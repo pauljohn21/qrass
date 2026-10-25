@@ -147,8 +147,28 @@
       `verbatim_fallback_needs_a_fatality_decision`、`higher_order_subscribe_needs_a_slot`、
       `legal_stream_shapes_are_not_flagged`——最后一例钉住“合法半边不得误报”这个下界，否则闸不可用）。
       诚实记录：它们是**代理而非证明**（只认本仓库真删过的形状签名），不能代替 `ledger diff`。
-- [ ] 0′.7 **`Selector`/`PropName` 结构化**：消除 `render→canon→split_whitespace` 与 `&` 的 `str::replace`
-      （现 `lexer.rs:223-257`、`exec.rs:150-155`）；选择器/属性名不再经字符串承载语义。
+- [x] 0′.7 **`Selector`/`PropName` 结构化（已合入）**：新增 `src/selector.rs`——`Piece::{Text,Parent}` +
+      `Selector`（`from_pieces`/`references_parent`/`nest`/`trimmed`/`to_css`）+ `PropName`（构造时就从
+      pieces 定下 `is_custom`）。`exec` 的 `interp_text`（拼串）换成 `head_pieces`：**每词素映 0..N
+      piece 后 `concat`**，`&` 组合走 `Selector::nest`（splice），**`str::replace` 与 `combine` 已删**；
+      `StyleRule{selector: Selector, decls: Vec<(PropName, Value)>}`；绑定目标改成 `Target::{Variable,Property}`
+      （先拼 `"${var}"` 再 `strip_prefix('$')` 的回环消失）。前置：词法把 `&` 升为独立词素
+      （`STRUCTURAL`），因为分类粒度不能超过词法粒度（0′.3b 的教训）。
+      **两条语料新发现**（均为本轮实测而非推定）：
+      1. `#{&}` **不是** `&` 组合位置——语料期望“把父选择器当**文本**代入后照常嵌套”：
+         `.test{ .selector#{&}{} }` → `.test .selector.test`（`libsass-closed-issues/issue_1043`）。
+         我先把它映成 `Piece::Parent` 得 `.selector.test`，新写用例自身按语料不成立 → 改为带 `parent` 文本
+         入参的 `pieces_of`。（旧字串写法同样错，但 `libsass-*` 不入基线，从未被量到。）
+      2. 词法在行注释结束时 `buf.push(' ')` 把换行发成了 **`Word(" ")`** ——伪装成词素的空白。它一直存在，
+         但新的词素级绑定判定（首个非空白/非注释词素是不是 `Var`）使它把 `// c\n$ids: ();` 里的 `$ids`
+         当普通属性处理 ⇒ 变量未绑定 ⇒ 真 `Err` 通道直接报错（实测一度回退 16 条）。正解是修根：该位置发
+         `Tok::Space(' ')`，空白在词法层就是空白。
+      实测（全路径 key + 消息金样量具）：**600 → 600，`regress=0 net=0`**（空库 `ledger diff`）——属结构
+      改造，不应也真的没移动任何判定。全量 `diff` 两快照仅 **1 行**不同，且属于本来就 FAIL 的
+      `css/custom_properties/nesting_characters::`：它的垃圾文本里“两个空格”变“一个空格”，无判定变化。
+      新增 `tests/selector.rs` 4 例（root `&`/`&.b`/`&b`/descendant、`:has(~ &)`、`:where(&)`、`#{&}`、
+      注释不伪装下一个绑定），每条期望都注了出处 fixture。门：57 测试全过 0 ignored、clippy
+      `-D warnings` exit 0、`sasslint count=0`。
 
 ## P0 — hrx harness(验收安全网)
 - [~] 0.1 `tests/hrx.rs` 经 `compile` 跑 `sass-spec` 安全子集、产 `ledger`  快照 + 立基线(seed 560/11486，现 **600**)。**已具雏形,待补 0.2/0.3**；key 制式已改（0′.3 的 0.5）

@@ -13,7 +13,8 @@
 
 use crate::env::Env;
 use crate::expr::{self, Expr};
-use crate::lexer::{Event, Tok, canon, render, render_raw, token_text};
+use crate::lexer::{Event, Tok, render, render_raw, token_text};
+use crate::selector::{Piece, PropName, Selector};
 use crate::value::Value;
 
 use crate::SassError;
@@ -23,28 +24,28 @@ use crate::SassError;
 /// "the block's whole body".
 #[derive(Debug, Clone)]
 pub struct StyleRule {
-    pub selector: String,
-    pub decls: Vec<(String, Value)>,
+    pub selector: Selector,
+    pub decls: Vec<(PropName, Value)>,
 }
 
 impl StyleRule {
     /// Serialise the rule to an expanded CSS block. [`Value::to_css`] stays the one place a
-    /// value becomes text.
+    /// value becomes text, and [`Selector::to_css`] the one place a head does.
     pub fn to_css(&self) -> String {
         let body = self
             .decls
             .iter()
-            .map(|(prop, value)| format!("  {prop}: {};\n", value.to_css()))
+            .map(|(prop, value)| format!("  {}: {};\n", prop.as_str(), value.to_css()))
             .collect::<String>();
-        format!("{} {{\n{}}}\n", self.selector, body)
+        format!("{} {{\n{}}}\n", self.selector.to_css(), body)
     }
 }
 
 /// One currently open block, as data inside the flowing state.
 #[derive(Debug, Clone)]
 struct Scope {
-    selector: String,
-    decls: Vec<(String, Value)>,
+    selector: Selector,
+    decls: Vec<(PropName, Value)>,
     /// This block is the body of a **plain-CSS at-rule** (`@function --a()`), or sits inside one, so
     /// its declarations are CSS text: an unbound `$x` stays written rather than raising
     /// `UndefinedVariable` (the three `*/sass_script` cases of `css/function.hrx`).
@@ -79,39 +80,39 @@ impl State {
     pub fn step(&mut self, ev: Event) -> Result<Option<StyleRule>, SassError> {
         match ev {
             Event::Open(head) => {
-                let parent_text = self
+                let parent = self
                     .scopes
                     .last()
                     .map(|s| s.selector.clone())
                     .unwrap_or_default();
-                let text = self.interp_text(&head)?;
-                let selector = combine(&parent_text, &text);
+                let child = self.head_selector(&head, &parent.to_css())?;
                 let settled = self.settle_top();
                 // A nested block inherits the plain-CSS context: it is still inside that body.
-                let plain_css = self.in_plain_css() || plain_css_body(&text);
+                let plain_css = self.in_plain_css() || plain_css_body(&child.to_css());
                 self.scopes.push(Scope {
-                    selector,
+                    selector: child.nest(&parent),
                     decls: Vec::new(),
                     plain_css,
                 });
                 Ok(settled)
             }
             Event::Decl { prop, value } => {
-                // The left side of `$x: …` is a binding target: its name is taken verbatim and
-                // is never interpolated, unlike an ordinary property name.
-                let name = match prop.as_slice() {
-                    [Tok::Var(var)] => format!("${var}"),
-                    _ => self.interp_text(&prop)?,
+                // The left side of `$x: …` is a **binding target**, named by the variable itself; an
+                // ordinary property name is a structured [`PropName`]. No `"${var}"` round-trip that a
+                // later `strip_prefix('$')` would have to undo.
+                let target = match prop.iter().find(|tok| !skipped_in_name(tok)) {
+                    Some(Tok::Var(var)) => Target::Variable(var.clone()),
+                    _ => Target::Property(PropName::from_pieces(&self.head_pieces(&prop, "")?)),
                 };
-                match name.strip_prefix('$') {
+                match target {
                     // A binding updates the environment inside the flowing state; a later
                     // declaration reads the value this position has, so document order holds
                     // without any snapshot being carried around.
-                    Some(var) => {
+                    Target::Variable(var) => {
                         let bound = self.value_of(&value)?;
-                        self.env.bind(var, bound);
+                        self.env.bind(&var, bound);
                     }
-                    None => {
+                    Target::Property(name) => {
                         let owned = self.decl_value(&name, &value, self.in_plain_css())?;
                         if let Some(top) = self.scopes.last_mut() {
                             top.decls.push((name, owned));
@@ -154,18 +155,18 @@ impl State {
             })
     }
 
-    /// The declaration's owned value. A custom property (`--x: …`) and a value carrying a CSS
-    /// native function (`var()`, `calc()`, `url()`, …) hold **raw CSS text** that Sass must not
-    /// interpret; the first is stored verbatim, the others bail inside [`State::evaluated`].
-    /// Any other value becomes a typed [`Value`] when — and only when — the run is
-    /// unambiguous; a run that does not parse, or whose failure is not fatal, keeps its verbatim
+    /// The declaration's owned value. A custom property ([`PropName::is_custom`], decided once from the
+    /// name's pieces) and a value carrying a CSS native function (`var()`, `calc()`, `url()`, …) hold
+    /// **raw CSS text** that Sass must not interpret; the first is stored verbatim, the others bail
+    /// inside [`State::evaluated`]. Any other value becomes a typed [`Value`] when — and only when — the
+    /// run is unambiguous; a run that does not parse, or whose failure is not fatal, keeps its verbatim
     /// text. `plain` is the enclosing plain-CSS at-rule body, which keeps an unbound `$x` as text.
-    fn decl_value(&self, prop: &str, value: &[Tok], plain: bool) -> Result<Value, SassError> {
-        Ok(match prop {
-            p if p.starts_with("--") => Value::from_text(render_raw(value)),
-            _ => self
-                .evaluated(value, plain)?
-                .unwrap_or_else(|| Value::from_text(render(value))),
+    fn decl_value(&self, prop: &PropName, value: &[Tok], plain: bool) -> Result<Value, SassError> {
+        Ok(if prop.is_custom() {
+            Value::from_text(render_raw(value))
+        } else {
+            self.evaluated(value, plain)?
+                .unwrap_or_else(|| Value::from_text(render(value)))
         })
     }
 
@@ -202,22 +203,48 @@ impl State {
         }
     }
 
-    /// A head position (selector or property name) resolves **only `#{ … }`**: Sass has no bare
-    /// variable reference there. This matters because a block head is not always a selector — an
+    /// A head position (selector or property name) as structured pieces: **only `#{ … }` is resolved**,
+    /// every other lexeme stays exactly as written, and a literal `&` lexeme becomes a `Piece::Parent`.
+    ///
+    /// Sass has no bare variable reference in a head, and a head is not always a selector — an
     /// `@for`/`@each` header *binds* its `$i`, so looking a bare `$var` up here turned
     /// `sass-spec/directives/for/whitespace.hrx`'s `@for $i from … {}` into an "Undefined variable"
     /// (measured: that one over-reach accounted for ~47 of the 60 regressions when `UndefinedVariable`
     /// was made fatal). Lexemes must also never be read as numbers (`.2xl` is an identifier).
-    fn interp_text(&self, toks: &[Tok]) -> Result<String, SassError> {
+    ///
+    /// `parent` is the enclosing scope's resolved text, needed only by `#{&}`.
+    fn head_selector(&self, toks: &[Tok], parent: &str) -> Result<Selector, SassError> {
+        self.head_pieces(toks, parent).map(Selector::from_pieces)
+    }
+
+    /// The head's pieces, in source order: mapping each lexeme to 0..N pieces and flattening keeps the
+    /// order without ever building a string and searching it for `&`. Edges are trimmed at the piece
+    /// level, because a head's surrounding newlines are layout, not part of the selector — the difference
+    /// between `a.b` and `a .b` when this head is nested.
+    fn head_pieces(&self, toks: &[Tok], parent: &str) -> Result<Vec<Piece>, SassError> {
         toks.iter()
-            .map(|tok| self.head_piece(tok))
-            .collect::<Result<String, SassError>>()
-            .map(|text| canon(&text))
+            .map(|tok| self.pieces_of(tok, parent))
+            .collect::<Result<Vec<Vec<Piece>>, SassError>>()
+            .map(|runs| Selector::from_pieces(runs.concat()).trimmed().into_pieces())
+    }
+
+    fn pieces_of(&self, tok: &Tok, parent: &str) -> Result<Vec<Piece>, SassError> {
+        match tok {
+            Tok::Punct('&') => Ok(vec![Piece::Parent]),
+            // `#{&}` is **not** the parent-reference position: the corpus substitutes the parent as text
+            // and then nests normally, so `.test { .selector#{&} {} }` prints
+            // `.test .selector.test`, not `.selector.test`
+            // (`libsass-closed-issues/issue_1043.hrx`).
+            Tok::Interp(inner) if matches!(inner.as_slice(), [Tok::Punct('&')]) => {
+                Ok(vec![Piece::Text(parent.to_string())])
+            }
+            other => self.piece_text(other).map(|text| vec![Piece::Text(text)]),
+        }
     }
 
     /// One head token as text: only an interpolation is evaluated, every other lexeme stays exactly
     /// as written.
-    fn head_piece(&self, tok: &Tok) -> Result<String, SassError> {
+    fn piece_text(&self, tok: &Tok) -> Result<String, SassError> {
         let Tok::Interp(inner) = tok else {
             return Ok(token_text(tok));
         };
@@ -232,13 +259,17 @@ impl State {
     }
 }
 
-/// Parent/child selector combination (Sass semantics): `&` replaces the parent, else descendant.
-fn combine(parent: &str, child: &str) -> String {
-    match parent {
-        "" => child.to_string(),
-        p if child.contains('&') => child.replace('&', p),
-        p => format!("{p} {child}"),
-    }
+/// What carries no meaning into a property name: layout whitespace and a dropped silent comment. Both
+/// were invisible to the old rendered-text form (`canon` trimmed the first, [`render`] drops the second),
+/// so the binding test looks past them to the first lexeme that is actually part of the name.
+fn skipped_in_name(tok: &Tok) -> bool {
+    matches!(tok, Tok::Space(_) | Tok::Silent(_))
+}
+
+/// What a declaration's left side names: the environment's variable, or a CSS property.
+enum Target {
+    Variable(String),
+    Property(PropName),
 }
 
 /// Whether a settled head text opens a **plain-CSS at-rule** body: `@function` (any case) naming a

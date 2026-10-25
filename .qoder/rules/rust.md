@@ -10,8 +10,13 @@ alwaysApply: true
 ## 🧭 新会话起手（先读这三处再写码，否则必返工）
 1. `docs/rxrust-source-analysis/`（rc.6 逐行取证，01–09；**09** = 取消/锁/终止投递次序不变量 + “库自带注释与实现不一致”清单）；
 2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）；
-3. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md`（现状：四个内核 `Lexer/Structurize/Exec/Render` 已在
-   `crates/sasspile/src/phases.rs`，待做 0′.3 真 Err 通道 / 0′.6 sasslint 机器闸 / 0′.7 Selector 结构化）。
+3. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` + `tasks.md`（现状：**P0′ 已收尾**——四个内核
+   `Lexer/Structurize/Exec/Render` 在 `crates/sasspile/src/phases.rs`；0′.1/.2/.3/.4/.6/.7 均已合入：真 `Err` 通道已接且
+   `UndefinedVariable` 已致命（守卫：头部只认 `#{}`、special 调用参数、plain-CSS at-rule 体）、选择器/属性名是
+   `src/selector.rs` 的结构化值（`&` 就是词素，`str::replace` 已删）、四条铁律已成 `sasslint` 机器闸。
+   **不得重做这三项**。当前基线 hrx **600/11,486**；唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，
+   触发点在 P4 `@content` / P5 模块多播）。下一步主战场：P1 值地基（单位代数/`Calculation`）与 P7 诊断消息
+   ——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启。
 
 ## 硬性禁止（违反 = 任务失败）

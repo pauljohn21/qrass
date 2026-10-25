@@ -50,11 +50,13 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
 公开面:仅 async fn compile(content) -> Result<String, SassError>
 ```
 
-**现状(P0′.1/.2/.3/.4 已落)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
-`order` 键/`sort_by_key`/`from_stream` 假并发已不存在;真 `Err` 通道已接上且 `UndefinedVariable` 已致命。
-harness 基线 595 → **600**(量具已换成全路径 key + 错误消息金样,见 tasks 0′.3)。**0′.3 只真值 +1** 这件事本身
-是结论:剩下大量 `error` 用例要的是尚未实现的**消息**(单位代数、`Expected identifier.`、deprecation),归 P1/P7。
-仍待做:0′.6(四条 sasslint 机器闸)、0′.7(`Selector`/`PropName` 结构化)。
+**现状(P0′ 已收尾)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
+`order` 键/`sort_by_key`/`from_stream` 假并发已不存在;真 `Err` 通道已接上且 `UndefinedVariable` 已致命;
+选择器/属性名是结构化值(`src/selector.rs`),`&` 组合不再走 `str::replace`;四条铁律已编成 `sasslint`
+机器闸并打开 CI 门。harness 基线 595 → **600**(量具已换成全路径 key + 错误消息金样,见 tasks 0′.3)。
+**0′.3 只真值 +1** 这件事本身是结论:剩下大量 `error` 用例要的是尚未实现的**消息**(单位代数、
+`Expected identifier.`、deprecation),归 P1/P7。P0′ 仅剩 0′.5(共享态 `C::RcMut`/`C::RcCell`)——它当前
+无可改之物(四个内核状态全为观察者独有),真正触发点是 P4(`@content` 闭包流)与 P5(模块多播)。
 
 嵌套不是"树",是事件流上的 owned `scopes`;规则在**开子块冲刷父块待定声明段**与**闭块冲刷残余**两个时刻被推出来
 (所以一个块可以出多条规则),而不是"等 `Close` 一次性出整块"。除表达式求值(自底向上,天然递归)

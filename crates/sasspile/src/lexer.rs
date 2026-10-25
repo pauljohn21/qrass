@@ -43,7 +43,13 @@ pub enum Event {
 /// produced item straight into the stream.
 pub type Emit<'a, T> = &'a mut dyn FnMut(T);
 
-const STRUCTURAL: [char; 5] = ['{', '}', ';', ':', ','];
+/// The characters that always close the running lexeme and become a `Punct` of their own.
+///
+/// `&` belongs here because the parent reference has to be a **lexeme**: nesting is then decided on
+/// pieces (`crate::selector`) instead of by searching for `'&'` inside a rendered string, and no
+/// classifier can be finer than what the lexer separates. `&:hover`, `&-suffix` and `a & b` all arrive
+/// as a `Punct('&')` beside their neighbours rather than glued into one `Word`.
+const STRUCTURAL: [char; 6] = ['{', '}', ';', ':', ',', '&'];
 
 fn is_var_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
@@ -119,7 +125,11 @@ impl LexAcc {
                 '\n' => {
                     self.line = false;
                     self.take_comment(emit);
-                    self.buf.push(' ');
+                    // The line break that ended the comment is **whitespace**, so it is emitted as a
+                    // `Space` lexeme. It used to be pushed into the word buffer, which turned it into a
+                    // `Word(" ")` — a fake identifier that hid the `$name` of a following binding from any
+                    // lexeme-level test (`// c\n$ids: ();` stopped binding `$ids`).
+                    self.push(Tok::Space(' '), emit);
                 }
                 ';' => {
                     self.take_comment(emit);

@@ -184,10 +184,13 @@ async fn hrx_snapshot() {
                     pass += 1;
                     rows.push(format!("PASS\t{id}"));
                 }
-                (Err(e), _, Some(want)) => {
-                    rows.push(format!("FAIL\t{id}\tgot error {:?} want {:?}", e.message, want))
+                (Err(e), _, Some(want)) => rows.push(format!(
+                    "FAIL\t{id}\tgot error {:?} want {:?}",
+                    e.message, want
+                )),
+                (Err(e), _, None) => {
+                    rows.push(format!("FAIL\t{id}\tunexpected error {:?}", e.message))
                 }
-                (Err(e), _, None) => rows.push(format!("FAIL\t{id}\tunexpected error {:?}", e.message)),
                 (Ok(css), Some(expected), None) => rows.push(format!(
                     "FAIL\t{id}\tgot {:?} want {:?}",
                     norm(&css),

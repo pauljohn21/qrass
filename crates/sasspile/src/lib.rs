@@ -17,6 +17,7 @@ mod exec;
 mod expr;
 mod lexer;
 mod phases;
+mod selector;
 mod value;
 
 use crate::phases::{Exec, Lexer, Render, Structurize};
