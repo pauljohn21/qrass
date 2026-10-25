@@ -14,6 +14,7 @@ use rxrust::prelude::*;
 
 mod exec;
 mod lexer;
+mod value;
 
 use crate::exec::StyleRule;
 

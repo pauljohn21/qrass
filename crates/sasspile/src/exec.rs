@@ -9,19 +9,20 @@ use std::convert::Infallible;
 use rxrust::prelude::*;
 
 use crate::lexer::{Event, render};
+use crate::value::Value;
 
 /// A resolved CSS rule in document order.
 #[derive(Debug, Clone)]
 pub struct StyleRule {
     pub selector: String,
-    pub decls: Vec<(String, String)>,
+    pub decls: Vec<(String, Value)>,
     pub order: u32,
 }
 
 #[derive(Debug)]
 struct Scope {
     selector: String,
-    decls: Vec<(String, String)>,
+    decls: Vec<(String, Value)>,
     order: u32,
 }
 
@@ -45,7 +46,8 @@ impl Exec {
             }
             Event::Decl { prop, value } => {
                 if let Some(top) = self.scopes.last_mut() {
-                    top.decls.push((render(&prop), render(&value)));
+                    top.decls
+                        .push((render(&prop), Value::from_text(render(&value))));
                 }
                 Vec::new()
             }
@@ -78,12 +80,13 @@ pub fn exec(events: SharedBoxedObservable<'static, Event, Infallible>) -> Shared
         .box_it()
 }
 
-/// Serialise one rule to an expanded CSS block.
+/// Serialise one rule to an expanded CSS block. A declaration value is serialised through
+/// [`Value::to_css`] — the one place a value becomes text.
 pub fn render_rule(rule: &StyleRule) -> String {
     let body = rule
         .decls
         .iter()
-        .map(|(prop, value)| format!("  {prop}: {value};\n"))
+        .map(|(prop, value)| format!("  {prop}: {};\n", value.to_css()))
         .collect::<String>();
     format!("{} {{\n{}}}\n", rule.selector, body)
 }
