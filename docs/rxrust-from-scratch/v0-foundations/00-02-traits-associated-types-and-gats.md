@@ -171,7 +171,7 @@ pub fn map_window<S: Windowed>(s: &S, at: usize, len: usize, f: impl FnMut(&i32)
 | 行 | 讲什么 |
 |---|---|
 | `pub trait Windowed {` | 新的抽象：来源**不交出拥有权**，而是每次"借一段自己内部的数据"。 |
-| `type Row<'a>: Iterator<Item = &'a i32> where Self: 'a;` | 三个信息挤在一行：① `Row` 是关联类型但**自己带参数** `'a`；② 它必须实现 `Iterator` 且元素是 `&'a i32`（借用）；③ `where Self: 'a` 声明“只有当实现者至少活到 `'a` 这么久，`Row<'a>` 才存在”。删掉**声明侧**的 ③，编译器直接拒收（§6③）；`impl` 里那份重复的则是可省（§6③ 注）。 |
+| `type Row<'a>: Iterator<Item = &'a i32> where Self: 'a;` | 三个信息挤在一行：① `Row` 是关联类型但**自己带参数** `'a`；② 它必须实现 `Iterator` 且元素是 `&'a i32`（借用）；③ `where Self: 'a` 声明“只有当实现者至少活到 `'a` 这么久，`Row<'a>` 才存在”。删掉**声明侧**的 ③，编译器直接拒绝（§6③）；`impl` 里那份重复的则可省（§6③ 注）。 |
 | `fn window(&self, at: usize, len: usize) -> Self::Row<'_>;` | `'_` 让编译器把返回元素的寿命绑到这次 `&self` 借用上：借来的窗口不可能比被看的对象活得久。调用点完全不用写生命周期。 |
 | `impl Windowed for Series { type Row<'a> = std::slice::Iter<'a, i32> where Self: 'a;` | 实现者选定具体类型：借用切片迭代器。它的元素正是 `&'a i32`，与 trait 的约束对齐。 |
 | `fn window(&self, at: usize, len: usize) -> Self::Row<'_> { self.values[at..at + len].iter() }` | 返回借用：`iter()` 借 `self.values`，长度由参数决定。没有任何克隆，也没有把整段数据复制出去。 |

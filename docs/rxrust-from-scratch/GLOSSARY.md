@@ -21,3 +21,9 @@
 | 闭包吞错 | `FnMutObserver` 的空 `error`/`complete` | 用 `subscribe(closure)` 时，错误与完成信号没有出口；它只该用于 `Err = Infallible` 的流 | V0-03 |
 | 镜像 trait | `DynObserver` / `box_error(self: Box<Self>)` | 把不可 object-safe 的消耗式方法改写成能通过 `dyn` 调用的形式，再 blanket impl 接回原协议 | V0-03 |
 | `take()` 语义 | `Option::take` | 把内部消费者取走并结束它；取走后 `Option` 变 `None`，后续信号自动 no-op | V0-03 |
+| 共享所有权 | `Rc` / `Arc` | 引用计数容器；`Rc` 单线程，`Arc` 跨线程（靠 `Send`/`Sync` 筛） | V0-04 |
+| 内部可变性 | interior mutability / `RefCell` / `Mutex` / `Cell` | 只拿 `&self` 也能改内部；代价是把“能不能改”从编译期推到运行期 | V0-04 |
+| 守卫 | borrow guard / `Ref` / `RefMut` / `MutexGuard` | 一个智能指针型对象，离开作用域即释放借用；两种线程模型的守卫**类型不同**，所以要用 GAT | V0-04 |
+| 重入探测 | `try_rc_deref_mut` | `rc.rs:45-50` 明说用途：检测同步重入，改走调度器而不是当场 panic/死锁 | V0-04 |
+| 锁中毒 | mutex poisoning | 持锁线程 panic 后 `lock()` 的两种策略：源码 `.unwrap()` 一起炸，本课 `into_inner()` 继续用 | V0-04 |
+| 无守卫共享 | `SharedCell` / `CellRc` / `CellArc` | 给 `Copy` 小值（flag/计数）的 `get`/`set`/`compare_exchange`，不会 panic 也不会死锁 | V0-04 |

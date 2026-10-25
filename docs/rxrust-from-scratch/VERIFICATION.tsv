@@ -3,4 +3,5 @@
 V0-01	OK	6 passed	0 warnings	E0308/E0277（total: usize += i32，已修并写进课文 §6②）
 V0-02	OK	5 passed（4 断言 + 1 答案文件）	0 warnings	E0119 冲突实现 / missing lifetime in associated type / missing required bound on `Row`（三者共同推出 GAT）；另含 clippy redundant-closure 与 rustc 多余 `mut`；并实测：删 impl 侧 `where Self: 'a` 仍可通过（约束只在声明侧）
 V0-03	OK	8 passed（5 断言 + 3 答案）	0 warnings	E0277 需要 FnMut 却声明成 Fn / E0382 FnOnce 只能调一次 / E0161 不能经 `dyn` 移动 `self`（正是 `DynObserver` 的存在理由）/ E0382 终止后再发；另实测 `mut self` 何时必需、何时多余
+V0-04	OK	6 passed（5 断言 + 1 答案文件）	0 warnings	E0277 `Rc<RefCell<_>>` 不能 `Send` / E0599 `derive(Clone)` 要求 `T: Clone` / 运行时 `RefCell already borrowed`（`rc.rs:99` 用 `borrow_mut`，所以 `try_*` 才是非 panic 出口）；我自己的两个错也被实测拦下：E0107 漏泛型参数、`JoinHandle` 需先 `join()`
 V1-01	PENDING	PENDING	PENDING	课文尚未按新契约重写（旧草稿 01-the-observer-and-the-first-source.md 待并入 V1）

@@ -30,7 +30,10 @@
       报错链均为实测：E0119 → missing lifetime in associated type → missing required bound on `Row`，
       外加第一版被拦的 redundant closure 与多余 `mut`
 - [x] 1.3 闭包三兄弟 `Fn/FnMut/FnOnce`：为什么 `next(&mut self)` 用 `FnMut`、终止方法为何消耗 `self`
-- [ ] 1.4 `Rc/Arc/RefCell/Mutex` 与内部可变性：共享 vs 共享可变；object-safety 初探（为 V1 `DynObserver` 铺路）
+- [x] 1.4 `Rc/Arc/RefCell/Mutex` 与内部可变性：共享 vs 共享可变；object-safety 初探（为 V1 `DynObserver` 铺路）——
+      `v0-foundations/00-04-shared-ownership-and-interior-mutability.md`；代码外部验证（5 断言 + 1 答案、clippy 0 警）；
+      报错均实测：E0277 `Rc` 不能 `Send` / E0599 `derive(Clone)` 要求 `T: Clone` / 运行时
+      `RefCell already borrowed`（因此才有 `try_*`）；并逐条核对了 `rc.rs` 的行号引用
 - [ ] 1.5 宏最小知识：`macro_rules!` 会展开成什么（用 `impl_observer_for_box!` 的真实形态做例子，只看不写）
 - [ ] 1.6 卷末：`docsizer words` 报告 + 术语表并入 + 读者自评清单（能独立回答每课三问）
 
