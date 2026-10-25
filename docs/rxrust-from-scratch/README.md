@@ -13,26 +13,27 @@
 | 可教行（分母） | **14,116**（排除 test 模块 11,644、空行 1,677、纯 `use` 239、纯括号 2,079） | 同上，分类可对账 |
 | 课次 | **58 课 / 103 段**（`--target 300 --max 600`） | `docsizer plan` |
 | 行级**预分配** | 100%（`COVERAGE.tsv` 由 `plan` 生成，每行都有归属课号）；**是否已写成课文**另由 `VERIFICATION.tsv` + `words` 跟踪 | `docsizer coverage` |
-| 非代码字数 | 42,652 / 目标 ≥ 1,000,000（删掉旧错位课后下降，属正常：宁少而不灌） | `docsizer words` |
-| **可读性闸** | ❌ **未通过**：147 处行话先用后定义 + 5 课新概念超预算（预算 2）——这就是重写清单 | `docsizer terms --strict` |
-| 交付进度 | 前置卷按“没写过代码”重写中：**新第 1 课已过闸**（先用后定义 0 / 超预算 0）；旧五课待逐课替换 | `tasks.md` 的 V0R 节 |
+| 非代码字数 | 51,913 / 目标 ≥ 1,000,000（含待重写的旧草稿） | `docsizer words` |
+| **可读性闸** | ✅ 已发布的 5 课：**0 先用后定义 / 0 超预算**<br>⚠ 全目录仍报 214 处——全部来自 `advanced-drafts/` 与旧草稿，即重写清单 | `docsizer terms --strict` |
+| 交付进度 | 前置卷（按“没写过代码”重写）**R.1–R.5 已交付**：程序/编译 → 变量/可变 → 函数/返回值 → 列表/循环 → 所有权/搬走 | `tasks.md` 的 V0R 节 |
 
 ## 目录结构
 
 ```
 docs/rxrust-from-scratch/
   README.md            ← 本文件（进度表 + 怎么用）
-  GLOSSARY.md          ← 术语表：中文释义 + 英文原词 + 首现课号
+  GLOSSARY.md          ← 术语表：可读性闸的数据源（一行=一个概念，标注首现课）
   MAP.tsv              ← 88 个源文件 → 7 卷（`plan` 的输入）
-  COVERAGE.tsv         ← 行级账本：源文件 / 行区间 / 课号 / 主·复习（`plan` 的输出）
-  VERIFICATION.tsv     ← 每课代码的编译验证结论
-  v0-foundations/      ← 零基础前置卷（已完成 5 课，不覆盖源码）
-    00-01-ownership-and-borrowing.md
-    00-02-traits-associated-types-and-gats.md
-    00-03-closures-and-sinks-observer-powers.md
-    00-04-shared-ownership-and-interior-mutability.md
-    00-05-macro-rules-minimum.md
-    code/00-0{1..5}-*.rs（含 .tests.rs 与 .answers.rs）
+  COVERAGE.tsv         ← 行级账本：源文件 / 行区间 / 课号 / 主·复习
+  VERIFICATION.tsv     ← 每课代码的编译/真跑结论
+  v0-foundations/      ← 零基础前置卷（真正写给没写过代码的人，已交付 5 课）
+    00-01-what-a-program-does.md      程序、编译
+    00-02-variables-and-mutability.md 变量、可变
+    00-03-functions-and-return-values.md 函数、返回值
+    00-04-lists-and-loops.md          列表、循环
+    00-05-ownership-and-moving.md     所有权、搬走
+  advanced-drafts/     ← ❗旧“五课 V0”：写给已会 Rust 的人，读者错位，
+                        将被 R.7–R.16 逐课吸收后删除（terms 报的 214 处全在这里）
   v1-observer-source/  v2-subscription/  v3-context-rc-factory/
   v4-three-layer-traits/  v5-higher-order-multicast/  v6-scheduler-async-final/
 ```
@@ -76,9 +77,9 @@ cd /tmp/minirx-check && cargo test && cargo clippy --all-targets -- -D warnings
 
 ## 谁该从哪里开始
 
-完全没写过代码 → 从 `v0-foundations/00-01-what-a-program-does.md`（让屏幕上出现字）开始，
-每课最多两个新词，不先教任何未定义的行话。已经有 Rust 基础 → 可直接进 V1，
-卡住时回来查前置卷。**旧的五课 V0（仍散在目录里）是写给会 Rust 的人的，正在重写替换。**
+完全没写过代码 → 从 `v0-foundations/00-01-what-a-program-does.md` 开始，顺着 00-02…00-05 往下。
+每课最多两个新词，不先用未定义的行话（这一条由 `docsizer terms --strict` 强制）。
+已经有 Rust 基础 → 可直接进 V1，卡住时回来查前置卷。
 
 ## 三句自检（任何一步卡住先背）
 

@@ -1,10 +1,18 @@
-# VERIFICATION — 每课代码的累计编译验证结论（验证 crate MUST 建在 workspace 之外：/tmp/minirx-check）
+# VERIFICATION — 每课代码的累计编译验证结论（验证 crate MUST 建在 workspace 之外：/tmp/minirx-check；零基础各课用 /tmp/l1…l5 独立 bin 真跑）
 # 可读性结论另见 `docsizer terms --strict`（先用后定义 / 新概念超预算两类违规）
 # lesson	build	test	clippy	key_error
-V0-01	OK	6 passed	0 warnings	E0308/E0277（total: usize += i32，已修并写进课文 §6②）
-V0-02	OK	5 passed（4 断言 + 1 答案文件）	0 warnings	E0119 冲突实现 / missing lifetime in associated type / missing required bound on `Row`（三者共同推出 GAT）；另含 clippy redundant-closure 与 rustc 多余 `mut`；并实测：删 impl 侧 `where Self: 'a` 仍可通过（约束只在声明侧）
-V0-03	OK	8 passed（5 断言 + 3 答案）	0 warnings	E0277 需要 FnMut 却声明成 Fn / E0382 FnOnce 只能调一次 / E0161 不能经 `dyn` 移动 `self`（正是 `DynObserver` 的存在理由）/ E0382 终止后再发；另实测 `mut self` 何时必需、何时多余
-V0-04	OK	6 passed（5 断言 + 1 答案文件）	0 warnings	E0277 `Rc<RefCell<_>>` 不能 `Send` / E0599 `derive(Clone)` 要求 `T: Clone` / 运行时 `RefCell already borrowed`（`rc.rs:99` 用 `borrow_mut`，所以 `try_*` 才是非 panic 出口）；我自己的两个错也被实测拦下：E0107 漏泛型参数、`JoinHandle` 需先 `join()`
-V0-05	OK	6 passed（5 断言 + 1 手写展开）	0 warnings	no rules expected `weird` / no rules expected `,`（单 tt vs tt 流）/ cannot find macro（定义在调用之后）/ E0119 手写与宏生成同一 impl / E0596 `Arc` 给不了 `&mut`；另取到 `coherence_leak_check` 警告原文（= `observer.rs:136` 那个属性的实测理由），以及我自己的 E0308（盒子写具体类型、item_type 却给泛型）
-V0R-01	OK	程序真跑（3 行输出已抄入课文）	0 warnings	实测 3 条：E0601 找不到 main（报在文件末尾）/ expected `;`, found `println` / 未关引号使报错落到**下一行**；`terms --strict` → undefined=0 over_budget=0
+
+## 已重写并按"没写过代码"交付的前置卷（程序真跑、输出抄录、报错实测）
+V0R-01	OK	真跑 3 行输出	0 warnings	E0601 找不到 main（报在文件末尾）/ expected `;`, found `println` / 未关引号使报错落到**下一行**
+V0R-02	OK	真跑 3 行输出 + 答案程序	0 warnings	E0384 没写 mut / E0425 名字拼错（`help:` 给出修正行）/ E0277 数字加文字（长清单只需看第一行）
+V0R-03	OK	真跑 3 行输出 + 答案程序	0 warnings	E0061 少给参数 / E0308 expected `()` found `i32`（忘写 `->`）/ E0308 expected `i32` found `&str`
+V0R-04	OK	真跑 7 行输出 + 答案程序	0 warnings	E0384 累加忘 mut / 常量下标越界被**编译期**拦（unconditional_panic）/ 函数交回下标则**运行时** index out of bounds / 中括号未关 mismatched closing delimiter
+V0R-05	OK	真跑 4 行输出 + 答案程序	0 warnings	E0382 borrow of moved value / E0382 use of moved value / E0308 expected `String` found `&str`；本课曾被 `terms` 抓到 1 处提前用"借用"，改措辞后复验 0 违规
+
+## 旧"五课 V0"：读者错位（写给会 Rust 的人），已移到 advanced-drafts/ 待被 R.7–R.16 吸收
+V0-01	OK	6 passed	0 warnings	E0308/E0277（total: usize += i32）
+V0-02	OK	5 passed	0 warnings	E0119 / missing lifetime in associated type / missing required bound on `Row`
+V0-03	OK	8 passed	0 warnings	E0277 需要 FnMut / E0382 FnOnce 只调一次 / E0161 不能经 dyn 移动 self / E0382 终止后再发
+V0-04	OK	6 passed	0 warnings	E0277 Rc 不能 Send / E0599 derive(Clone) / 运行时 RefCell already borrowed
+V0-05	OK	6 passed	0 warnings	no rules expected `weird` / no rules expected `,` / cannot find macro / E0119 / E0596；coherence_leak_check 警告原文
 V1-01	PENDING	PENDING	PENDING	课文尚未按新契约重写（旧草稿 01-the-observer-and-the-first-source.md 待并入 V1）
