@@ -8,7 +8,7 @@ use std::convert::Infallible;
 
 use rxrust::prelude::*;
 
-use crate::lexer::{Event, render};
+use crate::lexer::{Event, Tok, render, render_raw};
 use crate::value::Value;
 
 /// A resolved CSS rule in document order.
@@ -46,8 +46,9 @@ impl Exec {
             }
             Event::Decl { prop, value } => {
                 if let Some(top) = self.scopes.last_mut() {
-                    top.decls
-                        .push((render(&prop), Value::from_text(render(&value))));
+                    let name = render(&prop);
+                    let text = value_text(&name, &value);
+                    top.decls.push((name, Value::from_text(text)));
                 }
                 Vec::new()
             }
@@ -61,14 +62,22 @@ impl Exec {
     }
 }
 
+/// Declaration value text: a custom property (`--x: …`) carries **raw CSS text**, so a `//`
+/// comment inside its value belongs to the value; any other declaration value drops silent
+/// comments, which Sass strips before output.
+fn value_text(prop: &str, value: &[Tok]) -> String {
+    match prop {
+        p if p.starts_with("--") => render_raw(value),
+        _ => render(value),
+    }
+}
+
 /// Parent/child selector combination (Sass semantics): `&` replaces the parent, else descendant.
 fn combine(parent: &str, child: &str) -> String {
-    if parent.is_empty() {
-        child.to_string()
-    } else if child.contains('&') {
-        child.replace('&', parent)
-    } else {
-        format!("{parent} {child}")
+    match parent {
+        "" => child.to_string(),
+        p if child.contains('&') => child.replace('&', p),
+        p => format!("{p} {child}"),
     }
 }
 

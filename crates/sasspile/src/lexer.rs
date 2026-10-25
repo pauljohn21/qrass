@@ -15,6 +15,10 @@ pub enum Tok {
     Var(String),
     /// the inner tokens of a `#{ … }` interpolation
     Interp(Vec<Tok>),
+    /// a `// …` silent comment **including its slashes**, carried as data so each consumer
+    /// decides whether it survives into CSS: selectors and ordinary declaration values drop
+    /// it, a custom property (`--x:`) keeps it verbatim because its value is raw CSS text.
+    Silent(String),
 }
 
 /// A structural event produced by the delimiter fold.
@@ -41,6 +45,13 @@ struct LexAcc {
     slash: bool,
     block: bool,
     block_star: bool,
+    /// inside a `// … end-of-line` comment, collecting its text
+    line: bool,
+    /// the run being collected for [`Tok::Silent`] (starts with `//`)
+    comment: String,
+    /// last source character consumed outside comments — the lookbehind that keeps a
+    /// protocol slash (`url(http://x)`, `url(//cdn/x)`) from reading as a silent comment
+    prev: Option<char>,
 }
 
 impl LexAcc {
@@ -58,6 +69,14 @@ impl LexAcc {
         }
     }
 
+    /// Push the `// …` text collected so far as one [`Tok::Silent`] and restart the run.
+    fn take_comment(&mut self) {
+        if !self.comment.is_empty() {
+            let text = std::mem::take(&mut self.comment);
+            self.push(Tok::Silent(text));
+        }
+    }
+
     /// feed one char, emit 0..N tokens (owned accumulator, moved via `scan_map`).
     fn feed(&mut self, ch: char) -> Vec<Tok> {
         self.out.clear();
@@ -71,11 +90,34 @@ impl LexAcc {
             }
             return std::mem::take(&mut self.out);
         }
+        if self.line {
+            // A comment swallows the line, but never a declaration terminator: a custom
+            // property keeps its `// …` text and still ends at `;` (`--b: c // comment;`).
+            match ch {
+                '\n' => {
+                    self.line = false;
+                    self.take_comment();
+                    self.buf.push(' ');
+                }
+                ';' => {
+                    self.take_comment();
+                    self.push(Tok::Punct(';'));
+                }
+                c => self.comment.push(c),
+            }
+            return std::mem::take(&mut self.out);
+        }
         if self.slash {
             self.slash = false;
             if ch == '*' {
                 self.block = true;
                 self.block_star = false;
+                return std::mem::take(&mut self.out);
+            }
+            if ch == '/' {
+                self.flush_word();
+                self.line = true;
+                self.comment = String::from("//");
                 return std::mem::take(&mut self.out);
             }
             self.buf.push('/');
@@ -98,8 +140,15 @@ impl LexAcc {
             self.var = None;
             self.push(Tok::Var(name));
         }
+        // Lookbehind for the slash rule below: capture the previous character, then record
+        // the one about to be consumed.
+        let prev = self.prev;
+        self.prev = Some(ch);
         match ch {
-            '/' => self.slash = true,
+            // A slash only opens a pending comment/division when it cannot be part of a
+            // URL authority (`http://`, `url(//cdn`); the pending-flag fold resolves the
+            // second slash in the next step.
+            '/' if prev != Some(':') && prev != Some('(') => self.slash = true,
             '#' => {
                 self.flush_word();
                 self.hash = true;
@@ -160,17 +209,28 @@ impl MsgAcc {
 
 /// Render a token run back to source text (P0: values/selectors pass through verbatim; the
 /// full `Value`/`Expr` algebra arrives in P1). Interpolation is glued with no extra space.
+/// A silent comment is **dropped** — see [`render_raw`] for the context that keeps it.
 pub fn render(toks: &[Tok]) -> String {
-    let s = toks
-        .iter()
+    canon(&text_of(toks, false))
+}
+
+/// Like [`render`] but keeps `// …` comment text, for a custom-property value whose content
+/// is raw CSS and must survive untouched.
+pub fn render_raw(toks: &[Tok]) -> String {
+    canon(&text_of(toks, true))
+}
+
+fn text_of(toks: &[Tok], keep_silent: bool) -> String {
+    toks.iter()
         .map(|t| match t {
             Tok::Word(w) => w.clone(),
             Tok::Punct(c) => c.to_string(),
             Tok::Var(n) => format!("${n}"),
-            Tok::Interp(inner) => render(inner),
+            Tok::Interp(inner) => text_of(inner, keep_silent),
+            Tok::Silent(c) if keep_silent => c.clone(),
+            Tok::Silent(_) => String::new(),
         })
-        .collect::<String>();
-    canon(&s)
+        .collect()
 }
 
 fn canon(text: &str) -> String {
