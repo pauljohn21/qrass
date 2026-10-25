@@ -73,15 +73,24 @@
       （`directives/for/whitespace.hrx`、`comment.hrx` 的 `*/scss` 键）不再回退。跳过的“意外通过”：
       `core_functions/string/unique_id.hrx::is_unique` 是因为我们从“吐垃圾”变成“什么都不吐”而撞上了
       空期望输出（它要 `@use`/`@for`/`map.*`/`@error`，均未实现），**不计作真收益**。
-  - **0′.3b-2 未做（已尝试并退回）——“Sass 不拥有的调用”分类器**：把 `UndefinedVariable` 放进 `FATAL` 后仍剩
-    **4 条回退**，全在 `css/functions/special/prefixed/lowercase.hrx::*\/script_like`（`a {b: -a-calc($c)}`、
-    `-c-element($d)`、`-c-expression($d)`、`-c-progid:d($d)` 期望原样输出）。两次尝试均实测不成立，已退回：
-    ① `Word::ends_with('(')` 过宽 → 踩坏 `values/calc/min::preserved/variable`、`clamp`、`url` 等
-    **变量必须解析**的用例（978 → 947、3 个单测失败）；②收窄成“名字以 `-` 开头或含 `:`”→ 完全不命中，
-    因为词法把 `-a-calc(` 切成 `Op('-') + Word("a") + Op('-') + Word("calc(")`、`progid:d(` 里的 `:` 是独立
-    `Punct(':')`。=> 正解在**词法层**：调用名必须作为一个完整 lexeme 保留（含前导 `-` 与内部 `:`），
-    或建立一个真正的“Sass 拥有的函数名”名单（P1.7/P2 的 builtin 注册表）而非字符串启发式。在这之前
-    `FATAL` 保持为空（已回退），否则 `tests/fallback.rs::progid_filter_value_stays_literal` 会红。
+  - **0′.3b-2 未做（已三次实测推翻猜测）——special call 分类器**：`FATAL` 翻转后回退项从 60 降到 4，但任何
+    基于“形状”的判据都错。语料里的**判别文件**是（本轮没读到、导致两次错方向猜测）：
+    • `css/functions/not_special.hrx`：“`a {b: -c-type(1 + 1)}` → `-c-type(2)`”——**带厂商前缀的未知函数
+      不是 special**，参数照做 SassScript 算术（“名字含 `-` 即原始 CSS”错）；
+    • `css/functions/special/unprefixed.hrx` / `special/prefixed/*`：special 名单是 `url`/`calc`/
+      `element`/`expression`/`progid:` 这类**具名函数**（去前缀后的基名）；
+    • `css/functions/special_variable.hrx` 与 `values/calculation/calc/no_operator.hrx`：special 函数的参数里
+      **变量与插值仍解析**（`$a: foobar; b {c: calc($a)}` → `calc(foobar)`；`calc(#{1px + 2px})` → `calc(3px)`），
+      只是 `+ -` 不当算术——“名单命中就整个不解析”错。
+    实测数据：用 `SPECIAL_CALLS=[calc,element,expression]`+`progid:` 判定并翻转 `FATAL` → pass **599→979**，
+    但 `no_operator.hrx` 两条回退（因把 `calc` 当成不解析）；用“名字以 `-` 开头”→ 踩坏 `min`/`clamp`/`url`
+    （978→947、3 个单测红）。因此**未落**：已仅保留中性部分（词法让 `-a-calc(` 成为一个词素，
+    `regress=0 net=0`，已推），分类器与 `FATAL` 翻转已 `git checkout` 退回。
+  - **0′.3b-3 下一个具体开门问题**（先回答它再写分类器）：`css/functions/special/prefixed/lowercase::calc/script_like`
+    期望 `a {b: -a-calc($c)}` 输出 `-a-calc($c)`——按上面三条规则，`calc` 是 special 且参数应解 `$c`，而 `$c`
+    未定义应报错。这一条与三条规则共存不下去，需先确定它是“前缀后基名不算 special”还是
+    “解不了就整体退回原始 CSS”（后者属于 Sass 的声明值解析失败回退，需另找至少一个用例交叉验证）。
+    在该问题回答前 `FATAL` 保持为空，并用 `tests/fallback.rs` 钉住 interim 行为。
   - **0′.3c**：上面两项完成后，才把 `UndefinedVariable` 放进 `FATAL`，并翻转 `tests/fallback.rs` 最后一条
     （它现在故意钉着“暂逐字保留”），再按簇重测 error 类用例；同时收紧 harness 的 error 比对粒度（0.4），
     否则“+380”这类数字无法区分“真按金样报错”与“只是报了个错”。
