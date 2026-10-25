@@ -1,14 +1,18 @@
 //! docsizer — read-only accounting for the "write rxrust from scratch" tutorial.
 //!
-//! Three questions, three subcommands, all answered from files rather than from memory:
+//! Four questions, four subcommands, all answered from files rather than from memory:
 //! - `inventory` — how many lines of the reference crate are *teachable*, and what was excluded
 //!   and why (so the denominator is auditable);
 //! - `plan` / `coverage` — does the lesson ledger own every teachable line exactly once;
-//! - `words` — how much prose (non-code characters) the tutorial actually contains.
+//! - `words` — how much prose (non-code characters) the tutorial actually contains;
+//! - `terms` — can a reader with no background follow it, i.e. is every piece of Rust jargon in
+//!   the prose defined in the glossary *at or before* the lesson that uses it (word count and a
+//!   green build cannot answer this; a user's "I understood none of it" can).
 
 pub mod coverage;
 pub mod inventory;
 pub mod plan;
+pub mod terms;
 pub mod words;
 
 use std::collections::BTreeMap;
@@ -26,8 +30,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
         Some("plan") => plan_cmd(args),
         Some("coverage") => coverage_cmd(args),
         Some("words") => words_cmd(args),
+        Some("terms") => terms_cmd(args),
         _ => {
-            info!("usage: docsizer inventory|plan|coverage|words [--src P] [--out P] [--map P] [--ledger P] [--min N] [--target N] [--max N] [--strict]");
+            info!("usage: docsizer inventory|plan|coverage|words|terms [--src P] [--out P] [--map P] [--ledger P] [--dir P] [--glossary P] [--min N] [--max-new N] [--target N] [--max N] [--strict]");
             Ok(())
         }
     }
@@ -135,6 +140,32 @@ fn words_cmd(args: &[String]) -> Result<(), Box<dyn Error>> {
     counts.iter().for_each(|count| info!(file = %count.file, prose = count.prose, "docsizer words: file"));
     match strict(args) && totals.1 < min {
         true => Err("word gate failed".into()),
+        false => Ok(()),
+    }
+}
+
+/// `terms --dir docs/rxrust-from-scratch --glossary GLOSSARY.md [--max-new 2] [--strict]`
+///
+/// 这是“读者能不能跟上”的闸：不是量我写了多少，而是量我有没有拿未定义的行话去解释未知。
+fn terms_cmd(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let dir = flag(args, "--dir").unwrap_or_else(|| PathBuf::from("docs/rxrust-from-scratch"));
+    let glossary_path = flag(args, "--glossary").unwrap_or_else(|| dir.join("GLOSSARY.md"));
+    let glossary = fs::read_to_string(glossary_path)?;
+    let max_new = num(args, "--max-new", 2);
+    let report = terms::check(&dir, &glossary, max_new)?;
+    info!(
+        lessons = report.lessons,
+        defined_terms = report.defined_terms,
+        max_new_per_lesson = max_new,
+        undefined_uses = report.undefined.len(),
+        over_budget = report.over_budget.len(),
+        dir = %dir.display(),
+        "docsizer terms"
+    );
+    report.undefined.iter().take(30).for_each(|hit| warn!(use_site = %hit, "行话在正文里用了，却没在同一课或更早定义"));
+    report.over_budget.iter().take(10).for_each(|hit| warn!(lesson = %hit, "一节课引入的新术语超预算"));
+    match strict(args) && !report.clean() {
+        true => Err("readability gate failed".into()),
         false => Ok(()),
     }
 }

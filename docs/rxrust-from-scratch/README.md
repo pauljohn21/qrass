@@ -13,8 +13,9 @@
 | 可教行（分母） | **14,116**（排除 test 模块 11,644、空行 1,677、纯 `use` 239、纯括号 2,079） | 同上，分类可对账 |
 | 课次 | **58 课 / 103 段**（`--target 300 --max 600`） | `docsizer plan` |
 | 行级**预分配** | 100%（`COVERAGE.tsv` 由 `plan` 生成，每行都有归属课号）；**是否已写成课文**另由 `VERIFICATION.tsv` + `words` 跟踪 | `docsizer coverage` |
-| 非代码字数 | 46,149 / 目标 ≥ 1,000,000 | `docsizer words` |
-| 已完成课 | **V0 全卷（V0-01…V0-05）**：31 条断言全过、clippy 0 警——逐课结论见 `VERIFICATION.tsv` | — |
+| 非代码字数 | 42,652 / 目标 ≥ 1,000,000（删掉旧错位课后下降，属正常：宁少而不灌） | `docsizer words` |
+| **可读性闸** | ❌ **未通过**：147 处行话先用后定义 + 5 课新概念超预算（预算 2）——这就是重写清单 | `docsizer terms --strict` |
+| 交付进度 | 前置卷按“没写过代码”重写中：**新第 1 课已过闸**（先用后定义 0 / 超预算 0）；旧五课待逐课替换 | `tasks.md` 的 V0R 节 |
 
 ## 目录结构
 
@@ -72,6 +73,12 @@ cd /tmp/minirx-check && cargo test && cargo clippy --all-targets -- -D warnings
 
 > 为什么在仓库外：实测在 `target/` 下 `cargo new` 会让 cargo 改写根 `Cargo.toml` 的
 > `workspace.members`（本项目遇到过一次并已复原）。
+
+## 谁该从哪里开始
+
+完全没写过代码 → 从 `v0-foundations/00-01-what-a-program-does.md`（让屏幕上出现字）开始，
+每课最多两个新词，不先教任何未定义的行话。已经有 Rust 基础 → 可直接进 V1，
+卡住时回来查前置卷。**旧的五课 V0（仍散在目录里）是写给会 Rust 的人的，正在重写替换。**
 
 ## 三句自检（任何一步卡住先背）
 

@@ -110,3 +110,27 @@
 - [ ] 8.3 交叉链接：`docs/rxrust-source-analysis/` 各篇顶部加"配套实战教程见 `docs/rxrust-from-scratch/`"
 - [ ] 8.4 不影响产品码：每卷末复核 `sasspile` 的 test/clippy -D/`sasslint count=0`/hrx `regress=0` 仍成立
 - [ ] 8.5 README 进度表与实际课次同步；`GLOSSARY.md` 完整可查（首现课号无缺口）
+
+## V0R — 前置卷按"没写过代码"重写（用户反馈驱动，取代旧 V0 的 1.1–1.6）
+
+> 旧 V0 五课判为读者错位（`docsizer terms` 实测：147 处先用后定义；每课引入 16~22 个新概念，
+> 预算 2）。本节每课交付都要过 `terms --strict`；旧课文逐课替换后删除，不留"注释式补丁"。
+
+- [x] R.0 先建可读性闸：`docsizer terms`（`JARGON` 清单 + `GLOSSARY.md` 首现课号 → 先用后定义 /
+      超预算两类违规；`--strict` 非零退出）。10 条断言（4 旧 + 6 新）、clippy 0 警；
+      对旧 V0 跑 `--strict` 确实失败（这正是它该有的行为）
+- [x] R.1 第 1 课：让电脑打字给你看（新词只 2 个：程序、编译）——
+      `v0-foundations/00-01-what-a-program-does.md`；真实运行输出与 3 条真实报错原话
+      （E0601 报在文件末尾 / expected `;` / 未关引号导致报错落到下一行）；
+      新课单独过闸：`terms --strict` → `undefined_uses=0 over_budget=0`
+- [ ] R.2 第 2 课：让电脑记住一个数（变量、改值；新词 2 个）
+- [ ] R.3 第 3 课：把一件事起个名字（函数、返回值）
+- [ ] R.4 第 4 课：同一件事做很多遍（列表与重复；仍不出现 trait/泛型）
+- [ ] R.5 第 5 课：值有主人（所有权、搬走）——替换旧 00-01 的所有权内容
+- [ ] R.6 第 6 课：暂时借给别人看（借用、生命周期）
+- [ ] R.7 第 7 课：能力分等级（`Fn`/`FnMut`/`FnOnce`；含"闭包消费者丢信号"的可观察证明）
+- [ ] R.8 第 8 课：一种东西多种写法（`trait` 与泛型参数 → 关联类型）
+- [ ] R.9 第 9 课：类型也要带寿命（GAT：`type Item<'a>`；含 `missing lifetime in associated type` 实测）
+- [ ] R.10 第 10 课：多处持有还能改（共享可变：`Rc`/`Arc`/`RefCell`/`Mutex`；`try_*` 与中毒策略）
+- [ ] R.11 第 11 课：一份骨架多种组合（`macro_rules!` 最小知识 + hygiene）
+- [ ] R.12 卷末：全卷 `terms --strict` 必须 0 违规；`words` 报告；自评清单

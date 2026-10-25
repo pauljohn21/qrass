@@ -23,6 +23,25 @@
 反灌水：任何"复述源码原文、跨卷复制、把代码块算进字数"都在 `docsizer words` 的**非代码口径**下无收益
 （实测：写 V0-01 前 2 文件 / 非代码 7,613 字 → 写完后 4 文件 / 非代码 14,602 字，增量即该课正文的真实密度）。
 
+### 1.1 可读性闸（新增，因用户反馈而必选）
+
+字数、覆盖率、编译全绿**不能证明读者看得懂**。`docsizer terms` 量两件事：
+
+1. **先用后定义**：正文普通句子里出现 `JARGON` 清单中的行话，但 `GLOSSARY.md` 里该词的首现课号
+   晚于本课（或根本没收录）→ 违规，附 `文件名:行号 词`；``` 围栏内与行内反引号不计。
+2. **新概念预算**：`GLOSSARY.md` 里首现课号等于本课的**行数** > `--max-new`（默认 2）→ 违规。
+   一行的中英文名只算一个概念（按行计，不按别名计）。
+
+`--strict` 不干净则非零退出，作为每课交付门。实测旧 V0：`undefined_uses=147 over_budget=5`；
+新写的第 1 课：`undefined_uses=0 over_budget=0`（新词恰为“程序/编译”两个）。
+
+### 1.2 教具例外：`println!`
+
+项目规则禁用 `println!`（适用产品 `crates/`）。但零基础的第一个程序必须能在屏幕上看到字，
+`tracing` 对他是噪声不是教学。因此登记一个窄边界例外：**`println!` 仅允许出现在
+`docs/rxrust-from-scratch/**/code/` 下的教具**（它们在 workspace 外 `/tmp` 验证，不进产品构建，
+也不受 `sasslint` 扫描目录覆盖）。产品 crate 的禁令不得据此放宽。
+
 ## 2. 文件布局
 
 ```
@@ -33,6 +52,8 @@ docs/rxrust-from-scratch/
   COVERAGE.tsv              # 行级覆盖账本：源文件\t行区间\t课号\t主/复习（plan 的输出）
   VERIFICATION.tsv          # 每课编译验证结论：课号\tbuild\ttest\tclippy\t关键报错
   v0-foundations/            lesson 00-01 … 00-05（零基础前置，不覆盖源码；代码放 code/ 子目录）
+                             ⚠ 2026-10-25 读者错位：本卷按 tasks 的 V0R 重写为 12 课，从
+                             「让屏幕上出现字」起；新词 ≤ 2/课，旧五课逐课替换后删除
   v1-observer-source/        lesson 01-06   observer.rs / from_iter / trivial
   v2-subscription/           lesson 07-10   subscription*
   v3-context-rc-factory/     lesson 11-16   context.rs / rc.rs / factory.rs

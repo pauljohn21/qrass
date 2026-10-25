@@ -71,3 +71,26 @@ object-safety（`dyn` 相关，V1/V6 相关处）。
 #### Scenario: 反例可判定
 - **WHEN** 一课给出反例
 - **THEN** 同时给出"哪条铁律/哪个 `sasslint` 规则会拦下它"，读者能在自己项目里复查
+
+### Requirement: 零基础术语预算与"先跑再命名"
+
+目标读者被明确定义为**从未写过任何代码**的人。因此每课 MUST 最多引入 **2 个新概念**
+（以 `GLOSSARY.md` 的行计；同一行的中英文名只算一个概念），MUST NOT 在正文的普通句子里使用
+任何尚未在**同一课或更早的课**定义过的 Rust 行话（`docsizer terms` 的 `JARGON` 清单为准）。
+每个新概念 MUST 先让读者在**真实运行结果**里见到现象，再给名字与定义；
+MUST NOT 用"协议""签名""类型层固化"这类抽象词去解释另一个还没教过的东西。
+
+#### Scenario: 一节课塞进三个新概念
+
+- **WHEN** `GLOSSARY.md` 里有 3 行标注同一个首现课号
+- **THEN** `docsizer terms --max-new 2 --strict` MUST 以非零退出码报出该课的 `over_budget`
+
+#### Scenario: 用行话解释未知
+
+- **WHEN** 第 N 课正文出现 `trait`，而术语表把 `trait` 标在第 N+2 课首现
+- **THEN** `docsizer terms --strict` MUST 报出 `文件名:行 \`trait\``（先用后定义）
+
+#### Scenario: 示例代码与元话语不算违规
+
+- **WHEN** `trait` 只出现在 ``` 围栏代码块内，或被反引号包住且句子是"先别用这个词"
+- **THEN** 该处 MUST NOT 被记为违规（正文计数只统计把行话当解释工具使用的普通句子）

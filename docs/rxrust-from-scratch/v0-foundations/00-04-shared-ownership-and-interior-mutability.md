@@ -33,11 +33,11 @@ let handle = SubscriptionHandle { state: state.clone() };
 而线程模型又分两档：单线程 `Rc<RefCell<T>>`、多线程 `Arc<Mutex<T>>`。
 
 **如果每个算子都要自己写这两种分支，代码量翻倍且必然写错。** 所以需要一个抽象：
-"我有一个共享的可变句子，能借出守卫"——由调用方选容器，由算子只写一遍。这就是 `rc.rs`。
+"我有一个共享的可变句柄，能借出守卫"——由调用方选容器，由算子只写一遍。这就是 `rc.rs`。
 
 ## 2. 你先试（先卡住，再看讲解）
 
-1. 只用 `Rc<RefCell<i32>>`，写一个函数：拿句子的可变借用，加一个数，返回新值。
+1. 只用 `Rc<RefCell<i32>>`，写一个函数：拿句柄的可变借用，加一个数，返回新值。
 2. 现在把同样的函数用于 `Arc<Mutex<i32>>`。**不许改函数体**——想想签名要写成什么样子才可能成立。
 3. 试着给 `struct Wrap<T>(Rc<RefCell<T>>)` 加 `#[derive(Clone)]`，然后用一个**没有 `Clone`** 的 `T` 去克隆它。
    看编译器拦不拦（§6②）。
@@ -259,7 +259,7 @@ pub fn parallel_bump(handles: Vec<MutArc<i32>>, each: i32) -> usize {
 | `fn rc_deref(&self) -> Self::Ref<'_>;` | 接收者是 `&self`——只读借用不需要"拥有可变性"。 |
 | `pub trait RcDerefMut: RcDeref {` | 可变版是读版的超集：先能借看，才谈得上借改。 |
 | `type MutRef<'a>: DerefMut<Target = Self::Target> where Self: 'a;` | 同理，但要 `DerefMut`。 |
-| `fn rc_deref_mut(&self) -> Self::MutRef<'_>;` | **仍是 `&self`**。这就是内部可变性的定义：句子本身不可变，里面的数据可改。 |
+| `fn rc_deref_mut(&self) -> Self::MutRef<'_>;` | **仍是 `&self`**。这就是内部可变性的定义：句柄本身不可变，里面的数据可改。 |
 | `fn try_rc_deref_mut(&self) -> Option<Self::MutRef<'_>>;` | `rc.rs:45-50` 的注释讲得很直白：用途是**检测同步重入**，让调用方改走调度器，而不是当场 panic 或死锁。没有 `try_`，一个 bug 就是一次崩溃。 |
 
 ### `MutRc`：`Rc<RefCell<T>>` 的薄包装

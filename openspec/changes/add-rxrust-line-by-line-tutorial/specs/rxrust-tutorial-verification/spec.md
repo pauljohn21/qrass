@@ -77,3 +77,21 @@ MUST 保留该课的验证结论（通过/失败 + 关键报错）到 `docs/rxru
 - **WHEN** 本变更任一阶段交付
 - **THEN** `sasspile` 的 `cargo test --all-targets`、`clippy -D warnings`、`sasslint count=0`
   与 hrx `regress=0` 仍然成立
+
+### Requirement: 可读性闸与编译验证同等重要
+
+每课交付 MUST 同时满足三件事：① 教学代码在 workspace 之外**真编译真运行**，课文抄录真实输出
+（含真实报错原文）；② `docsizer terms --strict` 对已发布课文目录通过（先用后定义 = 0、超预算 = 0）；
+③ 若教具必须使用被项目规则限制的设施——例如给零基础读者看屏幕输出所需的 `println!`——
+MUST 在 design 中显式登记该例外及其边界（**仅限 `docs/` 下、在 workspace 外编译的教具**），
+不得据此放宽产品 crate 内的同一禁令。
+
+#### Scenario: 只有绿灯但没有过可读性闸
+
+- **WHEN** 课文代码全部编译通过，但正文存在未定义先用的行话
+- **THEN** 该课 MUST 判为未交付；`terms --strict` 的非零退出码即证据
+
+#### Scenario: 字数与覆盖率达标仍读不懂
+
+- **WHEN** `words` 与 `coverage` 都通过，`terms` 报出大量先用后定义
+- **THEN** MUST 以 `terms` 为准判定教程不合格，并把它当作重写的工作清单
