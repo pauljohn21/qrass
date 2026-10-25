@@ -1,0 +1,3 @@
+# VERIFICATION — 每课代码的累计编译验证结论（工具 MUST 建在 workspace 之外）
+# lesson\tbuild\ttest\tclippy\tkey_error
+V1-01\tPENDING\tPENDING\tPENDING\t课文尚未按新契约重写
