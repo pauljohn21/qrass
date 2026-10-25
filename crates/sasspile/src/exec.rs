@@ -45,6 +45,13 @@ impl StyleRule {
 struct Scope {
     selector: String,
     decls: Vec<(String, Value)>,
+    /// This block is the body of a **plain-CSS at-rule** (`@function --a()`), or sits inside one, so
+    /// its declarations are CSS text: an unbound `$x` stays written rather than raising
+    /// `UndefinedVariable` (the three `*/sass_script` cases of `css/function.hrx`).
+    /// Interpolation inside such a body is still SassScript (`lowercase/result/interpolation`:
+    /// `#{1 + 1}` → `2`), so this suppresses fatality only. (`css/plain/function.hrx` states the same
+    /// bodies through `@use "plain"`; those cases still fail for want of the P5 loader, not here.)
+    plain_css: bool,
 }
 
 /// The program state the `Exec` kernel mutates as events flow: open blocks and the lexical
@@ -72,16 +79,20 @@ impl State {
     pub fn step(&mut self, ev: Event) -> Result<Option<StyleRule>, SassError> {
         match ev {
             Event::Open(head) => {
-                let parent = self
+                let parent_text = self
                     .scopes
                     .last()
                     .map(|s| s.selector.clone())
                     .unwrap_or_default();
-                let selector = combine(&parent, &self.interp_text(&head)?);
+                let text = self.interp_text(&head)?;
+                let selector = combine(&parent_text, &text);
                 let settled = self.settle_top();
+                // A nested block inherits the plain-CSS context: it is still inside that body.
+                let plain_css = self.in_plain_css() || plain_css_body(&text);
                 self.scopes.push(Scope {
                     selector,
                     decls: Vec::new(),
+                    plain_css,
                 });
                 Ok(settled)
             }
@@ -101,7 +112,7 @@ impl State {
                         self.env.bind(var, bound);
                     }
                     None => {
-                        let owned = self.decl_value(&name, &value)?;
+                        let owned = self.decl_value(&name, &value, self.in_plain_css())?;
                         if let Some(top) = self.scopes.last_mut() {
                             top.decls.push((name, owned));
                         }
@@ -111,6 +122,11 @@ impl State {
             }
             Event::Close => Ok(Self::settled(self.scopes.pop())),
         }
+    }
+
+    /// Is the innermost open block a plain-CSS at-rule body?
+    fn in_plain_css(&self) -> bool {
+        self.scopes.last().is_some_and(|scope| scope.plain_css)
     }
 
     /// Settle the innermost block's pending declaration run **without** popping it: the block stays
@@ -123,6 +139,7 @@ impl State {
         Self::settled(Some(Scope {
             selector: top.selector.clone(),
             decls: std::mem::take(&mut top.decls),
+            plain_css: top.plain_css,
         }))
     }
 
@@ -142,19 +159,20 @@ impl State {
     /// interpret; the first is stored verbatim, the others bail inside [`State::evaluated`].
     /// Any other value becomes a typed [`Value`] when — and only when — the run is
     /// unambiguous; a run that does not parse, or whose failure is not fatal, keeps its verbatim
-    /// text.
-    fn decl_value(&self, prop: &str, value: &[Tok]) -> Result<Value, SassError> {
+    /// text. `plain` is the enclosing plain-CSS at-rule body, which keeps an unbound `$x` as text.
+    fn decl_value(&self, prop: &str, value: &[Tok], plain: bool) -> Result<Value, SassError> {
         Ok(match prop {
             p if p.starts_with("--") => Value::from_text(render_raw(value)),
             _ => self
-                .evaluated(value)?
+                .evaluated(value, plain)?
                 .unwrap_or_else(|| Value::from_text(render(value))),
         })
     }
 
     fn value_of(&self, toks: &[Tok]) -> Result<Value, SassError> {
+        // A binding (`$x: …`) is SassScript by definition, never plain-CSS text.
         Ok(self
-            .evaluated(toks)?
+            .evaluated(toks, false)?
             .unwrap_or_else(|| Value::from_text(render(toks))))
     }
 
@@ -163,11 +181,13 @@ impl State {
     /// digits instead of being normalised to `10px` from a float.
     ///
     /// `Ok(None)` means "stays verbatim": the run did not parse as a Sass expression, or it failed
-    /// inside a **special** call, whose arguments are plain CSS where an unbound `$x` is just text
-    /// (`expr::special_call`; `css/functions/special/prefixed/lowercase::calc/script_like`). Anywhere
-    /// else a fatal failure travels down the real `Err` channel — the decision is explicit per shape
-    /// and per kind, never one blanket `.ok()` that also eats real errors.
-    fn evaluated(&self, toks: &[Tok]) -> Result<Option<Value>, SassError> {
+    /// inside plain CSS — the arguments of a **special** call (`expr::special_call`) or a declaration
+    /// in a **plain-CSS at-rule body** (`plain`), where an unbound `$x` is just text
+    /// (`css/functions/special/prefixed/lowercase::calc/script_like`, `css/function.hrx::lowercase/
+    /// result/sass_script`). Anywhere else a fatal failure travels down the real `Err` channel — the
+    /// decision is explicit per shape and per kind, never one blanket `.ok()` that also eats real
+    /// errors.
+    fn evaluated(&self, toks: &[Tok], plain: bool) -> Result<Option<Value>, SassError> {
         let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
             other => Some(other),
@@ -177,7 +197,7 @@ impl State {
         };
         match expr.eval(&self.env) {
             Ok(value) => Ok(Some(value)),
-            Err(err) if err.is_fatal() && !expr::special_call(toks) => Err(err),
+            Err(err) if err.is_fatal() && !(plain || expr::special_call(toks)) => Err(err),
             Err(_) => Ok(None),
         }
     }
@@ -219,4 +239,19 @@ fn combine(parent: &str, child: &str) -> String {
         p if child.contains('&') => child.replace('&', p),
         p => format!("{p} {child}"),
     }
+}
+
+/// Whether a settled head text opens a **plain-CSS at-rule** body: `@function` (any case) naming a
+/// custom ident that begins with `--` — `@function --a()`, `@function --a(--b <color>)`,
+/// `@function --a() returns <ident>`, `@#{function} --a()` (`css/function.hrx`,
+/// `css/plain/function.hrx`).
+///
+/// It reads the **resolved** head because a head may itself carry `#{…}` (the last case above), so the
+/// interpolation must be folded before the shape is known. `@mixin --a` is deliberately not included:
+/// the corpus makes it an error (`css/mixin.hrx::error/css/mixin`), not a passthrough body.
+fn plain_css_body(text: &str) -> bool {
+    let resolved = text.to_lowercase();
+    let mut words = resolved.strip_prefix('@').unwrap_or("").split_whitespace();
+    matches!(words.next(), Some("function"))
+        && words.next().is_some_and(|name| name.starts_with("--"))
 }

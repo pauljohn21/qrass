@@ -19,19 +19,53 @@ async fn escaped_dollar_in_selector_is_not_a_variable() {
 }
 
 /// An unbound variable in an ordinary value must become a real error on the stream's `Err` channel —
-/// `directives/use/error/member/missing` expects `Error: Undefined variable.`
+/// `directives/use/error/member/missing` and `core_functions/meta/call.hrx::error/if_args` both state
+/// the oracle header `Error: Undefined variable.`
 ///
-/// Ignored until plain-CSS at-rule bodies pass through (0′.3b-4): flipping `FATAL` today breaks
-/// `css/plain/function.hrx::*\/sass_script`, which must leave `result: $b` untouched inside
-/// `@function --a() { … }`. Kept as a test rather than deleted so the target stays executable.
+/// The header carries no variable name: in the corpus the name appears only in the source span drawn
+/// under the header (`css/comment.hrx::error/loud/interpolation/failure`), which P7 7.2 emits.
 #[tokio::test]
-#[ignore = "pending 0'.3b-4: plain-CSS at-rule passthrough"]
 async fn unbound_variable_travels_the_err_channel() {
     let err = compile("a { b: $undefined }")
         .await
         .expect_err("an unbound reference must fail the compile");
     assert_eq!(err.kind, sasspile::ErrorKind::UndefinedVariable);
-    assert_eq!(err.message, "Undefined variable: \"$undefined\".");
+    assert_eq!(err.message, "Undefined variable.");
+}
+
+/// The third guard flipping `FATAL` needed: a declaration inside a **plain-CSS at-rule body** is CSS
+/// text, so an unbound `$x` must not abort — while the same body still resolves `#{ … }`, and an
+/// ordinary style rule still fails on the same name. Every shape is a fixture of `css/function.hrx`.
+#[tokio::test]
+async fn plain_css_at_rule_body_keeps_an_unbound_variable_as_text() {
+    // `lowercase/`, `uppercase/result/sass_script`, `result/uppercase/sass_script`
+    assert_eq!(
+        compile("@function --a() {\n  result: $b;\n}")
+            .await
+            .expect("plain-CSS body is text"),
+        "@function --a() {\n  result: $b;\n}\n"
+    );
+    assert_eq!(
+        compile("@FUNCTION --a() {\n  result: $b;\n}")
+            .await
+            .expect("the at-rule name is case-insensitive"),
+        "@FUNCTION --a() {\n  result: $b;\n}\n"
+    );
+    // `lowercase/result/interpolation`: interpolation in that body is still SassScript.
+    assert_eq!(
+        compile("@function --a() {\n  result: #{1 + 1};\n}")
+            .await
+            .expect("#{ } evaluates inside a plain-CSS body"),
+        "@function --a() {\n  result: 2;\n}\n"
+    );
+    // The boundary: the identical reference in a style rule is the corpus's fatal case.
+    assert_eq!(
+        compile("a {\n  result: $b;\n}")
+            .await
+            .expect_err("a style rule is not plain CSS")
+            .message,
+        "Undefined variable."
+    );
 }
 
 /// The other half of the rule: the same unbound name inside a **special** call is plain-CSS text and

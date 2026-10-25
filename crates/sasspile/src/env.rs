@@ -28,15 +28,17 @@ impl Env {
 
     /// Look a variable up. An unbound name is typed as the Sass **undefined variable** error so the
     /// `Exec` phase can decide — by kind, against the `FATAL` set in the crate root — whether it
-    /// aborts the stream or the declaration keeps its verbatim text. The corpus wants
-    /// `Error: Undefined variable.` (`directives/use/error/member/missing`); literal contexts must not
-    /// look here at all (P0′.3b).
+    /// aborts the stream or the declaration keeps its verbatim text.
+    ///
+    /// The message is the corpus's **oracle header**, `Error: Undefined variable.`
+    /// (`directives/use/error/member/missing`, `css/comment.hrx::error/loud/interpolation/failure` — all
+    /// 23 fixtures that name this error spell it without the variable). The name is not part of the
+    /// header: in Sass it is read off the *source span* under the header, which P7 7.2 adds. Literal
+    /// contexts must not look here at all (P0′.3b).
     pub fn get(&self, name: &str) -> Result<Value, SassError> {
-        self.vars.get(name).cloned().ok_or_else(|| {
-            SassError::typed(
-                ErrorKind::UndefinedVariable,
-                format!("Undefined variable: \"${name}\"."),
-            )
-        })
+        self.vars
+            .get(name)
+            .cloned()
+            .ok_or_else(|| SassError::typed(ErrorKind::UndefinedVariable, "Undefined variable."))
     }
 }

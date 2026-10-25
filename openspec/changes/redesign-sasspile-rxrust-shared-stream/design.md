@@ -50,9 +50,11 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
 公开面:仅 async fn compile(content) -> Result<String, SassError>
 ```
 
-**现状(P0′.1/.2/.4 已落)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
-`order` 键/`sort_by_key`/`from_stream` 假并发已不存在;harness 基线 595 → 598。仍待做:0′.3(真 `Err`
-通道,删 `exec.rs` 里 4 处兜底)、0′.6(四条 sasslint 机器闸)、0′.7(`Selector`/`PropName` 结构化)。
+**现状(P0′.1/.2/.3/.4 已落)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
+`order` 键/`sort_by_key`/`from_stream` 假并发已不存在;真 `Err` 通道已接上且 `UndefinedVariable` 已致命。
+harness 基线 595 → **600**(量具已换成全路径 key + 错误消息金样,见 tasks 0′.3)。**0′.3 只真值 +1** 这件事本身
+是结论:剩下大量 `error` 用例要的是尚未实现的**消息**(单位代数、`Expected identifier.`、deprecation),归 P1/P7。
+仍待做:0′.6(四条 sasslint 机器闸)、0′.7(`Selector`/`PropName` 结构化)。
 
 嵌套不是"树",是事件流上的 owned `scopes`;规则在**开子块冲刷父块待定声明段**与**闭块冲刷残余**两个时刻被推出来
 (所以一个块可以出多条规则),而不是"等 `Close` 一次性出整块"。除表达式求值(自底向上,天然递归)
@@ -114,6 +116,10 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
   **不是错误策略**,它会静默吞掉真错误并掩盖 hrx 的 error 期望。
 - 保留的例外:仅"局部可恢复且语义上确需原样透传"的 CSS 原生构造(calc 不可化简、custom property 原样文本、
   未识别 at-rule),这类**由规范定义为透传**,而非由 `Result` 失败降级。
+- 落地形态:`const FATAL: &[ErrorKind]` 是唯一的“哪类失败真终止”开关,当前 = `[UndefinedVariable]`。透传例外
+  逐个由语料定形状,且只**抑制致命性**、不改求值结果:① 块头部只认 `#{}`(`@for $i` 是绑定目标);
+  ② special 调用的参数(`expr::special_call`);③ plain-CSS at-rule 体(`exec::plain_css_body`,
+  `@function --a()` 里 `result: $b` 留原文而同体 `#{1 + 1}` 仍出 `2`)。`@mixin --a` 不属透传(语料判它报错)。
 - 收口只用框架原生口子:`collect`/`reduce_initial` + `into_future()`、`into_stream()`、或 await `TaskHandle`;
   `std::sync::mpsc` 仅当必须把 `Sender` 交给外部/跨线程时作桥接,禁当终点、禁外套 `block_on`。
 - `into_future()` 实测限制:要求**恰好一个值**(空→`Empty`,多→`MultipleValues`)且**丢弃订阅句柄**(不可取消);

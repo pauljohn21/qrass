@@ -20,7 +20,8 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 pass=595/14,345）。
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=600/11,486**，量具 =
+> 相对 `spec/` 全路径 key + 错误消息金样，见 0′.3 末“可复核数据”）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
       `ObservableType`/`CoreObservable`），在自己 `next` 里逐条发射 0..N 项；删除
@@ -46,7 +47,8 @@
       **附带修一个工具缺陷**：`ledger` 重导同名 run 时不清 `run_fail` 旧行 → 已修好的用例会报 phantom REGRESS
       （一度使我误判为 `regress=1`）；现 `import_rows` 先 `DELETE FROM run_fail WHERE run_id`，并加
       `crates/ledger/tests/reimport.rs` 两例钉住（该缺陷是旧工具可观测的假数据，不属本阶段验收项）。
-- [ ] 0′.3 **真 `Err = SassError` 通道**：拆为三步，**已做过一次并因证据不够而回退**（下记实测数据不得被遗忘）。
+- [x] 0′.3 **真 `Err = SassError` 通道**：拆为三步，**已做过一次并因证据不够而回退**（下记实测数据不得被遗忘）。
+  0′.3c 起 `UndefinedVariable` **已在 `FATAL` 中**，量具同时换成“全路径 key + 错误消息金样”，两笔历史读数已作废。
   - **试验结果（已 `git checkout` 回退）**：把 `ErrorKind::UndefinedVariable` 接成致命错误后，hrx
     **598 → 984**（+389 全部是规范期望为错误的用例），但同时 **回退 60 条**。因不能解释全部回退项而放弃，
     不得拿 60 条真通过换未评估的收益。
@@ -61,7 +63,7 @@
   - [x] **0′.3a（已合入）管道**：`SassError` 带 `ErrorKind`；`ExecObserver` 改持 `Option<O>` 并用
     `take()` 保证终止恰好一次（上游 `Infallible`，`error` 分支不可达）；`State::step` 返回
     `Result<.., SassError>`；终点不再重新贴标签（删 `map_err(|_| SassError::new("reduce"))`）。
-    致命集合 `const FATAL: &[ErrorKind] = &[]` 暂时为空，所以行为**逐字节不变**：
+    致命集合 `const FATAL: &[ErrorKind] = &[]` 暂时为空（0′.3c 起已翻转），所以行为**逐字节不变**：
     hrx 快照与基线 **md5 相同**（`2959a889…`，598/598），空库 `ledger diff regress=0 net=0`，
     0 测试失败、clippy `-D warnings` 无告警、`sasslint count=0`。
     新增 `tests/fallback.rs` 钉住两类事实：规范要求的字面量透传（`progid:` 值、选择器 `\$`）不得查变量；
@@ -90,24 +92,41 @@
       按**去厂商前缀后的基名**匹配 `url`/`calc`/`element`/`expression`（另认 `progid:` 这类命名空间形）；
       词法已保证 `-a-calc(` 是一个词素。注意它只在 `FATAL` 非空时才参与判定，所以现在行为中性（实测
       与 599 基线集合完全相等：新增=0 丢失=0）。
-  - [ ] **0′.3b-3 翻转的实测结果（未落地，原因已定位）**：把 `UndefinedVariable` 放进 `FATAL` 并加上述两条
-      守卫后，hrx **599 → 981**（逐条集合差：新增 **385**、丢失 **3**）。三条丢失全部是
-      `css/plain/function.hrx::*\/sass_script`：输入为 plain-CSS `@function --a() { result: $b; }`，
-      规范要求整块原样透传，而我们仍把 `$b` 当 SassScript 求值→ 报错。不拿 385 换 3 条真回退，已退。
-  - [ ] **0′.3b-4 翻转的前置任务**：plain CSS at-rule（`@function --a()`/`@mixin --a()`/未知 at-rule）体
-      原样透传（属 P7 7.1，但它是 0′.3 的门，不是可选项）。完成后才能把 `UndefinedVariable` 加进 `FATAL`，
-      并把 `tests/fallback.rs::unbound_variable_travels_the_err_channel`（现 `#[ignore]`）恢复为常规断言。
-  - [ ] **0.5 harness 用例 key 相撞（本轮实测发现，工具会低报回归）**：`tests/hrx.rs` 用
-      `<basename>.hrx::<case>` 做 key，不同目录同名文件（如两个 `function.hrx`）会碰撞；导致
-      `ledger diff` 报 `regress=0 net=266` 而逐条集合差实为 `+385 / −3`。key 必须改用相对 `spec/` 的
-      完整路径。在此之前，任何关键结论都应用两份快照的 `awk|sort|comm` 集合差复核，不得只信 `ledger diff`。
-  - **0′.3c**：上面两项完成后，才把 `UndefinedVariable` 放进 `FATAL`，并翻转 `tests/fallback.rs` 最后一条
-    （它现在故意钉着“暂逐字保留”），再按簇重测 error 类用例；同时收紧 harness 的 error 比对粒度（0.4），
-    否则“+380”这类数字无法区分“真按金样报错”与“只是报了个错”。
+  - [x] **0′.3b-3 翻转的实测结果（已落地，但先前两笔读数全被证明不可信）**：同一翻转在三种量具下的读数 ——
+    ① 旧量具（basename key + “有错即算 error 用例通过”）：**599 → 984**，报“新增 385 / 丢失 3”；
+    ② key 换成相对 `spec/` 全路径（0.5）后同样两笔：**+385 / −3** 复现，但三条丢失其实是
+      `css/function.hrx::*/sass_script`（此前错记为 `css/plain/function.hrx`——两个同名文件被撞成一个 key，
+      而 `css/plain/function.hrx::*` 一直因 `got ""` 失败，缺的是 P5 的 `@use "plain"` 加载器，不是透传）；
+    ③ 再加“错误消息必须等于金样 `Error:` 首行”（0.4 的一部分）：**599 → 600，regress=0，真收益 1 条**
+      （`core_functions/meta/call::error/if_args` 期望 `Error: Undefined variable.`）。
+    **385 里有 384 条是假通过**：逐条取金样 `error` 首行比对，只有 1 条真写 `Undefined variable`，其余是
+    `Expected identifier.`(23)、`DEPRECATION WARNING [global-builtin]`(18)、`$red: Expected 0.5px to have
+    unit "%" or no units.`(42…) 等我们尚未产生的消息 ⇒ “报了个错”被旧量具当成“按金样报错”。
+    结论：翻转本身正确（铁律要求真通道），但它今天在**真**指标上只值 +1；已按 ③ 落地。
+  - [x] **0′.3b-4 plain CSS at-rule 体透传（已合入）**：`exec::plain_css_body` 认**已求值后**的头部文本
+    `@` + `function`（大小写不限）+ `--` 开头的自定义 ident（`@function --a()`／`@FUNCTION --a()`／
+    `@#{function} --a()`／`--a(--b <color>)`／`returns <ident>`），命中的 `Scope` 标 `plain_css`，
+    嵌套块继承。该位置只**抑制致命性**、不改求值：`result: $b` 留原文，而同体 `#{1 + 1}` 仍出 `2`
+    （`css/function.hrx::lowercase/result/{sass_script,interpolation}`）。`@mixin --a` **不纳入**：语料判它
+    报错（`css/mixin.hrx::error/css/mixin`），不是透传体。新增 `tests/fallback.rs::
+    plain_css_at_rule_body_keeps_an_unbound_variable_as_text` 钉住这条边界。
+  - [x] **0.5 harness 用例 key 相撞（已修）**：key 改为**相对 `spec/` 的完整路径**（去 `.hrx`）+ 用例目录，
+      并在 harness 里加**撞名断言**（出现重复 key 即整轮判失败）。实测旧方案在 11486 条里有 **1135 个重复
+      key**，其中 **33 个 key 同时挂着一条 PASS 和一条 FAIL**（这正是“丢 3 条”被归错文件的机制）；旧 run 落库时
+      10891 条失败被压成 7138 个 key。历史 run 与新 run 的 key 不同构，**不得跨制式 diff**（已在 `reports/hrx.db`
+      的 `case-key-scheme` note 里记明，新基线 `target/baselines/head-600-pathkey.tsv`）。
+  - [x] **0′.3c（已合入）**：`UndefinedVariable` 进 `FATAL`；`tests/fallback.rs::
+    unbound_variable_travels_the_err_channel` 去掉 `#[ignore]` 并断言金样消息 `Undefined variable.`
+    （语料 23 处该错误的首行都不带变量名，名字属于头下面的 source span，归 P7 7.2）。
+  - [~] **0.4 harness 断言 error/warning 期望（部分完成）**：`error` 用例改为比对金样 `Error:` 首行，
+      消息不等即 FAIL（旧口径“任何 Err 都算过”会凭空 +384）。未做：span/行列、`Warning:`、
+      `DEPRECATION WARNING`（这类首行非 `Error:` 的用例现在一律判不匹配，诚实计为 FAIL）。
   - **可复核数据**：基线与阶段快照一律存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线导致
-    拿空基线比出 `regress=7134` 的垃圾数）；现有 `head-before-3b.tsv`(598) / `after-3b.tsv`(599) 与
-    `ledger-3b.sqlite`。行为不变型改动用 `cmp` 证逐字节相同，变型用 `ledger diff` 列 NET/REGRESS 具体键。
-    harness 对 error 类用例的比对粒度尚需收紧（得确认“+380”不是“只比对有没有报错”的假阳性）——归 0.4。
+    拿空基线比出 `regress=7134` 的垃圾数）。本轮留存：`head-pathkey-599.tsv`（新 key、旧粗量具）、
+    `tight-empty.tsv`(599)／`tight-fatal.tsv`(600)（新 key、消息金样量具，翻转前后对照）、
+    `head-600-pathkey.tsv`（**往后的基线**）、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
+    行为不变型改动用 `cmp` 证逐字节相同；变型必须在**空库** `ledger diff` 列 NET/REGRESS 具体键，并用
+    `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够。
 - [ ] 0′.5 **共享态改 `C::RcMut`/`C::RcCell`**：内核泛型于 `C: Context`，`Local`(wasm32) 与 `Shared` 两份编译均过；
       禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
       （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
@@ -119,10 +138,11 @@
       （现 `lexer.rs:223-257`、`exec.rs:150-155`）；选择器/属性名不再经字符串承载语义。
 
 ## P0 — hrx harness(验收安全网)
-- [~] 0.1 `tests/hrx.rs` 经 `compile` 跑 `sass-spec` 安全子集、产 `ledger` 快照 + 立基线(seed 560/11486)。**已具雏形,待补 0.2/0.3**
+- [~] 0.1 `tests/hrx.rs` 经 `compile` 跑 `sass-spec` 安全子集、产 `ledger`  快照 + 立基线(seed 560/11486，现 **600**)。**已具雏形,待补 0.2/0.3**；key 制式已改（0′.3 的 0.5）
 - [ ] 0.2 harness 支持**多文件输入**(partial `_x.scss`/相对 import)与目录型用例
 - [ ] 0.3 harness 解析 `options.yml`:尊重 `:todo:`(skip/xfail,不入基线)、`precision`、`--indented` 语法
-- [ ] 0.4 harness 断言 `error`/`warning`/`deprecation` 期望(按 P7 诊断范围决定是否计入)
+- [~] 0.4 harness 断言 `error`/`warning`/`deprecation` 期望(按 P7 诊断范围决定是否计入)。**`error` 已收**：
+      比对金样 `Error:` 首行（详见 0′.3 的 0.4 条）；`warning`/`deprecation` 与 span 仍未计入
 
 ## P1 — 值地基:单位代数 + calculation + 全色彩空间 + list/map
 - [~] 1.1 `Value`(带单位 Number/引号态 String/Color/List/Map/Bool/Null)+ `to_css` 规范化。**已有基础,缺单位换算/calc/CSS4 色**

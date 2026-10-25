@@ -36,21 +36,29 @@ pub enum ErrorKind {
 }
 
 /// The kinds that abort the stream. An unbound variable is fatal because the corpus says so
-/// (`directives/use/error/member/missing`: `Error: Undefined variable.`).
+/// (`directives/use/error/member/missing`, `core_functions/meta/call.hrx::error/if_args`: both expect
+/// `Error: Undefined variable.`).
 ///
-/// Still empty, because flipping it was measured at 599 → 981 (+385) but with **3 real
-/// regressions**, all `css/plain/function.hrx::*\/sass_script`: a plain-CSS at-rule body
-/// (`@function --a() { result: $b; }`) must pass through untouched (P7/0′.7), and we still evaluate
-/// it as SassScript. The two guards that flipping already required are landed and verified:
+/// The three guards flipping already required are landed, and each one is a corpus shape, not a guess:
 /// 1. a block **head** resolves only `#{ … }` — an `@for $i from …` header *binds* `$i`; looking it
 ///    up there invented errors for ~47 cases (`directives/for/{whitespace,comment}.hrx`);
-/// 2. an unbound `$x` inside a **special** call is plain-CSS text (`expr::special_call`: arguments
-///    of `url`/`calc`/`element`/`expression`/`progid:`), while a *bound* one still resolves
+/// 2. an unbound `$x` inside a **special** call is plain-CSS text (`expr::special_call`: arguments of
+///    `url`/`calc`/`element`/`expression`/`progid:`), while a *bound* one still resolves
 ///    (`values/calculation/calc/no_operator::variable/unquoted_string`) and `min`/`max`/`clamp` are
-///    not special at all (`css/functions/not_special.hrx` computes `-c-type(1 + 1)`).
+///    not special at all (`css/functions/not_special.hrx` computes `-c-type(1 + 1)`);
+/// 3. a declaration in a **plain-CSS at-rule body** (`@function --a()`) keeps `$x` as text
+///    (`exec::plain_css_body`; `css/function.hrx::{lowercase,uppercase}/result/sass_script`,
+///    `result/uppercase/sass_script`) while `#{1 + 1}` in the same body still evaluates
+///    (`lowercase/result/interpolation`).
 ///
-/// Add `UndefinedVariable` once plain-CSS at-rule bodies pass through (0′.3b-4).
-const FATAL: &[ErrorKind] = &[];
+/// **Measured with a per-case-unique key and an error-message oracle** (see `tests/hrx.rs`): hrx
+/// 599 → **600**, `regress=0`. The single gain is `core_functions/meta/call::error/if_args`.
+/// The older "599 → 984 (+385)" figure was an artefact of the coarse oracle: the harness used to count
+/// **any** error as satisfying an `error` case, and 384 of those 385 fixtures state a different message
+/// (`Expected identifier.`, `$red: Expected 0.5px to have unit "%"…`, `DEPRECATION WARNING …`) that we
+/// do not produce. Those cases stay FAIL until P1's unit algebra and P7's diagnostics emit the message
+/// the oracle names.
+const FATAL: &[ErrorKind] = &[ErrorKind::UndefinedVariable];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
 /// value a fallback can quietly swallow.
