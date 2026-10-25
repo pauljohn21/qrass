@@ -13,7 +13,7 @@
 
 use crate::env::Env;
 use crate::expr::{self, Expr};
-use crate::lexer::{Event, Tok, render, render_raw};
+use crate::lexer::{Event, Tok, canon, render, render_raw, token_text};
 use crate::value::Value;
 
 use crate::SassError;
@@ -163,10 +163,9 @@ impl State {
     /// digits instead of being normalised to `10px` from a float.
     ///
     /// `Ok(None)` means "stays verbatim": the run did not parse as a Sass expression, or its failure
-    /// is not yet fatal. Which failures may stay verbatim is being pinned case-by-case against the
-    /// corpus (P0′.3b: selector escapes, `progid:`/prefixed values, uppercase `VAR(...)` must not
-    /// look variables up at all) — the point is that the decision is **explicit per kind**, not one
-    /// blanket `.ok()` that also eats real errors.
+    /// is not fatal. Which failures may stay verbatim is being pinned case-by-case against the
+    /// corpus (P0′.3b) — the decision is **explicit per kind**, not one blanket `.ok()` that also
+    /// eats real errors.
     fn evaluated(&self, toks: &[Tok]) -> Result<Option<Value>, SassError> {
         let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
@@ -182,16 +181,33 @@ impl State {
         }
     }
 
-    /// A token run that only **interpolates**: a selector or property name may resolve `#{}`
-    /// and `$var`, but its lexemes must never be read as numbers (`.2xl` is an identifier).
+    /// A head position (selector or property name) resolves **only `#{ … }`**: Sass has no bare
+    /// variable reference there. This matters because a block head is not always a selector — an
+    /// `@for`/`@each` header *binds* its `$i`, so looking a bare `$var` up here turned
+    /// `sass-spec/directives/for/whitespace.hrx`'s `@for $i from … {}` into an "Undefined variable"
+    /// (measured: that one over-reach accounted for ~47 of the 60 regressions when `UndefinedVariable`
+    /// was made fatal). Lexemes must also never be read as numbers (`.2xl` is an identifier).
     fn interp_text(&self, toks: &[Tok]) -> Result<String, SassError> {
-        Ok(
-            match expr::interpolated(toks).map(|expr| expr.eval(&self.env)) {
-                Some(Ok(value)) => value.to_css(),
-                Some(Err(err)) if err.is_fatal() => return Err(err),
-                _ => render(toks),
-            },
-        )
+        toks.iter()
+            .map(|tok| self.head_piece(tok))
+            .collect::<Result<String, SassError>>()
+            .map(|text| canon(&text))
+    }
+
+    /// One head token as text: only an interpolation is evaluated, every other lexeme stays exactly
+    /// as written.
+    fn head_piece(&self, tok: &Tok) -> Result<String, SassError> {
+        let Tok::Interp(inner) = tok else {
+            return Ok(token_text(tok));
+        };
+        let Some(expr) = expr::interpolated(inner) else {
+            return Ok(render(inner));
+        };
+        match expr.eval(&self.env) {
+            Ok(value) => Ok(value.to_css()),
+            Err(err) if err.is_fatal() => Err(err),
+            Err(_) => Ok(render(inner)),
+        }
     }
 }
 

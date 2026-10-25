@@ -66,12 +66,29 @@
     0 测试失败、clippy `-D warnings` 无告警、`sasslint count=0`。
     新增 `tests/fallback.rs` 钉住两类事实：规范要求的字面量透传（`progid:` 值、选择器 `\$`）不得查变量；
     以及“未绑定变量暂逐字保留”的 interim 策略（P0′.3b 落地时预期改这条）。
-  - **0′.3b**：先把字面量上下文规则说清并只在这些位置保留透传（选择器/属性名仅 `#{}` 求值、
-    大写/前缀 CSS 函数名、`progid:` 等），然后才把未绑定变量判致命。
-  - **0′.3c**：补 `@for`/`@each` 在缩进语法下的绑定（或先按 0.3 排除该类），重测那 47 条。
-  - **可复核数据**：基线快照与回退清单已存 `/tmp/hrx-base.tsv`、`/tmp/hrx-p03.tsv`、`/tmp/ledger-p03.sqlite`
-    （临时目录会被清理，重跑即可再得）；harness 对 error 类用例的比对粒度尚需收紧（得确认 +389 不是
-    “只比对有没有报错”的假阳性）——归 0.4。
+  - [x] **0′.3b-1 头部只认 `#{}`**（已合入）：`interp_text` 不再把整个头 run 当表达式求值，而是逐 token 走
+      `head_piece`：只有 `Tok::Interp` 求值，其余一律 `token_text` 原样。因为头未必是选择器——
+      `@for $i from …` 的 `$i` 是**绑定目标**，旧写法把它去环境里查，制造出假“Undefined variable”。
+      实测：598 → **599**，`ledger diff regress=0 net=1`；且翻转 `FATAL` 后原先 60 条回退里的 ≈47 条
+      （`directives/for/whitespace.hrx`、`comment.hrx` 的 `*/scss` 键）不再回退。跳过的“意外通过”：
+      `core_functions/string/unique_id.hrx::is_unique` 是因为我们从“吐垃圾”变成“什么都不吐”而撞上了
+      空期望输出（它要 `@use`/`@for`/`map.*`/`@error`，均未实现），**不计作真收益**。
+  - **0′.3b-2 未做（已尝试并退回）——“Sass 不拥有的调用”分类器**：把 `UndefinedVariable` 放进 `FATAL` 后仍剩
+    **4 条回退**，全在 `css/functions/special/prefixed/lowercase.hrx::*\/script_like`（`a {b: -a-calc($c)}`、
+    `-c-element($d)`、`-c-expression($d)`、`-c-progid:d($d)` 期望原样输出）。两次尝试均实测不成立，已退回：
+    ① `Word::ends_with('(')` 过宽 → 踩坏 `values/calc/min::preserved/variable`、`clamp`、`url` 等
+    **变量必须解析**的用例（978 → 947、3 个单测失败）；②收窄成“名字以 `-` 开头或含 `:`”→ 完全不命中，
+    因为词法把 `-a-calc(` 切成 `Op('-') + Word("a") + Op('-') + Word("calc(")`、`progid:d(` 里的 `:` 是独立
+    `Punct(':')`。=> 正解在**词法层**：调用名必须作为一个完整 lexeme 保留（含前导 `-` 与内部 `:`），
+    或建立一个真正的“Sass 拥有的函数名”名单（P1.7/P2 的 builtin 注册表）而非字符串启发式。在这之前
+    `FATAL` 保持为空（已回退），否则 `tests/fallback.rs::progid_filter_value_stays_literal` 会红。
+  - **0′.3c**：上面两项完成后，才把 `UndefinedVariable` 放进 `FATAL`，并翻转 `tests/fallback.rs` 最后一条
+    （它现在故意钉着“暂逐字保留”），再按簇重测 error 类用例；同时收紧 harness 的 error 比对粒度（0.4），
+    否则“+380”这类数字无法区分“真按金样报错”与“只是报了个错”。
+  - **可复核数据**：基线与阶段快照一律存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线导致
+    拿空基线比出 `regress=7134` 的垃圾数）；现有 `head-before-3b.tsv`(598) / `after-3b.tsv`(599) 与
+    `ledger-3b.sqlite`。行为不变型改动用 `cmp` 证逐字节相同，变型用 `ledger diff` 列 NET/REGRESS 具体键。
+    harness 对 error 类用例的比对粒度尚需收紧（得确认“+380”不是“只比对有没有报错”的假阳性）——归 0.4。
 - [ ] 0′.5 **共享态改 `C::RcMut`/`C::RcCell`**：内核泛型于 `C: Context`，`Local`(wasm32) 与 `Shared` 两份编译均过；
       禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
       （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
