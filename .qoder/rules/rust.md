@@ -57,12 +57,30 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - **自造框架层**（`Stage/fail/drain/drain_one` 之类把流压回值的中转）→ 直接用 rxrust 组合子。
 - **多播不可重入**：`Subject` 回调里再 `next/error/complete` 会 panic → 插 `delay(0)`；`Subject::is_closed()` 意思是“无订阅者”，不是“已终止”。
 - **收口只用框架原生口子**：`collect`/`reduce_initial`+`into_future()`、`into_stream()`（仅 `Drop` 取消）、或 await `TaskHandle`；`std::sync::mpsc` 不是终点。
-- 上述新形态对应的 `sasslint` 规则名（**待编成机器闸**，P0′.6 落地前只能靠人肉 grep 把关）：`no-batch-shell`（批量外壳）、`no-sort-for-order`（排序代替时机）、`require-err-channel`（兜底当错误策略）、`require-slot-before-subscribe`（高阶/多源未先建槽）。
+- 上述新形态已编成**机器闸**(P0′.6,`crates/sasslint/src/lib.rs`):`no-batch-shell`(同行 `scan_map(`+`Vec<` 或
+  `flat_map(`+`from_iter(`)、`require-err-channel`(同行 `.ok()`+`eval`;或文件里有 `unwrap_or_else(` 却无
+  `is_fatal` 判定)、`no-sort-for-order`(`sort_by_key`/`sort_by(`/`sort_unstable_by`/`.sort()`)、
+  `require-slot-before-subscribe`(文件用了高阶/多源且 `.subscribe(` 却无 `SingleAssignment`)。
+  闸口 = `cargo test -p sasslint` 的 `gate_sasspile_is_clean`(已去掉 `#[ignore]`,命中即红)与
+  `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src`(命中 exit 1)。
+  **它们是代理而非证明**:规则刻意放过一半签名的合法用法(`from_iter` 作源、词素解析的 `.ok()`、
+  内核的 `source.subscribe(..)`)——`tests/lint.rs::legal_stream_shapes_are_not_flagged` 钉住这个下界;
+  放宽规则或改名绕过仍属违规,应按 `reactive-stream-architecture` 的反例索引改数据分解。
 
 ### 🧪 验收读数也会骗人（工具级红线）
 - `crates/ledger` 只存失败行；同名 run 重导已改为先 `DELETE FROM run_fail`（旧版会把“已修好”报成 phantom REGRESS）。
 - 断言 `regress=0` 前 MUST 在**空 DB**（`--db=<临时路径>`）重做一次 A/B；行为不变型重构还要用 md5/`diff` 证明快照逐字节相同。
 - “同名两快照完全相同”得到的 `regress=0` 不证明任何事；行为变更 MUST 列出**哪几条用例**变了及其规范依据。
+- **用例 key MUST 唯一**：旧 `tests/hrx.rs` 用 `<basename>.hrx::<case>` 做 key，而语料在不同目录重名（两个
+  `function.hrx`），11,486 条里实测 **1,135 个重复 key / 33 个同时挂着 PASS 与 FAIL** → 一个文件的通过会
+  掩盖另一个的失败（一度把回归归到错误的文件上）。现在 key = 相对 `spec/` 的全路径，且 harness **有撞名断言**；
+  旧制式的 run 与新 run **不得跨制式 diff**（`reports/hrx.db` 的 `case-key-scheme` note 已记明，基线
+  `target/baselines/head-600-pathkey.tsv`）。
+- **“报了个错”≠“按金样报错”**：旧 harness 把任意 `Err` 当 `error` 用例通过，使 `FATAL` 翻转虚报 **+385**；
+  逐条比对金样 `Error:` 首行后真值是 **+1**（384 条的期望消息是 `Expected identifier.`、单位错误、
+  `DEPRECATION WARNING`——它们属 P1/P7 待实现的消息，不是错误管道）。批量新增/回退 MUST 抽样看**期望文本**，
+  并区分“指标修正”与“真收益”。
+- 基线/阶段快照存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线而拿空基线比出垃圾读数）。
 
 ## 🔌 接线纪律（新功能）
 新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测** 钉死，**不接 `compile`**；接线时只在无歧义处触发：含 `/ * %` 的值跳过（护 `font:12px/1.5`、`grid:1/2` 等 CSS 斜杠分隔符），函数走**白名单** `call_builtin`，未知名 `eval→Err→` 原样兜底（`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；会动全局 truthiness 的比较/布尔单列一步、先护选择器（`a > b` combinator 不得当比较）。每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。

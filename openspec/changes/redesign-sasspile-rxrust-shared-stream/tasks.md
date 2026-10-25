@@ -131,9 +131,22 @@
       禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
       （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
       已做到的是：内核 `Err` 泛型 + `C: Context` 泛型，不写死具体指针类型。
-- [ ] 0′.6 **`sasslint` 新规则**：`no-batch-shell`（`scan_map` 返 `Vec` + `flat_map(from_iter)`）、
-      `require-err-channel`（求值路径上的 `.ok()`/`unwrap_or_else` 兜底）、`no-sort-for-order`（并发段
-      `sort_by_key`）、`require-slot-before-subscribe`（高阶/多源未先取 `SingleAssignment` 槽）。
+- [x] 0′.6 **`sasslint` 新规则（已合入，四条全部上闸）**：引擎新增两类判定能力——**同行双签名**
+      `AND_BANS`与**文件级一致性** `FileFacts`（只看非注释行，防文档注释“洗白”）：
+      • `no-batch-shell`：`scan_map(`+`Vec<` 或 `flat_map(`+`from_iter(`（旧 `scan_map→Vec→flat_map(from_iter)`
+        外壳的确切签名）；单独一个 `from_iter(` 是合法源，不命中。
+      • `require-err-channel`：同行 `.ok()`+`eval`；或文件里有 `unwrap_or_else(` 却无 `is_fatal` 判定
+        ——放过 `exec.rs` 现在这种“按形状×按 kind 显式判定”的规范透传，拦住 `value.rs`/`expr.rs` 里
+        无判定的 blanket 兜底（词素解析的 `.ok()` 不属此形状，故用双签名）。
+      • `no-sort-for-order`：`sort_by_key`/`sort_by(`/`sort_unstable_by`/`.sort()`。
+      • `require-slot-before-subscribe`：文件用了高阶/多源（`merge_all(`/`concat_all(`/`switch_map(`/
+        `flat_map(`/`connectable(`/`Subject`/`from_stream(`）且自己 `.subscribe(` 却无 `SingleAssignment`。
+      **闸口已开**：`tests/lint.rs::gate_sasspile_is_clean` 去掉 `#[ignore]`（P0′.1/.2/.4/.3 已清掉旧债），
+      CLI `sasslint lint crates/sasspile/src` 命中即 exit 1。实测：sasslint **10 测试全过、0 ignored**，
+      `crates/sasspile/src` 命中数 **0**；四条新规则各有正/反例钉住（`detects_the_p0_prime_shapes`、
+      `verbatim_fallback_needs_a_fatality_decision`、`higher_order_subscribe_needs_a_slot`、
+      `legal_stream_shapes_are_not_flagged`——最后一例钉住“合法半边不得误报”这个下界，否则闸不可用）。
+      诚实记录：它们是**代理而非证明**（只认本仓库真删过的形状签名），不能代替 `ledger diff`。
 - [ ] 0′.7 **`Selector`/`PropName` 结构化**：消除 `render→canon→split_whitespace` 与 `&` 的 `str::replace`
       （现 `lexer.rs:223-257`、`exec.rs:150-155`）；选择器/属性名不再经字符串承载语义。
 

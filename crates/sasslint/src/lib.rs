@@ -4,6 +4,16 @@
 //! owned-value stream. This tool encodes the high-signal structural bans as a rule
 //! table and scans Rust sources, so a violation is caught by a machine (CI / test gate)
 //! instead of relying on self-discipline. Findings are reported via `tracing`.
+//!
+//! Three kinds of evidence, because the shapes differ:
+//! * [`SUBSTRING_BANS`] / [`LINE_START_BANS`] — one line carries the signature alone;
+//! * [`AND_BANS`] — only **two signatures on the same line** identify the shape, so a legal use of
+//!   either one (`from_iter` as the source, `.ok()` on a lexeme parse) does not fire;
+//! * [`FileFacts`] — a rule about a whole file ("a verbatim fallback must come with a fatality
+//!   decision"), which no single line can state.
+//!
+//! The last two kinds are **proxies** for the iron rule, never proofs: they are tuned to catch the
+//! shapes this repository actually removed, and they skip comments (see [`is_comment`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,7 +40,50 @@ const SUBSTRING_BANS: &[(&str, &[&str])] = &[
     ("no-work-queue", &["VecDeque<"]),
     // heuristic: a mutable accumulator that DRIVES traversal (frame stack / @if chain),
     // i.e. a state machine wearing operator clothing — banned even though it uses no loop
-    ("mutable-accumulator-drives", &["Vec<Frame>", "stack: Vec<", "chain_taken"]),
+    (
+        "mutable-accumulator-drives",
+        &["Vec<Frame>", "stack: Vec<", "chain_taken"],
+    ),
+    // Order was restored by sorting rules produced concurrently. The corpus settles a rule at an
+    // *emission moment* instead (css/style_rule declaration/interleaved/**), so an ordering key is
+    // the signature of re-adding the machinery that was deleted with P0′.4.
+    (
+        "no-sort-for-order",
+        &["sort_by_key", "sort_unstable_by", "sort_by(", ".sort()"],
+    ),
+];
+
+/// Same-line conjunctions: `(rule, &[(needle_a, needle_b)])`. Each pair is one forbidden shape whose
+/// meaning only exists when both halves appear together — which is exactly what keeps the legal
+/// single half from firing.
+const AND_BANS: &[(&str, &[(&str, &str)])] = &[
+    // a phase that batches its output into a `Vec` and flattens it again downstream: the
+    // `scan_map(acc) -> Vec<Tok> -> flat_map(from_iter)` shell removed by P0′.1/.2, where the
+    // kernel emits its own 0..N items with `observer.next(..)`
+    (
+        "no-batch-shell",
+        &[
+            ("scan_map(", "Vec<"),
+            ("flat_map(", "from_iter("),
+            ("then(", "from_iter("),
+        ],
+    ),
+    // an evaluation failure turned into `None` and then into text: the error never reaches the
+    // stream's `Err` channel (P0′.3a/b). `.ok()` on a lexeme parse is not this shape, hence the pair.
+    ("require-err-channel", &[(".ok()", "eval")]),
+];
+
+/// Combinators whose inner subscription must be parked in a slot **before** subscribing: rc.6
+/// `into_future`/higher-order sources drop (or lose) what arrives while the slot is still empty
+/// (docs/rxrust-source-analysis 09 §1), and a queued inner in `merge_all` **loses** emissions.
+const HIGHER_ORDER: &[&str] = &[
+    "merge_all(",
+    "concat_all(",
+    "switch_map(",
+    "flat_map(",
+    "connectable(",
+    "Subject",
+    "from_stream(",
 ];
 
 /// Control-flow keywords banned when they START a (non-comment, non-`//`) line.
@@ -41,6 +94,77 @@ fn is_comment(text: &str) -> bool {
     t.starts_with("//") || t.starts_with("/*") || t.starts_with('*')
 }
 
+fn finding(file: &str, line_no: usize, rule: &'static str, raw: &str) -> Finding {
+    Finding {
+        file: file.to_string(),
+        line: line_no,
+        rule,
+        text: raw.trim().to_string(),
+    }
+}
+
+/// What the whole file states, for the rules no single line can decide. Built from **code lines
+/// only**, so a doc comment can never launder a violation (e.g. mentioning `is_fatal` in prose while
+/// the code swallows the error).
+#[derive(Debug, Default)]
+struct FileFacts {
+    /// the file makes its fatality decision by kind (`SassError::is_fatal`), so a
+    /// `unwrap_or_else(verbatim)` in it is the corpus-defined passthrough of a *specific* shape —
+    /// not the blanket `.ok()` fallback P0′.3 replaces
+    declares_fatality: bool,
+    /// a verbatim fallback exists in code
+    has_verbatim_fallback: bool,
+    /// the file drives a higher-order/multi-source combinator
+    uses_higher_order: bool,
+    /// the file subscribes something itself
+    subscribes: bool,
+    /// the file parks a subscription in the framework's slot
+    builds_slot: bool,
+}
+
+impl FileFacts {
+    fn of(content: &str) -> Self {
+        let code = content.lines().filter(|line| !is_comment(line)).fold(
+            String::new(),
+            |mut acc, line| {
+                acc.push_str(line);
+                acc.push('\n');
+                acc
+            },
+        );
+        let holds = |needles: &[&str]| needles.iter().any(|n| code.contains(n));
+        Self {
+            declares_fatality: code.contains("is_fatal"),
+            has_verbatim_fallback: code.contains("unwrap_or_else("),
+            uses_higher_order: holds(HIGHER_ORDER),
+            subscribes: code.contains(".subscribe("),
+            builds_slot: code.contains("SingleAssignment"),
+        }
+    }
+
+    /// The file-level rules, reported at the line that carries the offending call: a verbatim
+    /// fallback with no `is_fatal` decision in the file, or a higher-order subscription with no
+    /// `SingleAssignment` slot parked first.
+    fn line_findings(&self, file: &str, line_no: usize, raw: &str) -> Vec<Finding> {
+        if is_comment(raw) {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if self.has_verbatim_fallback && !self.declares_fatality && raw.contains("unwrap_or_else(")
+        {
+            out.push(finding(file, line_no, "require-err-channel", raw));
+        }
+        if self.uses_higher_order
+            && self.subscribes
+            && !self.builds_slot
+            && raw.contains(".subscribe(")
+        {
+            out.push(finding(file, line_no, "require-slot-before-subscribe", raw));
+        }
+        out
+    }
+}
+
 fn scan_line(file: &str, line_no: usize, raw: &str) -> Vec<Finding> {
     if is_comment(raw) {
         return Vec::new();
@@ -49,22 +173,23 @@ fn scan_line(file: &str, line_no: usize, raw: &str) -> Vec<Finding> {
     SUBSTRING_BANS
         .iter()
         .filter(|(_, needles)| matched(needles))
-        .map(|(rule, _)| Finding {
-            file: file.to_string(),
-            line: line_no,
-            rule,
-            text: raw.trim().to_string(),
-        })
-        .chain(if LINE_START_BANS.iter().any(|kw| raw.trim_start().starts_with(kw)) {
-            vec![Finding {
-                file: file.to_string(),
-                line: line_no,
-                rule: "no-imperative-loop",
-                text: raw.trim().to_string(),
-            }]
-        } else {
-            Vec::new()
-        })
+        .map(|(rule, _)| finding(file, line_no, rule, raw))
+        .chain(AND_BANS.iter().flat_map(|(rule, pairs)| {
+            pairs
+                .iter()
+                .filter(|(a, b)| raw.contains(a) && raw.contains(b))
+                .map(move |_| finding(file, line_no, rule, raw))
+        }))
+        .chain(
+            if LINE_START_BANS
+                .iter()
+                .any(|kw| raw.trim_start().starts_with(kw))
+            {
+                vec![finding(file, line_no, "no-imperative-loop", raw)]
+            } else {
+                Vec::new()
+            },
+        )
         .collect()
 }
 
@@ -73,10 +198,15 @@ pub fn scan_file(path: &Path) -> Vec<Finding> {
     let Ok(content) = fs::read_to_string(path) else {
         return Vec::new();
     };
+    let facts = FileFacts::of(&content);
     content
         .lines()
         .enumerate()
-        .flat_map(|(i, line)| scan_line(name, i + 1, line))
+        .flat_map(|(i, line)| {
+            scan_line(name, i + 1, line)
+                .into_iter()
+                .chain(facts.line_findings(name, i + 1, line))
+        })
         .collect()
 }
 
@@ -84,13 +214,15 @@ pub fn scan_file(path: &Path) -> Vec<Finding> {
 /// on the compiled pipeline walking a tree, not on a directory scan).
 fn rust_files(dir: &Path, acc: &mut Vec<PathBuf>) {
     if let Ok(entries) = fs::read_dir(dir) {
-        entries.filter_map(|e| e.ok().map(|e| e.path())).for_each(|p| {
-            if p.is_dir() {
-                rust_files(&p, acc);
-            } else if p.extension().is_some_and(|e| e == "rs") {
-                acc.push(p);
-            }
-        });
+        entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .for_each(|p| {
+                if p.is_dir() {
+                    rust_files(&p, acc);
+                } else if p.extension().is_some_and(|e| e == "rs") {
+                    acc.push(p);
+                }
+            });
     }
 }
 
@@ -100,10 +232,7 @@ pub fn scan_dir(dir: &Path) -> Vec<Finding> {
     }
     let mut files = Vec::new();
     rust_files(dir, &mut files);
-    files
-        .iter()
-        .flat_map(|f| scan_file(f))
-        .collect::<Vec<_>>()
+    files.iter().flat_map(|f| scan_file(f)).collect::<Vec<_>>()
 }
 
 /// Human-readable review report for a directory (used by the CLI and the MCP tool).
@@ -112,13 +241,13 @@ pub fn review_report(dir: &Path) -> String {
     if findings.is_empty() {
         return format!("{}: no iron-rule violations", dir.display());
     }
-    findings
-        .iter()
-        .fold(String::new(), |mut s, f| {
-            s.push_str(&format!("[{}] {}:{} — {}\n", f.rule, f.file, f.line, f.text));
-            s
-        })
-        + &format!("{} violation(s)", findings.len())
+    findings.iter().fold(String::new(), |mut s, f| {
+        s.push_str(&format!(
+            "[{}] {}:{} — {}\n",
+            f.rule, f.file, f.line, f.text
+        ));
+        s
+    }) + &format!("{} violation(s)", findings.len())
 }
 
 use serde_json::{Value, json};
@@ -138,7 +267,7 @@ pub fn handle_message(req: &Value) -> Option<Value> {
         "tools/list" => json!({
             "tools": [{
                 "name": "review",
-                "description": "Scan a Rust source tree for sasspile iron-rule violations (tree/recursion/relay-Vec/string-machine/imperative loops).",
+                "description": "Scan a Rust source tree for sasspile iron-rule violations (tree/recursion/relay-Vec/string-machine/imperative loops, batch shells, sorted order, swallowed Err channel, missing subscription slot).",
                 "inputSchema": {
                     "type": "object",
                     "properties": { "path": { "type": "string", "description": "directory to scan" } },

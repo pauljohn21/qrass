@@ -82,7 +82,13 @@ partial `_x.scss`/相对 import 解析);解析 `options.yml`(`:todo:`→skip/xfa
 (`scan_map` 返 `Vec` + `flat_map(from_iter)` 批量外壳)、`require-err-channel`(求值路径上的 `.ok()`/
 `unwrap_or_else` 兜底)、`no-sort-for-order`(靠排序保文档序)、`require-slot-before-subscribe`(高阶/多源
 未先取 `SingleAssignment` 槽)。命中任一即视为把控制流写回 GC/命令式,MUST 按 `reactive-stream-architecture` 的
-"GC/改造反例索引"出路列改写,而非放宽规则或改名绕过。
+"GC/改造反例索引"出路列改写,而非放宽规则或改名绕过。四条规则均已实现,闸口是 `cargo test -p sasslint` 的
+`gate_sasspile_is_clean` 与 CLI 的非零退出;它们度量的是**签名代理**,不代替 `ledger diff` 的结果证据。
+
+#### Scenario: 合法的一半签名不得误报
+- **WHEN** 代码只出现配对签名的合法一半(`Shared::from_iter(..)` 作流源、1:1 内核的 `source.subscribe(..)`、
+  词素解析的 `.ok()`)
+- **THEN** 四条新规则均不命中(否则闸因噪声而被绕过);该下界由 `legal_stream_shapes_are_not_flagged` 钉住
 
 #### Scenario: 命中即阻断
 - **WHEN** 改动引入帧栈累加子驱动 / 手搓工作队列 / 递归遍历树 / 中途 collect 加工等
