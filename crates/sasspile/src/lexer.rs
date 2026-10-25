@@ -1,10 +1,7 @@
-//! Lexer (push): `chars → Tok → structural events`, all as forward `scan_map` folds over an
-//! owned accumulator (the `#{}`/interp depth is *data* in the accumulator, not call-stack
-//! recursion). No AST, no back-walk: downstream consumes the event stream forward.
-
-use std::convert::Infallible;
-
-use rxrust::prelude::*;
+//! Lexer — the two owned accumulator **values** that turn characters into tokens and tokens
+//! into structural events. Each is a forward fold step over a single character or token; the
+//! `#{}`/interp depth is *data* inside the accumulator, never a call stack, and no observable
+//! type appears here: the operator chain that uses them lives in `compile` (crate root).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
@@ -41,7 +38,7 @@ fn is_var_char(c: char) -> bool {
 }
 
 #[derive(Default)]
-struct LexAcc {
+pub struct LexAcc {
     buf: String,
     hash: bool,
     var: Option<String>,
@@ -83,7 +80,7 @@ impl LexAcc {
     }
 
     /// feed one char, emit 0..N tokens (owned accumulator, moved via `scan_map`).
-    fn feed(&mut self, ch: char) -> Vec<Tok> {
+    pub fn feed(&mut self, ch: char) -> Vec<Tok> {
         self.out.clear();
         if self.block {
             // inside /* .. */ loud comment: consume until */
@@ -187,13 +184,13 @@ impl LexAcc {
 
 /// First structural pass: `Tok → Vec<Event>` on delimiters only (no tree). Own accumulator.
 #[derive(Default)]
-struct MsgAcc {
+pub struct MsgAcc {
     run: Vec<Tok>,
     events: Vec<Event>,
 }
 
 impl MsgAcc {
-    fn feed(&mut self, tok: Tok) -> Vec<Event> {
+    pub fn feed(&mut self, tok: Tok) -> Vec<Event> {
         self.events.clear();
         match tok {
             Tok::Punct('{') => self.events.push(Event::Open(std::mem::take(&mut self.run))),
@@ -257,14 +254,4 @@ pub fn token_text(tok: &Tok) -> String {
 /// Collapse runs of whitespace to single spaces and trim, the canonical CSS text form.
 pub fn canon(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// The full lexer: content → a cold `Shared` stream of structural events.
-pub fn events(content: String) -> SharedBoxedObservable<'static, Event, Infallible> {
-    Shared::from_iter(content.chars().collect::<Vec<char>>())
-        .scan_map(LexAcc::default(), |acc, ch| acc.feed(ch))
-        .flat_map(Shared::from_iter)
-        .scan_map(MsgAcc::default(), |acc, tok| acc.feed(tok))
-        .flat_map(Shared::from_iter)
-        .box_it()
 }

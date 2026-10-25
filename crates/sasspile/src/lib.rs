@@ -18,7 +18,8 @@ mod expr;
 mod lexer;
 mod value;
 
-use crate::exec::StyleRule;
+use crate::exec::{Fold, StyleRule};
+use crate::lexer::{LexAcc, MsgAcc};
 
 /// Compiler error carried as an in-stream value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,21 +41,26 @@ impl fmt::Display for SassError {
 
 impl std::error::Error for SassError {}
 
-/// The public entry — and the **only** external API. The whole compile is one cold **push**
-/// stream: `lexer::events` (chars→Tok→events) is consumed forward by `exec` (owned `scopes`
-/// accumulator pushes out `StyleRule`s on `Close`); rules are gathered once, stably sorted by
-/// their `order` key (document order), then pushed through render/reduce to a single
-/// `into_future().await` (no synchronous `block_on`/`mpsc` facade; caller supplies runtime).
+/// The public entry — and the **only** external API. One cold **push** chain, written here and
+/// nowhere else: no stage function takes or returns an observable type, no `box_it()` seam.
+/// Characters flow forward through the framework's own operators, each accumulator a plain
+/// owned value, and CSS text is produced only at the single `into_future().await` terminal.
 pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
     let _span = tracing::info_span!("compile").entered();
-    exec::exec(lexer::events(content.into()))
+    Shared::from_iter(content.into().chars().collect::<Vec<char>>())
+        .scan_map(LexAcc::default(), |acc, ch| acc.feed(ch))
+        .flat_map(Shared::from_iter)
+        .scan_map(MsgAcc::default(), |acc, tok| acc.feed(tok))
+        .flat_map(Shared::from_iter)
+        .scan_map(Fold::default(), |fold, ev| fold.step(ev))
+        .filter_map(std::convert::identity)
         .collect::<Vec<StyleRule>>()
         .map(|mut rules| {
-            rules.sort_by_key(|r| r.order);
+            rules.sort_by_key(|rule| rule.order);
             rules
         })
         .flat_map(Shared::from_iter)
-        .map(|rule| exec::render_rule(&rule))
+        .map(|rule| rule.to_css())
         .reduce_initial(String::new(), |mut css, chunk| {
             css.push_str(&chunk);
             css
