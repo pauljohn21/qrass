@@ -27,3 +27,9 @@
 | 重入探测 | `try_rc_deref_mut` | `rc.rs:45-50` 明说用途：检测同步重入，改走调度器而不是当场 panic/死锁 | V0-04 |
 | 锁中毒 | mutex poisoning | 持锁线程 panic 后 `lock()` 的两种策略：源码 `.unwrap()` 一起炸，本课 `into_inner()` 继续用 | V0-04 |
 | 无守卫共享 | `SharedCell` / `CellRc` / `CellArc` | 给 `Copy` 小值（flag/计数）的 `get`/`set`/`compare_exchange`，不会 panic 也不会死锁 | V0-04 |
+| 宏规则集 | `macro_rules!` | “matcher `=>` 模板”的有序集合；匹配的是令牌而非值，全 rxrust 仅 7 处，都是“同一骨架 × N 种类型组合” | V0-05 |
+| 片段分类符 | fragment specifier（`ty`/`expr`/`ident`/`lifetime`/`tt`…） | 声明“这里吃什么”；选错就报 `no rules expected …` | V0-05 |
+| `tt` 流 | `$($x:tt)*` | 把“泛型参数列表”连同逗号当令牌搬走，展开时原样吐出 | V0-05 |
+| 内部规则 | `@impl` 首令牌 | 惯例性的“私有入口”：骨架只写一份，公开规则只负责打包参数 | V0-05 |
+| 卫生性 | hygiene | 宏里的名字不会捕获调用方同名变量（实测 `counted!(5)` 得 6 而非 105） | V0-05 |
+| 一致性泄漏检查 | `coherence_leak_check` | `Sink<Item>` 与 `Sink<&mut T>` 两条规则重叠产生的警告；`observer.rs:136` 显式 `allow` | V0-05 |

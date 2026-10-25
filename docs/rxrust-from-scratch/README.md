@@ -13,8 +13,8 @@
 | 可教行（分母） | **14,116**（排除 test 模块 11,644、空行 1,677、纯 `use` 239、纯括号 2,079） | 同上，分类可对账 |
 | 课次 | **58 课 / 103 段**（`--target 300 --max 600`） | `docsizer plan` |
 | 行级**预分配** | 100%（`COVERAGE.tsv` 由 `plan` 生成，每行都有归属课号）；**是否已写成课文**另由 `VERIFICATION.tsv` + `words` 跟踪 | `docsizer coverage` |
-| 非代码字数 | 37,857 / 目标 ≥ 1,000,000 | `docsizer words` |
-| 已完成课 | **V0-01**（6）、**V0-02**（5）、**V0-03**（8）、**V0-04**（6）断言全过、clippy 0 警——均见 `VERIFICATION.tsv` | — |
+| 非代码字数 | 46,149 / 目标 ≥ 1,000,000 | `docsizer words` |
+| 已完成课 | **V0 全卷（V0-01…V0-05）**：31 条断言全过、clippy 0 警——逐课结论见 `VERIFICATION.tsv` | — |
 
 ## 目录结构
 
@@ -25,12 +25,13 @@ docs/rxrust-from-scratch/
   MAP.tsv              ← 88 个源文件 → 7 卷（`plan` 的输入）
   COVERAGE.tsv         ← 行级账本：源文件 / 行区间 / 课号 / 主·复习（`plan` 的输出）
   VERIFICATION.tsv     ← 每课代码的编译验证结论
-  v0-foundations/      ← 零基础前置卷（不覆盖源码）
+  v0-foundations/      ← 零基础前置卷（已完成 5 课，不覆盖源码）
     00-01-ownership-and-borrowing.md
     00-02-traits-associated-types-and-gats.md
     00-03-closures-and-sinks-observer-powers.md
     00-04-shared-ownership-and-interior-mutability.md
-    code/00-0{1,2,3,4}-*.rs（含 .tests.rs 与 .answers.rs）
+    00-05-macro-rules-minimum.md
+    code/00-0{1..5}-*.rs（含 .tests.rs 与 .answers.rs）
   v1-observer-source/  v2-subscription/  v3-context-rc-factory/
   v4-three-layer-traits/  v5-higher-order-multicast/  v6-scheduler-async-final/
 ```
@@ -43,7 +44,7 @@ docs/rxrust-from-scratch/
 
 | 卷 | 主题 | 你会写出 |
 |---|---|---|
-| V0 | 零基础前置：所有权/借用/生命周期、trait 与泛型 → GAT、`Fn/FnMut/FnOnce`、`Rc/Arc/RefCell/Mutex`、object-safety、宏最小知识 | 能读懂 V1 起每一行签名 |
+| V0 | ✅ 已完成：前置地基（所有权/借用、关联类型→GAT、闭包三能力、共享可变、宏最小知识） | 能读懂 V1 起每一行签名 |
 | V1 | 消费者与源头：`Observer`/`Emitter`/`DynObserver`/`FnMutObserver` + `from_iter`/`of`/`empty`/`never`/`throw_err` | 第一个能跑的 push 流 |
 | V2 | 订阅与取消：`Unsubscribable`/`Subscription`/`SingleAssignment`/`DynamicSubscriptions` | 外部 `unsubscribe()` 真让源头停 |
 | V3 | 线程模型：`Context`/`Local`/`Shared`/`MutRc`/`MutArc` + `factory` | 一份算子代码两种线程模型 |

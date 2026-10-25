@@ -34,8 +34,14 @@
       `v0-foundations/00-04-shared-ownership-and-interior-mutability.md`；代码外部验证（5 断言 + 1 答案、clippy 0 警）；
       报错均实测：E0277 `Rc` 不能 `Send` / E0599 `derive(Clone)` 要求 `T: Clone` / 运行时
       `RefCell already borrowed`（因此才有 `try_*`）；并逐条核对了 `rc.rs` 的行号引用
-- [ ] 1.5 宏最小知识：`macro_rules!` 会展开成什么（用 `impl_observer_for_box!` 的真实形态做例子，只看不写）
-- [ ] 1.6 卷末：`docsizer words` 报告 + 术语表并入 + 读者自评清单（能独立回答每课三问）
+- [x] 1.5 宏最小知识：`macro_rules!` 会展开成什么（用 `impl_observer_for_box!` 的真实形态做例子，只看不写）——
+      `v0-foundations/00-05-macro-rules-minimum.md`；先实测出全库**只有 7 处** `macro_rules!`
+      并列其位置；自写 `impl_sink_for_box!` 复刻 `observer.rs:133-169`（4 次调用在 `:172-178`）；
+      5 条错均实测原文（no rules expected ×2 / cannot find macro / E0119 / E0596）+ 拿到
+      `coherence_leak_check` 警告从而解释了 `observer.rs:136` 那个属性；代码 6 断言全过、clippy 0
+- [x] 1.6 卷末：`docsizer words` 报告 + 术语表并入 + 读者自评清单（能独立回答每课三问）——
+      V0 全卷实测 46,149 非代码字（入 README 现状表）；GLOSSARY 已收 V0 五课全部术语；
+      自评清单与逐课兑现表写在 `00-05` 末尾“V0 卷末”节
 
 ## V1 — 消费者与第一批源头（`observer.rs` 379 行 + `observable/{from_iter,trivial,never,throw_err}.rs`）
 
