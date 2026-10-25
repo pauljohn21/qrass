@@ -14,7 +14,11 @@ pub enum Tok {
     /// one whitespace character — **data**, because Sass reads `10px -5px` as a
     /// space-separated list but `10px - 5px` as subtraction
     Space(char),
-    /// `+` or `-` standing at a token boundary (an operator or a sign, decided downstream)
+    /// `+`, or a `-` that stands alone at a token boundary (an operator, decided downstream by the
+    /// spacing law). A `-` that belongs to an identifier is **not** an `Op`: it stays inside the
+    /// `Word`, because a classification never gets finer than the lexer's lexemes — `-a-calc(` cut
+    /// into `Op('-')+Word("a")+…` made "is this a vendor-prefixed CSS call?" unanswerable
+    /// (`css/functions/special/prefixed/lowercase::*/script_like`).
     Op(char),
     Punct(char),
     /// a `$name` reference (name excludes the leading `$`)
@@ -45,6 +49,11 @@ fn is_var_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
 }
 
+/// A character that continues an identifier lexeme — the test that decides a pending `-`'s role.
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
 #[derive(Default)]
 pub struct LexAcc {
     buf: String,
@@ -61,6 +70,9 @@ pub struct LexAcc {
     /// last source character consumed outside comments — the lookbehind that keeps a
     /// protocol slash (`url(http://x)`, `url(//cdn/x)`) from reading as a silent comment
     prev: Option<char>,
+    /// a `-` seen at a token boundary whose role is not decided yet: Sass's spacing law needs the
+    /// next character, exactly like the pending-slash fold
+    minus: bool,
 }
 
 impl LexAcc {
@@ -150,6 +162,18 @@ impl LexAcc {
             self.var = None;
             self.push(Tok::Var(name), emit);
         }
+        // A pending `-` resolves against this character: an identifier char continues the lexeme
+        // (vendor prefix, or an in-ident hyphen), anything else makes the `-` a standalone
+        // operator/sign and lets `ch` be handled on its own below.
+        if self.minus {
+            self.minus = false;
+            if is_ident_char(ch) {
+                self.buf.push('-');
+            } else {
+                self.flush_word(emit);
+                self.push(Tok::Op('-'), emit);
+            }
+        }
         // Lookbehind for the slash rule below: capture the previous character, then record
         // the one about to be consumed.
         let prev = self.prev;
@@ -180,10 +204,13 @@ impl LexAcc {
                 self.flush_word(emit);
                 self.push(Tok::Space(c), emit);
             }
-            '+' | '-' => {
+            '+' => {
                 self.flush_word(emit);
                 self.push(Tok::Op(ch), emit);
             }
+            // Defer: whether a `-` is Sass's operator (whitespace on both sides) or part of an
+            // identifier (`-a-calc(`, `10px -5px`) is only knowable once the next char arrives.
+            '-' => self.minus = true,
             c => self.buf.push(c),
         }
     }
