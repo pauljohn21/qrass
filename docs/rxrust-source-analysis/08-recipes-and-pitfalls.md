@@ -4,39 +4,58 @@
 一份产出喂多下游**）逐一对应到 rxrust 原生算子，并列出踩过的坑与判据。
 配 `crates/sasslint` 的机器规则一起看（它已把反模式编码成硬闸）。
 
-## 1. 编译器 / 多阶段管线配方（`flat_map` 串联 + 终点收口）
+## 1. 编译器 / 多阶段管线配方（直接组合算子 + 终点收口）
 
-阶段 = 冷 observable 函数；跨阶段串联用 `flat_map`（**没有 `and_then`**）；错误以
-in-stream `Result` + `Err = Infallible` 走；终点唯一一次 `subscribe` 用 `mpsc` 收口。
+跨阶段串联用 `flat_map`（**没有 `and_then`**）；错误以 in-stream `Result` + `Err = Infallible` 走。
+**不要**为此造 `type Stage<T>` / `fn fail<T>` / `fn drain` 之类框架层——那是把 rxrust 压回"你自
+己的控制流抽象"（`rust.md` 禁止；见 §4）。算子直接链在源头上；仅当一条链要跨函数边界返回时，
+用 `box_it()` 擦除类型（这是原语用法，不是框架层）。
+
+**收口看执行模型（`01 §5`）：**
+
+纯同步 `Local` 链（非时间算子全程内联）→ 终点**唯一一次** `subscribe` + `mpsc` 取出，无需 runtime：
 
 ```rust
-use std::convert::Infallible;
-use std::sync::mpsc;
 use rxrust::prelude::*;
+use std::sync::mpsc;
 
-// 统一阶段类型：产出 Result<T, E>，Err 通道空（错误当数据在 Item 里）
-type Stage<T> = LocalBoxedObservable<'static, Result<T, MyError>, Infallible>;
-
-fn fail<T>(e: MyError) -> Stage<T> { Local::of(Err(e)).box_it() }
-
-fn lex_stage(src: String) -> Stage<Vec<Token>>  { /* from_iter/map … */ todo!() }
-fn parse_stage(toks: Vec<Token>) -> Stage<Program> { todo!() }
-fn eval_stage(prog: Program) -> Stage<Output> { todo!() }
-
-fn compile(entry: Stage<String>) -> String {
-  let (tx, rx) = mpsc::channel::<Result<String, MyError>>();
-  entry
-    .flat_map(|r| match r { Ok(s) => lex_stage(s),        Err(e) => fail(e) })
-    .flat_map(|r| match r { Ok(t) => parse_stage(t),      Err(e) => fail(e) })
-    .flat_map(|r| match r { Ok(p) => eval_stage(p),       Err(e) => fail(e) })
-    .map(|r| r.map(|out| out.css))
-    .subscribe(move |out| { tx.send(out).ok(); });   // 非时间源：这里同步跑完
-  rx.recv().unwrap().unwrap()
+// 源头 → 各阶段都是算子；错误当数据；一次 subscribe 收口。不物化"任务表"、不先建 AST 再遍历。
+fn compile(source: String) -> String {
+  let (tx, rx) = mpsc::channel::<String>();
+  token_stream(source)
+    .map(|toks| parse(&toks))                     // owned 值直接进下一算子
+    .flat_map(|ast| eval(ast))                    // 循环 / 一对多 = flat_map
+    .map(to_css)
+    .reduce_initial(String::new(), |mut acc, s| { acc.push_str(&s); acc })
+    .subscribe(move |css| { tx.send(css).ok(); }); // 内联同步跑完
+  rx.recv().unwrap()
 }
 ```
 
-- 两分支（正常阶段 / `fail`）返回**同一 `Stage<T>`**——`box_it` 擦除后类型统一（`07 §一`）。
-- `subscribe` 之后 `rx.recv()` 立刻可得（同步执行模型，`01 §5`）——纯同步管线不建 runtime。
+`Shared` + `from_stream` 源（`from_stream` 走 scheduler，`subscribe` 返回可 await 句柄）→ 终点用
+rxrust 自带 **`into_future().await`**（由调用方 runtime 驱动），**不要**再套 `std::sync::mpsc`+`block_on`
+同步壳。单条 `from_stream` 保序；别对每条 item 各起一个 `from_stream`（并发→乱序，见 §4）：
+
+```rust
+use rxrust::prelude::*;
+
+pub async fn compile(source: String) -> String {
+  Shared::from_stream(futures::stream::iter(items(source)))
+    .scan_map((env0(), false), |(env, taken), item| {  // @if 链作为随流 move 的 owned 累加子值
+      /* 返回本 item 的 Vec<Leaf>，写回 *taken */
+  })
+    .flat_map(Shared::from_iter)                  // 内联、顺序展平（保序）
+    .map(to_css)
+    .reduce_initial(String::new(), |mut a, s| { a.push_str(&s); a })
+    .into_future()
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+}
+```
+
+- `reduce` = `FnMut(Item,Item)->Item`（**无初值**）；要折叠成别的类型用 `reduce_initial(seed, FnMut(Acc,Item)->Acc)`。
 
 ## 2. 四个"必失守点"的原生写法
 
@@ -106,13 +125,16 @@ let b = shared.clone().filter(fb);
 | wasm 编译报 `Send`/线程 | `Shared`+多线程上 wasm | 统一 `Local`（`04 §四`）；`into_shared` 的 `Send` 会逼你塞 `Arc` |
 | `cargo add rxrust` 后 API 全错 | 解析到旧 0.15 | 锁 `=1.0.0-rc.6`（`README`） |
 | 时间算子不动/需要 runtime | 只有 `05 §G` 走 scheduler | 纯同步管线避开它们；要计时才引 `LocalSet`/tokio |
+| `Shared::from_stream` 文档序乱 | `flat_map(\|i\| from_stream(..))` 每条 item 各起一任务并发 | 用**单条** `from_stream`(顺序 poll) + `scan_map` 携 owned 累加子 + `flat_map(Shared::from_iter)` 内联顺序展平 |
+| `.reduce(seed, f)` 报 E0061 | rc.6 `reduce`=`FnMut(Item,Item)->Item` 无初值 | 带初值用 `reduce_initial(seed, FnMut(Acc,Item)->Acc)` |
+| `Shared::from_stream` 收口又套 `mpsc`+`block_on` | 在异步核心外裹 std 同步壳 | 终点用 `into_future().await`（runtime 由调用方供） |
 
 ## 4. Do / Don't 总纲
 
 **Do**
 - 起手先问"这条流推什么 owned 值、经哪个算子、变成哪条流"（自底向上，`01 §2`）。
 - 循环 → `flat_map`；状态 → `scan_map`/`reduce_initial` 的 owned 累加子；一到多 → 多播；
-  收口 → 终点一次 `subscribe` + `mpsc`。
+  收口 → 同步 `Local` 链终点一次 `subscribe`+`mpsc`；`Shared`/`from_stream` 异步链用 `into_future().await`（别套 std 壳）。
 - 错误当数据（in-stream `Result` + `Err=Infallible`）或显式 `on_error`/`into_future`。
 - 跨函数/异构存流用 `box_it()`。
 
@@ -133,7 +155,7 @@ let b = shared.clone().filter(fb);
 1. `cargo run -p sasslint -- crates/sasspile/src`（或 MCP `review{path}`）→ **0 命中**；
 2. `cargo test -p sasspile` + `cargo clippy --all-targets -- -D warnings` → 绿；
 3. `ledger diff <base> <run>` → **`regress = 0`** 才合入，否则回退。
-新算子/函数先做成 **pub 独立件 + 金样单测、不接 `compile_string`**，接线时**只在无歧义处触发**
+新算子/函数先做成 **pub 独立件 + 金样单测、不接 `compile`**，接线时**只在无歧义处触发**
 （函数白名单、`/ * %` 跳过护 CSS），逐片守门（见项目记忆"sasspile 值/函数层安全生长范式"）。
 
 ---

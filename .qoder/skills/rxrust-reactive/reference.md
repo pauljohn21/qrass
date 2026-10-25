@@ -2,8 +2,9 @@
 
 Deep API notes backing [SKILL.md](SKILL.md). Every signature below was read from
 `rxrust-1.0.0-rc.6` source (observable.rs / context.rs / factory.rs / observer.rs /
-ops/* / observable/boxed.rs / rc.rs / subject.rs). The project's parallel copy lives in
-`docs/rxrust-ai-manual.md`. If the rxrust version changes, re-verify against source.
+ops/* / observable/boxed.rs / rc.rs / subject.rs). For the full per-file walkthrough and
+the do/don't doctrine see `docs/rxrust-source-analysis/`. If the rxrust version changes,
+re-verify against source.
 
 **rc.5 → rc.6 delta (verified against source):** the core model is unchanged — `Item<'a>`
 is still a GAT, `and_then` is still absent (use `flat_map`/`concat_map`), `subscribe(closure)`
@@ -44,11 +45,14 @@ Observable              user API — blanket impl<T: Context where T::Inner: Obs
 
 | Scenario | Pick | Constraint |
 |---|---|---|
-| Single-thread, synchronous pipeline (all qrass stages) | `Local` | no Send/Sync needed |
+| Single-thread, synchronous pipeline | `Local` | no Send/Sync needed |
 | Truly cross-thread emit/subscribe | `Shared` | Item/Err/closures `Send(+Sync)` |
 | Switch context | `.into_shared()` / `.into_local()` (context.rs L450/462) | swaps wrapper only; execution model unchanged |
 
-qrass rule: **`Local` everywhere.**
+Decision for THIS compiler: `Local` is the default for the synchronous pipeline; `Shared`
++ threads are used only for genuinely cross-thread work (per the OpenSpec design, not a
+framework rule). Do not force `Shared` where there is no concurrent work — it only adds
+`Send + Sync + 'static` bounds.
 
 ## 3. Execution model (source semantics)
 
@@ -161,7 +165,7 @@ group_by(...)          grouped multicast
 contains(v) / start_with(Vec)
 ```
 
-## 6. Terminals (drain) — three shapes
+## 6. Terminals — three shapes
 
 ```text
 (a) subscribe(closure)      next only. Fine when the value channel already encodes Result errors.
@@ -172,7 +176,7 @@ contains(v) / start_with(Vec)
                             (outer Err = Empty / MultipleValues pipeline error).
 ```
 
-**Standard qrass terminal (synchronous + error-observable): mpsc sink.**
+**Standard terminal (synchronous + error-observable): mpsc sink.**
 
 ```rust
 use std::sync::mpsc;
@@ -187,6 +191,29 @@ Error protocol: **compiler errors never enter the observable `Err` channel** (wh
 `Infallible`). They flow as in-stream `Result` data to the terminal, sidestepping the
 `subscribe(closure)` error-swallowing problem (§1). To *additionally* observe errors on
 the side, use `.on_error(move |e| …)`.
+
+**Shared / async terminal: prefer `into_future().await` over a std `mpsc` sink.** When the
+source is `Shared::from_stream(..)` (which schedules a task, so `subscribe` returns an
+awaitable handle, not an inline run),收口 with the framework's own `into_future()` driven by
+a tokio runtime — do NOT wrap a synchronous stream back with `std::sync::mpsc`+`recv`
+(that reintroduces a std layer around the reactive core). `reduce` = `FnMut(Item,Item)->Item`
+(NO seed); to fold to a different accumulator type use `reduce_initial(seed, FnMut(Acc,Item)->Acc)`.
+
+```rust
+// Shared + from_stream, terminal via rxrust's own into_future (no std channel):
+Shared::from_stream(futures::stream::iter(items))
+    .reduce_initial(String::new(), |mut acc, chunk| { acc.push_str(&chunk); acc })
+    .into_future()
+    .await
+```
+
+**Ordering gotcha (verified):** `Shared::from_stream` preserves order (one task polls the
+stream sequentially), but `flat_map(|item| Shared::from_stream(..))` spawns a *separate task
+per item* → emission interleaves and document order is lost. To fan out per-item work and
+keep order, thread per-step state (env / an `@if` chain flag) as an owned `scan_map`
+accumulator over ONE ordered source, then `flat_map(Shared::from_iter(..))` (`from_iter`
+runs inline & in order) to flatten. Cross-sibling state is a *moved accumulator value*, not
+per-item-independent.
 
 `subscribe_with` custom sink (when errors DO ride the Err channel, e.g. throw_err):
 ```rust
@@ -222,62 +249,37 @@ won't match a `create` source typed with `Infallible`).
 Anti-pattern: `fn stage<O: Observable<Item = T, Err = E>>(…)` → E0107 (GAT). box_it is
 the escape.
 
-## 8. qrass compile-pipeline recipe (the landing template)
+## 8. Compose directly with operators — NO framework layer
 
-Stage = a cold stream function; inter-stage = `flat_map` driven; error = in-stream
-Result; builder collects config only; one mpsc terminal:
+Do NOT introduce `type Stage<T>` / `fn fail<T>` / `fn load_stage` / `fn drain(...)`. That is a
+self-made framework layer (`rust.md`: 禁自造框架层 `Stage<T>`/`fail`/`drain`/`drain_one`) which
+bends rxrust into running *your* control-flow abstraction instead of using its operators.
+Compose ONE cold operator chain straight on the source, with a single terminal `subscribe`.
+Per-item stage *functions* that take an owned value and return an observable are fine, and
+`box_it()` at a fn boundary is fine — the ban is the `Stage<T>`/`fail`/`drain` framework *type*
+and any hand-built state machine (`from_fn` + `VecDeque`, or a shared mutable `Acc` that *drives*
+traversal).
 
 ```rust
-use rxrust::observer::Emitter;
 use rxrust::prelude::*;
-use std::convert::Infallible;
 use std::sync::mpsc;
 
-/// Stage output: Item is "next stage's input OR an error"; errors never use the Err channel.
-type Stage<T> = LocalBoxedObservable<'static, Result<T, SassError>, Infallible>;
-
-/// Short-circuit: carry an error straight to the terminal (same shape as any Stage).
-fn fail<T>(e: SassError) -> Stage<T> { Local::of(Err(e)).box_it() }
-
-/// One stage: upstream Item -> this stage's product via closure operators; span timed
-/// at the closure that actually executes.
-fn lex_stage(loaded: Loaded) -> Stage<Lexed> {
-    let span = tracing::span!(tracing::Level::INFO, "compile",
-        stage = "lex", module = %loaded.name, elapsed_ms = tracing::field::Empty);
-    let started = std::time::Instant::now();
-    let mut carrier = Some(loaded);                 // Option::take to satisfy FnMut
-    lexer::token_stream(/* emits Result<Spanned, SassError> per token via create */)
-        .collect::<Vec<_>>()                        // Vec<Result<Spanned, SassError>>
-        .map(move |toks| {
-            let _g = span.enter();
-            let loaded = carrier.take().expect("once");
-            let out = toks.into_iter()
-                .try_fold(Vec::new(), |mut acc, r| r.map(|t| { acc.push(t); acc }))
-                .map(|tokens| Lexed { loaded, tokens });
-            span.record("elapsed_ms",
-                &tracing::field::debug(started.elapsed().as_millis() as u64));
-            out
-        })
-        .box_it()
-}
-
-/// Orchestration: every link driven by stream emission (flat_map), no sequential statements.
-fn drain(cfg: Config) -> Result<String, SassError> {
+// One cold chain over owned values; no Stage/fail/drain layer, no shared mutable driver.
+// Loops (`@each`) are `flat_map`; branches (`@if`) are `filter`; ONE terminal subscribe.
+fn compile(source: String) -> String {
     let (tx, rx) = mpsc::channel();
-    load_stage(cfg.entry)
-        .flat_map(|r| match r { Ok(l) => lex_stage(l),               Err(e) => fail(e) })
-        .flat_map(|r| match r { Ok(l) => parse_stage(l),            Err(e) => fail(e) })
-        .flat_map(|r| match r { Ok(p) => eval_stage(p, cfg.style),  Err(e) => fail(e) })
-        .flat_map(|r| match r { Ok(v) => render_stage(v),           Err(e) => fail(e) })
-        .map(|r| r.map(|rendered| rendered.css))
-        .subscribe(move |out| { tx.send(out).ok(); });
-    rx.recv().unwrap_or_else(|_| Err(SassError::new(ErrorKind::Render, "no output")))
+    lexer::token_stream(source)                     // chars -> owned Tok, moved downstream
+        .collect::<Vec<_>>()                         // owned batch (data), not an imperative replay
+        .flat_map(|toks| parse_eval_render(toks))    // operators over the owned value
+        .subscribe(move |css| { tx.send(css).ok(); });
+    rx.recv().unwrap()
 }
+
+// a loop is literally `flat_map`, written inline — no wrapper, no buffer-then-replay:
+//   Shared::from_iter(items).flat_map(|item| body_stream(item)).box_it()
 ```
 
-Inside a stage, fine-grained per-token / per-statement streams (a lexer `create` source
-emitting one `Result<Spanned, SassError>` per `next`, completing on first error; a
-render stage `from_iter + reduce_initial`) keep the same ownership style.
+Time each stage with `tracing::span!`, recording elapsed inside the closure that runs (§11).
 
 ## 9. Subject multicast (subject.rs)
 
@@ -289,8 +291,9 @@ subject.complete();
 ```
 
 - `Subject` is the **framework's internal multicast plumbing**, not a business-state
-  container. In qrass use it only when one stage's output must feed multiple downstream
-  chains simultaneously (e.g. future watch/HMR). In rc.6 the subject payload is a
+  container. Use it whenever one producer's output must feed multiple consumers at once —
+  e.g. a module compiled once and fanned out to every `@use`, or a `@mixin` definition
+  consumed by many `@include`s. In rc.6 the subject payload is a
   `SubjectPtr<…>` over the `rc.rs` shared handles: `Local::subject::<Item,Err>()` uses
   `MutRc` (`Rc<RefCell<…>>`), the `Shared` form `MutArc` (`Arc<Mutex<…>>`); `Item: Clone`
   is required by `behavior_subject`. This is the framework's own sharing — it is NOT
@@ -333,11 +336,11 @@ subject.complete();
 |---|---|---|
 | E0107 on `Observable<Item = T>` | Item is a GAT | assemble inline in one fn, or return `LocalBoxedObservable` alias |
 | `expected String, found &str` in `tx.send` | channel type shadowed by map closure | annotate `mpsc::channel::<Result<T, E>>()` |
-| flat_map branches type-mismatch | inner streams must share Item/Err | `.box_it()` both branches to the same `Stage<T>` |
+| flat_map branches type-mismatch | inner streams must share Item/Err | `.box_it()` both branches to the same erased stream type |
 | `move out of captured value` in a map closure | map is `FnMut`, called many times | `Option::take()` to pull the owned value once |
 | `Emitter` not found in a create closure | not in prelude | `use rxrust::observer::Emitter;` |
 | no value at `rx.recv()` after subscribe | upstream used a timed operator / async source | drop timed ops or enter a runtime; sync sources never miss |
-| `into_shared` Send not satisfied | Shared needs Send+Sync+'static across the chain | stay `Local` (qrass default) |
+| `into_shared` Send not satisfied | Shared needs Send+Sync+'static across the chain | use `Local` unless you truly need cross-thread execution |
 | want to mutate inside `filter` | filter receives `&Item` | use `map`/`filter_map` for value semantics |
 | errors swallowed by `subscribe` | `FnMutObserver` drops error/complete | in-stream `Result` protocol / `subscribe_with` / `on_error` |
 
@@ -359,8 +362,8 @@ CellRc<T>/CellArc<T> = Rc<Cell<T>>/Arc<AtomicCell<T>>   Copy flags/counters (che
 
 `try_rc_deref_mut` returning `None` is how the framework detects synchronous re-entrancy
 and defers via the scheduler instead of panicking/deadlocking. **These are framework
-internals** (subject fan-out, `Connectable`, internal counters). qrass business data must
-stay move-only: if you reach for `MutRc`/`MutArc`/`Subject` to hold a token vector or an
+internals** (subject fan-out, `Connectable`, internal counters). The compiler's business data
+must stay move-only: if you reach for `MutRc`/`MutArc`/`Subject` to hold a token vector or an
 accumulator, that is the GC/shared-state smell R2/§11 forbid — carry it as the `scan_map`
 /`reduce_initial` owned accumulator instead.
 

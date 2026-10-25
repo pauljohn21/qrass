@@ -1,26 +1,14 @@
-//! sasspile — a clean-room SCSS→CSS compiler whose control flow IS a **lazy rxrust
-//! owned-value stream**. Every stage is an operator over owned values; nesting is data
-//! (not a walked tree); CSS is merged only at the single terminal `subscribe`. Rebuilt
-//! from scratch per OpenSpec `rebuild-sasspile-on-rxrust-lazy-stream`; governed by
-//! `.qoder/rules/rust.md` and `openspec/config.yaml`. Behaviour oracle = `sass-spec/*.hrx`
-//! + `element-plus`; every step gated by `ledger diff regress=0`.
-
-mod builtins;
-pub mod expr;
-pub mod lexer;
-mod parse;
-mod render;
-pub mod value;
-pub mod value_parse;
-// Shared-stream core (OpenSpec redesign, tasks 2.2+); `compile_string` still uses the
-// `Local` `parse`/`render` core until parity (task 3.1), so `parse`/`render` stay for now.
-pub mod structure;
+//! sasspile — a clean-room SCSS→CSS compiler architected as a **PUSH (rxrust) stream**: a
+//! source pushes owned values *forward* through operators (`from_iter → scan_map → flat_map →
+//! filter → collect → into_future`), and is **never** pulled/walked as a materialized AST.
+//!
+//! This crate was reset to a from-scratch skeleton after adopting the push doctrine
+//! (`dart-sass = pull / rxrust = push`). The old pull-shaped code (parse→AST→recursive walk)
+//! has been deleted to prevent backsliding. The pipeline is rebuilt phase by phase (P0–P8)
+//! per `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md`. Governed by
+//! `.qoder/rules/rust.md`; behaviour oracle = `sass-spec/*.hrx` + `element-plus` only.
 
 use std::fmt;
-
-use rxrust::prelude::*;
-
-use crate::lexer::token_stream;
 
 /// Compiler error carried as an in-stream value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,26 +30,12 @@ impl fmt::Display for SassError {
 
 impl std::error::Error for SassError {}
 
-/// Compile SCSS/CSS text to expanded CSS. The whole compiler is the observable chain
-/// below: chars→tokens→(`scan_map`)structural messages→(`scan_map` owned `Acc`)flat
-/// leaves→(`map`)CSS blocks→(`reduce`)merged text, met by exactly ONE `subscribe`.
-pub fn compile_string(content: impl Into<String>) -> Result<String, SassError> {
-    let _span = tracing::info_span!("compile").entered();
-    let (tx, rx) = std::sync::mpsc::channel::<Result<String, SassError>>();
-    token_stream(content.into())
-        .scan_map(parse::MsgAcc::default(), |acc, tok| acc.feed(tok))
-        .flat_map(Local::from_iter)
-        .scan_map(parse::Acc::new(), |acc, msg| acc.feed(msg))
-        .flat_map(Local::from_iter)
-        .map(|leaf| render::leaf_block(&leaf))
-        .reduce_initial(String::new(), |mut css, chunk| {
-            css.push_str(&chunk);
-            css
-        })
-        .map(Ok::<_, SassError>)
-        .subscribe(move |out| {
-            tx.send(out).ok();
-        });
-    rx.recv()
-        .unwrap_or_else(|_| Err(SassError::new("no output")))
+/// The public entry — and the **only** external API. It is the head of one cold push stream
+/// that terminates in `into_future().await` (no synchronous `block_on`/`mpsc` facade; the
+/// caller supplies the runtime).
+///
+/// P0 skeleton: the push pipeline is not rebuilt yet, so this reports not-implemented rather
+/// than resurrect any pull-shaped logic.
+pub async fn compile(_content: impl Into<String>) -> Result<String, SassError> {
+    Err(SassError::new("sasspile: not implemented (push-model rebuild in progress — design P0–P8)"))
 }

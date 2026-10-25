@@ -1,0 +1,31 @@
+{
+  "name": "rxrust-source-analysis",
+  "displayName": "rxrust 源码解析参考",
+  "version": "0.1.0",
+  "description": "Source-level reference for rxrust 1.0.0-rc.6: operator semantics, Local/Shared context, Observer/Subscription contracts, Subject multicast, box_it type erasure, schedulers, and ownership-first pipeline recipes.",
+  "descriptionZh": "rxrust 1.0.0-rc.6 的源码级参考：算子语义、Local/Shared 上下文、Observer/Subscription 契约、Subject 多播、box_it 类型擦除、调度器，以及以所有权为先的管线配方。",
+  "author": {
+    "name": "pauljohn21"
+  },
+  "homepage": "https://github.com/pauljohn21/qrass",
+  "repository": "https://github.com/pauljohn21/qrass",
+  "license": "MIT",
+  "logo": "./assets/avatar.svg",
+  "keywords": [
+    "qoder-plugin",
+    "skill",
+    "rxrust",
+    "rust",
+    "reactive-streams",
+    "observable",
+    "source-analysis"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "rxrust",
+    "reactive-streams",
+    "rust",
+    "reference"
+  ],
+  "skills": "./skills/"
+}

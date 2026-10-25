@@ -45,8 +45,10 @@ pub type BoxedCoreObservableMutRef<…> = … BoxedObserverMutRef …;    // 广
 - 不同源链（`of` / `from_iter.map` / `from_iter.filter`）擦后同型 → 放进 `Vec<LocalBoxedObservable<…>>`
   统一订阅（`test_heterogeneous_collection` / `test_box_it_heterogeneous_with_type_alias`）。
 
-> 技能手册的"跨函数边界传流用 `box_it()` → `LocalBoxedObservable`"正是对应这里。项目编译器管线
-> 里每个阶段函数返回 `Stage<T> = LocalBoxedObservable<'static, Result<T,E>, Infallible>` 就是它。
+> “跨函数边界传流用 `box_it()` → `LocalBoxedObservable`”正是对应这里：当一条链要作为函数
+> 返回值/存入异构容器时，用 `box_it()` 擦除类型即可。**但不要为此造 `type Stage<T>`/`fn fail`/`fn drain`
+> 框架层**（那是把 rxrust 压回自定义控制流，`rust.md`/`08 §4` 禁）；能直接链就直链，只在确实需
+> 要类型擦除的边界用 `box_it()`。
 
 ### 5. 相关 observer/subscription 也各有一套装箱
 

@@ -15,7 +15,7 @@
 | `05-operators.md` | 完整算子目录（约 70 个），按类分组：签名约束、item 传递语义、Clone 要求、错误/完成传播、并发挥度 |
 | `06-subject-multicast-connectable.md` | `Subject<P>` 多播（value / mut_ref 两种 observer）、再入策略、`Subscribers` SmallVec、订阅延迟；`BehaviorSubject` + `peek`；`ConnectableObservable` 的 `fork`/`connect`/`ref_count` |
 | `07-type-erasure-and-scheduler.md` | `box_it`/`BoxedCoreObservable`/`DynCoreObservable`；`scheduler.rs` 的 `Task`/`TaskHandle`/`Scheduler`/`Schedulable`/`SleepProvider`、`LocalScheduler`/`SharedScheduler`、自定义调度器要点 |
-| `08-recipes-and-pitfalls.md` | 落地配方：编译器式 `flat_map` 管线（`Stage<T>`/`fail`/mpsc 收口）、Local vs Shared 选择、in-stream `Result` 错误协议、常见编译错误、Do/Don't |
+| `08-recipes-and-pitfalls.md` | 落地配方：直接组合算子的 `flat_map` 管线（无 `Stage`/`fail`/`drain` 框架层；同步 `Local`→`mpsc`、`Shared`/`from_stream`→`into_future().await` 两种收口）、Local vs Shared 选择、in-stream `Result` 错误协议、常见编译错误与 `from_stream` 乱序坑、Do/Don't |
 
 ## 三句话记住 rxrust
 

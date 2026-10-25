@@ -1,121 +1,95 @@
 ---
 name: rxrust-reactive
-description: Build reactive streams in Rust with the rxrust crate (1.0.0-rc.5) using ownership semantics and a flat_map-driven pipeline. Use when writing rxrust Observables/operators, chaining compilation/processing stages, multicasting via Subject, draining a stream to an owned result, or handling Observable errors. Enforces ownership over Arc<Mutex>, in-stream Result error protocol, and LocalBoxedObservable type erasure across function boundaries.
+description: Write Rust reactive streams with the rxrust crate (1.0.0-rc.6) by using its operators directly — flat_map pipelines, Subject multicast, in-stream Result errors, box_it type erasure, a single terminal subscribe. Use when building or reviewing rxrust code (operators, chaining stages, multicasting, draining a stream to an owned result, Observable errors). Enforces ownership over Arc<Mutex> and forbids any self-made Stage/fail/drain framework layer.
 ---
 
-# rxrust Reactive Streams (Rust, ownership-first, flat_map pipelines)
+# rxrust Reactive Streams (Rust, ownership-first, use-the-operators)
 
-rxrust is the Rust port of ReactiveX. Its core is **Rust ownership**: items move
-*by value* through operators. Do **not** carry business data in
-`Arc<Mutex<_>>` — that shared mutability is only the framework's internal plumbing
-for multicasting (Subject). Write pipelines that move owned values and drain them
-through channels.
+rxrust is the Rust port of ReactiveX. Its core is **Rust ownership**: items move *by value*
+through operators. Use the operators directly — the pipeline IS a chain of them. Do **not**
+build a framework abstraction on top of rxrust and then make rxrust run *your* design.
 
 Version pin (critical):
 
 ```toml
-rxrust = "=1.0.0-rc.5"   # bare `cargo add rxrust` resolves the OLD 0.15 line
+rxrust = "=1.0.0-rc.6"   # bare `cargo add rxrust` resolves the OLD 0.15 line
 ```
 
-Keep default features (the `scheduler` feature gates `Local`/`Shared` and the
-`LocalBoxedObservable` aliases). The 1.0 API differs fundamentally from both RxJS
-and rxrust 0.15.
+Keep default features (`scheduler` gates `Local`/`Shared` + the `LocalBoxedObservable`
+aliases). The 1.0 API differs fundamentally from both RxJS and rxrust 0.15. The authoritative
+per-file walkthrough and the do/don't doctrine live in **`docs/rxrust-source-analysis/`**;
+deep API notes in [reference.md](reference.md); `docs/rxrust-ai-manual.md` is the older copy.
 
-## Golden rules
+## The rule that keeps getting broken
 
-| Need | Do (ownership) | Don't (GC-style) |
+Express control flow **as** rxrust operators; do not re-implement it and wrap it:
+
+| Need | Use (directly) | Never (retrofit) |
 |------|----------------|------------------|
-| Streaming state + per-item output | `scan_map(seed, \|&mut acc, item\| -> out)` — acc needs NO `Clone` | `scan(Arc<Mutex<S>, …) + flat_map` |
-| Fold to one value | `reduce_initial(owned_acc, \|acc, item\| -> acc)` or `collect` | `Arc<Mutex<acc>>` + lock-back |
-| Chain a stage per item | **`flat_map`** — each emission drives the next stage's stream | sequential `run_stage` statements; there is **no `and_then`** in rc.5 |
-| Pass a stream across fn boundaries | `.box_it()` → `LocalBoxedObservable<'a, Item, Err>` | naming the unnameable chain type (E0107) |
-| Errors | **in-stream `Result<T,E>` + `Err = Infallible`** protocol, drained at terminal | `.subscribe(closure)` — it **silently drops** `error`/`complete` |
-| Move result out | `mpsc::channel(); …subscribe(move\|v\| {tx.send(v).ok();}); rx.recv()` | `Arc<Mutex<Option<T>>>` + `try_unwrap` |
+| A loop / one item → many (`@each`, nesting fan-out) | `from_iter(items).flat_map(|i| sub_stream(i))` | buffer the body and replay with `for`/`while`/`for_each`; `from_fn`+`VecDeque` work-queue |
+| Cross-element state (env, prefix) | `scan_map(seed, |&mut acc, item| …)` / `reduce_initial` — acc is owned, no `Clone` | `Arc<Mutex<S>>` acc; a shared mutable `Acc` object that *drives* traversal via push/pop + control flags |
+| One producer → many consumers (`@use`, `@mixin`) | `Shared::subject` / `behavior_subject`+`peek` / `publish().ref_count()` / `share()` | collect to a `Vec` and hand-feed each consumer |
+| Branch (`@if`) | `filter` on a value computed from moved inputs | a mutable `chain_taken`/state flag threaded by hand |
+| Chain a stage per item | `flat_map` (there is **no `and_then`**) | sequential `run_stage` statements |
+| Pass a stream across a fn boundary | `.box_it()` → `SharedBoxedObservable`/`LocalBoxedObservable` | naming the unnameable chain type (E0107) |
+| Errors | in-stream `Result<T,E>` + `Err = Infallible`; `subscribe` sends to `mpsc` | rely on `.subscribe(closure)` — it **silently drops** `error`/`complete` |
 
-## Pipeline architecture (the qrass template)
+## Do NOT build a framework layer
 
-Stages are cold stream **functions**; stages connect via **`flat_map`** (flow-driven,
-not sequential statements); errors ride as in-stream `Result` data; the builder holds
-only owned config; a single mpsc terminal collects. See [reference.md](reference.md)
-§8 for the full `Stage<T>` / `fail<T>` / `flat_map` orchestration recipe with tracing
-spans.
-
-```rust
-type Stage<T> = LocalBoxedObservable<'static, Result<T, SassError>, Infallible>;
-fn fail<T>(e: SassError) -> Stage<T> { Local::of(Err(e)).box_it() }
-
-load_stage(entry)
-    .flat_map(|r| match r { Ok(l) => lex_stage(l),   Err(e) => fail(e) })
-    .flat_map(|r| match r { Ok(l) => parse_stage(l), Err(e) => fail(e) })
-    .flat_map(|r| match r { Ok(p) => eval_stage(p),  Err(e) => fail(e) })
-    .map(|r| r.map(|done| done.css))
-    .subscribe(move |out| { tx.send(out).ok(); });
-```
-
-`flat_map` requires both branches to be the **same** `Stage<T>` — a normal stage and
-`fail(e)` unify because both erase `Item = Result<T, SassError>`, `Err = Infallible`.
+No `type Stage<T>`, no `fn fail<T>`, no `fn load_stage`, no `fn drain`/`drain_one`, no
+`run_stage` orchestrator. That is a self-made framework that bends rxrust into running your
+control flow (`rust.md` bans it; it is the recurring root of this project's rework). Compose
+**one cold operator chain** straight on the source and end in a **single** `subscribe`.
+Per-item stage functions that take an owned value and return an observable, and `box_it()` at
+a boundary, are fine. Also forbidden: a recursive `stream(node)` that walks a materialized
+AST to build nested observables — that is the same retrofit in another costume.
 
 ## Choosing Local vs Shared
 
-- `Local` — single-threaded, no `Send`/`Sync` bounds, works with `!Send` types.
-  **qrass uses `Local` for the entire pipeline** (design D1, wasm contract): the
-  per-item stage kernels (char→token lex, token→AST parse, eval emission, render
-  fold) *and* the module orchestration — module singleton = `Local` multicast
-  (`Local::behavior_subject`, one instantiation fan-out to N parents, `Arc<Module>`
-  read-only publish), `@use` branch fan-out via `Local::from_iter + flat_map`
-  executed inline. Rc-based plumbing, zero locks, runs on `wasm32-unknown-unknown`.
-- `Shared` — requires Item, Err, and every closure/captured value to be `Send + Sync + 'static`.
-  Kept available in rxrust for genuinely cross-thread streams, but qrass deliberately
-  does not use it: the thread-parallel ceiling measured ~5%, and `Shared` would break
-  the wasm target (its `Arc`/`Mutex` + `Send` bounds and the tokio scheduler base are
-  unusable in the browser). Immutable finished modules are still shared as
-  `Arc<Module>` (read-only data, NOT `Arc<Mutex<business state>>`).
-- Convert: `.into_shared()` / `.into_local()` (context.rs — swaps the wrapper, changes
-  no execution model for non-timed sources; they still run inline).
+- `Local` — single-threaded, no `Send`/`Sync`; works with `!Send` data. Right default for a
+  synchronous compile: non-timed operators run inline, zero locks.
+- `Shared` — requires `Send + Sync + 'static` on Item/Err/closures/captures. Use it only for
+  genuinely cross-thread work (this project's `@use` module fan-out / parallel independent
+  streams per its OpenSpec). **Do not force it**: it buys nothing for a synchronous chain and
+  pushes `Arc`/`Mutex`/`Send` onto every value — which is the GC/shared-state smell, not
+  "using the framework". Immutable finished results may still be shared as `Arc<T>` (read-only),
+  never `Arc<Mutex<business state>>`.
+- `.into_shared()` / `.into_local()` swap the wrapper only; non-timed sources still run inline.
 
-## Execution model (what is synchronous)
+## Execution model (what runs synchronously)
 
-- `from_iter`, `of`, `create`, `empty`, and all non-timed combinators
-  (`map`/`filter`/`scan_map`/`reduce_initial`/`collect`/`flat_map`/`tap`/…) run
-  **fully inline during `.subscribe()`**. So `rx.recv()` right after `.subscribe()`
-  works without any runtime.
-- Only **timed** operators (`delay`, `timer`, `interval`, `buffer_time`, `debounce`,
-  `sample`, `throttle`, `observe_on`, `subscribe_on`) invoke the scheduler
-  (`Local`→`tokio::task::spawn_local`). **Avoid them in synchronous pipelines.**
+- `from_iter`, `of`, `create`, `empty`, `defer`, `from_fn`, and all non-timed combinators
+  (`map`/`filter`/`scan_map`/`reduce_initial`/`collect`/`flat_map`/`concat_map`/`merge`/`zip`/
+  `tap`…) run **fully inline during `.subscribe()`** — `rx.recv()` right after works with no runtime.
+- Only **timed** operators (`delay`/`timer`/`interval`/`buffer_time`/`debounce`/`sample`/
+  `throttle`/`observe_on`/`subscribe_on`) use the scheduler. **Avoid them in a synchronous pipeline.**
 
-## Item by value vs by reference (operator-specific — check before writing)
+## Item by value vs by reference (check before writing)
 
-- `map` / `filter_map` / `flat_map` closures take `Item<'a>` **by value** (move).
-- `filter` / `tap` take `&Item<'a>` (borrow). To mutate-then-emit use `map`/`filter_map`.
-- `scan_map` takes `(&mut Acc, Item<'a>) -> Output` — emits Output each item.
-- `reduce_initial` takes `(Output, Item<'a>) -> Output` — emits final Output once on complete.
+- `map`/`filter_map`/`flat_map`/`scan_map`/`reduce` take item **by value** (move).
+- `filter`/`tap` take `&Item`. `scan_map` = `(&mut Acc, Item) -> Out` each item;
+  `reduce_initial` = `(Out, Item) -> Out` final once.
 
-## Minimal source shape
+## Minimal source shape (a `create`-based lexer, not a driver)
 
 ```rust
-use rxrust::prelude::*;
 use std::convert::Infallible;
-use rxrust::observer::Emitter;              // NOT in prelude — always import explicitly
+use rxrust::observer::Emitter;          // NOT in prelude — import explicitly
+use rxrust::prelude::*;
 
-Local::create::<i32, Infallible, _, _>(
-    |emitter: &mut dyn Emitter<i32, Infallible>| {
-        emitter.next(1); emitter.next(2); emitter.complete();
-    })                                       // closure returns () which is a Subscription
-    .collect::<Vec<_>>()
-    .subscribe(|v| { /* v: Vec<i32> */ });
+Local::create::<i32, Infallible, _, _>(|emitter: &mut dyn Emitter<i32, Infallible>| {
+    emitter.next(1); emitter.next(2); emitter.complete();
+})                                       // returns () = a Subscription
+.collect::<Vec<_>>()
+.subscribe(|v: Vec<i32>| { /* … */ });
 ```
-
-## Full operator catalog, terminals, Subject, RxJS/0.15 differences, compile-error
-remediation, and the complete compiler-pipeline recipe are in
-[reference.md](reference.md). The authoritative source-read verification lives in
-`docs/rxrust-ai-manual.md`.
 
 ## Do / Don't recap
 
-- Don't put tokens, ASTs, buffers, or accumulators in `Arc<Mutex<_>>`. Move them as
-  `scan_map`/`reduce_initial` state and drain via `mpsc`.
-- Don't rely on `.subscribe(closure)` for failing streams — it drops `error`/`complete`.
-  Use the in-stream `Result` protocol, `subscribe_with`, `on_error`, or `into_future`.
-- Don't copy RxJS patterns (`pipe`, free `of(...)` operators, reference-passed values)
-  or 0.15 patterns (`Arc<Mutex>` accumulators, `and_then` — **deleted in rc.5**).
-- Don't pull a tokio runtime into a purely synchronous pipeline; skip the timed operators.
+- Move values; `scan_map`/`reduce_initial` carry owned accumulators; drain only via `mpsc`/`into_future`.
+- One-to-many = `Subject`/`share`/`ref_count`; loop = `flat_map`; branch = `filter`; state = owned acc.
+- Errors = in-stream `Result` + `Err = Infallible`; `subscribe(closure)` alone swallows `error`/`complete`.
+- **Never** wrap rxrust in a `Stage/fail/drain` framework layer, a `from_fn`+`VecDeque`/hand
+  state machine, or a recursive AST interpreter — those all mean "改造框架" and get rejected.
+- No Python/scripts; no `println!` (use `tracing` spans recorded inside the executing closure);
+  tests in `tests/` (`#[test]`, no inline); files ≤ 500 lines.

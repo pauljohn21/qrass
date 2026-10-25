@@ -1,0 +1,120 @@
+// sasspile async compile pipeline — data/ownership flow (L3/L4)
+// Produced by flow-visualizer + graphviz (Architecture Visualization plugin).
+// Every node/edge traces to crates/sasspile/src/*.rs — see sasspile-flow.evidence.json.
+// Reflects the Shared-stream cutover (tasks 3.1): parse.rs/render.rs removed, replaced by
+//   structure.rs (owned Block data) + eval.rs (per-item independent eval) + lib.rs Shared chain.
+// Question answered: "How does Sass source text move, stage by stage, to CSS — and
+//   where do owned values / accumulators flow through rxrust operators?"
+// Reading order: top→bottom. Solid edges = in-process operator chain. Dashed = lazy value-layer.
+digraph sasspile_flow {
+  rankdir=TB;
+  nodesep=0.35;
+  ranksep=0.7;
+  fontname="Helvetica";
+  labelloc="t";
+  label="sasspile :: async compile( ) — one Shared rxrust stream (from_stream → scan_map → flat_map → into_future)";
+  bgcolor="white";
+
+  node [fontname="Helvetica", fontsize=11, style="rounded,filled", fillcolor="#F5F7FA", color="#94A3B8"];
+  edge [fontname="Helvetica", fontsize=9, color="#475569", arrowsize=0.8];
+
+  // ================= INPUT =================
+  src [label="Sass source\n(impl Into<String>)", shape=note, fillcolor="#DBEAFE", color="#2563EB"];
+
+  // ================= LEXER (lexer.rs) =================
+  subgraph cluster_lexer {
+    label="lexer.rs  ·  chars → Tok";
+    color="#CBD5E1"; style="dashed";
+    token_stream [label="«inline lex in compile»\nShared::from_iter(chars)", fillcolor="#EDE9FE", color="#7C3AED"];
+    lex_acc [label="«acc» LexAcc\nbuf·hash·var·interp stack·out\n(owned accumulator, moved via scan_map)", shape=ellipse, fillcolor="#FEF3C7", color="#D97706"];
+    lex_scan [label="scan_map(LexAcc::default( ), feed)", fillcolor="#EDE9FE", color="#7C3AED"];
+    lex_flat [label="flat_map(Shared::from_iter)", fillcolor="#EDE9FE", color="#7C3AED"];
+    collect_toks [label="collect::<Vec<Tok>>( )\n(the ONE Vec boundary in the single chain)", fillcolor="#EDE9FE", color="#7C3AED"];
+    tok [label="Vec<Tok>\nWord·Punct·Var·Interp", shape=record, fillcolor="#E2E8F0"];
+  }
+
+  // ================= STRUCTURE (structure.rs) =================
+  subgraph cluster_struct {
+    label="structure.rs  ·  tokens → owned Block tree (DATA, no tree-walk driver)";
+    color="#CBD5E1"; style="dashed";
+    parse [label="Block::parse(&[Tok])\nrecursive-descent (data build)", fillcolor="#DBEAFE", color="#2563EB"];
+    block [label="Block\nhead·decls·body·order\n(owned, nested)", shape=record, fillcolor="#E2E8F0"];
+  }
+
+  // ================= SHARED STREAM + EVAL (lib.rs + eval.rs) =================
+  subgraph cluster_shared {
+    label="lib.rs Shared chain  ·  one ordered stream, per-item independent eval";
+    color="#CBD5E1"; style="dashed";
+    from_stream [label="Shared::from_stream(root.body)\nONE task, sequential poll → doc order", fillcolor="#DCFCE7", color="#16A34A"];
+    scan_acc [label="«acc» (env, taken)\nowned accumulator moved across siblings", shape=ellipse, fillcolor="#FEF3C7", color="#D97706"];
+    scan [label="scan_map((global, false), |acc,item| …)", fillcolor="#DCFCE7", color="#16A34A"];
+    eval [label="eval::eval_top(item,env,taken)\nper-block → Vec<Leaf>;\n@each=flat_map · @if=taken value", fillcolor="#DCFCE7", color="#16A34A"];
+    flat_iter [label="flat_map(Shared::from_iter)\ninline, order-preserving flatten", fillcolor="#DCFCE7", color="#16A34A"];
+    leaf [label="Leaf\nselector:String·decls:Vec<(String,String)>", shape=record, fillcolor="#E2E8F0"];
+  }
+
+  // ================= RENDER + TERMINAL (lib.rs) =================
+  subgraph cluster_term {
+    label="lib.rs  ·  map + merge + into_future terminal (no std mpsc/block_on)";
+    color="#CBD5E1"; style="dashed";
+    leaf_block [label="map(|leaf| eval::leaf_block(&leaf))", fillcolor="#FCE7F3", color="#DB2777"];
+    css_chunk [label="CSS block String", shape=note, fillcolor="#FCE7F3", color="#DB2777"];
+    reduce [label="reduce_initial(String::new( ), push_str)", fillcolor="#F1F5F9", color="#334155"];
+    term [label="into_future( ).await\n← rxrust terminal (Empty→\"\")", shape=octagon, fillcolor="#FEE2E2", color="#DC2626"];
+    out [label="Result<String, SassError>", shape=note, fillcolor="#DBEAFE", color="#2563EB"];
+  }
+
+  // ================= SHARED VALUE/EXPR LAYER (expr.rs / value.rs) =================
+  subgraph cluster_value {
+    label="value/expr layer  ·  lazy, invoked by eval";
+    color="#FCA5A5"; style="dashed";
+    render_fn [label="Expr::render(toks,env)\n→ from_tokens → eval → to_css → canon", fillcolor="#FFE4E6", color="#E11D48"];
+    expr [label="Expr\nLit·Var·Interp·Concat·Bin·Cmp·And·Or·If·Func", shape=record, fillcolor="#FECDD3"];
+    eval_fn [label="eval(Expr,&Env)→Result<Value,String>\neval_strict (interp: undefined $var = Err)", fillcolor="#FFE4E6", color="#E11D48"];
+    value [label="Value\nRaw·Number·Str·Color·Bool·Null·List·Map", shape=record, fillcolor="#FECDD3"];
+    to_css [label="Value::to_css( )  (lazy serialise)", fillcolor="#FFE4E6", color="#E11D48"];
+    env [label="Env = HashMap<String,Value>\n(owned: global in scan acc; child via apply_decls)", shape=ellipse, fillcolor="#FEF3C7", color="#D97706"];
+  }
+
+  // ================= MAIN FLOW (solid) =================
+  src -> token_stream [label="chars"];
+  token_stream -> lex_scan;
+  lex_acc -> lex_scan [label="moved in / re-emitted", style=dotted, color="#D97706"];
+  lex_scan -> lex_flat;
+  lex_flat -> collect_toks;
+  collect_toks -> tok;
+  tok -> parse;
+  parse -> block;
+  block -> from_stream;
+  from_stream -> scan;
+  scan_acc -> scan [label="moved in", style=dotted, color="#D97706"];
+  scan -> eval;
+  eval -> flat_iter [label="Vec<Leaf>"];
+  flat_iter -> leaf;
+  leaf -> leaf_block [label="owned Leaf"];
+  leaf_block -> css_chunk;
+  css_chunk -> reduce;
+  reduce -> term;
+  term -> out;
+
+  // ================= LAZY EVAL SIDES (dashed) =================
+  eval -> render_fn [label="head / Decl prop+value", style=dashed, color="#E11D48"];
+  render_fn -> expr [style=dashed, color="#E11D48"];
+  expr -> eval_fn [style=dashed, color="#E11D48"];
+  eval_fn -> value [style=dashed, color="#E11D48"];
+  value -> to_css [style=dashed, color="#E11D48"];
+  to_css -> render_fn [label="css text", style=dashed, color="#E11D48"];
+  env -> eval_fn [label="resolve $var", style=dashed, color="#D97706"];
+  scan_acc -> env [label="global Env carried as acc", style=dotted, color="#D97706"];
+
+  // ================= LEGEND =================
+  subgraph cluster_legend {
+    label="legend"; color="#94A3B8"; fontsize=10;
+    lg1 [label="«acc» owned accumulator\n(moved through scan_map)", shape=ellipse, fillcolor="#FEF3C7", color="#D97706", fontsize=9];
+    lg2 [label="rxrust operator\n(from_stream/scan_map/flat_map/reduce)", fontsize=9];
+    lg3 [label="data value crossing stages", shape=record, fontsize=9];
+    lg4 [label="lazy value-layer call\n(dashed)", fontsize=9];
+    lg5 [label="terminal\n(into_future().await)", shape=octagon, fillcolor="#FEE2E2", color="#DC2626", fontsize=9];
+    lg1 -> lg2 [style=invis]; lg2 -> lg3 [style=invis]; lg3 -> lg4 [style=invis]; lg4 -> lg5 [style=invis];
+  }
+}

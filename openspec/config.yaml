@@ -69,7 +69,7 @@ context: |
     后续只消费 token，不再对字符串重扫。
 
   ## 生长与合入纪律
-  - 新算子/函数先做 pub 独立件 + `sass-spec` 金样单测 钉死，不接 `compile_string`；再守门
+  - 新算子/函数先做 pub 独立件 + `sass-spec` 金样单测 钉死，不接 `compile`；再守门
     接线（只在无歧义处触发），逐增量用 `ledger diff <base> <run>` 验证 MUST `regress=0` 才提交/
     推送，达不到即回退到绿色基线。
   - 行为 MUST 只由 `sass-spec/*.hrx`（input.scss→output.css/error）+ `element-plus` 语料决定；

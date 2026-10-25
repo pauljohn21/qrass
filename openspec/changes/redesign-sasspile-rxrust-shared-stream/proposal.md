@@ -2,36 +2,29 @@
 
 ## Why
 
-当前 `crates/sasspile` 的核心（`parse.rs` 的 `Acc{ 帧栈 Vec<Frame> + env + chain_taken }`
-经 `scan_map` 携带、靠 push/pop 与可变标志**驱动**遍历）虽编译绿、已过 §4a/§4b 用例，但本质是
-"穿了算子外衣的命令式状态机"——正是本项目反复返工的"下钻一层即滑回 GC"根因，且已被 `sasslint`
-的 `mutable-accumulator-drives` 规则判为违规。同时，功能面远未覆盖参照语料：`sass-spec` 有约
-2100+ 个非 libsass/non_conformant 的 `.hrx` 金样（core_functions / directives / values / css /
-expressions / callable / operators / parser / variables），`element-plus` 有 316 个真实 `.scss`
-待端到端编译；现核心仅覆盖嵌套/变量/插值/`@if`。
-
-精读 rxrust `=1.0.0-rc.6` 源码后（结论沉淀在 `docs/rxrust-source-analysis/`）确认：`flat_map`
-（流中流）、`Shared::subject`/`publish().ref_count()`（多播）、`scan_map`/`reduce_initial`
-（owned 累加子）、`create`/工厂、`box_it`（类型擦除）、终点单次 `subscribe` 这些**内置原语本身就是
-引擎**。因此应据此把整体架构一次重设计到位，而不是再在其上补状态机。
+本变更最初是"把 `parse::Acc` 帧栈换成 `Shared` 流"的**局部**重设计。把整个 `sass-spec`
+系统性吃透后确认:问题不是某个累加子,而是**缺一份覆盖全语言的框架设计**——值是带单位/calc/
+全色彩空间的代数,选择器需结构化才能 `@extend`/`selector.*`,模块/mixin/function 是独立子系统,
+`@media` 要冒泡合并,诊断(warn/deprecation/error)也是行为面。此前"来一个 directive 加一个"
+每加一个横切能力就动一次骨架 → 反复返工。故本变更**升格为全语言框架设计**:`design.md` 给出数据
+模型 + 分层管线 + 各子系统契约 + 并发/保序 + 分阶段实现计划;实现按依赖序 P0–P8 推进、每阶段以
+`sass-spec` hrx 回归 `regress=0` 为门。行为唯一参照 = `sass-spec/*.hrx` + `element-plus`,
+**不**参照 dart-sass 源码/物化-遍历心智,也**不**参照已删除的 qrass。
 
 ## What Changes
 
-- **BREAKING** 核心重写：`compile` 入口改为**全程 `Shared` 冷 observable**——词法→结构化 token 流；
-  解析把每个块/子流建成 owned 数据，其求值/渲染用 `flat_map` 扇出子 observable、`merge_observables`
-  并发合并、`filter` 选支，env/选择器前缀作为随流 move 的 owned 入参下传；CSS 只在**唯一一次**
-  终点 `subscribe` 合并产出。**移除** `parse::Acc` 帧栈折叠与可变 `chain_taken` 驱动。
-- **BREAKING** 执行模型：采用 `Shared` + 多线程（tokio multi-thread）；并行扇出用 owned 文档序序号
-  (`order`) 随流下传、终点按序确定重组，保证 expanded CSS 与 `sass-spec` 逐字节一致（见 design D3）。
-- 一到多交给多播：模块 `@use` 单例一次编译喂 N 个引用方用 `Shared::subject`/`publish().ref_count()`；
-  跨线程共享**冻结只读** `Arc<CompiledModule>`，绝不 `Arc<Mutex<业务态>>`。
-- 能力面按参照补全：`@each`/`@for`/`@while`、`@mixin`/`@include`、`@function`/调用、`@extend`、
-  `@media`/`@supports`、`@use`/`@forward`、内置函数与值类型（Number/List/Map/Color/Bool/Null）、
-  运算符与单位、字符串/插值——逐项以 `sass-spec` 对应目录 `.hrx` + `element-plus` 钉行为。
-- 保留可复用件：`lexer`（结构化 token 流）、`value`（`Value`/`to_css`）、`expr`（`Expr` 折叠 +
-  惰性 `eval`）；在其上补 `Bin/Func/And/Or/If`、算术与内置函数白名单。
-- 唯一行为参照 = `sass-spec/*.hrx`（`input.scss`→`output.css`/`error`）+ `element-plus`；
-  **不**参照 dart-sass 源码/文档/物化-遍历心智，**不**参照旧 `qrass`。
+- **框架先于实现**:先定稿 `design.md`(全语言数据模型 + 6 相管线 + 子系统契约 + 并发/保序 + 阶段),
+  不再局部戳补丁。详见 `design.md`。
+- **入口契约**:`async fn compile(...) -> Result<String, SassError>`(携诊断),终点 `into_future().await`;
+  无同步 `block_on`/`mpsc` 壳;runtime 由调用方提供。**仅模块加载用真并发**(独立子图 + order 键保序)。
+- **执行边界诚实化**:承认真流/假并发之分——非模块求值是"对物化 owned 结构的算子/`fold`/`flat_map`
+  pass";`@extend`/`@media` 是**全局多趟 pass**(非 `Acc` 状态机、非递归下降遍历)。
+- **现状处置**:未提交核心重构(`lib.rs` 的 `Shared` `compile`、`structure`/`eval` 独立块求值 +
+  `@each/@for`/`@if`、`tests/hrx.rs` harness、`ledger` 基线)是 **P1/P3 可复用子集**,非丢弃重写;
+  旧 `parse.rs`/`render.rs` 已删。未提交的一阶 `@extend`(带 borrow 错)归入 P6 正确实现。
+- **能力面按阶段补全**(依赖序):P0 harness(多文件/`options.yml`/诊断断言)→ P1 值/单位/calc/color →
+  P2 结构化 selector → P3 管线/控制流/媒体冒泡/作用域 → P4 callable(mixin/@content/function)→
+  P5 模块(use/forward/import + 并发 + 多播)→ P6 `@extend` → P7 原生 CSS 透传 + 诊断 → P8 CSS Color 4。
 
 ## Capabilities
 
@@ -39,23 +32,21 @@ expressions / callable / operators / parser / variables），`element-plus` 有 
 - `scss-compilation`：SCSS→expanded CSS 的对外行为契约——嵌套/`&`、变量、插值、控制流、mixin/
   function/extend、`@use` 模块、内置函数与值类型、运算符与单位、注释处理、错误形态；每条断言可回溯
   到具体 `sass-spec` 金样与 `element-plus` 语料。
-- `reactive-stream-architecture`：系统作为**一条 Shared 惰性 owned 值流**的体系结构/质量属性契约——
-  每一层都是流、循环=flat_map、状态=owned 累加子、一到多=多播、终点单次 subscribe、禁止物化-再-遍历
-  与手搓驱动；由 `sasslint` 确定性把关。
-- `sasspile-conformance`：验收闸契约——行为只由 `sass-spec` + `element-plus` 决定；每个增量
-  `ledger diff regress=0`；`sasslint` 命中数 0；测试为 `#[test]` 置于 `crates/sasspile/tests/`。
+- `reactive-stream-architecture`：系统作为**流 + 全局 pass 的混合式分层管线**的结构/质量属性契约——
+  循环=flat_map、状态=owned 累加子、一到多=多播、真并发仅模块加载、终点 `into_future` 收口、
+  禁止 `Acc` 驱动与递归下降遍历;由 `sasslint` 确定性把关。
+- `sasspile-conformance`：验收闸契约——行为只由 `sass-spec` + `element-plus` 决定;每阶段
+  `ledger diff regress=0`;`sasslint` 命中 0;测试为 `#[test]` 置于 `crates/sasspile/tests/`。
 
 ### Modified Capabilities
-<!-- openspec/specs/ 目前为空（无已归档主 spec），本变更全部为新增能力，无既有能力需求被修改。 -->
+<!-- openspec/specs/ 为空(无归档主 spec),本变更全部为新增能力。 -->
 
 ## Impact
 
-- Affected specs（新建）：`scss-compilation`、`reactive-stream-architecture`、`sasspile-conformance`。
-- Affected code：`crates/sasspile/src/`（`lib`/`parse` 重写为 `Shared` 流核心；新增块求值/渲染流模块；
-  `expr`/`value` 扩展算术与内置函数；`render`/`lex` 适配），可能新增 `tokio`（rt-multi-thread）依赖。
-- Affected tools：`crates/sasslint`（规则已含 `mutable-accumulator-drives`/`no-from-fn-driver`/
-  `no-work-queue`/`no-tree`/`no-recursive-descent`/`no-relay-vec`/`no-string-machine`，作为 CI 闸）；
-  `crates/ledger`（在新核心下重立基线，再按 hrx 目录簇 `regress=0` 增长）。
-- Reference source（唯一）：`sass-spec/`、`element-plus/`。
-- 风险：核心重写期回归 → 全程 `regress=0` 提交闸，达不到即回退绿色基线（`@if` 已在）；`Shared` 的
-  `Send+Sync+'static` 与并发保序是新约束，遇阻先假设分解错，不退回累加子驱动（见 design Risks）。
+- Affected specs(新建):`scss-compilation`、`reactive-stream-architecture`、`sasspile-conformance`。
+- Affected code:`crates/sasspile/src/`(`lib` = `Shared` `compile` 入口;`lexer`/`value`/`expr`/
+  `value_parse`/`builtins`/`structure`/`eval` 为私有内部件,按 P1–P8 扩成全语言模型/管线)。
+- Affected tools:`crates/sasslint`(铁律 CI 闸)、`crates/ledger`(hrx A/B 基线 + `regress=0`)。
+- Reference source(唯一):`sass-spec/`、`element-plus/`。
+- 风险:阶段内允许 pass 数波动但**不得**把已过例改坏(`regress=0`);诊断文本达标比"出对 CSS"更难,
+  单列一相;并发保序用 order 键 + 稳定合并(见 design「并发/保序」节),不靠 `from_stream` 侥幸。

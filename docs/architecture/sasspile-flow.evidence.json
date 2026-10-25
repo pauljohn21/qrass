@@ -1,0 +1,187 @@
+{
+  "view": "sasspile async compile pipeline (Shared stream core)",
+  "question": "How does Sass source text move stage-by-stage to CSS, and where do owned values/accumulators flow through rxrust operators?",
+  "producedBy": ["explore", "flow-visualizer", "graphviz"],
+  "viewLevel": "L3 components / L4 symbols",
+  "diagramState": "current",
+  "sourceRefPolicy": "resolvable",
+  "generatedFrom": "source over crates/sasspile/src (post Shared-stream cutover, tasks 3.1)",
+  "nodes": [
+    {
+      "id": "entry.compile",
+      "label": "async compile(content)",
+      "type": "capability",
+      "state": "current",
+      "description": "Public async entry; builds and drives the Shared observable chain, terminating in into_future().await. No sync compile_string / block_on facade.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:46-78"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.token_stream",
+      "label": "lex (inlined in compile)",
+      "type": "module",
+      "state": "current",
+      "description": "compile inlines lexing as operators on ONE Shared chain: Shared::from_iter(chars) -> scan_map(LexAcc) -> flat_map(Shared::from_iter) -> collect::<Vec<Tok>>. The separate lexer::token_stream() (chars->from_iter->scan_map->flat_map->box_it Local observable) is now only a helper used by lexer tests, NOT the compile pipeline.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:51-54", "crates/sasspile/src/lexer.rs:126-131"],
+      "confidence": "high"
+    },
+    {
+      "id": "acc.LexAcc",
+      "label": "LexAcc (owned accumulator)",
+      "type": "module",
+      "state": "current",
+      "description": "DFA state moved through scan_map: buf/hash/var/interp depth stack/out/slash/block. Interp depth is data, not recursion.",
+      "sourceRefs": ["crates/sasspile/src/lexer.rs:32-124"],
+      "confidence": "high"
+    },
+    {
+      "id": "data.Tok",
+      "label": "Tok",
+      "type": "data",
+      "state": "current",
+      "description": "Word | Punct(char) | Var(name no $) | Interp(Vec<Tok>).",
+      "sourceRefs": ["crates/sasspile/src/lexer.rs:15-24"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.collect_toks",
+      "label": "collect + into_future (tokens)",
+      "type": "module",
+      "state": "current",
+      "description": "collect::<Vec<Tok>>() (the single Vec boundary inside the one Shared chain) feeding the parser; not a separate boxed sub-observable bridged by std.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:54"],
+      "confidence": "high"
+    },
+    {
+      "id": "mod.structure",
+      "label": "structure::Block::parse",
+      "type": "module",
+      "state": "current",
+      "description": "Recursive-descent over the token slice produces an owned Block tree (DATA). No mutable driving accumulator; recursion only to build nested owned data.",
+      "sourceRefs": ["crates/sasspile/src/structure.rs:23-33", "crates/sasspile/src/structure.rs:79-109"],
+      "confidence": "high"
+    },
+    {
+      "id": "data.Block",
+      "label": "Block / Decl",
+      "type": "data",
+      "state": "current",
+      "description": "Block { head:Vec<Tok>, decls:Vec<(Vec<Tok>,Vec<Tok>)>, body:Vec<Block>, order:u32 } — owned nested structure; body/decls use 'body' (not 'children').",
+      "sourceRefs": ["crates/sasspile/src/structure.rs:11-21"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.shared_stream",
+      "label": "Shared::from_stream(root.body)",
+      "type": "module",
+      "state": "current",
+      "description": "ONE cold Shared observable over the top-level items; a single from_stream task polls sequentially, preserving document order.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:56"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.scan_acc",
+      "label": "scan_map((env, taken))",
+      "type": "module",
+      "state": "current",
+      "description": "Owned accumulator (global Env, @if-chain 'taken' bool) moved across siblings; each block evaluated independently, returns Vec<Leaf>; the taken value threads the branch chain as a moved value (no mutable chain_taken flag).",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:57-61"],
+      "confidence": "high"
+    },
+    {
+      "id": "mod.eval",
+      "label": "eval::eval_top/eval_block/eval_list/eval_each",
+      "type": "module",
+      "state": "current",
+      "description": "Pure per-block evaluation (owned Block + prefix + &Env -> owned Vec<Leaf>). Nesting = recursion over owned data; @each = flat_map over item stream; @if/@else = immutable taken value.",
+      "sourceRefs": ["crates/sasspile/src/eval.rs:61-131"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.flat_iter",
+      "label": "flat_map(Shared::from_iter)",
+      "type": "module",
+      "state": "current",
+      "description": "Flattens each item's Vec<Leaf> into the main stream inline and in order (from_iter is non-timed, runs synchronously) — order-preserving fan-out.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:62"],
+      "confidence": "high"
+    },
+    {
+      "id": "data.Leaf",
+      "label": "Leaf",
+      "type": "data",
+      "state": "current",
+      "description": "Resolved flat output rule: selector:String + decls:Vec<(String,String)>. Interpolation/vars resolved during eval.",
+      "sourceRefs": ["crates/sasspile/src/eval.rs:15-18"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.leaf_block",
+      "label": "map(leaf_block)",
+      "type": "module",
+      "state": "current",
+      "description": "Pure per-leaf map: Leaf -> CSS block String.",
+      "sourceRefs": ["crates/sasspile/src/eval.rs:21-28", "crates/sasspile/src/lib.rs:63"],
+      "confidence": "high"
+    },
+    {
+      "id": "op.reduce_term",
+      "label": "reduce_initial + into_future().await",
+      "type": "module",
+      "state": "current",
+      "description": "Merge chunks into one String; terminal into_future().await (Empty -> Ok(\"\")). No std mpsc/recv, no block_on facade — the reactive chain terminates via rxrust's own terminal.",
+      "sourceRefs": ["crates/sasspile/src/lib.rs:64-75"],
+      "confidence": "high"
+    },
+    {
+      "id": "layer.expr",
+      "label": "Expr / Expr::render/eval",
+      "type": "module",
+      "state": "current",
+      "description": "Token run folds ONCE into Expr (Lit/Var/Interp/Concat/Bin/Cmp/And/Or/If/Func); eval resolves against owned Env; undefined $var inside #{} is Err (drops decl); builtin calls via whitelist.",
+      "sourceRefs": ["crates/sasspile/src/expr.rs:60-135"],
+      "confidence": "high"
+    },
+    {
+      "id": "layer.value",
+      "label": "Value / to_css",
+      "type": "module",
+      "state": "current",
+      "description": "Owned value model flowing down the stream; CSS produced lazily by to_css only when demanded.",
+      "sourceRefs": ["crates/sasspile/src/value.rs:15-91"],
+      "confidence": "high"
+    },
+    {
+      "id": "data.env",
+      "label": "Env = HashMap<String,Value>",
+      "type": "data",
+      "state": "current",
+      "description": "Variable environment; the global Env is seeded by eval::global_env and carried as the scan_map accumulator's owned value; per-block child Env is produced by apply_decls (owned, moved down).",
+      "sourceRefs": ["crates/sasspile/src/expr.rs:17", "crates/sasspile/src/eval.rs:118-131"],
+      "confidence": "high"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "entry.compile", "to": "op.token_stream", "type": "calls", "sync": "async", "protocol": "in-process", "description": "starts the single Shared chain by inlining lexing over owned chars", "sourceRefs": ["crates/sasspile/src/lib.rs:51"], "confidence": "high" },
+    { "id": "e2", "from": "op.token_stream", "to": "op.collect_toks", "type": "produces", "sync": "async", "protocol": "in-process", "description": "token stream is collected to owned Vec<Tok> within the one chain", "sourceRefs": ["crates/sasspile/src/lib.rs:51-54"], "confidence": "high" },
+    { "id": "e3", "from": "acc.LexAcc", "to": "op.token_stream", "type": "owns", "sync": "sync", "protocol": "in-process", "description": "accumulator moved in/re-emitted via scan_map", "sourceRefs": ["crates/sasspile/src/lexer.rs:128"], "confidence": "high" },
+    { "id": "e4", "from": "op.collect_toks", "to": "mod.structure", "type": "calls", "sync": "sync", "protocol": "in-process", "description": "Vec<Tok> -> owned Block tree", "sourceRefs": ["crates/sasspile/src/lib.rs:54"], "confidence": "high" },
+    { "id": "e5", "from": "mod.structure", "to": "data.Block", "type": "produces", "sync": "sync", "protocol": "in-process", "description": "recursive-descent parse (data, no tree-walk driver)", "sourceRefs": ["crates/sasspile/src/structure.rs:79-109"], "confidence": "high" },
+    { "id": "e6", "from": "data.Block", "to": "op.shared_stream", "type": "reads", "sync": "async", "protocol": "in-process", "description": "Shared::from_stream over root.body (one ordered stream)", "sourceRefs": ["crates/sasspile/src/lib.rs:56"], "confidence": "high" },
+    { "id": "e7", "from": "op.shared_stream", "to": "op.scan_acc", "type": "calls", "sync": "async", "protocol": "in-process", "description": "per item, scan_map threads owned (env, taken)", "sourceRefs": ["crates/sasspile/src/lib.rs:57"], "confidence": "high" },
+    { "id": "e8", "from": "op.scan_acc", "to": "mod.eval", "type": "calls", "sync": "sync", "protocol": "in-process", "description": "eval_top evaluates one block independently -> Vec<Leaf>", "sourceRefs": ["crates/sasspile/src/eval.rs:40-42"], "confidence": "high" },
+    { "id": "e9", "from": "mod.eval", "to": "op.flat_iter", "type": "produces", "sync": "sync", "protocol": "in-process", "description": "Vec<Leaf> flattened inline & in order", "sourceRefs": ["crates/sasspile/src/lib.rs:62"], "confidence": "high" },
+    { "id": "e10", "from": "op.flat_iter", "to": "data.Leaf", "type": "produces", "sync": "sync", "protocol": "in-process", "description": "resolved leaves in document order", "sourceRefs": ["crates/sasspile/src/eval.rs:61-90"], "confidence": "high" },
+    { "id": "e11", "from": "data.Leaf", "to": "op.leaf_block", "type": "reads", "sync": "sync", "protocol": "in-process", "description": "owned Leaf handed to map", "sourceRefs": ["crates/sasspile/src/lib.rs:63"], "confidence": "high" },
+    { "id": "e12", "from": "op.leaf_block", "to": "op.reduce_term", "type": "produces", "sync": "async", "protocol": "in-process", "description": "CSS chunks merged then into_future().await terminal", "sourceRefs": ["crates/sasspile/src/lib.rs:64-75"], "confidence": "high" },
+    { "id": "e13", "from": "mod.eval", "to": "layer.expr", "type": "calls", "sync": "sync", "protocol": "in-process", "description": "Expr::render for head/selector + Decl prop/value", "sourceRefs": ["crates/sasspile/src/eval.rs:120-123", "crates/sasspile/src/eval.rs:133-135"], "confidence": "high" },
+    { "id": "e14", "from": "layer.expr", "to": "layer.value", "type": "produces", "sync": "sync", "protocol": "in-process", "description": "eval -> Value -> to_css", "sourceRefs": ["crates/sasspile/src/expr.rs:89-122", "crates/sasspile/src/value.rs:29-52"], "confidence": "high" },
+    { "id": "e15", "from": "data.env", "to": "layer.expr", "type": "reads", "sync": "sync", "protocol": "in-process", "description": "eval resolves $var against owned Env", "sourceRefs": ["crates/sasspile/src/expr.rs:92-95"], "confidence": "high" },
+    { "id": "e16", "from": "op.scan_acc", "to": "data.env", "type": "owns", "sync": "sync", "protocol": "in-process", "description": "global Env carried as owned accumulator value", "sourceRefs": ["crates/sasspile/src/lib.rs:55", "crates/sasspile/src/eval.rs:31-33"], "confidence": "high" }
+  ],
+  "gaps": [
+    { "id": "gap.order.concurrent", "note": "Document order is preserved today by ONE ordered from_stream + inline flat_map(from_iter); the concurrent fan-out + order-key/stable-sort path (design D3) is deferred to the independent-subgraph (@use/module) stage.", "confidence": "high" },
+    { "id": "gap.directives.multicast", "note": "@mixin/@include/@use one-to-many Shared::subject/behavior_subject multicast (design D6) not yet implemented; @each (flat_map) and @if (immutable taken) landed.", "confidence": "high" },
+    { "id": "gap.hrx.harness", "note": "ledger diff regress=0 requires the hrx snapshot harness in sasspile/tests; basic goldens are covered by tests/compile.rs (async).", "confidence": "medium" }
+  ]
+}

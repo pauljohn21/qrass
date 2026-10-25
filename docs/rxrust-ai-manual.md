@@ -1,5 +1,11 @@
 # rxrust 1.0 AI 编码手册（官方 Book + 源码核实版）
 
+> ⚠️ **已被取代（SUPERSEDED）**：本手册基于 `rxrust-1.0.0-rc.5` 与已删除的 qrass，保留仅作历史参考。
+> 当前**唯一权威** = `docs/rxrust-source-analysis/`（`rc.6`、sasspile、逐文件 文件:行 取证）与
+> `.qoder/skills/rxrust-reactive/`。冲突一律以那两处为准。尤其：本文下方任何 `type Stage<T>`/`fn fail`/
+> `fn drain` 管线示例都是旧的“自造框架层”写法，**已禁**（见 `08 §1/§4`：直接组合算子；同步 `Local`→
+> `subscribe`+`mpsc`，`Shared`/`from_stream`→`into_future().await`）；入口为 `async fn sasspile::compile`。
+
 > 依据：rxRust 官方 Book（`https://rxrust.github.io/rxRust/latest/`，源码在 crate 的
 > `guide/` 目录）逐章精读 + `rxrust-1.0.0-rc.5` 源码逐文件核实（`context.rs` /
 > `factory.rs` / `observable.rs` / `observer.rs` / `ops/*` / `observable/boxed.rs` /

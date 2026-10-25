@@ -1,0 +1,32 @@
+{
+  "mode": "local-directory-mirror",
+  "originRepository": "https://github.com/pauljohn21/qrass",
+  "sourcePath": "docs/rxrust-source-analysis",
+  "sourceCommit": "5bea39dbd056e59f6c811304506a806bb26a3a98",
+  "sourceOfTruth": "docs/rxrust-source-analysis in the qrass repository",
+  "packaged": [
+    "README.md",
+    "01-philosophy-and-architecture.md",
+    "02-context-scope-rc.md",
+    "03-observer-subscription.md",
+    "04-observable-trait-and-sources.md",
+    "05-operators.md",
+    "06-subject-multicast-connectable.md",
+    "07-type-erasure-and-scheduler.md",
+    "08-recipes-and-pitfalls.md"
+  ],
+  "fidelity": "verbatim copy; references/ is byte-identical to the source directory (diff -rq clean)",
+  "handWrittenFiles": [
+    "skills/rxrust-source-analysis/SKILL.md",
+    "README.md",
+    ".qoder-plugin/plugin.json",
+    "SOURCE.json",
+    "assets/avatar.svg"
+  ],
+  "logoProvenance": "self-drawn assets/avatar.svg (no external or marketplace icon reused)",
+  "omitted": "none — all 9 Markdown files of the source directory are packaged",
+  "syncCommand": "cp docs/rxrust-source-analysis/*.md plugins/rxrust-source-analysis/skills/rxrust-source-analysis/references/ && rm -rf .qoder/skills/rxrust-source-analysis && cp -R plugins/rxrust-source-analysis/skills/rxrust-source-analysis .qoder/skills/",
+  "installedCopy": ".qoder/skills/rxrust-source-analysis (project-local install, verified byte-identical by scripts/validate.sh gate 8)",
+  "subjectCrate": "rxrust =1.0.0-rc.6",
+  "adaptation": "superpowers-reference-skill-r1"
+}

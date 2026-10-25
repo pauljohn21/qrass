@@ -7,8 +7,9 @@ rust-version.workspace = true
 description = "A clean-room SCSS->CSS compiler whose control flow IS a lazy rxrust owned-value stream."
 
 [dependencies]
-rxrust = "=1.0.0-rc.6"
+rxrust = { version = "=1.0.0-rc.6", features = ["scheduler"] }
 tracing = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 ledger = { path = "../ledger" }
