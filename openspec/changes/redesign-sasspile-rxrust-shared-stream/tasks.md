@@ -86,11 +86,21 @@
     但 `no_operator.hrx` 两条回退（因把 `calc` 当成不解析）；用“名字以 `-` 开头”→ 踩坏 `min`/`clamp`/`url`
     （978→947、3 个单测红）。因此**未落**：已仅保留中性部分（词法让 `-a-calc(` 成为一个词素，
     `regress=0 net=0`，已推），分类器与 `FATAL` 翻转已 `git checkout` 退回。
-  - **0′.3b-3 下一个具体开门问题**（先回答它再写分类器）：`css/functions/special/prefixed/lowercase::calc/script_like`
-    期望 `a {b: -a-calc($c)}` 输出 `-a-calc($c)`——按上面三条规则，`calc` 是 special 且参数应解 `$c`，而 `$c`
-    未定义应报错。这一条与三条规则共存不下去，需先确定它是“前缀后基名不算 special”还是
-    “解不了就整体退回原始 CSS”（后者属于 Sass 的声明值解析失败回退，需另找至少一个用例交叉验证）。
-    在该问题回答前 `FATAL` 保持为空，并用 `tests/fallback.rs` 钉住 interim 行为。
+  - [x] **0′.3b-2 special 调用分类器（已合入，暂时休眠）**：`expr::special_call` + `SPECIAL_CALLS`
+      按**去厂商前缀后的基名**匹配 `url`/`calc`/`element`/`expression`（另认 `progid:` 这类命名空间形）；
+      词法已保证 `-a-calc(` 是一个词素。注意它只在 `FATAL` 非空时才参与判定，所以现在行为中性（实测
+      与 599 基线集合完全相等：新增=0 丢失=0）。
+  - [ ] **0′.3b-3 翻转的实测结果（未落地，原因已定位）**：把 `UndefinedVariable` 放进 `FATAL` 并加上述两条
+      守卫后，hrx **599 → 981**（逐条集合差：新增 **385**、丢失 **3**）。三条丢失全部是
+      `css/plain/function.hrx::*\/sass_script`：输入为 plain-CSS `@function --a() { result: $b; }`，
+      规范要求整块原样透传，而我们仍把 `$b` 当 SassScript 求值→ 报错。不拿 385 换 3 条真回退，已退。
+  - [ ] **0′.3b-4 翻转的前置任务**：plain CSS at-rule（`@function --a()`/`@mixin --a()`/未知 at-rule）体
+      原样透传（属 P7 7.1，但它是 0′.3 的门，不是可选项）。完成后才能把 `UndefinedVariable` 加进 `FATAL`，
+      并把 `tests/fallback.rs::unbound_variable_travels_the_err_channel`（现 `#[ignore]`）恢复为常规断言。
+  - [ ] **0.5 harness 用例 key 相撞（本轮实测发现，工具会低报回归）**：`tests/hrx.rs` 用
+      `<basename>.hrx::<case>` 做 key，不同目录同名文件（如两个 `function.hrx`）会碰撞；导致
+      `ledger diff` 报 `regress=0 net=266` 而逐条集合差实为 `+385 / −3`。key 必须改用相对 `spec/` 的
+      完整路径。在此之前，任何关键结论都应用两份快照的 `awk|sort|comm` 集合差复核，不得只信 `ledger diff`。
   - **0′.3c**：上面两项完成后，才把 `UndefinedVariable` 放进 `FATAL`，并翻转 `tests/fallback.rs` 最后一条
     （它现在故意钉着“暂逐字保留”），再按簇重测 error 类用例；同时收紧 harness 的 error 比对粒度（0.4），
     否则“+380”这类数字无法区分“真按金样报错”与“只是报了个错”。

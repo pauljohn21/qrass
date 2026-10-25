@@ -51,6 +51,36 @@ fn protected(toks: &[Tok]) -> bool {
     })
 }
 
+/// Sass's **special** calls, matched on the base name after a vendor prefix: their arguments are
+/// plain CSS, where `+`/`-` are not arithmetic and an **unbound** `$x` is just text rather than an
+/// error (`css/functions/special/prefixed/lowercase::calc/script_like` keeps `-a-calc($c)`; the same
+/// family's `calc/interpolation` still evaluates `#{0}`, and `values/calculation/calc/no_operator::
+/// variable/unquoted_string` resolves a *bound* `$a`). A function that is merely unknown is **not**
+/// special: `css/functions/not_special.hrx` computes `-c-type(1 + 1)` → `-c-type(2)`.
+///
+/// Grows with the builtin registry (P1.7/P2); `min`/`max`/`clamp` are excluded on purpose — their
+/// variables resolve too.
+const SPECIAL_CALLS: [&str; 4] = ["url", "calc", "element", "expression"];
+
+/// Strip a vendor prefix from a call name (`-a-calc` → `calc`). A `fn`, not a closure: a closure's
+/// elided lifetimes cannot tie the returned `&str` to its argument.
+fn base_call_name(name: &str) -> &str {
+    name.rsplit('-').next().unwrap_or(name)
+}
+
+/// Whether a run calls a special (or namespaced, `progid:`-style) function.
+pub fn special_call(toks: &[Tok]) -> bool {
+    toks.iter().any(|tok| match tok {
+        Tok::Word(word) => match word.strip_suffix('(') {
+            Some(name) => SPECIAL_CALLS.contains(&base_call_name(name)) || name.contains(':'),
+            None => false,
+        },
+        _ => false,
+    }) || toks.windows(2).any(|pair| {
+        matches!(pair[0], Tok::Punct(':')) && matches!(&pair[1], Tok::Word(w) if w.ends_with('('))
+    })
+}
+
 fn has_dynamic(toks: &[Tok]) -> bool {
     toks.iter()
         .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)))

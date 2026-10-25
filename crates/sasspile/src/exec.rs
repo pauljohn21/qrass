@@ -162,10 +162,11 @@ impl State {
     /// an operation (or an interpolation) earns evaluation, so `w: 10px` keeps its exact source
     /// digits instead of being normalised to `10px` from a float.
     ///
-    /// `Ok(None)` means "stays verbatim": the run did not parse as a Sass expression, or its failure
-    /// is not fatal. Which failures may stay verbatim is being pinned case-by-case against the
-    /// corpus (P0′.3b) — the decision is **explicit per kind**, not one blanket `.ok()` that also
-    /// eats real errors.
+    /// `Ok(None)` means "stays verbatim": the run did not parse as a Sass expression, or it failed
+    /// inside a **special** call, whose arguments are plain CSS where an unbound `$x` is just text
+    /// (`expr::special_call`; `css/functions/special/prefixed/lowercase::calc/script_like`). Anywhere
+    /// else a fatal failure travels down the real `Err` channel — the decision is explicit per shape
+    /// and per kind, never one blanket `.ok()` that also eats real errors.
     fn evaluated(&self, toks: &[Tok]) -> Result<Option<Value>, SassError> {
         let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
@@ -176,7 +177,7 @@ impl State {
         };
         match expr.eval(&self.env) {
             Ok(value) => Ok(Some(value)),
-            Err(err) if err.is_fatal() => Err(err),
+            Err(err) if err.is_fatal() && !expr::special_call(toks) => Err(err),
             Err(_) => Ok(None),
         }
     }

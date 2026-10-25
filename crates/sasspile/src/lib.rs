@@ -35,12 +35,21 @@ pub enum ErrorKind {
     Other,
 }
 
-/// The kinds that abort the stream **today**. Deliberately empty at P0′.3a: plumbing the real `Err`
-/// channel must not move the pass count. Flipping `UndefinedVariable` in without more was measured
-/// (598 → 984 pass, but 60 regressions): a variable lookup must not run at all in literal contexts
-/// — selector escapes, `progid:`/prefixed IE values, uppercase `VAR(...)` — and ~47 of those
-/// regressions are indented-syntax cases whose `@for $i` binding does not exist yet. P0′.3b adds
-/// this kind back once the literal-context rule is in; P0′.3c covers the bindings.
+/// The kinds that abort the stream. An unbound variable is fatal because the corpus says so
+/// (`directives/use/error/member/missing`: `Error: Undefined variable.`).
+///
+/// Still empty, because flipping it was measured at 599 → 981 (+385) but with **3 real
+/// regressions**, all `css/plain/function.hrx::*\/sass_script`: a plain-CSS at-rule body
+/// (`@function --a() { result: $b; }`) must pass through untouched (P7/0′.7), and we still evaluate
+/// it as SassScript. The two guards that flipping already required are landed and verified:
+/// 1. a block **head** resolves only `#{ … }` — an `@for $i from …` header *binds* `$i`; looking it
+///    up there invented errors for ~47 cases (`directives/for/{whitespace,comment}.hrx`);
+/// 2. an unbound `$x` inside a **special** call is plain-CSS text (`expr::special_call`: arguments
+///    of `url`/`calc`/`element`/`expression`/`progid:`), while a *bound* one still resolves
+///    (`values/calculation/calc/no_operator::variable/unquoted_string`) and `min`/`max`/`clamp` are
+///    not special at all (`css/functions/not_special.hrx` computes `-c-type(1 + 1)`).
+///
+/// Add `UndefinedVariable` once plain-CSS at-rule bodies pass through (0′.3b-4).
 const FATAL: &[ErrorKind] = &[];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
