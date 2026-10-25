@@ -16,12 +16,12 @@
 | 课次（`--target 300 --max 600`） | **58 课 / 103 段**，落在课程契约的 45–60 带内 | `docsizer plan` + `coverage 100.00% unassigned=0 duplicates=0` |
 | 每行平均真讲解 | **≥ 70 字** | "作用 + 存在理由 + 不这样写的后果"三问的最小长度 |
 | 逐行讲解合计 | ≈ 98.8 万字 | 14,116 × 70 |
-| V0 前置卷（零基础） | ≈ 12 万字 | 所有权/闭包 trait/泛型/Rc-Arc/内部可变性/object-safety/GAT/宏 |
+| V0 前置卷（零基础） | ≈ 5 万字 | 实测密度：V0-01 = 0.74 万非代码字；所有权/闭包 trait/泛型与 GAT/Rc-Arc/object-safety/宏 |
 | 练习 + 参考答案 + 编译错解读 | ≈ 25 万字 | 每课 ≥3 个真实编译错 + ≥4 练习 |
-| **预期总量** | **≈ 135 万字（非代码口径）** | 达标线 100 万，余量 35% |
+| **预期总量** | **≈ 130 万字（非代码口径）** | 达标线 100 万，余量 30% |
 
 反灌水：任何"复述源码原文、跨卷复制、把代码块算进字数"都在 `docsizer words` 的**非代码口径**下无收益
-（实测现存草稿：2 文件 / 总字符 12,458 / 非代码 7,613）。
+（实测：写 V0-01 前 2 文件 / 非代码 7,613 字 → 写完后 4 文件 / 非代码 14,602 字，增量即该课正文的真实密度）。
 
 ## 2. 文件布局
 
@@ -32,7 +32,7 @@ docs/rxrust-from-scratch/
   MAP.tsv                   # 88 个源文件 → 7 卷归属（plan 的输入）
   COVERAGE.tsv              # 行级覆盖账本：源文件\t行区间\t课号\t主/复习（plan 的输出）
   VERIFICATION.tsv          # 每课编译验证结论：课号\tbuild\ttest\tclippy\t关键报错
-  v0-foundations/            lesson 00-04 …（零基础前置，不覆盖源码）
+  v0-foundations/            lesson 00-01 … 00-05（零基础前置，不覆盖源码；代码放 code/ 子目录）
   v1-observer-source/        lesson 01-06   observer.rs / from_iter / trivial
   v2-subscription/           lesson 07-10   subscription*
   v3-context-rc-factory/     lesson 11-16   context.rs / rc.rs / factory.rs

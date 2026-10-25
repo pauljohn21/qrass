@@ -1,3 +1,4 @@
-# VERIFICATION — 每课代码的累计编译验证结论（工具 MUST 建在 workspace 之外）
-# lesson\tbuild\ttest\tclippy\tkey_error
-V1-01\tPENDING\tPENDING\tPENDING\t课文尚未按新契约重写
+# VERIFICATION — 每课代码的累计编译验证结论（验证 crate MUST 建在 workspace 之外：/tmp/minirx-check）
+# lesson	build	test	clippy	key_error
+V0-01	OK	6 passed	0 warnings	E0308/E0277（total: usize += i32，已修并写进课文 §6②）
+V1-01	PENDING	PENDING	PENDING	课文尚未按新契约重写（旧草稿 01-the-observer-and-the-first-source.md 待并入 V1）

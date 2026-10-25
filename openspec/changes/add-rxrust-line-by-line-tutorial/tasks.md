@@ -14,13 +14,17 @@
 - [x] 0.4 `docsizer words --dir docs/rxrust-from-scratch`：非代码字数（剔 ``` 代码块与表格分隔行、不计空白）+ 总字数两口径
 - [x] 0.5 `docsizer` 的 `tests/` 用真实小样本断言四类行为（test 块整块排除 / plan→coverage 干净账 / 未归属与重复都能报 / 代码与表分隔不计正文）；bin 名歧义已避（`--bin docsizer`）
 - [x] 0.6 建立 `MAP.tsv`（88 文件→ 7 卷）+ `COVERAGE.tsv`（58 课预分配，100% 覆盖）+ `VERIFICATION.tsv` / `GLOSSARY.md` 骨架
-- [ ] 0.7 验证工装位置：**MUST 放在 workspace 之外**（如 `/tmp/minirx-check`，不入库）。实测坑：在
-      `target/` 下 `cargo new` 会被 cargo 改写根 `Cargo.toml` 的 `workspace.members`（已发生并复原），
-      故验证 crate MUST NOT 建在仓库目录树内
+- [x] 0.7 验证工装位置：**MUST 放在 workspace 之外**（实测：`/tmp/minirx-check`；课文代码则放
+      `docs/…/code/` 入库、`cp` 出去编译）。实测坑：在 `target/` 下 `cargo new` 会被 cargo 改写根 `Cargo.toml` 的
+      `workspace.members`（已发生并复原），故验证 crate MUST NOT 建在仓库目录树内
 
-## V0 — 零基础前置卷（约 5 课，≈12 万字；不覆盖源码）
+## V0 — 零基础前置卷（约 5 课，≈5 万字；不覆盖源码）
 
-- [ ] 1.1 所有权与借用：为什么"值被搬走"而不是"值被引用"（为 V1 的 `Item` 按值铺路）
+> 密度实测：V0-01 非代码字数 0.74 万 → 本卷按每课 0.7–1 万、共 ≈5 万字计（原 12 万估计偏大，不拿灌水凑）。
+
+- [x] 1.1 所有权与借用：为什么"值被搬走"而不是"值被引用"（为 V1 的 `Item` 按值铺路）——
+      `v0-foundations/00-01-ownership-and-borrowing.md`；代码 `code/00-01-ownership*.rs` 已外部验证
+      （6 测通过、clippy 0 警）；4 个编译错均为实测原文（E0382×2 / E0308+E0277 / E0106）
 - [ ] 1.2 trait 与泛型：trait 边界、关联类型；**手写一次再改写成 GAT** 的对照实验
 - [ ] 1.3 闭包三兄弟 `Fn/FnMut/FnOnce`：为什么 `next(&mut self)` 用 `FnMut`、终止方法为何消耗 `self`
 - [ ] 1.4 `Rc/Arc/RefCell/Mutex` 与内部可变性：共享 vs 共享可变；object-safety 初探（为 V1 `DynObserver` 铺路）
