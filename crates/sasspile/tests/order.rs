@@ -1,8 +1,12 @@
-//! The concurrency contract. Items are flattened and then worked on **independently**:
-//! `flat_map` defaults to `usize::MAX` concurrency and `Shared::from_stream` hands its stream
-//! to the scheduler, which on native is `tokio::spawn`. So the merge must still come out in
-//! exact document order — carried by the owned `order` key, not by a serialised fan-out and
-//! not by recursive descent.
+//! Document order is a property of the **stream**, not of a key. Up to `Render` the chain is serial,
+//! so rules reach it in the order their blocks settle (see `exec::State::step`: a pending
+//! declaration run settles when a nested block opens, the rest when a block closes). No `order`
+//! field, no `collect`, no `sort_by_key`, and no per-rule task hand-off — real concurrency returns
+//! only at P5 (independent module subgraphs), where the extra constraint is that a queued inner
+//! observable must not have produced anything before it was subscribed.
+//!
+//! The multi-thread runtime below is kept deliberately: it proves the pipeline is order-correct even
+//! when the caller drives it from several workers.
 
 use sasspile::compile;
 
@@ -12,7 +16,6 @@ async fn css(input: String) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn many_independent_items_still_merge_in_document_order() {
-    // TEMPORARY evidence instrumentation: prove the fan-out really runs on several threads.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
@@ -27,7 +30,8 @@ async fn many_independent_items_still_merge_in_document_order() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn nested_blocks_close_early_but_still_merge_parent_first() {
-    // A child block closes before its parent, yet the parent's own declarations must lead.
+    // A child block closes before its parent, yet the parent's own declaration run leads — it
+    // settles when the child opens, not when the parent closes.
     assert_eq!(
         css("a { p: 1; b { q: 2 } c { r: 3 } }".to_string()).await,
         "a {\n  p: 1;\n}\na b {\n  q: 2;\n}\na c {\n  r: 3;\n}\n"

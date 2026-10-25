@@ -1,11 +1,12 @@
-//! State — the running program state, carried as **the item the stream emits**.
+//! State — the running program state, held by the `Exec` phase kernel's **observer** (`crate::phases`).
 //!
-//! This is the framework's own shape for stateful forward computation: `scan` emits the
-//! accumulation itself, so nothing is hidden inside a private accumulator (that was `scan_map`)
-//! and nothing has to be smuggled alongside each declaration (that was an `Arc<Env>` snapshot
-//! per decl, invented to let evaluation be deferred). The env, the open blocks and the rule
-//! this step produced all live inside the value that flows, so a declaration is evaluated at
-//! the position it appears — which is exactly Sass's document-order semantics.
+//! This is the framework's own shape for stateful forward computation: the state lives inside
+//! `ExecObserver` and is moved by `&mut self` per event, while the stream carries only what the
+//! phase actually produces (the settled rule). The previous form — `scan(seed, step)` — made the
+//! accumulator **be** the emitted item, so every event cloned the whole `State` (open blocks, env,
+//! rules) and `filter_map` then threw all but the rule away: correct decomposition, wrong vehicle.
+//! Nothing is smuggled alongside a declaration either (no per-decl `Arc<Env>` snapshot), so a
+//! declaration is still evaluated at the position it appears — Sass's document-order semantics.
 //!
 //! Nesting depth is data inside this value (`scopes`), never a call stack; no observable type
 //! appears here, because `compile` (crate root) owns the one operator chain.
@@ -15,12 +16,13 @@ use crate::expr::{self, Expr};
 use crate::lexer::{Event, Tok, render, render_raw};
 use crate::value::Value;
 
-/// A resolved CSS rule in document order.
+/// A resolved CSS rule: one **declaration run** flushed from a block. A block can yield several
+/// rules (`sass-spec` `css/style_rule` `declaration/interleaved/around_style_rule`), so this is not
+/// "the block's whole body".
 #[derive(Debug, Clone)]
 pub struct StyleRule {
     pub selector: String,
     pub decls: Vec<(String, Value)>,
-    pub order: u32,
 }
 
 impl StyleRule {
@@ -41,37 +43,41 @@ impl StyleRule {
 struct Scope {
     selector: String,
     decls: Vec<(String, Value)>,
-    order: u32,
 }
 
-/// The value `scan` carries and emits: open blocks, the lexical environment, the document
-/// order counter, and the rule (if any) that the latest event settled.
+/// The program state the `Exec` kernel mutates as events flow: open blocks and the lexical
+/// environment.
 #[derive(Debug, Clone, Default)]
 pub struct State {
     scopes: Vec<Scope>,
     env: Env,
-    next: u32,
-    emitted: Option<StyleRule>,
 }
 
 impl State {
-    /// Take the rule the latest event settled, if any — the only thing the chain reads off a
-    /// state value.
-    pub fn into_rule(self) -> Option<StyleRule> {
-        self.emitted
-    }
-
-    /// Move one event into the state and hand the whole state back to the stream. Only the
-    /// settled rule is ever read downstream, through `filter_map` in `compile`.
-    pub fn step(mut self, ev: Event) -> State {
-        self.emitted = None;
+    /// Move one event into the state, returning the rule it settled, if any.
+    ///
+    /// **When a block's text settles** is what puts the output in document order without an
+    /// ordering key and without re-sorting. Per `sass-spec/css/style_rule` `declaration/interleaved/**`:
+    /// - opening a nested block first settles the enclosing block's **pending declaration run**
+    ///   (`.a {b:c; .d{e:f}}` → `.a{b:c}` before `.a .d{e:f}`);
+    /// - closing a block settles whatever it still holds (`.a {.b{c:d}; e:f}` → `.a{e:f}` **after**
+    ///   `.a .b{c:d}`);
+    /// - so one block split around children becomes several rules (`b:c`, then `g:h`).
+    pub fn step(&mut self, ev: Event) -> Option<StyleRule> {
         match ev {
             Event::Open(head) => {
-                let parent = self.scopes.last().map(|s| s.selector.clone()).unwrap_or_default();
+                let parent = self
+                    .scopes
+                    .last()
+                    .map(|s| s.selector.clone())
+                    .unwrap_or_default();
                 let selector = combine(&parent, &self.interp_text(&head));
-                let order = self.next;
-                self.next += 1;
-                self.scopes.push(Scope { selector, decls: Vec::new(), order });
+                let settled = self.settle_top();
+                self.scopes.push(Scope {
+                    selector,
+                    decls: Vec::new(),
+                });
+                settled
             }
             Event::Decl { prop, value } => {
                 // The left side of `$x: …` is a binding target: its name is taken verbatim and
@@ -92,16 +98,34 @@ impl State {
                         }
                     }
                 }
+                None
             }
-            Event::Close => {
-                self.emitted = self
-                    .scopes
-                    .pop()
-                    .filter(|s| !s.decls.is_empty() && !s.selector.is_empty())
-                    .map(|s| StyleRule { selector: s.selector, decls: s.decls, order: s.order });
-            }
+            Event::Close => Self::settled(self.scopes.pop()),
         }
-        self
+    }
+
+    /// Settle the innermost block's pending declaration run **without** popping it: the block stays
+    /// open for later declarations and children, but its text so far becomes a rule right now.
+    fn settle_top(&mut self) -> Option<StyleRule> {
+        let top = self.scopes.last_mut()?;
+        if top.decls.is_empty() {
+            return None;
+        }
+        Self::settled(Some(Scope {
+            selector: top.selector.clone(),
+            decls: std::mem::take(&mut top.decls),
+        }))
+    }
+
+    /// Turn a finished or flushed scope into a rule; a declaration-less run, or one at the root
+    /// (empty selector), settles to nothing.
+    fn settled(scope: Option<Scope>) -> Option<StyleRule> {
+        scope
+            .filter(|s| !s.decls.is_empty() && !s.selector.is_empty())
+            .map(|s| StyleRule {
+                selector: s.selector,
+                decls: s.decls,
+            })
     }
 
     /// The declaration's owned value. A custom property (`--x: …`) and a value carrying a CSS
@@ -120,7 +144,8 @@ impl State {
     }
 
     fn value_of(&self, toks: &[Tok]) -> Value {
-        self.evaluated(toks).unwrap_or_else(|| Value::from_text(render(toks)))
+        self.evaluated(toks)
+            .unwrap_or_else(|| Value::from_text(render(toks)))
     }
 
     /// Fold a token run into a typed value. A lone number is **not** an expression yet — only

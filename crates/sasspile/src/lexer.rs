@@ -1,7 +1,11 @@
-//! Lexer — the two owned accumulator **values** that turn characters into tokens and tokens
-//! into structural events. Each is a forward fold step over a single character or token; the
-//! `#{}`/interp depth is *data* inside the accumulator, never a call stack, and no observable
-//! type appears here: the operator chain that uses them lives in `compile` (crate root).
+//! Lexer — the two owned accumulator **values** behind the `Lexer`/`Structurize` phase kernels
+//! (`crate::phases`). Each is a forward fold step over a single character or token; the
+//! `#{}`/interp depth is *data* inside the accumulator, never a call stack.
+//!
+//! They hand their output to an **emit sink** (`&mut dyn FnMut(..)`) that the kernel drives with
+//! `observer.next(..)`, so a `char → 0..N Tok` / `Tok → 0..N Event` fan-out is emitted item by
+//! item. There is deliberately no returned `Vec`: batching a phase's output and flattening it
+//! again downstream was the non-framework shape this refactor removes.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
@@ -31,6 +35,10 @@ pub enum Event {
     Close,
 }
 
+/// The sink a kernel installs for its downstream observer: `FnMut(Item)` that moves each
+/// produced item straight into the stream.
+pub type Emit<'a, T> = &'a mut dyn FnMut(T);
+
 const STRUCTURAL: [char; 5] = ['{', '}', ';', ':', ','];
 
 fn is_var_char(c: char) -> bool {
@@ -43,7 +51,6 @@ pub struct LexAcc {
     hash: bool,
     var: Option<String>,
     interp: Vec<Vec<Tok>>,
-    out: Vec<Tok>,
     slash: bool,
     block: bool,
     block_star: bool,
@@ -57,31 +64,32 @@ pub struct LexAcc {
 }
 
 impl LexAcc {
-    fn push(&mut self, tok: Tok) {
+    /// A completed token: an open interpolation still collects its own inner tokens, at the top
+    /// level the token goes straight into the stream.
+    fn push(&mut self, tok: Tok, emit: Emit<'_, Tok>) {
         match self.interp.last_mut() {
             Some(inner) => inner.push(tok),
-            None => self.out.push(tok),
+            None => emit(tok),
         }
     }
 
-    fn flush_word(&mut self) {
+    fn flush_word(&mut self, emit: Emit<'_, Tok>) {
         if !self.buf.is_empty() {
             let word = std::mem::take(&mut self.buf);
-            self.push(Tok::Word(word));
+            self.push(Tok::Word(word), emit);
         }
     }
 
     /// Push the `// …` text collected so far as one [`Tok::Silent`] and restart the run.
-    fn take_comment(&mut self) {
+    fn take_comment(&mut self, emit: Emit<'_, Tok>) {
         if !self.comment.is_empty() {
             let text = std::mem::take(&mut self.comment);
-            self.push(Tok::Silent(text));
+            self.push(Tok::Silent(text), emit);
         }
     }
 
-    /// feed one char, emit 0..N tokens (owned accumulator, moved via `scan_map`).
-    pub fn feed(&mut self, ch: char) -> Vec<Tok> {
-        self.out.clear();
+    /// Feed one character, emitting 0..N owned tokens into `emit`.
+    pub fn feed(&mut self, ch: char, emit: Emit<'_, Tok>) {
         if self.block {
             // inside /* .. */ loud comment: consume until */
             if self.block_star && ch == '/' {
@@ -90,7 +98,7 @@ impl LexAcc {
             } else {
                 self.block_star = ch == '*';
             }
-            return std::mem::take(&mut self.out);
+            return;
         }
         if self.line {
             // A comment swallows the line, but never a declaration terminator: a custom
@@ -98,49 +106,49 @@ impl LexAcc {
             match ch {
                 '\n' => {
                     self.line = false;
-                    self.take_comment();
+                    self.take_comment(emit);
                     self.buf.push(' ');
                 }
                 ';' => {
-                    self.take_comment();
-                    self.push(Tok::Punct(';'));
+                    self.take_comment(emit);
+                    self.push(Tok::Punct(';'), emit);
                 }
                 c => self.comment.push(c),
             }
-            return std::mem::take(&mut self.out);
+            return;
         }
         if self.slash {
             self.slash = false;
             if ch == '*' {
                 self.block = true;
                 self.block_star = false;
-                return std::mem::take(&mut self.out);
+                return;
             }
             if ch == '/' {
-                self.flush_word();
+                self.flush_word(emit);
                 self.line = true;
                 self.comment = String::from("//");
-                return std::mem::take(&mut self.out);
+                return;
             }
             self.buf.push('/');
         }
         if self.hash {
             self.hash = false;
             if ch == '{' {
-                self.flush_word();
+                self.flush_word(emit);
                 self.interp.push(Vec::new());
-                return std::mem::take(&mut self.out);
+                return;
             }
             self.buf.push('#');
         }
         if self.var.is_some() {
             if is_var_char(ch) {
                 self.var.as_mut().unwrap().push(ch);
-                return std::mem::take(&mut self.out);
+                return;
             }
             let name = std::mem::take(self.var.as_mut().unwrap());
             self.var = None;
-            self.push(Tok::Var(name));
+            self.push(Tok::Var(name), emit);
         }
         // Lookbehind for the slash rule below: capture the previous character, then record
         // the one about to be consumed.
@@ -152,66 +160,65 @@ impl LexAcc {
             // second slash in the next step.
             '/' if prev != Some(':') && prev != Some('(') => self.slash = true,
             '#' => {
-                self.flush_word();
+                self.flush_word(emit);
                 self.hash = true;
             }
             '$' => {
-                self.flush_word();
+                self.flush_word(emit);
                 self.var = Some(String::new());
             }
             '}' if !self.interp.is_empty() => {
-                self.flush_word();
+                self.flush_word(emit);
                 let inner = self.interp.pop().unwrap();
-                self.push(Tok::Interp(inner));
+                self.push(Tok::Interp(inner), emit);
             }
             c if STRUCTURAL.contains(&c) => {
-                self.flush_word();
-                self.push(Tok::Punct(c));
+                self.flush_word(emit);
+                self.push(Tok::Punct(c), emit);
             }
             c if c.is_whitespace() => {
-                self.flush_word();
-                self.push(Tok::Space(c));
+                self.flush_word(emit);
+                self.push(Tok::Space(c), emit);
             }
             '+' | '-' => {
-                self.flush_word();
-                self.push(Tok::Op(ch));
+                self.flush_word(emit);
+                self.push(Tok::Op(ch), emit);
             }
             c => self.buf.push(c),
         }
-        std::mem::take(&mut self.out)
     }
 }
 
-/// First structural pass: `Tok → Vec<Event>` on delimiters only (no tree). Own accumulator.
+/// First structural pass: `Tok → Event` on delimiters only (no tree). Own accumulator.
 #[derive(Default)]
 pub struct MsgAcc {
     run: Vec<Tok>,
-    events: Vec<Event>,
 }
 
 impl MsgAcc {
-    pub fn feed(&mut self, tok: Tok) -> Vec<Event> {
-        self.events.clear();
+    /// Feed one token, emitting 0..N structural events into `emit`.
+    pub fn feed(&mut self, tok: Tok, emit: Emit<'_, Event>) {
         match tok {
-            Tok::Punct('{') => self.events.push(Event::Open(std::mem::take(&mut self.run))),
-            Tok::Punct(';') => self.push_decl(),
+            Tok::Punct('{') => {
+                emit(Event::Open(std::mem::take(&mut self.run)));
+            }
+            Tok::Punct(';') => self.push_decl(emit),
             Tok::Punct('}') => {
-                self.push_decl();
-                self.events.push(Event::Close);
+                self.push_decl(emit);
+                emit(Event::Close);
             }
             other => self.run.push(other),
         }
-        self.events.clone()
     }
 
-    fn push_decl(&mut self) {
+    fn push_decl(&mut self, emit: Emit<'_, Event>) {
         let run = std::mem::take(&mut self.run);
         if let Some(colon) = run.iter().position(|t| matches!(t, Tok::Punct(':'))) {
             let prop = run[..colon].to_vec();
             let value = run[colon + 1..].to_vec();
             let non_empty = render(&prop).chars().any(|c| !c.is_whitespace());
             if non_empty {
-                self.events.push(Event::Decl { prop, value });
+                emit(Event::Decl { prop, value });
             }
         }
     }
