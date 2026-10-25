@@ -1,11 +1,14 @@
-//! Fold — the exec stage's **owned accumulator value** plus the data moves it makes.
+//! State — the running program state, carried as **the item the stream emits**.
 //!
-//! No observable type crosses into or out of this file: `compile` in the crate root owns the
-//! operator chain, so the chain — not a method on my struct — is where control flow reads.
-//! Nesting depth lives here as a `Vec<Scope>` **value** carried by `scan_map` (depth is data,
-//! not a call stack and not an object that decides what to visit next), and a closing block
-//! hands back the rule it settled as an `Option`: whether that becomes CSS is the chain's
-//! `filter_map`, not this type's call.
+//! This is the framework's own shape for stateful forward computation: `scan` emits the
+//! accumulation itself, so nothing is hidden inside a private accumulator (that was `scan_map`)
+//! and nothing has to be smuggled alongside each declaration (that was an `Arc<Env>` snapshot
+//! per decl, invented to let evaluation be deferred). The env, the open blocks and the rule
+//! this step produced all live inside the value that flows, so a declaration is evaluated at
+//! the position it appears — which is exactly Sass's document-order semantics.
+//!
+//! Nesting depth is data inside this value (`scopes`), never a call stack; no observable type
+//! appears here, because `compile` (crate root) owns the one operator chain.
 
 use crate::env::Env;
 use crate::expr::{self, Expr};
@@ -18,67 +21,6 @@ pub struct StyleRule {
     pub selector: String,
     pub decls: Vec<(String, Value)>,
     pub order: u32,
-}
-
-/// One currently open block, as data.
-#[derive(Debug)]
-struct Scope {
-    selector: String,
-    decls: Vec<(String, Value)>,
-    order: u32,
-}
-
-/// The value `scan_map` carries while the `Event` stream moves forward.
-#[derive(Default)]
-pub struct Fold {
-    scopes: Vec<Scope>,
-    next: u32,
-    env: Env,
-}
-
-impl Fold {
-    /// Move one event into the accumulator and report the block that just closed, if any.
-    /// Pure bookkeeping: it emits nothing and decides nothing about CSS.
-    pub fn step(&mut self, ev: Event) -> Option<StyleRule> {
-        match ev {
-            Event::Open(head) => {
-                let parent = self.scopes.last().map(|s| s.selector.clone()).unwrap_or_default();
-                let selector = combine(&parent, &interp_text(&self.env, &head));
-                let order = self.next;
-                self.next += 1;
-                self.scopes.push(Scope { selector, decls: Vec::new(), order });
-                None
-            }
-            Event::Decl { prop, value } => {
-                // The left side of `$x: …` is a binding target: its name is taken verbatim and
-                // is never interpolated, unlike an ordinary property name.
-                let name = match prop.as_slice() {
-                    [Tok::Var(var)] => format!("${var}"),
-                    _ => interp_text(&self.env, &prop),
-                };
-                match name.strip_prefix('$') {
-                    // `$x: …` is a binding in the environment, never a CSS declaration.
-                    Some(var) => {
-                        let bound = evaluated(&self.env, &value)
-                            .unwrap_or_else(|| Value::from_text(render(&value)));
-                        self.env.bind(var, bound);
-                    }
-                    None => {
-                        let owned = decl_value(&self.env, &name, &value);
-                        if let Some(top) = self.scopes.last_mut() {
-                            top.decls.push((name, owned));
-                        }
-                    }
-                }
-                None
-            }
-            Event::Close => self
-                .scopes
-                .pop()
-                .filter(|s| !s.decls.is_empty() && !s.selector.is_empty())
-                .map(|s| StyleRule { selector: s.selector, decls: s.decls, order: s.order }),
-        }
-    }
 }
 
 impl StyleRule {
@@ -94,38 +36,114 @@ impl StyleRule {
     }
 }
 
-/// The declaration's owned value. A custom property (`--x: …`) and a value carrying a CSS
-/// native function (`var()`, `calc()`, `url()`, …) hold **raw CSS text** that Sass must not
-/// interpret; the first is stored verbatim, the others bail inside [`evaluated`]. Any other
-/// value becomes a typed [`Value`] when — and only when — the run is unambiguous; a run that
-/// does not parse, or whose evaluation errors, keeps its verbatim text for now.
-fn decl_value(env: &Env, prop: &str, value: &[Tok]) -> Value {
-    match prop {
-        p if p.starts_with("--") => Value::from_text(render_raw(value)),
-        _ => evaluated(env, value).unwrap_or_else(|| Value::from_text(render(value))),
+/// One currently open block, as data inside the flowing state.
+#[derive(Debug, Clone)]
+struct Scope {
+    selector: String,
+    decls: Vec<(String, Value)>,
+    order: u32,
+}
+
+/// The value `scan` carries and emits: open blocks, the lexical environment, the document
+/// order counter, and the rule (if any) that the latest event settled.
+#[derive(Debug, Clone, Default)]
+pub struct State {
+    scopes: Vec<Scope>,
+    env: Env,
+    next: u32,
+    emitted: Option<StyleRule>,
+}
+
+impl State {
+    /// Take the rule the latest event settled, if any — the only thing the chain reads off a
+    /// state value.
+    pub fn into_rule(self) -> Option<StyleRule> {
+        self.emitted
     }
-}
 
-/// Fold a token run into a typed value. A lone number is **not** an expression yet — only an
-/// operation (or an interpolation) earns evaluation, so `w: 10px` keeps its exact source
-/// digits instead of being normalised to `10px` from a float.
-fn evaluated(env: &Env, toks: &[Tok]) -> Option<Value> {
-    let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
-        Expr::Num(_, _) => None,
-        other => Some(other),
-    });
-    arithmetic
-        .or_else(|| expr::interpolated(toks))
-        .and_then(|expr| expr.eval(env).ok())
-}
+    /// Move one event into the state and hand the whole state back to the stream. Only the
+    /// settled rule is ever read downstream, through `filter_map` in `compile`.
+    pub fn step(mut self, ev: Event) -> State {
+        self.emitted = None;
+        match ev {
+            Event::Open(head) => {
+                let parent = self.scopes.last().map(|s| s.selector.clone()).unwrap_or_default();
+                let selector = combine(&parent, &self.interp_text(&head));
+                let order = self.next;
+                self.next += 1;
+                self.scopes.push(Scope { selector, decls: Vec::new(), order });
+            }
+            Event::Decl { prop, value } => {
+                // The left side of `$x: …` is a binding target: its name is taken verbatim and
+                // is never interpolated, unlike an ordinary property name.
+                let name = match prop.as_slice() {
+                    [Tok::Var(var)] => format!("${var}"),
+                    _ => self.interp_text(&prop),
+                };
+                match name.strip_prefix('$') {
+                    // A binding updates the environment inside the flowing value; a later
+                    // declaration reads the value this position has, so document order holds
+                    // without any snapshot being carried around.
+                    Some(var) => self.env.bind(var, self.value_of(&value)),
+                    None => {
+                        let owned = self.decl_value(&name, &value);
+                        if let Some(top) = self.scopes.last_mut() {
+                            top.decls.push((name, owned));
+                        }
+                    }
+                }
+            }
+            Event::Close => {
+                self.emitted = self
+                    .scopes
+                    .pop()
+                    .filter(|s| !s.decls.is_empty() && !s.selector.is_empty())
+                    .map(|s| StyleRule { selector: s.selector, decls: s.decls, order: s.order });
+            }
+        }
+        self
+    }
 
-/// A token run that only **interpolates**: a selector or property name may resolve `#{}` and
-/// `$var`, but its lexemes must never be read as numbers (`.2xl` is an identifier).
-fn interp_text(env: &Env, toks: &[Tok]) -> String {
-    expr::interpolated(toks)
-        .and_then(|expr| expr.eval(env).ok())
-        .map(|value| value.to_css())
-        .unwrap_or_else(|| render(toks))
+    /// The declaration's owned value. A custom property (`--x: …`) and a value carrying a CSS
+    /// native function (`var()`, `calc()`, `url()`, …) hold **raw CSS text** that Sass must not
+    /// interpret; the first is stored verbatim, the others bail inside [`State::evaluated`].
+    /// Any other value becomes a typed [`Value`] when — and only when — the run is
+    /// unambiguous; a run that does not parse, or whose evaluation errors, keeps its verbatim
+    /// text for now.
+    fn decl_value(&self, prop: &str, value: &[Tok]) -> Value {
+        match prop {
+            p if p.starts_with("--") => Value::from_text(render_raw(value)),
+            _ => self
+                .evaluated(value)
+                .unwrap_or_else(|| Value::from_text(render(value))),
+        }
+    }
+
+    fn value_of(&self, toks: &[Tok]) -> Value {
+        self.evaluated(toks).unwrap_or_else(|| Value::from_text(render(toks)))
+    }
+
+    /// Fold a token run into a typed value. A lone number is **not** an expression yet — only
+    /// an operation (or an interpolation) earns evaluation, so `w: 10px` keeps its exact source
+    /// digits instead of being normalised to `10px` from a float.
+    fn evaluated(&self, toks: &[Tok]) -> Option<Value> {
+        let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
+            Expr::Num(_, _) => None,
+            other => Some(other),
+        });
+        arithmetic
+            .or_else(|| expr::interpolated(toks))
+            .and_then(|expr| expr.eval(&self.env).ok())
+    }
+
+    /// A token run that only **interpolates**: a selector or property name may resolve `#{}`
+    /// and `$var`, but its lexemes must never be read as numbers (`.2xl` is an identifier).
+    fn interp_text(&self, toks: &[Tok]) -> String {
+        expr::interpolated(toks)
+            .and_then(|expr| expr.eval(&self.env).ok())
+            .map(|value| value.to_css())
+            .unwrap_or_else(|| render(toks))
+    }
 }
 
 /// Parent/child selector combination (Sass semantics): `&` replaces the parent, else descendant.

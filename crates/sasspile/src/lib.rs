@@ -18,7 +18,7 @@ mod expr;
 mod lexer;
 mod value;
 
-use crate::exec::{Fold, StyleRule};
+use crate::exec::State;
 use crate::lexer::{LexAcc, MsgAcc};
 
 /// Compiler error carried as an in-stream value.
@@ -43,8 +43,15 @@ impl std::error::Error for SassError {}
 
 /// The public entry — and the **only** external API. One cold **push** chain, written here and
 /// nowhere else: no stage function takes or returns an observable type, no `box_it()` seam.
-/// Characters flow forward through the framework's own operators, each accumulator a plain
-/// owned value, and CSS text is produced only at the single `into_future().await` terminal.
+///
+/// Flattening, not recursion: the structural pass moves the program `State` forward with
+/// `scan` — the framework's verb whose emitted item **is** the accumulation, so the open
+/// blocks, the environment and any settled rule travel as one owned value instead of living in
+/// a hidden accumulator. Rules are then worked on **independently**: `flat_map` defaults to
+/// `usize::MAX` concurrency and `Shared::from_stream` hands its work to the scheduler, which on
+/// native is `tokio::spawn`. Document order is carried by the owned `order` key and restored by
+/// one stable sort after the concurrent merge (no `merge_all(1)` serialising the fan-out away,
+/// and no recursive descent anywhere). CSS text appears only at the single terminal.
 pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
     let _span = tracing::info_span!("compile").entered();
     Shared::from_iter(content.into().chars().collect::<Vec<char>>())
@@ -52,15 +59,22 @@ pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
         .flat_map(Shared::from_iter)
         .scan_map(MsgAcc::default(), |acc, tok| acc.feed(tok))
         .flat_map(Shared::from_iter)
-        .scan_map(Fold::default(), |fold, ev| fold.step(ev))
-        .filter_map(std::convert::identity)
-        .collect::<Vec<StyleRule>>()
-        .map(|mut rules| {
-            rules.sort_by_key(|rule| rule.order);
-            rules
+        .scan(State::default(), State::step)
+        .filter_map(State::into_rule)
+        .flat_map(|rule| {
+            let order = rule.order;
+            // Each settled rule is worked on independently inside the scheduled task, not on
+            // the thread that produced it; `order` is what puts the concurrent merge back into
+            // document order.
+            Shared::from_stream(futures::stream::once(async move { (order, rule.to_css()) }))
+        })
+        .collect::<Vec<(u32, String)>>()
+        .map(|mut expanded| {
+            expanded.sort_by_key(|(order, _)| *order);
+            expanded
         })
         .flat_map(Shared::from_iter)
-        .map(|rule| rule.to_css())
+        .map(|(_, css)| css)
         .reduce_initial(String::new(), |mut css, chunk| {
             css.push_str(&chunk);
             css

@@ -19,7 +19,9 @@ pub struct Env {
 }
 
 impl Env {
-    /// Bind `$name: value` at the current layer (later phases push a layer first).
+    /// Bind `$name: value` at the current layer (later phases push a layer first). The env is
+    /// reached only through the `State` value that the stream carries, so this mutation is of
+    /// data already owned by that value — never of state shared behind a handle.
     pub fn bind(&mut self, name: &str, value: Value) {
         self.vars.insert(name.to_string(), value);
     }

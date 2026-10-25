@@ -15,11 +15,13 @@
 ```
 chars ──from_iter──▶ Tok
    ──scan_map(LexAcc)·flat_map──▶ 结构事件流 (Open{head}/Decl{prop,value}/Close)   ← 分词内联,不旁落 Vec
-   ──scan_map(执行累加子)──▶ 规则事件向前流出:
-        累加子 Acc = { scopes: Vec<OpenScope>, env, chain_taken, order }   ← 栈是"数据",住在累加子里
+   ──scan(程序状态值)──▶ 状态就是被发射的 item（不是 scan_map 私藏的 Acc）:
+        State = { scopes: Vec<OpenScope>, env, next, emitted: Option<StyleRule> }
+        · 框架语义:scan 的 FnMut(Output, Item) -> Output 让**累加值本身沿流 move**；
+          env 因此是流上的值，随位置前进 —— 禁把 env 快照塞进每条声明随身带。
         · Open  → 把"祖先选择器前缀 + env 快照"压入 scopes(纯数据 push)
-        · Decl  → 就地绑 $var(env) 或累到当前 scope 的 decls
-        · Close → 弹栈并 emit 定稿 StyleRule{selector, decls}(值被"推出",不是被 walk 出来)
+        · Decl  → 就地绑 $var(env) 或把求过值的声明累到当前 scope
+        · Close → 弹栈并把定稿 StyleRule 放进 emitted;链上 filter_map 取出（发射与否由算子决定）
         · @each/@for/@while → flat_map:一条 item 事件扇出成 body 子流(推)
         · @if/@else        → filter:按随流 move 的不可变 taken 选支(推)
    ──collect(仅在"必须看到全体"处做一次)──▶ Vec<StyleRule>
@@ -71,6 +73,9 @@ chars ──from_iter──▶ Tok
 
 ## 6. rxrust 即引擎(推;不改、不套壳)
 `from_iter/scan_map/reduce_initial/flat_map/filter/Subject/box_it/into_future` 就是控制流本身。
+**状态用哪个算子有硬性口径**：累加值需要沿流被读/被 move 时用 `scan`（`FnMut(Output, Item) -> Output`，
+发射的就是累加值本身）；只有"状态纯粹私藏、只发射输出"才用 `scan_map`。**禁**把状态拆进自造类型
+的字段里随身带（如给每条声明配一份 `Arc<Env>` 快照），那等于绕过流的 item 自己造传播机制。
 **禁**:自造 `Stage<T>`/`fail`/`drain` 编排、`from_fn`+`VecDeque` 手搓状态机、递归 `stream(node)` AST 解释器、
 在异步核心外套 `std::sync::mpsc`+`block_on` 同步门面、为单测 `pub` 泄漏内部件。入口 = 那条流。
 
