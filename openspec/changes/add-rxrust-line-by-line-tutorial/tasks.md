@@ -25,7 +25,10 @@
 - [x] 1.1 所有权与借用：为什么"值被搬走"而不是"值被引用"（为 V1 的 `Item` 按值铺路）——
       `v0-foundations/00-01-ownership-and-borrowing.md`；代码 `code/00-01-ownership*.rs` 已外部验证
       （6 测通过、clippy 0 警）；4 个编译错均为实测原文（E0382×2 / E0308+E0277 / E0106）
-- [ ] 1.2 trait 与泛型：trait 边界、关联类型；**手写一次再改写成 GAT** 的对照实验
+- [x] 1.2 trait 与泛型：trait 边界、关联类型；**手写一次再改写成 GAT** 的对照实验——
+      `v0-foundations/00-02-traits-associated-types-and-gats.md`；代码外部验证（4 测通过、clippy 0 警）；
+      报错链均为实测：E0119 → missing lifetime in associated type → missing required bound on `Row`，
+      外加第一版被拦的 redundant closure 与多余 `mut`
 - [ ] 1.3 闭包三兄弟 `Fn/FnMut/FnOnce`：为什么 `next(&mut self)` 用 `FnMut`、终止方法为何消耗 `self`
 - [ ] 1.4 `Rc/Arc/RefCell/Mutex` 与内部可变性：共享 vs 共享可变；object-safety 初探（为 V1 `DynObserver` 铺路）
 - [ ] 1.5 宏最小知识：`macro_rules!` 会展开成什么（用 `impl_observer_for_box!` 的真实形态做例子，只看不写）

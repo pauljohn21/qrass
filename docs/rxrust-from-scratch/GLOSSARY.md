@@ -11,3 +11,9 @@
 | 消耗式方法 | method taking `self` | 调用后接收者被夺走，后续调用编译错 —— 用来把“终止后不再发”协议写进类型 | V0-01 |
 | 拉 / 推 | pull / push | 拉：调用方决定何时取（`Iterator`）；推：源头决定何时发（`Observable`） | V0-01 |
 | 早停 | early stop / `break` | 每发一个前先问接收方还要不要，要取消就走值而不是走异常 | V0-01 |
+| 泛型参数 | trait 的 `<Item>` | 元素类型由使用点选定：同一能力要为每种元素类型各写一份签名 | V0-02 |
+| 关联类型 | associated type `type Item;` | 元素类型由**实现者**选定；一个类型对同一 trait 只能实现一次（E0119） | V0-02 |
+| GAT | generic associated type `type Item<'a>` | 带参数的关联类型：元素自己的寿命由**使用者**逐次选定 | V0-02 |
+| `where Self: 'a` | outlives 约束 | “实现者至少活得和借用一样久”；GAT 里少了它直接被编译器拒（missing required bound） | V0-02 |
+| HRTB | higher-ranked trait bound `for<'a>` | “对任意寿命都成立”的约束；rxrust `map` 用它接 `Self::Item<'a>` | V0-02 |
+| 结束契约 | `Option::None` | `take()` 返回 `None` 即“没有更多了”；缺了它消费者循环永不退出 | V0-02 |

@@ -1,4 +1,5 @@
 # VERIFICATION — 每课代码的累计编译验证结论（验证 crate MUST 建在 workspace 之外：/tmp/minirx-check）
 # lesson	build	test	clippy	key_error
 V0-01	OK	6 passed	0 warnings	E0308/E0277（total: usize += i32，已修并写进课文 §6②）
+V0-02	OK	5 passed（4 断言 + 1 答案文件）	0 warnings	E0119 冲突实现 / missing lifetime in associated type / missing required bound on `Row`（三者共同推出 GAT）；另含 clippy redundant-closure 与 rustc 多余 `mut`；并实测：删 impl 侧 `where Self: 'a` 仍可通过（约束只在声明侧）
 V1-01	PENDING	PENDING	PENDING	课文尚未按新契约重写（旧草稿 01-the-observer-and-the-first-source.md 待并入 V1）
