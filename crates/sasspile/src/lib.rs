@@ -12,6 +12,7 @@ use std::fmt;
 
 use rxrust::prelude::*;
 
+mod env;
 mod exec;
 mod expr;
 mod lexer;

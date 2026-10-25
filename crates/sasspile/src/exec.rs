@@ -8,9 +8,10 @@ use std::convert::Infallible;
 
 use rxrust::prelude::*;
 
+use crate::env::Env;
+use crate::expr;
 use crate::lexer::{Event, Tok, render, render_raw};
 use crate::value::Value;
-use crate::expr;
 
 /// A resolved CSS rule in document order.
 #[derive(Debug, Clone)]
@@ -27,11 +28,13 @@ struct Scope {
     order: u32,
 }
 
-/// Owned `scan_map` accumulator: the open-scope stack is plain data living here.
+/// Owned `scan_map` accumulator: the open-scope stack and the lexical environment are plain
+/// data living here, moved through the operator rather than shared behind a handle.
 #[derive(Default)]
 pub struct Exec {
     scopes: Vec<Scope>,
     next: u32,
+    env: Env,
 }
 
 impl Exec {
@@ -39,17 +42,28 @@ impl Exec {
         match ev {
             Event::Open(head) => {
                 let parent = self.scopes.last().map(|s| s.selector.clone()).unwrap_or_default();
-                let selector = combine(&parent, &render(&head));
+                let selector = combine(&parent, &self.interp_text(&head));
                 let order = self.next;
                 self.next += 1;
                 self.scopes.push(Scope { selector, decls: Vec::new(), order });
                 Vec::new()
             }
             Event::Decl { prop, value } => {
-                if let Some(top) = self.scopes.last_mut() {
-                    let name = render(&prop);
-                    let value = decl_value(&name, &value);
-                    top.decls.push((name, value));
+                // The left side of `$x: …` is a binding target: its name is taken verbatim and
+                // is never interpolated, unlike an ordinary property name.
+                let name = match prop.as_slice() {
+                    [Tok::Var(var)] => format!("${var}"),
+                    _ => self.interp_text(&prop),
+                };
+                match name.strip_prefix('$') {
+                    // `$x: …` is a binding in the environment, never a CSS declaration.
+                    Some(var) => self.bind(var, &value),
+                    None => {
+                        let owned = self.decl_value(&name, &value);
+                        if let Some(top) = self.scopes.last_mut() {
+                            top.decls.push((name, owned));
+                        }
+                    }
                 }
                 Vec::new()
             }
@@ -61,19 +75,49 @@ impl Exec {
             },
         }
     }
-}
 
-/// Build the declaration's owned value. A custom property (`--x: …`) carries **raw CSS
-/// text**, so a `//` comment inside its value belongs to the value. Any other value becomes a
-/// typed [`Value`] when — and only when — the run is unambiguous arithmetic; a run that does
-/// not parse, or whose evaluation errors (incompatible units), keeps its verbatim text for
-/// now, which is what protects slash-separated shorthands and CSS-native functions.
-fn decl_value(prop: &str, value: &[Tok]) -> Value {
-    match prop {
-        p if p.starts_with("--") => Value::from_text(render_raw(value)),
-        _ => expr::from_tokens(value)
-            .and_then(|expr| expr.eval().ok())
-            .unwrap_or_else(|| Value::from_text(render(value))),
+    /// The declaration's owned value. A custom property (`--x: …`) and a value carrying a CSS
+    /// native function (`var()`, `calc()`, `url()`, …) hold **raw CSS text** that Sass must not
+    /// interpret; the first is stored verbatim, the others bail inside `evaluated`. Any other
+    /// value becomes a typed [`Value`] when — and only when — the run is unambiguous; a run that
+    /// does not parse, or whose evaluation errors, keeps its verbatim text for now.
+    fn decl_value(&self, prop: &str, value: &[Tok]) -> Value {
+        match prop {
+            p if p.starts_with("--") => Value::from_text(render_raw(value)),
+            _ => self
+                .evaluated(value)
+                .unwrap_or_else(|| Value::from_text(render(value))),
+        }
+    }
+
+    /// Bind `$name: value`, evaluating the right-hand side against the current environment.
+    fn bind(&mut self, name: &str, value: &[Tok]) {
+        let bound = self
+            .evaluated(value)
+            .unwrap_or_else(|| Value::from_text(render(value)));
+        self.env.bind(name, bound);
+    }
+
+    /// Fold a token run into a typed value. A lone number is **not** an expression yet — only
+    /// an operation (or an interpolation) earns evaluation, so `w: 10px` keeps its exact source
+    /// digits instead of being normalised to `10px` from a float.
+    fn evaluated(&self, toks: &[Tok]) -> Option<Value> {
+        let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
+            expr::Expr::Num(_, _) => None,
+            other => Some(other),
+        });
+        arithmetic
+            .or_else(|| expr::interpolated(toks))
+            .and_then(|expr| expr.eval(&self.env).ok())
+    }
+
+    /// A token run that only **interpolates**: a selector or property name may resolve `#{}`
+    /// and `$var`, but its lexemes must never be read as numbers (`.2xl` is an identifier).
+    fn interp_text(&self, toks: &[Tok]) -> String {
+        expr::interpolated(toks)
+            .and_then(|expr| expr.eval(&self.env).ok())
+            .map(|value| value.to_css())
+            .unwrap_or_else(|| render(toks))
     }
 }
 

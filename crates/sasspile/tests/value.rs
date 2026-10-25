@@ -72,3 +72,25 @@ async fn incompatible_units_keep_the_text_instead_of_guessing() {
     // run must survive verbatim rather than invent a number.
     assert_eq!(css("a { w: 5px + 3s; }").await, "a {\n  w: 5px + 3s;\n}\n");
 }
+
+#[tokio::test]
+async fn a_lone_number_value_is_still_verbatim_text() {
+    // A single number is only a number once an expression consumes it; as a declaration
+    // value it must survive with its exact source digits (`010` is not Sass's `10`).
+    assert_eq!(css("a { w: 10px; }").await, "a {\n  w: 10px;\n}\n");
+    assert_eq!(css("a { w: 010; }").await, "a {\n  w: 010;\n}\n");
+    assert_eq!(
+        css("a { b: rgb(18 52 none); }").await,
+        "a {\n  b: rgb(18 52 none);\n}\n"
+    );
+}
+
+#[tokio::test]
+async fn bound_variables_resolve_and_emit_no_css_of_their_own() {
+    assert_eq!(css("$w: 5px; a { width: $w; }").await, "a {\n  width: 5px;\n}\n");
+    assert_eq!(
+        css("$k: 2; .col-#{$k} { w: 1px; }").await,
+        ".col-2 {\n  w: 1px;\n}\n"
+    );
+    assert_eq!(css("a { --d: 4px; width: var(--d); }").await, "a {\n  --d: 4px;\n  width: var(--d);\n}\n");
+}

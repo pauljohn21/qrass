@@ -8,8 +8,13 @@ use rxrust::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
-    /// a verbatim run of source text (may contain spaces)
+    /// a verbatim run of source text (never spans whitespace or an arithmetic sign)
     Word(String),
+    /// one whitespace character — **data**, because Sass reads `10px -5px` as a
+    /// space-separated list but `10px - 5px` as subtraction
+    Space(char),
+    /// `+` or `-` standing at a token boundary (an operator or a sign, decided downstream)
+    Op(char),
     Punct(char),
     /// a `$name` reference (name excludes the leading `$`)
     Var(String),
@@ -166,6 +171,14 @@ impl LexAcc {
                 self.flush_word();
                 self.push(Tok::Punct(c));
             }
+            c if c.is_whitespace() => {
+                self.flush_word();
+                self.push(Tok::Space(c));
+            }
+            '+' | '-' => {
+                self.flush_word();
+                self.push(Tok::Op(ch));
+            }
             c => self.buf.push(c),
         }
         std::mem::take(&mut self.out)
@@ -224,6 +237,8 @@ fn text_of(toks: &[Tok], keep_silent: bool) -> String {
     toks.iter()
         .map(|t| match t {
             Tok::Word(w) => w.clone(),
+            Tok::Space(c) => c.to_string(),
+            Tok::Op(c) => c.to_string(),
             Tok::Punct(c) => c.to_string(),
             Tok::Var(n) => format!("${n}"),
             Tok::Interp(inner) => text_of(inner, keep_silent),
@@ -233,7 +248,14 @@ fn text_of(toks: &[Tok], keep_silent: bool) -> String {
         .collect()
 }
 
-fn canon(text: &str) -> String {
+/// One token as source text, silent comments dropped — the piece an interpolated run is
+/// assembled from without re-scanning the rendered string.
+pub fn token_text(tok: &Tok) -> String {
+    text_of(std::slice::from_ref(tok), false)
+}
+
+/// Collapse runs of whitespace to single spaces and trim, the canonical CSS text form.
+pub fn canon(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

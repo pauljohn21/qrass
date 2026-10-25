@@ -122,13 +122,12 @@ fn measure(unit: &str) -> (&str, f64) {
         .map_or((unit, 1.0), |(_, (family, factor))| (*family, *factor))
 }
 
-/// Sass number output: integers lose the fraction, everything else keeps ten digits.
+/// Sass number output: integers lose the fraction, everything else prints at the shortest
+/// round-trip precision (so `1in + 1px` is `97px`, and a parsed `f64::MAX` literal keeps
+/// the 17 digits that actually identify it).
 fn format_number(value: f64) -> String {
     if value == 0.0 || (value.fract() == 0.0 && value.abs() < 1e15) {
         return format!("{}", value as i64);
     }
-    format!("{value:.10}")
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string()
+    format!("{value}")
 }
