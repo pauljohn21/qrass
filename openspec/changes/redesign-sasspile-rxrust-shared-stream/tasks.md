@@ -46,9 +46,27 @@
       **附带修一个工具缺陷**：`ledger` 重导同名 run 时不清 `run_fail` 旧行 → 已修好的用例会报 phantom REGRESS
       （一度使我误判为 `regress=1`）；现 `import_rows` 先 `DELETE FROM run_fail WHERE run_id`，并加
       `crates/ledger/tests/reimport.rs` 两例钉住（该缺陷是旧工具可观测的假数据，不属本阶段验收项）。
-- [ ] 0′.3 **真 `Err = SassError` 通道**：失败经 `Observer::error` 到底，终点 `into_future()` 给 `Ok(Err(..))`；
-      删掉 `.ok()`/`unwrap_or_else(verbatim)` 兜底（现 `exec.rs:118,123,136,143`）；仅规范定义为透传的
-      CSS 原生构造保留原样；harness 的 error 期望（`**/errors/**` 80 文件）从此刻开始计入。
+- [ ] 0′.3 **真 `Err = SassError` 通道**：拆为三步，**已做过一次并因证据不够而回退**（下记实测数据不得被遗忘）。
+  - **试验结果（已 `git checkout` 回退）**：把 `ErrorKind::UndefinedVariable` 接成致命错误后，hrx
+    **598 → 984**（+389 全部是规范期望为错误的用例），但同时 **回退 60 条**。因不能解释全部回退项而放弃，
+    不得拿 60 条真通过换未评估的收益。
+  - **测得的两条硬约束（回退项拆解而来）**：
+    1. **字面量上下文不得做变量查找** —— 回退项含 `css/selector/escaping.hrx::dollar_char`（`"$"`）、
+       `css/functions/special/prefixed/lowercase.hrx::*/script_like`（IE `progid:…($d=…)`）、
+       `css/functions/var.hrx::sass_function/two_argument/doesnt_use_function_if_case_doesnt_match`（大写
+       `VAR($args)` 不当 Sass 函数）。⇒ 错误只能来自**我们判定为 Sass 表达式**的求值；
+       `interp_text`（选择器/属性名）路径上的变量查找口径过宽，需先限定为“仅 `#{}` 内”。
+    2. **剩下的 ≈47 条全在缩进语法用例**（`whitespace.hrx`/`comment.hrx` 的 `*/scss` 键，错在 `"$i"`）——
+       根因是 `@for $i` 绑定在缩进语法下未成立（harness 尚未支持 `--indented`，见 0.3），不是错误策略本身。
+  - **0′.3a（可单独合入）**：只接管道——`SassError` 带 `ErrorKind`、`ExecObserver` 持 `Option<O>` 并用
+    `Option::take()` 保证终止恰好一次、终点直接返回 `Ok(Err(SassError))`（取消现有
+    `map_err(|_| SassError::new("reduce"))` 类重新贴标签）；**不改任何判定**，预期 `regress=0` 且 pass 不变。
+  - **0′.3b**：先把字面量上下文规则说清并只在这些位置保留透传（选择器/属性名仅 `#{}` 求值、
+    大写/前缀 CSS 函数名、`progid:` 等），然后才把未绑定变量判致命。
+  - **0′.3c**：补 `@for`/`@each` 在缩进语法下的绑定（或先按 0.3 排除该类），重测那 47 条。
+  - **可复核数据**：基线快照与回退清单已存 `/tmp/hrx-base.tsv`、`/tmp/hrx-p03.tsv`、`/tmp/ledger-p03.sqlite`
+    （临时目录会被清理，重跑即可再得）；harness 对 error 类用例的比对粒度尚需收紧（得确认 +389 不是
+    “只比对有没有报错”的假阳性）——归 0.4。
 - [ ] 0′.5 **共享态改 `C::RcMut`/`C::RcCell`**：内核泛型于 `C: Context`，`Local`(wasm32) 与 `Shared` 两份编译均过；
       禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
       （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
