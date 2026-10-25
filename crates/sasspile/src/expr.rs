@@ -82,9 +82,9 @@ fn classify<'a>(tok: &'a Tok, index: usize, run: &[Tok]) -> Option<Piece<'a>> {
     let spaced = |side: Option<usize>| matches!(side.and_then(|i| run.get(i)), Some(Tok::Space(_)));
     match tok {
         Tok::Space(_) => None,
-        Tok::Word(w) => Some(
-            number_lexeme(w).map_or(Piece::Other, |(value, unit)| Piece::Num(value, unit)),
-        ),
+        Tok::Word(w) => {
+            Some(number_lexeme(w).map_or(Piece::Other, |(value, unit)| Piece::Num(value, unit)))
+        }
         Tok::Op('+') if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => {
             Some(Piece::Op(BinOp::Add))
         }
@@ -157,29 +157,31 @@ fn arithmetic(toks: &[Tok]) -> Option<Expr> {
 /// An interpolated run folded into the parts to concatenate: literal text, `$var` reads and
 /// nested `#{ … }` bodies. Built by one `fold` so no imperative loop drives the shape.
 fn interpolation(toks: &[Tok]) -> Option<Expr> {
-    let parts = toks.iter().fold((Vec::new(), String::new()), |(mut parts, mut lit), tok| {
-        let flush = |parts: &mut Vec<Expr>, lit: &mut String| {
-            if !lit.is_empty() {
-                parts.push(Expr::Text(std::mem::take(lit)));
+    let parts = toks
+        .iter()
+        .fold((Vec::new(), String::new()), |(mut parts, mut lit), tok| {
+            let flush = |parts: &mut Vec<Expr>, lit: &mut String| {
+                if !lit.is_empty() {
+                    parts.push(Expr::Text(std::mem::take(lit)));
+                }
+            };
+            match tok {
+                Tok::Var(name) => {
+                    flush(&mut parts, &mut lit);
+                    parts.push(Expr::Var(name.clone()));
+                }
+                Tok::Interp(inner) => {
+                    flush(&mut parts, &mut lit);
+                    parts.push(
+                        from_tokens(inner).map_or(Expr::Text(canon(&render(inner))), |body| {
+                            Expr::Concat(vec![body])
+                        }),
+                    );
+                }
+                other => lit.push_str(&token_text(other)),
             }
-        };
-        match tok {
-            Tok::Var(name) => {
-                flush(&mut parts, &mut lit);
-                parts.push(Expr::Var(name.clone()));
-            }
-            Tok::Interp(inner) => {
-                flush(&mut parts, &mut lit);
-                parts.push(
-                    from_tokens(inner).map_or(Expr::Text(canon(&render(inner))), |body| {
-                        Expr::Concat(vec![body])
-                    }),
-                );
-            }
-            other => lit.push_str(&token_text(other)),
-        }
-        (parts, lit)
-    });
+            (parts, lit)
+        });
     let (mut parts, lit) = parts;
     if !lit.is_empty() {
         parts.push(Expr::Text(lit));

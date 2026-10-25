@@ -10,8 +10,8 @@
 
 use std::collections::HashMap;
 
-use crate::SassError;
 use crate::value::Value;
+use crate::{ErrorKind, SassError};
 
 #[derive(Debug, Clone, Default)]
 pub struct Env {
@@ -26,11 +26,17 @@ impl Env {
         self.vars.insert(name.to_string(), value);
     }
 
-    /// Look a variable up; an unknown name is the Sass error, and the caller decides whether
-    /// that fails the stream or leaves the declaration value untouched.
+    /// Look a variable up. An unbound name is typed as the Sass **undefined variable** error so the
+    /// `Exec` phase can decide — by kind, against the `FATAL` set in the crate root — whether it
+    /// aborts the stream or the declaration keeps its verbatim text. The corpus wants
+    /// `Error: Undefined variable.` (`directives/use/error/member/missing`); literal contexts must not
+    /// look here at all (P0′.3b).
     pub fn get(&self, name: &str) -> Result<Value, SassError> {
         self.vars.get(name).cloned().ok_or_else(|| {
-            SassError::new(format!("Undefined variable: \"${name}\"."))
+            SassError::typed(
+                ErrorKind::UndefinedVariable,
+                format!("Undefined variable: \"${name}\"."),
+            )
         })
     }
 }

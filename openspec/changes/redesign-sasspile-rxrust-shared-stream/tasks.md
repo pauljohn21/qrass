@@ -58,9 +58,14 @@
        `interp_text`（选择器/属性名）路径上的变量查找口径过宽，需先限定为“仅 `#{}` 内”。
     2. **剩下的 ≈47 条全在缩进语法用例**（`whitespace.hrx`/`comment.hrx` 的 `*/scss` 键，错在 `"$i"`）——
        根因是 `@for $i` 绑定在缩进语法下未成立（harness 尚未支持 `--indented`，见 0.3），不是错误策略本身。
-  - **0′.3a（可单独合入）**：只接管道——`SassError` 带 `ErrorKind`、`ExecObserver` 持 `Option<O>` 并用
-    `Option::take()` 保证终止恰好一次、终点直接返回 `Ok(Err(SassError))`（取消现有
-    `map_err(|_| SassError::new("reduce"))` 类重新贴标签）；**不改任何判定**，预期 `regress=0` 且 pass 不变。
+  - [x] **0′.3a（已合入）管道**：`SassError` 带 `ErrorKind`；`ExecObserver` 改持 `Option<O>` 并用
+    `take()` 保证终止恰好一次（上游 `Infallible`，`error` 分支不可达）；`State::step` 返回
+    `Result<.., SassError>`；终点不再重新贴标签（删 `map_err(|_| SassError::new("reduce"))`）。
+    致命集合 `const FATAL: &[ErrorKind] = &[]` 暂时为空，所以行为**逐字节不变**：
+    hrx 快照与基线 **md5 相同**（`2959a889…`，598/598），空库 `ledger diff regress=0 net=0`，
+    0 测试失败、clippy `-D warnings` 无告警、`sasslint count=0`。
+    新增 `tests/fallback.rs` 钉住两类事实：规范要求的字面量透传（`progid:` 值、选择器 `\$`）不得查变量；
+    以及“未绑定变量暂逐字保留”的 interim 策略（P0′.3b 落地时预期改这条）。
   - **0′.3b**：先把字面量上下文规则说清并只在这些位置保留透传（选择器/属性名仅 `#{}` 求值、
     大写/前缀 CSS 函数名、`progid:` 等），然后才把未绑定变量判致命。
   - **0′.3c**：补 `@for`/`@each` 在缩进语法下的绑定（或先按 0.3 排除该类），重测那 47 条。

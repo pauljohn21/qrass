@@ -13,10 +13,13 @@
 //! `Err` stays generic: a phase never decides the chain's error channel, so the same kernel works
 //! on a `Local` (wasm32, `!Send`) or `Shared` context and with any `Err`.
 
+use std::convert::Infallible;
+
 use rxrust::context::Context;
 use rxrust::observable::{CoreObservable, ObservableType};
 use rxrust::observer::Observer;
 
+use crate::SassError;
 use crate::exec::{State, StyleRule};
 use crate::lexer::{Event, LexAcc, MsgAcc, Tok};
 
@@ -148,57 +151,75 @@ where
     }
 }
 
-/// `Event → StyleRule`: the program state (`scopes`, `env`, order counter) lives in this
-/// observer and is moved by `&mut self` per event; only a rule the event settles is emitted.
+/// `Event → StyleRule`: the program state (`scopes`, `env`) lives in this observer and is moved by
+/// `&mut self` per event; only a rule the event settles is emitted. A fatal failure ends the stream
+/// on the real `Err` channel (`Observer::error`), which is why the downstream observer is held as an
+/// `Option` and consumed with `take()` — terminate exactly once, the way the framework's own
+/// multi-source observers do it. Whether any kind is fatal today is the `FATAL` set in the crate root.
 #[derive(Clone)]
 pub struct Exec<S> {
     pub source: S,
 }
 
 pub struct ExecObserver<O> {
-    observer: O,
+    observer: Option<O>,
     state: State,
 }
 
-impl<O, Err> Observer<Event, Err> for ExecObserver<O>
+impl<O> Observer<Event, Infallible> for ExecObserver<O>
 where
-    O: Observer<StyleRule, Err>,
+    O: Observer<StyleRule, SassError>,
 {
     fn next(&mut self, ev: Event) {
-        let ExecObserver { observer, state } = self;
-        if let Some(rule) = state.step(ev) {
-            observer.next(rule);
+        if self.observer.is_none() {
+            return; // already terminated on the Err channel
+        }
+        match self.state.step(ev) {
+            Ok(Some(rule)) => {
+                if let Some(observer) = &mut self.observer {
+                    observer.next(rule);
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                if let Some(terminated) = self.observer.take() {
+                    terminated.error(err);
+                }
+            }
         }
     }
 
-    fn error(self, err: Err) {
-        self.observer.error(err);
+    // The upstream is infallible; an error can only originate from this phase.
+    fn error(self, never: Infallible) {
+        match never {}
     }
 
     fn complete(self) {
-        self.observer.complete();
+        if let Some(observer) = self.observer {
+            observer.complete();
+        }
     }
 
     fn is_closed(&self) -> bool {
-        self.observer.is_closed()
+        self.observer.as_ref().is_none_or(|o| o.is_closed())
     }
 }
 
 impl<S> ObservableType for Exec<S>
 where
-    S: ObservableType,
+    S: ObservableType<Err = Infallible>,
 {
     type Item<'a>
         = StyleRule
     where
         Self: 'a;
-    type Err = S::Err;
+    type Err = SassError;
 }
 
 impl<S, C> CoreObservable<C> for Exec<S>
 where
     C: Context,
-    S: CoreObservable<C::With<ExecObserver<C::Inner>>>,
+    S: ObservableType<Err = Infallible> + CoreObservable<C::With<ExecObserver<C::Inner>>>,
 {
     type Unsub = S::Unsub;
 
@@ -207,7 +228,7 @@ where
         let span = tracing::debug_span!("phase", stage = "exec");
         let _entered = span.enter();
         let wrapped = context.transform(|observer| ExecObserver {
-            observer,
+            observer: Some(observer),
             state: State::default(),
         });
         source.subscribe(wrapped)

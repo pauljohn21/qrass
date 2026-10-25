@@ -111,7 +111,9 @@ fn norm(css: &str) -> String {
 async fn hrx_snapshot() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sass-spec/spec");
     let _span = tracing::info_span!("hrx").entered();
-    let _ = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
     let mut files = Vec::new();
     SPEC_DIRS
         .iter()
@@ -121,7 +123,9 @@ async fn hrx_snapshot() {
     let (mut total, mut pass, mut skipped) = (0usize, 0usize, 0usize);
 
     for file in &files {
-        let Ok(text) = fs::read_to_string(file) else { continue };
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
         for (key, case) in parse_hrx(&text) {
             // Runnable only as a single-input, single-output (or single-error) case.
             if case.extra_inputs > 0 || case.has_options || case.input.is_none() {

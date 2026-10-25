@@ -5,7 +5,9 @@
 use sasspile::compile;
 
 async fn css(input: &str) -> String {
-    compile(input).await.expect("silent-comment lexing compiles")
+    compile(input)
+        .await
+        .expect("silent-comment lexing compiles")
 }
 
 #[tokio::test]
@@ -44,5 +46,8 @@ async fn url_authority_is_never_a_comment() {
 
 #[tokio::test]
 async fn lone_slash_stays_division_text() {
-    assert_eq!(css("a { b: 1px / 2px; }").await, "a {\n  b: 1px / 2px;\n}\n");
+    assert_eq!(
+        css("a { b: 1px / 2px; }").await,
+        "a {\n  b: 1px / 2px;\n}\n"
+    );
 }

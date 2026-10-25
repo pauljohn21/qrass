@@ -12,20 +12,29 @@ async fn css(input: &str) -> String {
 #[tokio::test]
 async fn raw_value_is_carried_verbatim() {
     assert_eq!(css("a { b: c; }").await, "a {\n  b: c;\n}\n");
-    assert_eq!(css("a { color: #ff0000; }").await, "a {\n  color: #ff0000;\n}\n");
+    assert_eq!(
+        css("a { color: #ff0000; }").await,
+        "a {\n  color: #ff0000;\n}\n"
+    );
 }
 
 #[tokio::test]
 async fn slash_stays_a_separator_not_division() {
     // P1 owns the value algebra; until then `/` must survive untouched (protects
     // `font: 12px/1.5`, `grid: 1/2`, `w: 1/2`).
-    assert_eq!(css("a { font: 12px/1.5; }").await, "a {\n  font: 12px/1.5;\n}\n");
+    assert_eq!(
+        css("a { font: 12px/1.5; }").await,
+        "a {\n  font: 12px/1.5;\n}\n"
+    );
     assert_eq!(css("a { w: 1/2; }").await, "a {\n  w: 1/2;\n}\n");
 }
 
 #[tokio::test]
 async fn value_whitespace_is_canonicalised() {
-    assert_eq!(css("a {  b:   1px    2px  ; }").await, "a {\n  b: 1px 2px;\n}\n");
+    assert_eq!(
+        css("a {  b:   1px    2px  ; }").await,
+        "a {\n  b: 1px 2px;\n}\n"
+    );
 }
 
 #[tokio::test]
@@ -63,7 +72,10 @@ async fn convertible_units_normalise_into_the_left_operand_unit() {
 #[tokio::test]
 async fn unspaced_sign_is_a_list_item_not_subtraction() {
     // Sass reads `10px -5px` as a two-item space list, so nothing may be evaluated.
-    assert_eq!(css("a { w: 10px -5px; }").await, "a {\n  w: 10px -5px;\n}\n");
+    assert_eq!(
+        css("a { w: 10px -5px; }").await,
+        "a {\n  w: 10px -5px;\n}\n"
+    );
 }
 
 #[tokio::test]
@@ -87,10 +99,16 @@ async fn a_lone_number_value_is_still_verbatim_text() {
 
 #[tokio::test]
 async fn bound_variables_resolve_and_emit_no_css_of_their_own() {
-    assert_eq!(css("$w: 5px; a { width: $w; }").await, "a {\n  width: 5px;\n}\n");
+    assert_eq!(
+        css("$w: 5px; a { width: $w; }").await,
+        "a {\n  width: 5px;\n}\n"
+    );
     assert_eq!(
         css("$k: 2; .col-#{$k} { w: 1px; }").await,
         ".col-2 {\n  w: 1px;\n}\n"
     );
-    assert_eq!(css("a { --d: 4px; width: var(--d); }").await, "a {\n  --d: 4px;\n  width: var(--d);\n}\n");
+    assert_eq!(
+        css("a { --d: 4px; width: var(--d); }").await,
+        "a {\n  --d: 4px;\n  width: var(--d);\n}\n"
+    );
 }

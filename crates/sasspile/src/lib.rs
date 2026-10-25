@@ -21,17 +21,54 @@ mod value;
 
 use crate::phases::{Exec, Lexer, Render, Structurize};
 
-/// Compiler error carried as an in-stream value.
+/// Why a compile failed. The distinction is not cosmetic: the corpus treats the categories
+/// differently — an unbound variable must abort (`sass-spec`
+/// `directives/use/error/member/missing`: `Error: Undefined variable.`), while an unparseable run or a
+/// call Sass prints verbatim is **defined passthrough** (`css/functions/special/**`,
+/// `css/custom_properties/simple`, `css/selector/escaping::dollar_char`). So a failure can never be
+/// collapsed into "emit the source text" by one blanket fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// a variable reference with no binding at this position
+    UndefinedVariable,
+    /// everything else
+    Other,
+}
+
+/// The kinds that abort the stream **today**. Deliberately empty at P0′.3a: plumbing the real `Err`
+/// channel must not move the pass count. Flipping `UndefinedVariable` in without more was measured
+/// (598 → 984 pass, but 60 regressions): a variable lookup must not run at all in literal contexts
+/// — selector escapes, `progid:`/prefixed IE values, uppercase `VAR(...)` — and ~47 of those
+/// regressions are indented-syntax cases whose `@for $i` binding does not exist yet. P0′.3b adds
+/// this kind back once the literal-context rule is in; P0′.3c covers the bindings.
+const FATAL: &[ErrorKind] = &[];
+
+/// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
+/// value a fallback can quietly swallow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SassError {
     pub message: String,
+    pub kind: ErrorKind,
 }
 
 impl SassError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            kind: ErrorKind::Other,
         }
+    }
+
+    pub(crate) fn typed(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind,
+        }
+    }
+
+    /// Must this failure terminate the stream instead of falling back to verbatim text?
+    pub(crate) fn is_fatal(&self) -> bool {
+        FATAL.contains(&self.kind)
     }
 }
 
@@ -63,7 +100,7 @@ impl std::error::Error for SassError {}
 /// only at the single terminal.
 pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
     let _span = tracing::info_span!("compile").entered();
-    Shared::from_iter(content.into().chars().collect::<Vec<char>>())
+    let resolved = Shared::from_iter(content.into().chars().collect::<Vec<char>>())
         .transform(|source| Lexer { source })
         .transform(|source| Structurize { source })
         .transform(|source| Exec { source })
@@ -73,11 +110,14 @@ pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
             css
         })
         .into_future()
-        .await
-        .or_else(|e| match e {
-            rxrust::IntoFutureError::Empty => Ok(Ok(String::new())),
-            other => Err(other),
-        })
-        .map_err(|_| SassError::new("no output"))?
-        .map_err(|_| SassError::new("reduce"))
+        .await;
+    // A stream failure arrives as `Ok(Err(SassError))` and is returned **as-is** — the old terminal
+    // relabelled every failure (`map_err(|_| SassError::new("reduce"))`), which is exactly the
+    // swallow-this-error shape the real channel replaces. `reduce_initial` always emits its seed, so
+    // the only outer error left is an empty program, which legitimately compiles to `""`.
+    match resolved {
+        Ok(compiled) => compiled,
+        Err(rxrust::IntoFutureError::Empty) => Ok(String::new()),
+        Err(_) => Err(SassError::new("stream produced no result")),
+    }
 }

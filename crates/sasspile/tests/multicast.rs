@@ -18,8 +18,12 @@ fn ref_count_branches_on_a_synchronous_source() {
 
     let sink: Rc<RefCell<Vec<(u32, u32)>>> = Rc::new(RefCell::new(Vec::new()));
     let collector = Rc::clone(&sink);
-    shared.with_latest_from(sums).subscribe(move |p| collector.borrow_mut().push(p));
-    let _ = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).try_init();
+    shared
+        .with_latest_from(sums)
+        .subscribe(move |p| collector.borrow_mut().push(p));
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
     // Measured: `[(1,6),(2,6),(3,6)]` — every event pairs with the FINAL state, because with a
     // synchronous source the first-subscribed branch drains the shared upstream. So pairing can
     // never carry per-position state; `scan` (state as the emitted item) is the framework's answer.
@@ -36,8 +40,10 @@ fn shared_subject_feeds_every_consumer_from_one_producer() {
     let b: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
 
     let (sink_a, sink_b) = (Arc::clone(&a), Arc::clone(&b));
-    bus.clone().subscribe(move |v| sink_a.lock().unwrap().push(v));
-    bus.clone().subscribe(move |v| sink_b.lock().unwrap().push(v));
+    bus.clone()
+        .subscribe(move |v| sink_a.lock().unwrap().push(v));
+    bus.clone()
+        .subscribe(move |v| sink_b.lock().unwrap().push(v));
 
     let mut producer = bus.clone();
     Shared::from_iter([1u32, 2, 3]).subscribe(move |v| producer.next(v));
