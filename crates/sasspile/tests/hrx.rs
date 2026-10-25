@@ -5,7 +5,7 @@
 //! `regress = 0` as features are wired in. Test scaffolding lives in `tests/` (product
 //! code stays in `src/`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,7 +26,8 @@ const SPEC_DIRS: [&str; 6] = [
 struct Case {
     input: Option<String>,
     output: Option<String>,
-    error: bool,
+    /// the case's `error` section, verbatim (`None` when the case expects CSS)
+    error: Option<String>,
     extra_inputs: usize,
     has_options: bool,
 }
@@ -75,7 +76,7 @@ fn parse_hrx(text: &str) -> BTreeMap<String, Case> {
                         case.input = Some(body);
                     }
                     "output.css" => case.output = Some(body),
-                    "error" => case.error = true,
+                    "error" => case.error = Some(body),
                     "options.yml" => case.has_options = true,
                     _ => {
                         if file.ends_with(".scss") {
@@ -96,6 +97,33 @@ fn split_case(path: &str) -> (String, &str) {
         Some((dir, file)) => (dir.to_string(), file),
         None => (String::new(), path),
     }
+}
+
+/// The ledger key for one case: its path **relative to `spec/`** (`.hrx` dropped) plus the case
+/// directory inside the file.
+///
+/// It used to be `<basename>.hrx::<case>`, and that silently merged different cases: the corpus has
+/// `css/plain/function.hrx`, `css/function.hrx`, `css/supports/syntax/function.hrx`, … all folding
+/// onto `function.hrx::…`. `ledger` keys a run by case, so a merged pair lets one file's PASS hide
+/// the other's FAIL — measured: `ledger diff` reported `regress=0 net=266` where a per-case set diff
+/// was `+385 / -3`. Any conclusion about regressions therefore has to come from unique keys.
+fn case_id(root: &Path, file: &Path, key: &str) -> String {
+    let rel = file.strip_prefix(root).unwrap_or(file).with_extension("");
+    format!("{}::{}", rel.display(), key)
+}
+
+/// The oracle message for a failing case: the first non-empty line of its `error` section with the
+/// leading `Error:` removed — the corpus states the message on that line and puts the source span
+/// underneath (`css/comment.hrx::error/loud/interpolation/failure`).
+///
+/// A section that does not open with `Error:` (a `DEPRECATION WARNING` or `Warning:`) has no message
+/// we can produce yet; P7 7.2 brings diagnostics, so such a case must count as a mismatch. This is what
+/// makes an `error` case a real assertion: before it, the harness passed on **any** error at all, and
+/// measured 385 of 385 flipping `FATAL` "gained" cases whose oracle was an unrelated message.
+fn oracle_header(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    line.strip_prefix("Error:")
+        .map(|message| message.trim().to_string())
 }
 
 /// Normalise CSS for comparison: trim each line, drop blank lines, join with `\n`.
@@ -121,6 +149,8 @@ async fn hrx_snapshot() {
 
     let mut rows: Vec<String> = Vec::new();
     let (mut total, mut pass, mut skipped) = (0usize, 0usize, 0usize);
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut collision: Vec<String> = Vec::new();
 
     for file in &files {
         let Ok(text) = fs::read_to_string(file) else {
@@ -132,31 +162,43 @@ async fn hrx_snapshot() {
                 skipped += 1;
                 continue;
             }
-            if !(case.output.is_some() || case.error) {
+            if !(case.output.is_some() || case.error.is_some()) {
                 skipped += 1;
                 continue;
             }
             total += 1;
-            let id = format!("{}::{}", file.file_name().unwrap().to_string_lossy(), key);
+            let id = case_id(&root, file, &key);
+            if !seen.insert(id.clone()) {
+                collision.push(id.clone());
+            }
             tracing::info!(stage = "hrx", id = %id, input_len = case.input.as_ref().map_or(0, |s| s.len()), "case start");
             let result = compile(case.input.unwrap()).await;
-            match (result, &case.output, case.error) {
-                (Ok(css), Some(expected), false) if norm(&css) == norm(expected) => {
+            let want_error = case.error.as_deref().and_then(oracle_header);
+            match (result, &case.output, want_error) {
+                (Ok(css), Some(expected), None) if norm(&css) == norm(expected) => {
                     pass += 1;
                     rows.push(format!("PASS\t{id}"));
                 }
-                (Err(_), _, true) => {
+                // An error case is satisfied only by the message the oracle states, never by any error.
+                (Err(e), _, Some(want)) if e.message == want => {
                     pass += 1;
                     rows.push(format!("PASS\t{id}"));
                 }
-                (Ok(_), _, true) => rows.push(format!("FAIL\t{id}\texpected error, got css")),
-                (Err(e), _, false) => rows.push(format!("FAIL\t{id}\t{:?}", e.message)),
-                (Ok(css), Some(expected), false) => rows.push(format!(
+                (Err(e), _, Some(want)) => {
+                    rows.push(format!("FAIL\t{id}\tgot error {:?} want {:?}", e.message, want))
+                }
+                (Err(e), _, None) => rows.push(format!("FAIL\t{id}\tunexpected error {:?}", e.message)),
+                (Ok(css), Some(expected), None) => rows.push(format!(
                     "FAIL\t{id}\tgot {:?} want {:?}",
                     norm(&css),
                     norm(expected)
                 )),
-                _ => rows.push(format!("FAIL\t{id}\tno expected output")),
+                (Ok(css), _, Some(want)) => rows.push(format!(
+                    "FAIL\t{id}\texpected error {:?}, got {:?}",
+                    want,
+                    norm(&css)
+                )),
+                (Ok(_), None, None) => rows.push(format!("FAIL\t{id}\tno expected output")),
             }
         }
     }
@@ -168,6 +210,14 @@ async fn hrx_snapshot() {
     // Sanity: the harness found and ran cases. Individual failures are expected (the
     // compiler is incomplete); regress tracking is via `ledger diff`, not this assert.
     assert!(total > 0, "harness found no runnable cases under {root:?}");
+    // The guard against the defect above: two cases sharing a key makes `ledger diff` able to hide a
+    // regression, so the run is invalid rather than merely noisy.
+    assert!(
+        collision.is_empty(),
+        "{} duplicate case keys, first few: {:?}",
+        collision.len(),
+        collision.iter().take(5).collect::<Vec<_>>()
+    );
     tracing::info!(
         stage = "hrx",
         total,
