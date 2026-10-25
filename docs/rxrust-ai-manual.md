@@ -1,17 +1,31 @@
 # rxrust 1.0 AI 编码手册（官方 Book + 源码核实版）
 
 > ⚠️ **已被取代（SUPERSEDED）**：本手册基于 `rxrust-1.0.0-rc.5` 与已删除的 qrass，保留仅作历史参考。
-> 当前**唯一权威** = `docs/rxrust-source-analysis/`（`rc.6`、sasspile、逐文件 文件:行 取证）与
-> `.qoder/skills/rxrust-reactive/`。冲突一律以那两处为准。尤其：本文下方任何 `type Stage<T>`/`fn fail`/
-> `fn drain` 管线示例都是旧的“自造框架层”写法，**已禁**（见 `08 §1/§4`：直接组合算子；同步 `Local`→
-> `subscribe`+`mpsc`，`Shared`/`from_stream`→`into_future().await`）；入口为 `async fn sasspile::compile`。
+> 当前**权威链**（冲突时仍上层优先）：
+> 1. `docs/rxrust-source-analysis/`（rc.6 逐行取证，含 **01–09**；`09-cancellation-and-terminal-ordering.md`
+>    存“取消/锁/终止投递次序”不变量与“本文档注释与实现不一致”清单）；
+> 2. `docs/rxrust-source-analysis/` 的两份同步副本
+>    （`.qoder/skills/rxrust-source-analysis/references/`、`plugins/rxrust-source-analysis/skills/…/references/`）；
+> 3. `.qoder/skills/rxrust-reactive/`（写管线的 do/don't  doctrine）。
+>
+> **已知本手册正文中已过时的写法**（遇到即按右侧改写）：
+> - `type Stage<T>` / `fn fail<T>` / `fn drain` 管线示例 → 旧的“自造框架层”，**已禁**，直接组合算子；
+> - “同步链终点 `subscribe` + `std::sync::mpsc` 收口” → **非框架口子**。收口只用：`collect`/`reduce_initial` +
+>   `into_future()`（要求恰好一个值：空→`Empty`、多→`MultipleValues`，且不取消）、`into_stream()`（仅 `Drop` 取消）、
+>   或 await 订阅句柄（`TaskHandle` 自身是 Future）；mpsc 仅作对外的 `Sender` 桥接；
+> - `share()` → rc.6 **不存在**，一到多用 `Subject` / `behavior_subject` / `publish().ref_count()`；
+> - `on_error` → 它**消费**错误并把 `Err` 变成 `Infallible`（库内方法注释说“保留错误流”是错的）；
+> - `delay` → 实现把 **completion 也延迟**（方法注释说不延迟是错的）。
+>
+> 入口 = `async fn sasspile::compile`。
 
 > 依据：rxRust 官方 Book（`https://rxrust.github.io/rxRust/latest/`，源码在 crate 的
 > `guide/` 目录）逐章精读 + `rxrust-1.0.0-rc.5` 源码逐文件核实（`context.rs` /
 > `factory.rs` / `observable.rs` / `observer.rs` / `ops/*` / `observable/boxed.rs` /
 > `subject/*` / `subscription*`）。所有签名从源码取证，非凭记忆。
-> 供 AI 在本项目（qrass）编写/审查响应式代码时直接遵循。
-> 版本钉死：`rxrust = "=1.0.0-rc.5"`（裸 `cargo add` 会解析到旧 0.15 线）。
+> 供 AI 在本项目（现为 sasspile clean-room）编写/审查响应式代码时作历史参考。
+> 版本：本手册取证于 `=1.0.0-rc.5`；**当前工程已钉到 `=1.0.0-rc.6`**（裸 `cargo add` 会解析到旧 0.15 线），
+> rc.5→rc.6 的 delta 见 `.qoder/skills/rxrust-reactive/reference.md` 顶部与 `docs/rxrust-source-analysis/`。
 > 保留 default features（`scheduler` feature 提供 `LocalScheduler`/`SharedScheduler`
 > 与 `LocalBoxedObservable` 等别名，且已 re-export 进 prelude）。
 
@@ -333,7 +347,9 @@ observe_on(sched) / subscribe_on(sched)                                      ←
 (d) into_stream()               Observable → Stream<Item=Result<Item,Err>>，用 async 循环消费
 ```
 
-**qrass 标准终端（同步 + 错误可观测）：mpsc 收口。**
+**qrass 标准终端（同步 + 错误可观测）：mpsc 收口。** ← ❗ **已作废**（见文首清单）：mpsc 不是框架终点；
+同步链直接用 `collect`/`reduce_initial` + `subscribe` 写入局部 cell，或 `into_future()`；异步入口则
+`into_future().await` / `await` 订阅句柄 / `into_stream()`（仅 `Drop` 取消）。下文保留仅作当时的记录。
 
 ```rust
 use std::sync::mpsc;

@@ -1,127 +1,157 @@
-# qrass
+# qrass — workspace hosting **sasspile**
 
-A reactive **SCSS → CSS** compiler in Rust. Every pipeline stage is an rxrust
-Observable that is built and drained in place, passing *owned* tokens, AST nodes
-and values from one stage to the next — ownership-first, no garbage-collector
-style `Arc<Mutex<_>>` anywhere in the business path.
+A clean-room **SCSS → CSS** compiler written as a reactive *push* pipeline: every stage is an
+rxrust `Observable` that moves **owned** tokens, expressions and values forward through
+operators (`from_iter → scan/scan_map → flat_map → filter → collect → reduce_initial →
+into_future`). There is no materialized AST walked by recursion, and no `Arc<Mutex<_>>`
+business state anywhere in the path.
 
-## Status
+> History: this repository once contained `crates/qrass` (a pull-shaped compiler). It was
+> **deleted** when the project adopted the push doctrine; the crate directory no longer
+> exists and its code must not be used as a template. The only implementation is
+> `crates/sasspile`.
 
-| Gate | Result |
-| --- | --- |
-| `cargo test -p qrass` | **286 passed / 0 failed** |
-| element-plus theme-chalk golden | **4 / 4** |
-| sass-spec `.hrx` runner (full modern subset) | **6037 PASS / 10961 attempted = 55.08%**, floor `55.0` |
-| `expressions/if/error` annotation blocks, compared verbatim | **63 / 63** |
-| Clippy on the files under active development | clean |
+## Workspace
 
-Conformance is measured **only** against the `.hrx` goldens in the local
-`sass-spec` submodule and the committed element-plus CSS baseline. Those files
-are the specification; nothing else is treated as an authority.
+| Crate | Role | Size (measured 2026-10-25) |
+| --- | --- | --- |
+| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 6 `src/*.rs`, 891 lines, 6 test targets |
+| `crates/ledger` | A/B harness: diffs two hrx snapshots, reports `regress` | 310 lines |
+| `crates/sasslint` | deterministic rule gate for the project's hard rules (+ `sasslint-mcp` bin) | 226 lines, 5 tests |
+| `crates/docsizer` | doc-counting tooling, dormant (its tutorial programme was cancelled) | 942 lines, 10 tests |
 
-## Quick start
+Source layout of the compiler: `lib.rs` (the single chain), `lexer.rs`, `exec.rs`, `expr.rs`,
+`value.rs`, `env.rs`. The directories `src/builtins/` and `src/directives/` are currently
+empty placeholders for later phases.
+
+## Status (all numbers re-measured on 2026-10-25)
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Tests | `cargo test --workspace` | **39 passed / 0 failed** (1 ignored) |
+| Rule gate | `cargo run -p sasslint --bin sasslint -- crates/sasspile/src` | **`count=0`** |
+| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11486 pass=595 skipped=1232` (**5.2 %**) |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | **clean (exit 0)**, verified the same day |
+
+The 5.2 % pass rate is **not** a regression signal: the compiler is deliberately incomplete
+while the architecture is rebuilt phase by phase (P0–P8). What a round must never do is lose
+previously passing cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**,
+not by the raw rate. `tests/hrx.rs` asserts nothing case-by-case for the same reason.
+
+## Conformance authority
+
+- **Only** the `.hrx` goldens under the `sass-spec` submodule define behaviour
+  (`input.scss` → `output.css` / error block).
+- `element-plus` is used as a **non-regression self-baseline** — never as a source of
+  expected output produced by another implementation.
+- dart-sass source or documentation must **not** be consulted to infer behaviour; it is a
+  reference for *what the language is*, not for *what our output should be*.
 
 ```bash
 git submodule update --init element-plus sass-spec
-
-cargo run -p qrass -- crates/qrass/tests/fixtures/passthrough.scss
-# a {
-#   color: red;
-# }
-# .b > .c {
-#   margin: 0 auto;
-# }
-```
-
-CLI flags: input path, `-o` / `--output <path>`, `--style expanded`,
-`--load-path <dir>` (repeatable, consulted for `@use` / `@forward` resolution).
-`expanded` is the only output style implemented so far; anything else is
-rejected before compiling.
-
-Diagnostics are emitted through `tracing` on **stderr**, so stdout stays pure
-CSS:
-
-```bash
-RUST_LOG=info cargo run -p qrass -- input.scss   # `trace` adds per-stage spans
 ```
 
 ## Library
 
 ```rust
-use std::path::Path;
-use qrass::error::SassError;
-use qrass::{Options, compile};
+use sasspile::compile;
 
-fn build(entry: &str) -> Result<String, SassError> {
-    let opts = Options {
-        load_paths: vec!["vendor".into()],
-        ..Options::default()
-    };
-    compile(Path::new(entry), &opts)
+async fn build(scss: String) -> Result<String, sasspile::SassError> {
+    compile(scss).await          // the sole public entry; takes content, not a path
 }
+```
+
+Diagnostics go through `tracing` (never `println!`), so the returned `String` is pure CSS:
+
+```bash
+RUST_LOG=info cargo test -p sasspile --test hrx -- --nocapture   # `trace` adds per-stage spans
 ```
 
 ## Pipeline
 
-Five stages, each a self-contained stream drained through an `mpsc` channel and
-handing owned data to the next (wrapped in a `tracing` span with `stage`,
-`module`, `elapsed_ms`):
+One cold chain, written in `compile` and nowhere else — no stage function takes or returns an
+observable type, no `box_it()` seams, no `Stage`/`fail`/`drain` orchestration layer:
 
 ```
-load → lex → parse → eval → render
+chars ─▶ scan_map(LexAcc) ─▶ scan_map(MsgAcc) ─▶ scan(State) ─▶ filter_map(into_rule)
+       ─▶ flat_map(per-rule work, ordered by an owned `order` key)
+       ─▶ collect ─▶ pure fold ─▶ reduce_initial ─▶ into_future().await
 ```
 
-| Area | Files | Role |
-| --- | --- | --- |
-| Loading | `loader.rs`, `span.rs` | Source reading, URL canonicalization, position mapping |
-| Lexing | `lexer.rs`, `lexer_detail.rs`, `token.rs` | `scan_map` char transducer producing owned tokens; punct dispatch derived by `qrass-macros` |
-| Parsing | `parser*.rs`, `ast*.rs` | Owned token runs folded into statement / expression AST |
-| Eval | `eval*.rs`, `env.rs`, `module.rs`, `value.rs`, `builtins/`, `color4*.rs`, `named_colors.rs` | Scope arena, module instantiation, builtins, CSS Color 4 math, `@extend`, three-valued `if(…)` execution |
-| Output | `css.rs`, `color_css.rs`, `parser_text.rs`, `plain_css.rs` | Expanded CSS serialization; plain-CSS source enforcement |
-| Diagnostics | `error.rs`, `diag.rs` | Golden-layout error snippets (marker runs, labels, location line) |
+Cross-cutting passes that genuinely need the whole rule set (`@extend` fixpoint, media
+bubbling) are expressed as `collect` + a **pure forward fold**, then pushed back into the
+stream via `flat_map` — never a mutable object graph visited by a walker.
 
-Layout: `crates/qrass` (lib + CLI, 41 source files, ~9.6k lines),
-`crates/qrass-macros` (derive macros), `docs/rxrust-ai-manual.md` (the rxrust
-1.0 notes this codebase follows), `openspec/changes/add-qrass-scss-compiler/`
-(proposal, design, specs, tasks), `reports/` (assemlist snapshots),
-`.qoder/rules/rust.md` (hard project rules).
+## Anti-GC red lines (read before writing any pipeline code)
 
-## Convergence workflow
+Every line below is a shape this repository actually shipped, had to rework, and now blocks by rule +
+`sasslint` gate. They are here (not only in the long docs) because a fresh session must not
+rediscover them:
 
-The `.hrx` runner walks the modern spec subset, materializes each case under a
-virtual spec root and reports one row per case when asked:
+1. **Each phase is a real operator kernel**, not a batch shell: `struct Phase { source }` +
+   `PhaseObserver { observer, state }` + `impl ObservableType` + `impl CoreObservable<C: Context>`,
+   emitting `0..N` items one by one via `observer.next(..)`. Banning: `scan_map` returning a `Vec`
+   followed by `flat_map(from_iter)` — that hides a one-to-many behind a container.
+2. **Order comes from the stream, not from sorting.** An `order`/sequence key plus `sort_by_key` is a
+   symptom that the *emission moment* was modelled wrong (Sass settles a block's pending declaration
+   run when a nested block opens, and the rest when it closes — so one block can emit several rules).
+   Sorting also cannot recover elements: `merge_all` **drops** emissions of an inner that is still
+   queued. Use `concat_map`/`concat_all` or a serial chain.
+3. **Errors ride the real `Err = SassError` channel** (`Observer::error` → `into_future()` →
+   `Ok(Err(..))`). `.ok()` / `unwrap_or_else(source_text)` as a fallback is not an error policy: it
+   silently turns a real error into wrong output and masks the spec's `errors/**` expectations. Only
+   constructs the spec defines as verbatim (unreducible `calc`, custom properties, unknown at-rules)
+   stay as-is.
+4. **No fake concurrency**: wrapping microseconds of pure CPU work in `from_stream(stream::once(..))`
+   is not parallelism (measured: same worker thread). Real fan-out belongs to independent module
+   subgraphs (P5) only.
+5. **Close only through the framework's terminals**: `collect`/`reduce_initial` + `into_future()`,
+   `into_stream()` (cancels on `Drop`), or awaiting the `TaskHandle` a scheduled source returns.
+   `std::sync::mpsc` is a bridge for a caller that needs a `Sender`, never the terminal.
+6. **Multicast is not re-entrant**: `next`/`error`/`complete` on a `Subject` from inside its own
+   subscriber callback panics; insert `delay(Duration::ZERO)` for feedback loops. And `Subject::
+   is_closed()` means "no subscribers", not "terminated".
 
-```bash
-# narrow to one area and export a machine-readable report
-QRASS_HRX_DIR=expressions/if QRASS_HRX_OUT=/tmp/hrx.txt cargo test -p qrass --test hrx_spec
-awk -F'\t' '$1=="PASS"{print $2}' /tmp/hrx.txt | sort > /tmp/pass.txt
+**Verification is not self-evident either.** `ledger` stores only failures, so re-importing a run name
+must clear that run's old `run_fail` rows (it does now, with tests) — otherwise a fixed case reports a
+phantom REGRESS. Before trusting `regress=0`, redo the A/B on an empty `--db`, and for behaviour-neutral
+refactors prove it by a byte-identical snapshot (md5/`diff`), not by a matching pass count.
 
-# a round is only accepted if the previous pass list is a subset of the new one
-comm -23 /tmp/pass_before.txt /tmp/pass_after.txt   # must print nothing
-```
+## Where the rules and knowledge live
 
-`crates/qrass/tests/golden/sass-spec/min_pass_rate.txt` is a ratchet: a full run
-fails below the recorded floor, and each round raises it with a comment stating
-what moved. `tests/if_error.rs` additionally compares whole error annotation
-blocks verbatim, so a mis-placed caret cannot slip through the substring matcher
-used by the shared runner.
-
-Known gaps, recorded rather than hidden: `with`-config propagation,
-`expressions/if/css.hrx#0` (lexer), and the legacy three-argument `if()`
-argument-count blocks, which need a builtin declaration snippet plus an
-`if-function` deprecation warning.
+| Document | Authority |
+| --- | --- |
+| `.qoder/rules/rust.md` | hard project rules (always-on): rxrust as the engine, tracing spans, ≤500-line files, tests in `tests/`, no `println!`, no Python/scripts, SSH push |
+| `docs/rxrust-source-analysis/` (01–09 + README) | **authoritative** rxrust rc.6 source reading; `09-…-ordering.md` holds the cancellation / terminal-ordering invariants and the list of places where the library's own doc comments contradict its implementation |
+| `.qoder/skills/rxrust-reactive/` | the do/don't doctrine applied when writing pipelines (`SKILL.md` + `reference.md`) |
+| `docs/rxrust-ai-manual.md` | **historical** (written against rc.5); superseded by the two above — verify against source before trusting a detail |
+| `openspec/changes/redesign-sasspile-rxrust-shared-stream/` | the architecture plan and requirement deltas being implemented (P0–P8) |
+| `reports/` | assembly snapshots |
 
 ## Ground rules
 
-- Rust edition 2024 (toolchain 1.99), rxrust pinned to `=1.0.0-rc.5`.
-- Ownership over shared mutability; state moves *by value* through operators.
-- No `println!` / `eprintln!` — `tracing` macros only, with spans around
-  cross-function pipelines.
-- No inline tests in `src/`; everything lives under `tests/`.
-- ≤ 500 lines per source or test file — split rather than overflow.
+- Rust edition 2024 (toolchain 1.99); rxrust pinned to **`=1.0.0-rc.6`** (a bare
+  `cargo add rxrust` still resolves the incompatible 0.15 line).
+- Ownership over shared mutability: state travels as a value carried by the stream.
+- `Shared`/threads only where work is genuinely independent; the fan-out ordering caveat
+  (a queued inner observable **loses** emissions — `sort` cannot recover them) is documented
+  in `docs/rxrust-source-analysis/09-…`.
+- No `println!` / `eprintln!` — `tracing` macros, with spans around cross-function stages.
+- No inline tests: everything under `tests/`. ≤ 500 lines per source or test file.
 - CodeGraph CLI (`callers`, `impact`, `explore`, `node`) for code queries.
+- Push over SSH: `git push github main`.
+
+## Known gaps (recorded, not hidden)
+
+- Language coverage is early-phase: value/type semantics, selectors/`@extend`, module
+  `@use`/`@forward`/`@import`, callables and CSS at-rules are each specified in the OpenSpec
+  change but only partially implemented.
+- No CLI binary yet — the crate is library-only by design (`compile` is the sole exit).
+- `crates/docsizer` and `docs/rxrust-from-scratch/` are leftovers of a cancelled tutorial
+  programme; they remain tracked pending an explicit decision and are not part of the
+  compiler's gate set.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The vendored submodules (`sass-spec`,
-`element-plus`) keep their own licenses.
+MIT — see [LICENSE](LICENSE). The vendored submodules (`sass-spec`, `element-plus`) keep
+their own licenses.

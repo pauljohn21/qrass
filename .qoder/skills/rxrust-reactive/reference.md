@@ -165,39 +165,55 @@ group_by(...)          grouped multicast
 contains(v) / start_with(Vec)
 ```
 
-## 6. Terminals — three shapes
+## 6. Terminals — the framework's own shapes
 
 ```text
 (a) subscribe(closure)      next only. Fine when the value channel already encodes Result errors.
 (b) subscribe_with(Observer)implement Observer (next=&mut self; error=self; complete=self; is_closed),
                             or wrap a closure in FnMutObserver. Use when you must see error/complete.
-(c) into_future()           needs async runtime; Output =
-                            IntoFutureResult<T,E> = Result<Result<T,E>, IntoFutureError>
-                            (outer Err = Empty / MultipleValues pipeline error).
+(c) into_future()           Output = Result<Result<T,E>, IntoFutureError>. Verified on rc.6:
+                            exactly one value -> Ok(Ok(v)); error -> Ok(Err(e));
+                            zero values -> Err(Empty); MORE THAN ONE value -> Err(MultipleValues).
+                            It subscribes at construction, so a non-timed chain is already Ready
+                            (any block_on works; no LocalSet needed). It DROPS the subscription
+                            handle (into_future.rs:259) => not cancellable.
+(d) await the handle        from_stream / from_future / timer / observe_on / subscribe_on return
+                            TaskHandle, which is itself a Future (scheduler.rs:429):
+                            `let h = obs.subscribe(f); h.await;` is the framework's "wait for terminal".
+(e) into_stream()           Stream<Item = Result<Item, Err>>; polls one value at a time.
+                            Cancels only on Drop (into_stream.rs:123-129) — drop it to stop early.
 ```
 
-**Standard terminal (synchronous + error-observable): mpsc sink.**
+**Synchronous terminal (what the crate's own tests do):** non-timed operators run fully inline
+at `subscribe`, so the result is ready the moment `subscribe` returns — write it through the
+closure into a local shared cell, no channel needed:
 
 ```rust
-use std::sync::mpsc;
-let (tx, rx) = mpsc::channel::<Result<Out, SassError>>();
+use std::{cell::RefCell, rc::Rc};
+let out = Rc::new(RefCell::new(Vec::<String>::new()));
+let sink = out.clone();
 stream
-    .map(final_extract)                          // Item<'static> = Result<Out, SassError>
-    .subscribe(move |r| { tx.send(r).ok(); });   // inline sync; value ready on return
-rx.recv().unwrap_or_else(|_| Err(missing_output_error))
+    .map(final_extract)                            // Item<'static> = String
+    .collect::<Vec<String>>()                       // emitted once, on complete only
+    .subscribe(move |css| { *sink.borrow_mut() = css; });   // inline: done on return
 ```
+
+`std::sync::mpsc` is **not** a framework terminal: it is a std shell around the reactive core.
+Use it only to bridge into an API that must hand a `Sender` across threads, never as the
+compiler's own 收口.
 
 Error protocol: **compiler errors never enter the observable `Err` channel** (which is
 `Infallible`). They flow as in-stream `Result` data to the terminal, sidestepping the
 `subscribe(closure)` error-swallowing problem (§1). To *additionally* observe errors on
-the side, use `.on_error(move |e| …)`.
+the side, use `.on_error(move |e| …)` (note: `on_error` **consumes** the error and turns the
+stream's `Err` into `Infallible` — lifecycle.rs:31-40,56).
 
-**Shared / async terminal: prefer `into_future().await` over a std `mpsc` sink.** When the
+**Shared / async entry: `into_future().await`, or `await` the subscription handle.** When the
 source is `Shared::from_stream(..)` (which schedules a task, so `subscribe` returns an
-awaitable handle, not an inline run),收口 with the framework's own `into_future()` driven by
-a tokio runtime — do NOT wrap a synchronous stream back with `std::sync::mpsc`+`recv`
-(that reintroduces a std layer around the reactive core). `reduce` = `FnMut(Item,Item)->Item`
-(NO seed); to fold to a different accumulator type use `reduce_initial(seed, FnMut(Acc,Item)->Acc)`.
+awaitable handle, not an inline run), 收口 with the framework's own `into_future()` driven by
+the caller's runtime. `reduce` = `FnMut(Item,Item)->Item` (NO seed, emits nothing on an empty
+source); to fold to a different accumulator type use `reduce_initial(seed, FnMut(Acc,Item)->Acc)`
+(emits the seed on an empty source).
 
 ```rust
 // Shared + from_stream, terminal via rxrust's own into_future (no std channel):
@@ -215,10 +231,12 @@ accumulator over ONE ordered source, then `flat_map(Shared::from_iter(..))` (`fr
 runs inline & in order) to flatten. Cross-sibling state is a *moved accumulator value*, not
 per-item-independent.
 
-`subscribe_with` custom sink (when errors DO ride the Err channel, e.g. throw_err):
+`subscribe_with` custom sink (when errors DO ride the Err channel, e.g. throw_err) — the sink
+below is only the *bridge* case where the caller already owns a channel; inside the reactive
+core prefer `collect`/`reduce_initial` + `into_future()` (§6):
 ```rust
 use rxrust::observer::Observer;
-struct Sink<T, E>(mpsc::Sender<Result<T, E>>);
+struct Sink<T, E>(std::sync::mpsc::Sender<Result<T, E>>);
 impl<T, E> Observer<T, E> for Sink<T, E> {
     fn next(&mut self, v: T) { self.0.send(Ok(v)).ok(); }
     fn error(self, e: E)     { self.0.send(Err(e)).ok(); }
@@ -262,17 +280,20 @@ traversal).
 
 ```rust
 use rxrust::prelude::*;
-use std::sync::mpsc;
 
 // One cold chain over owned values; no Stage/fail/drain layer, no shared mutable driver.
-// Loops (`@each`) are `flat_map`; branches (`@if`) are `filter`; ONE terminal subscribe.
-fn compile(source: String) -> String {
-    let (tx, rx) = mpsc::channel();
-    lexer::token_stream(source)                     // chars -> owned Tok, moved downstream
-        .collect::<Vec<_>>()                         // owned batch (data), not an imperative replay
-        .flat_map(|toks| parse_eval_render(toks))    // operators over the owned value
-        .subscribe(move |css| { tx.send(css).ok(); });
-    rx.recv().unwrap()
+// Loops (`@each`) are `flat_map`; branches (`@if`) are `filter`; ONE terminal收口.
+// The project's entry point is async-only, so `into_future()` is the natural close:
+pub async fn compile(source: String) -> String {
+    lexer::token_stream(source)                       // chars -> owned Tok, moved downstream
+        .flat_map(|toks| parse_eval_render(toks))     // operators over the owned value
+        .collect::<Vec<String>>()                     // complete 时发一次容器
+        .reduce_initial(String::new(), |mut acc, chunk| { acc.push_str(&chunk); acc })
+        .into_future()
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
 }
 
 // a loop is literally `flat_map`, written inline — no wrapper, no buffer-then-replay:

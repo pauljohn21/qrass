@@ -4,6 +4,29 @@
 一份产出喂多下游**）逐一对应到 rxrust 原生算子，并列出踩过的坑与判据。
 配 `crates/sasslint` 的机器规则一起看（它已把反模式编码成硬闸）。
 
+## 0. 一相要发 0..N 项？写内核（框架自身的形状），不是批量外壳
+
+上面“直接组合内置算子”适用于 1:1 变换。**当一个阶段对每个输入会产出 0..N 项时（词法、结构划分、渲染前的展开），
+框架自己的答案是一个真算子**，与 `ops/*.rs` 完整同形（参考 `ops/map.rs`）：
+
+```text
+struct Phase<S, Params> { source, params }        // 惰性数据；#[derive(Clone)]；不含每订阅状态
+struct PhaseObserver<O, State> { observer, state } // 状态随 subscribe 诞生
+impl ObservableType          // type Item<'a> = Out where Self:'a;  type Err = S::Err;
+impl CoreObservable<C: Context>
+    subscribe(self, ctx) → ctx.transform(|o| PhaseObserver{ observer: o, .. }) → source.subscribe(wrapped)
+    type Unsub = S::Unsub
+// next(): 逐条 self.observer.next(..)；error(self)/complete(self): 消耗式转发；is_closed(): 委托下游
+```
+
+两个具体坑（sasspile 实测踩过）：
+- 在 `next` 里同时要改累加子与用观察者：先 `let PhaseObserver { observer, state } = self;` 拆字段，
+  再把 `&mut |item| observer.next(item)` 当 sink 传下去（edition 2021+ 的闭包按字段捕获）。
+- 有内置算子能表达时**不要**写内核（`map`/`scan`/`flat_map`/`collect` 就是框架自己的东西）；
+  内核只用于“逐条 0..N 发射”或“多个上游协调”这类内置算子表达不了的形状。
+这**不是**框架层：它用的是框架自己的三个 trait；禁的是 `Stage`/`fail`/`drain` 那种把流压回值、
+让 rxrust 去跑“你的控制流”的中转抽象。
+
 ## 1. 编译器 / 多阶段管线配方（直接组合算子 + 终点收口）
 
 跨阶段串联用 `flat_map`（**没有 `and_then`**）；错误以 in-stream `Result` + `Err = Infallible` 走。
@@ -11,30 +34,34 @@
 己的控制流抽象"（`rust.md` 禁止；见 §4）。算子直接链在源头上；仅当一条链要跨函数边界返回时，
 用 `box_it()` 擦除类型（这是原语用法，不是框架层）。
 
-**收口看执行模型（`01 §5`）：**
+**收口看执行模型（`01 §5`）。框架原生只有三种收口，`std::sync::mpsc` 不在其中：**
 
-纯同步 `Local` 链（非时间算子全程内联）→ 终点**唯一一次** `subscribe` + `mpsc` 取出，无需 runtime：
+1. **`collect` / `reduce_initial` 收成终值 + `into_future()`**——同步链在构造 future 时就已经内联跑完，
+   首次 poll 即 `Ready`，因此**任何 `block_on` 都能直接取结果**，不需要 `LocalSet`、不需要多线程 runtime
+   （实测：`Runtime::new()` + `block_on` 下 `Ok(Ok(["A", "B"]))`；`09 §7.3` 记了 `into_future` 的三个限制）：
 
 ```rust
 use rxrust::prelude::*;
-use std::sync::mpsc;
 
-// 源头 → 各阶段都是算子；错误当数据；一次 subscribe 收口。不物化"任务表"、不先建 AST 再遍历。
+// 源头 → 各阶段全是算子；错误当数据；不物化"任务表"，不先建 AST 再遍历。
 fn compile(source: String) -> String {
-  let (tx, rx) = mpsc::channel::<String>();
-  token_stream(source)
-    .map(|toks| parse(&toks))                     // owned 值直接进下一算子
-    .flat_map(|ast| eval(ast))                    // 循环 / 一对多 = flat_map
+  Local::from_iter(token_stream(source))      // owned 值直接进下一算子
+    .map(|toks| parse(&toks))
+    .flat_map(|ast| eval(ast))                // 循环 / 一对多 = flat_map
     .map(to_css)
+    .collect::<Vec<String>>()                 // 只有 complete 才发容器（错误时不发）
     .reduce_initial(String::new(), |mut acc, s| { acc.push_str(&s); acc })
-    .subscribe(move |css| { tx.send(css).ok(); }); // 内联同步跑完
-  rx.recv().unwrap()
+    .into_future()
+    // 纯同步链：这里无需调度器即可 poll 到 Ready
 }
 ```
 
-`Shared` + `from_stream` 源（`from_stream` 走 scheduler，`subscribe` 返回可 await 句柄）→ 终点用
-rxrust 自带 **`into_future().await`**（由调用方 runtime 驱动），**不要**再套 `std::sync::mpsc`+`block_on`
-同步壳。单条 `from_stream` 保序；别对每条 item 各起一个 `from_stream`（并发→乱序，见 §4）：
+2. **`into_stream()`** + `while let Some(r) = stream.next().await`：逐项消费、天然背压。
+   ⚠ 它是 **`Drop` 时才 `unsubscribe`**（`into_stream.rs:123-129`），要提前停必须显式 drop。
+3. **`await` 订阅句柄**：`from_stream`/`from_future`/`timer`/`observe_on`/`subscribe_on` 的 `Unsub` 是
+   `TaskHandle`（`impl Future`），所以 `let h = obs.subscribe(f); h.await;` 就是框架自己的"等终止"。
+   `Shared` + `from_stream` 源即走这条（`from_stream.rs` 全部测试都是 `handle.await` 后断言）。
+   单条 `from_stream` 保序；**别**对每条 item 各起一个 `from_stream`（并发→乱序，见 §4）：
 
 ```rust
 use rxrust::prelude::*;
@@ -55,7 +82,9 @@ pub async fn compile(source: String) -> String {
 }
 ```
 
-- `reduce` = `FnMut(Item,Item)->Item`（**无初值**）；要折叠成别的类型用 `reduce_initial(seed, FnMut(Acc,Item)->Acc)`。
+- `reduce` = `FnMut(Item,Item)->Item`（**无初值**，空源不发）；折叠成别的类型用 `reduce_initial(seed, FnMut(Acc,Item)->Acc)`（空源发种子）。
+- 状态选择：累加值**本身要下发** → `scan`（`Output: Clone`，每步一个值）；累加值只是**私有上下文**、
+  另有输出 → `scan_map`（`Acc` 免 Clone）。sasspile 的 env 属于前者（状态即 item），别一律套 `scan_map`。
 
 ## 2. 四个"必失守点"的原生写法
 
@@ -127,14 +156,24 @@ let b = shared.clone().filter(fb);
 | 时间算子不动/需要 runtime | 只有 `05 §G` 走 scheduler | 纯同步管线避开它们；要计时才引 `LocalSet`/tokio |
 | `Shared::from_stream` 文档序乱 | `flat_map(\|i\| from_stream(..))` 每条 item 各起一任务并发 | 用**单条** `from_stream`(顺序 poll) + `scan_map` 携 owned 累加子 + `flat_map(Shared::from_iter)` 内联顺序展平 |
 | `.reduce(seed, f)` 报 E0061 | rc.6 `reduce`=`FnMut(Item,Item)->Item` 无初值 | 带初值用 `reduce_initial(seed, FnMut(Acc,Item)->Acc)` |
-| `Shared::from_stream` 收口又套 `mpsc`+`block_on` | 在异步核心外裹 std 同步壳 | 终点用 `into_future().await`（runtime 由调用方供） |
+| `Shared::from_stream` 收口又套 `mpsc`+`block_on` | 在异步核心外裹 std 同步壳 | 见 §1 三种原生收口：`collect`/`reduce` + `into_future()`、`into_stream()`、`await` 订阅句柄 |
+| `collect()` 后拿不到结果、错误路径为空 | `CollectObserver::error` **不发容器**只转发错误（`collect.rs:54`） | 错误也用 `Result` 值携带，或 `on_error`/`map_err` 后统一收口（`09 §8.2`） |
+| `into_future()` 返回 `Err(MultipleValues)` | 它要求**恰好一个值**（`into_future.rs:8-15`） | 多项先 `collect()`/`reduce_initial()` 收成一项再 `into_future()` |
+| 用 `into_stream()` 后源仍在发 | 它只在 **`Drop`** 时取消（`into_stream.rs:123-129`） | 显式 `drop(stream)`，或 `take_until(notifier)` |
+| `delay()` 后下游没按时收到"完成" | 实现把 **completion 也延迟**（方法文档写反了，见 `09 §7.1`） | 需要立刻完成就别 `delay`，或用 `on_complete` 观察实际时刻 |
+| Subject 回调里 `subscribe` 的新订阅者没收到当前值 | 广播期间订阅变更被**推迟**（`subject_core.rs:245-286`，非 panic） | 把它当作"下一次起生效"；需要本次就生效先算好再订阅 |
+| 高阶算子"丢了几条值" | `merge_all` 并发额度满时，**排队内层在排队期间的发光被丢弃**（`merge_all.rs` 测试 `test_merge_all_concurrency`） | 保序/不丢值用 `concat_map`/`concat_all`（`concurrent:1`） |
+| 用 `order` 计数器 + `sort_by_key` 恢复文档序 | 排序只能恢复顺序，**不能恢复缺失的元素**；常常是在近似一个被建模错的**发射时刻**（sasspile 实例：块在“开子块”时就该冲刷待定声明段，一个块可出多条规则） | 先用规范用例定位真正的发射时机，改正后**删掉排序键** |
+| 一相先返 `Vec` 再 `flat_map(from_iter)` 摊平 | 把一到多藏进了容器（框架里没有这种形状） | 改成 §0 的算子内核，逐条 `observer.next(..)` |
+| 几微秒纯 CPU 活包 `from_stream(stream::once(..))` | 假并发（实测仍在同一 worker）且带丢值风险 | 串行内核；真并发只给确有阻塞工作的模块子图 |
+| 失败 `.ok()`/`unwrap_or_else(原文)` | 静默吞错，且掩盖规范的 error 类用例 | `Err = 业务错` 真通道，终点 `into_future()` 给 `Ok(Err(..))` |
 
 ## 4. Do / Don't 总纲
 
 **Do**
 - 起手先问"这条流推什么 owned 值、经哪个算子、变成哪条流"（自底向上，`01 §2`）。
-- 循环 → `flat_map`；状态 → `scan_map`/`reduce_initial` 的 owned 累加子；一到多 → 多播；
-  收口 → 同步 `Local` 链终点一次 `subscribe`+`mpsc`；`Shared`/`from_stream` 异步链用 `into_future().await`（别套 std 壳）。
+- 循环 → `flat_map`；状态 → `scan`/`scan_map` 的 owned 累加子；一到多 → 多播；
+  收口 → 只用 §1 的三种原生方式（`collect`/`reduce` + `into_future`、`into_stream`、`await` 句柄），**不套 std `mpsc` 同步壳**。
 - 错误当数据（in-stream `Result` + `Err=Infallible`）或显式 `on_error`/`into_future`。
 - 跨函数/异构存流用 `box_it()`。
 
@@ -159,5 +198,5 @@ let b = shared.clone().filter(fb);
 （函数白名单、`/ * %` 跳过护 CSS），逐片守门（见项目记忆"sasspile 值/函数层安全生长范式"）。
 
 ---
-本套文档完。核心一句话：**rxrust 本身就是引擎**——用它的 `flat_map`/多播/owned 累加子/冷流惰性
-表达控制流，而不是在它之上再造一台。
+核心一句话：**rxrust 本身就是引擎**——用它的 `flat_map`/多播/owned 累加子/冷流惰性
+表达控制流，而不是在它之上再造一台。跨算子的取消、锁与终止投递次序不变量见 `09`。

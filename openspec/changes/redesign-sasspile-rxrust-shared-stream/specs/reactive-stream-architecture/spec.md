@@ -2,11 +2,13 @@
 
 ## Purpose
 
-约定 `sasspile` 的体系结构属性:它是**流算子 + 全局 pass 的混合式分层管线**。控制流(循环/分支)、
-一到多(多播)、模块加载(真并发)用 rxrust 原生算子表达;`@extend`/媒体冒泡这类**天生全局、跨规则**
-的关注点,允许在**物化的 owned 结构**上做算子化的多趟 pass。红线是"禁 `Acc` push/pop 驱动、禁递归下降
-遍历、禁 `from_fn`+`VecDeque` 手搓状态机、禁在异步核心外套 std `mpsc`+`block_on`",而**不是**
-"禁止存在被各相消费的 owned AST"。这些属性由 `crates/sasslint` 确定性把关。
+约定 `sasspile` 的体系结构属性:它是**算子内核 + 全局 pass 的混合式分层管线**。控制流(循环/分支)、
+一到多(多播)、模块加载(真并发)用 rxrust 原生算子表达,且**每个编译相本身就是一个真算子**
+(`struct Phase{source}` + `PhaseObserver` 持状态 + `ObservableType`/`CoreObservable` 三件套);
+`@extend`/媒体冒泡这类**天生全局、跨规则**的关注点,允许在**物化的 owned 结构**上做算子化的多趟 pass。
+红线是"禁 `Acc` push/pop 驱动、禁递归下降遍历、禁 `from_fn`+`VecDeque` 手搓状态机、禁把流压成 `Vec` 后
+再命令式二加工、禁在异步核心外套 std `mpsc`+`block_on`",而**不是**"禁止存在被各相消费的 owned AST"。
+这些属性由 `crates/sasslint` 确定性把关。
 
 ## ADDED Requirements
 
@@ -38,28 +40,79 @@ MUST NOT 的是"用命令式循环/递归下降/`Acc` 可变标志去**驱动遍
 - **THEN** `sasslint` MUST 判违规(`mutable-accumulator-drives`/`no-tree`/`no-recursive-descent`),
   改回 `flat_map` 扇出 + `filter` 选支 + 独立全局 pass
 
+### Requirement: 每个编译相 = 一个真算子内核(非批量外壳)
+
+词法/结构/求值/渲染各相 MUST 以 rc.6 自身的算子形状实现:`struct Phase<S, Params> { source, params }`
+(惰性数据,不含每订阅状态)+ `PhaseObserver<O, State>`(状态在此,随 `subscribe` 诞生/死亡)+
+`impl ObservableType`(`Item<'a>` GAT + `Err`)+ `impl CoreObservable<C: Context>`。内核 MUST 在自己
+`next` 里**逐条** `observer.next(..)` 发射 0..N 项;MUST NOT 用"`scan_map` 返 `Vec` 再 `flat_map(from_iter)`"
+这类**批量外壳**(把一到多藏进容器再摊平)。上游句柄 MUST 用 `SingleAssignment<C::RcMut<State<U>>>` 的
+`channel()` **先建槽后订阅**;"终止只投一次" MUST 用 `Option::take()` 或 `C::RcCell<..>` 的 CAS,
+MUST NOT 用裸布尔标志;上游**自然终止**时 MUST NOT 往回 `unsubscribe`(只 retire 记账)。
+共享可变 MUST 取 `C::RcMut`/`C::RcCell`(由 Context 决定 `Rc<RefCell>`/`Arc<Mutex>`),MUST NOT 在
+kernel 里写死具体智能指针或引入 `Arc<Mutex<业务态>>`。
+
+#### Scenario: 一到多由内核发射,不由容器摊平
+- **WHEN** 一个字符要出 0..N 个 token(或一个 token 要出 0..N 个结构事件)
+- **THEN** 内核在 `next` 里逐条 `observer.next(..)`;源码不出现"先攒 `Vec<Tok>` 再 `flat_map(from_iter)`"
+
+#### Scenario: 线程模型由 Context 选,不写在 kernel 里
+- **WHEN** 同一内核分别用于 `Local`(wasm32/`!Send`)与 `Shared`
+- **THEN** 仅靠 `C: Context` 与 `C::RcMut`/`C::RcCell` 即可编译;无手写 `Rc`/`Arc` 分叉
+
+### Requirement: 缓冲/排序/兜底 = 建模错位的症状（遇先停下改分解）
+
+下列三种手法在本仓库每一次出现，都不是"风格选择"而是**真语义被建模错的信号**，MUST 当作 GC 报警处理：
+① **用排序键恢复顺序** —— 先问"真正的发射时刻是什么"；排序只能恢复顺序，**不能恢复缺失的元素**
+（`merge_all` 并发额度满时会丢弃仍在排队的内层的发射），也保不住"一块拆多段"这类结构差异。
+② **把流压成 `Vec` 再摊平**（`scan_map` 返 `Vec` + `flat_map(from_iter)`、或攒 body 重放）——
+框架对"一项产多项"的原语是**算子内核逐条 `next`**或 `flat_map` 子流，容器只是套壳。
+③ **用默认值兜底代替错误传播**（`.ok()`、`unwrap_or_else(原文)`）——它把真错静默换成错输出，还会掩盖
+规范里的 error 类期望。规范定义为透传的 CSS 原生构造是**正向建模**，不等于失败降级。
+出现任一形状 MUST 先回到语料（`sass-spec`/`element-plus`）查真正语义，再改分解；MUST NOT 以
+"过了现有测试"或"分数没降"给这些形状背书。
+
+#### Scenario: 排序键先问时机
+- **WHEN** 源码出现 `sort_by_key(order)`、或为排序而维护的计数器/序号字段
+- **THEN** MUST 先用规范用例证明"发射时机模型"不对（本仓库实例：`declaration/interleaved/**` 的冲刷时机），
+  改正时机后删除该键；不得保留排序作为"保险"
+
+#### Scenario: 批量摊平即违规
+- **WHEN** 某相先把输出攒进 `Vec`、再用 `flat_map(from_iter)` 摊回流
+- **THEN** 改写为真算子内核（`struct{source}` + `Observer` 持状态 + `next` 内逐条 `observer.next(..)`）
+
 ### Requirement: 循环用 flat_map 扇出、分支用 filter、一到多用多播
 
 `@each`/`@for`/`@while` 与块嵌套 MUST 表达为 `from_iter(..).flat_map(|it| sub_stream(it))`(循环即
 `flat_map`);`@if`/`@else` MUST 用 `filter` + 随流 move 的**不可变**链值(非可变标志对象);模块单例、
-`@mixin` 定义喂多处 `@include`、一段解析喂多消费者等**一到多** MUST 用 `Shared::subject`/`share`/
-`publish().ref_count()`/`behavior_subject`+`peek` 多播,MUST NOT `collect` 进 `Vec` 再 `for_each` 重放。
+`@mixin` 定义喂多处 `@include`、一段解析喂多消费者等**一到多** MUST 用 `Shared::subject`/
+`publish().ref_count()`/`behavior_subject`+`peek` 多播(rc.6 **无 `share()`**),MUST NOT `collect` 进 `Vec`
+再 `for_each` 重放。多播 MUST 遵守不可重入:同一 `Subject` 的回调里再 `next/error/complete` 会 panic,
+需反馈环时 MUST 插显式异步边界(如 `delay(0)`)。
 
 #### Scenario: 循环即 flat_map
 - **WHEN** 展开 `@each $v in list`
 - **THEN** 以 `list` 为流、`flat_map` 对每条 `v` 产子 observable 合并,展开顺序 = 文档序
 
-### Requirement: 并发只在模块加载且用 order 键保序
+### Requirement: 保序靠动词,并发段不得靠 sort 补救
 
-真并发 MUST 仅用于**互不依赖的模块/子图**(P5),经 `Shared`+`from_stream`/`spawn` 并发编译;每个产物
-MUST 携带确定性**文档序键**,并发合并后 MUST `sort_by_key(order)`(稳定)再序列化。非并发的普通求值默认
-在一条冷流上内联顺序跑(值均 owned `Send`),MUST NOT 为"看似多线程"处处强塞 `Shared`/`Send` 制造假并发。
-`Shared::from_stream` 单条顺序 poll 保序;MUST NOT 对每条 item 各起 `from_stream`(并发→乱序)。跨线程只
-共享**冻结只读** `Arc<CompiledModule>`,绝不 `Arc<Mutex<业务态>>`。
+真并发 MUST 仅用于**互不依赖的模块/子图**(P5)。顺序 intrinsic 的展开 MUST 用框架动词:串行冷流天然保序,
+"逐项展开且保文档序"MUST 用 `concat_map`/`concat_all()`/`concat_observables()`(实测 = `merge_all(1)`,
+保序且不丢值)。MUST NOT 把 `sort_by_key(order)` 当并发段的保序手段:rc.6 `merge_all` 在并发额度满时会
+**丢弃仍在排队的内层**期间的发射(缺元素而非乱序,排序不可恢复)。因此并发分支 MUST 满足其一:
+① 内层"被订阅后才开始生产"(`defer`/`from_stream`/内核在 `subscribe` 时才动);② 直接串行(`concurrent: 1`)。
+`order` 键 MUST 只用于**已 `collect` 的全局 pass 内部**确实重排。
+非并发的普通求值默认在一条冷流上内联顺序跑(值均 owned `Send`),MUST NOT 为"看似多线程"处处强塞
+`Shared`/`Send` 制造假并发。`Shared::from_stream` 单条顺序 poll 保序;MUST NOT 对每条 item 各起 `from_stream`。
+跨线程只共享**冻结只读** `Arc<CompiledModule>`。
 
-#### Scenario: 独立模块并发、产物按 order 合并
+#### Scenario: 保序展开用 concat
+- **WHEN** 一个集合需逐项展开为子流且输出必须文档序
+- **THEN** 用 `concat_map`/`concat_all`;不引入 `collect`+`sort_by_key` 补救
+
+#### Scenario: 并发模块不丢值
 - **WHEN** 多个独立 `@use` 模块并发编译
-- **THEN** 各自在自己作用域产出带 order 键的产物;merge 后按 order 稳定重排,expanded CSS 逐字节 = 文档序
+- **THEN** 并发分支只在订阅后才生产(或串行),因此无元素在排队期丢失;合并后逐字节 = 文档序
 
 ### Requirement: 值/控制建模不变量
 
@@ -67,8 +120,11 @@ MUST 携带确定性**文档序键**,并发合并后 MUST `sort_by_key(order)`(�
 (`Vec<Tok> → Expr → eval(owned Env) → Value → to_css`),MUST NOT 拼回字符串再 char 游标机二次扫描。
 算术/比较 MUST 仅在无歧义上下文触发(否则误伤 `font: 12px/1.5`、`grid 1/2`、选择器 `a > b`)。
 `@if` 链、兄弟选择器前缀、global-env MUST 是**随流 move 的 owned 累加子值**,MUST NOT 是跨元素共享
-可变对象/标志。可失败阶段以流内 `Result<T,SassError>`(`Err=Infallible`)传播,终点收口;MUST NOT 用
-`panic`/`unwrap` 作控制流,MUST NOT 自造 `Stage<T>`/`fail`/`drain` 框架中转层。`sasslint` 对 `src/` MUST 命中 0。
+可变对象/标志。**错误走真 `Err` 通道**:链的 `Err = SassError`,失败经 `Observer::error(self, SassError)`
+一路到底,终点 `into_future()` 给 `Ok(Err(SassError))`,`compile` 直接映射为 `Err(SassError)`。
+MUST NOT 以"失败 `unwrap_or_else` 兜底成原文"当错误策略(那会静默吞掉真错误并掩盖 hrx 的 error 期望);
+仅规范**定义为透传**的 CSS 原生构造(calc 不可化简、custom property 原样文本、未识别 at-rule)才保留原样。
+MUST NOT 用 `panic`/`unwrap` 作控制流,MUST NOT 自造 `Stage<T>`/`fail`/`drain` 框架中转层。`sasslint` 对 `src/` MUST 命中 0。
 
 #### Scenario: 无字符串重扫、无框架层
 - **WHEN** 处理插值/`$var`/内置函数
@@ -110,9 +166,9 @@ MUST 携带确定性**文档序键**,并发合并后 MUST `sort_by_key(order)`(�
 |---|---|---|---|
 | `Acc{ stack: Vec<Frame>, chain_taken }`+`feed(&mut self)` 驱动嵌套/`@if` | 状态=共享可变对象驱动 | `mutable-accumulator-drives`/`no-tree`/`no-recursive-descent` | 独立块求值 + `@if` 用随流不可变 `taken` |
 | `from_fn`+可变 `VecDeque` 工作队列"消掉 for" | 算子外衣下状态机 | `no-from-fn-driver`/`no-work-queue` | `from_iter().flat_map()` |
-| 攒 body 进 `Vec` 再 `for_each` 重放(`@each`/`@include`/`@mixin`) | 一到多/循环未用流 | `no-imperative-loop`/`mutable-accumulator-drives` | `flat_map` 扇出;一到多 `share`/`ref_count` |
+| 攒 body 进 `Vec` 再 `for_each` 重放(`@each`/`@include`/`@mixin`) | 一到多/循环未用流 | `no-imperative-loop`/`mutable-accumulator-drives` | `flat_map` 扇出;一到多 `Subject`/`publish().ref_count()`(rc.6 **无 `share()`**) |
 | 先 `Block::parse` 成树再递归下降 `walk(node)` 吐叶 | 物化-再-命令式遍历 | `no-recursive-descent`/`no-relay-vec` | 求值=对 owned 结构 `flat_map`;仅全局 pass 有意物化 |
-| `.collect::<Vec<_>>()` 中途排空再命令式加工 | 流被压回值 | 语义 review | 留惰性算子;确需全局再 collect+`sort_by_key(order)` |
+| `.collect::<Vec<_>>()` 中途排空再命令式加工 | 流被压回值 | 语义 review | 留惰性算子;流本身就要文档序时用 `concat_map`/`concat_all`(实测保序);确需全局视野才 collect + **纯函数** fold(含按 `order` 键定序) |
 | `flat_map`+全局可变 env | env 非 owned 随流 | `mutable-accumulator-drives` | env 作 owned 入参 move 进子流 |
 | 同步门面 `OnceLock<Runtime>::block_on`+`mpsc::recv` | 异步核心外套 std 壳 | 入口 review | 入口 `async`,终点 `into_future().await` |
 | 处处强塞 `Shared`/`Send` 冒充多线程 | 假并发 | 语义 review | 默认串行冷流;仅独立模块子图真并发+order 键 |

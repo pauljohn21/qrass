@@ -7,9 +7,9 @@ description: Use when writing, reviewing, or debugging Rust code that uses the r
 
 ## Overview
 
-A source-level reference for `rxrust = 1.0.0-rc.6`, from a file-by-file read of the
-crate's `src/` (~29,700 lines / 90 files). **Core principle: never state an rxrust
-behaviour from memory — every claim here carries `file:line` provenance, so quote
+A source-level reference for `rxrust = 1.0.0-rc.6`, from a line-by-line read of the
+crate's `src/` (measured: **88 `.rs` files / 29,755 lines**). **Core principle: never state an
+rxrust behaviour from memory — every claim here carries `file:line` provenance, so quote
 that instead of guessing.**
 
 ## When to Use
@@ -33,11 +33,12 @@ Not for: rxrust 0.15 (different API) or non-Rust ReactiveX.
 | push model, `ObservableType`/`CoreObservable`/`Observable` contract, subscribe = nested Observer wrapping, cold vs hot, sync execution, error protocol | [01-philosophy-and-architecture.md](references/01-philosophy-and-architecture.md) |
 | `Scope`/`Context`/`LocalCtx`/`SharedCtx`, `Local`/`Shared`, `MutRc`/`MutArc`/`CellRc`/`SharedCell` | [02-context-scope-rc.md](references/02-context-scope-rc.md) |
 | `Observer`/`Emitter`/`FnMutObserver`, `DynObserver`, `Subscription` combinators, `SingleAssignment` install-vs-cancel race | [03-observer-subscription.md](references/03-observer-subscription.md) |
-| `factory.rs` sources: `of`/`from_iter`/`create`/`defer`/`from_fn`/`from_future*`/`from_stream*`/`timer`/`interval`/`empty`/`never`/`throw_err`; wasm32 notes | [04-observable-trait-and-sources.md](references/04-observable-trait-and-sources.md) |
-| any of ~70 operators, grouped A–J, plus the pick-an-operator table | [05-operators.md](references/05-operators.md) |
+| `factory.rs` sources (`of`/`from_iter`/`create`/`defer`/`from_*`/`timer`/`interval`/`empty`/`never`/`throw_err`); wasm32 notes | [04-observable-trait-and-sources.md](references/04-observable-trait-and-sources.md) |
+| any of the **51** `ops.rs` modules (grouped A–J) + the pick-an-operator table | [05-operators.md](references/05-operators.md) |
 | `Subject<P>` re-entrancy, `Subscribers`, `BehaviorSubject` + `peek`, `fork`/`connect`/`ref_count` | [06-subject-multicast-connectable.md](references/06-subject-multicast-connectable.md) |
 | `box_it`/`BoxedCoreObservable`/`DynCoreObservable`; `Task`/`TaskHandle`/`Scheduler`/`SleepProvider`, `LocalScheduler`/`SharedScheduler` | [07-type-erasure-and-scheduler.md](references/07-type-erasure-and-scheduler.md) |
-| Compiler-style pipeline recipe, loop/state/tree/multicast idioms, pitfall table, Do/Don't | [08-recipes-and-pitfalls.md](references/08-recipes-and-pitfalls.md) |
+| pipeline recipe for compilers, loop/state/tree/multicast idioms, pitfall table, Do/Don't | [08-recipes-and-pitfalls.md](references/08-recipes-and-pitfalls.md) |
+| cancellation vs termination: slot-before-subscribe, terminate-exactly-once, cancel-only-on-early-termination, lock discipline, Subject re-entrancy, doc-vs-impl list | [09-cancellation-and-terminal-ordering.md](references/09-cancellation-and-terminal-ordering.md) |
 
 Chapter index and reading order: [references/README.md](references/README.md).
 

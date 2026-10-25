@@ -1,8 +1,11 @@
 # rxrust 源代码解析（可复用参考）
 
-> 对象：`rxrust = 1.0.0-rc.6`。本套文档基于对 crate `src/` 逐文件通读（~29700 行 / 90 文件）整理，
+> 对象：`rxrust = 1.0.0-rc.6`。本套文档基于对 crate `src/` 逐文件逐行通读（~29700 行 / 90 文件）整理，
 > 目标是让**任何使用 rxrust 的项目**都能直接照它写管线：理解模型、选对原语、避开坑。
 > 叙述中文，代码 / 类型 / 文件名 / 标识符保持 English。所有结论均标注源码出处（`文件:行`）。
+>
+> 核对方式：行号逐条 `grep` 验证；时序类语义以**实现 + 专测**为准（方法文档与实现冲突处已列入 `09 §7`）；
+> `08 §1` 的收口配方在 workspace 之外真编译真跑过（`Ok(Ok(["A", "B"]))` / `Err(MultipleValues)` / `Err(Empty)`）。
 
 ## 目录
 
@@ -12,10 +15,11 @@
 | `02-context-scope-rc.md` | `Scope`/`Context`/`LocalCtx`/`SharedCtx`、`Local`/`Shared`、`into_shared`/`into_local`；`rc.rs` 的 `MutRc`/`MutArc`/`CellRc`/`CellArc`/`RcDeref(Mut)`/`SharedCell` |
 | `03-observer-subscription.md` | `Observer`/`Emitter`/`DynObserver`/`IntoBoxedObserver`/`FnMutObserver`；`Subscription`/`ClosureSubscription`/`SubscriptionGuard`/`TupleSubscription`/`DynamicSubscriptions`/`SingleAssignment`/`SourceWithHandle`/`BoxedSubscription` |
 | `04-observable-trait-and-sources.md` | `ObservableType`/`CoreObservable`/`Observable` + 空布实现；`factory.rs` 全部构造源（`of`/`from_iter`/`create`/`defer`/`from_fn`/`from_future*`/`from_stream*`/`timer`/`interval`/`empty`/`never`/`throw_err`/`subject`/`merge_observables`） |
-| `05-operators.md` | 完整算子目录（约 70 个），按类分组：签名约束、item 传递语义、Clone 要求、错误/完成传播、并发挥度 |
+| `05-operators.md` | 完整算子目录（`ops.rs` 实测 **51** 个模块 / `Observable` trait 方法逐个签名行号）：约束、item 传递、发光与完成时机、取消与错误传播、派生算子的拼装方式 |
 | `06-subject-multicast-connectable.md` | `Subject<P>` 多播（value / mut_ref 两种 observer）、再入策略、`Subscribers` SmallVec、订阅延迟；`BehaviorSubject` + `peek`；`ConnectableObservable` 的 `fork`/`connect`/`ref_count` |
 | `07-type-erasure-and-scheduler.md` | `box_it`/`BoxedCoreObservable`/`DynCoreObservable`；`scheduler.rs` 的 `Task`/`TaskHandle`/`Scheduler`/`Schedulable`/`SleepProvider`、`LocalScheduler`/`SharedScheduler`、自定义调度器要点 |
-| `08-recipes-and-pitfalls.md` | 落地配方：直接组合算子的 `flat_map` 管线（无 `Stage`/`fail`/`drain` 框架层；同步 `Local`→`mpsc`、`Shared`/`from_stream`→`into_future().await` 两种收口）、Local vs Shared 选择、in-stream `Result` 错误协议、常见编译错误与 `from_stream` 乱序坑、Do/Don't |
+| `08-recipes-and-pitfalls.md` | 落地配方：直接组合算子的 `flat_map` 管线（无 `Stage`/`fail`/`drain` 框架层）+ **三种框架原生收口**、Local vs Shared 选择、in-stream `Result` 错误协议、常见编译错误与 `from_stream` 乱序坑、Do/Don't |
+| `09-cancellation-and-terminal-ordering.md` | 跨算子不变量：`SingleAssignment` 先建槽后订阅、"终止只投一次"的五种手法、取消只发生在提前终止、锁纪律、Subject 再入政策、"测试即规范"索引、**文档与实现不一致清单** |
 
 ## 三句话记住 rxrust
 
@@ -41,6 +45,9 @@ rxrust = "=1.0.0-rc.6"   # 裸 `cargo add rxrust` 会解析到旧的 0.15 系列
 
 ## 阅读顺序建议
 
-- 想快速写管线：直接看 `08-recipes-and-pitfalls.md`，再回查 `05-operators.md`。
+- 想快速写管线：`08-recipes-and-pitfalls.md` → 回查 `05-operators.md` → 动手前扫一遍 `09`。
 - 想理解"为什么 subscribe closure 收不到错误"等机制：读 `01` → `03` → `04`。
-- 要用多播 / 共享一份产出：读 `06`（并回顾项目铁律：一到多用 `Subject`/`share`，不共享可变挡箭牌）。
+- 要用多播 / 共享一份产出：读 `06`（并回顾项目铁律：一到多用 `Subject` / `publish().ref_count()`，
+  rc.6 **无 `share()`**；不拿共享可变当挡箭牌）。
+- 要写**自定义算子**：先照 `01 §3` 的三件套骨架 + `09 §1/§2`（槽位与终止）+ `05` 同类算子实现抄结构，
+  再考虑是否需要 `box_it`（`07`）。

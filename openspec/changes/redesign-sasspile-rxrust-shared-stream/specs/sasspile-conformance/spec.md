@@ -56,11 +56,32 @@ partial `_x.scss`/相对 import 解析);解析 `options.yml`(`:todo:`→skip/xfa
 - **WHEN** 新阶段引入尚全失败的域(如初期 `values/calculation/**`)
 - **THEN** 其失败不进 regress(旧基线未通过),仅要求本簇内单调上升
 
+### Requirement: A/B 读数 MUST 可重现(工具也会撒谎)
+
+`regress=0` 只有在新导的基线上才有意义。`crates/ledger` 的 `import` **只存失败行**且 run 行按名 upsert,
+因此重导同名 run MUST 清理该 run 的旧 `run_fail` 行(否则一个已修好的用例会报 phantom REGRESS,已真实
+误导过一次判定);该行为 MUST 由 `ledger` 自己的 `#[test]` 钉住(修好→不再计入失败、新失败→仍记录)。
+判定关键结论前 MUST 用一个**空 DB**(`--db=<临时路径>`)重做一次 A/B,或先确认旧行未被复用;MUST NOT
+以“换 run 名”规避工具缺陷而把缺陷留下。另:两次快照文件内容相同时的 `regress=0` 不证明任何东西——
+行为不变型重构 MUST 额外用逐字节比对(md5/`diff`)证明一致,行为变更型 MUST 列出**具体哪些用例**变了
+及其规范依据。
+
+#### Scenario: 重导同名 run 不残留旧失败
+- **WHEN** 同一 run 名被导入两次,第二次某用例已从 FAIL 变 PASS
+- **THEN** `ledger diff` MUST NOT 报该用例为回归;若有残留则 `ledger` 自身测试红
+
+#### Scenario: 空库复验
+- **WHEN** 一个结论将用作“无回归”证据
+- **THEN** 在临时空 DB 上重导两侧并重比,结果与主库一致才记录
+
 ### Requirement: 铁律以 sasslint 确定性把关
 
 `sasspile` 源码 MUST 通过 `crates/sasslint`(`src/` 命中数 `0`)作为合入前置:含 `mutable-accumulator-drives`、
 `no-from-fn-driver`、`no-work-queue`、`no-tree`、`no-recursive-descent`、`no-relay-vec`、`no-string-machine`、
-`no-imperative-loop`。命中任一即视为把控制流写回 GC/命令式,MUST 按 `reactive-stream-architecture` 的
+`no-imperative-loop`。**本迭代新出现的 GC 形态 MUST 同步编成机器闸**(P0′.6):`no-batch-shell`
+(`scan_map` 返 `Vec` + `flat_map(from_iter)` 批量外壳)、`require-err-channel`(求值路径上的 `.ok()`/
+`unwrap_or_else` 兜底)、`no-sort-for-order`(靠排序保文档序)、`require-slot-before-subscribe`(高阶/多源
+未先取 `SingleAssignment` 槽)。命中任一即视为把控制流写回 GC/命令式,MUST 按 `reactive-stream-architecture` 的
 "GC/改造反例索引"出路列改写,而非放宽规则或改名绕过。
 
 #### Scenario: 命中即阻断

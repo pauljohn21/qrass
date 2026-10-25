@@ -93,4 +93,5 @@ where C: Context, C::Inner: Observer<Item,Err>,
   （见 `08` 的取舍；但注意项目铁律——共享的应是冻结的 `Arc<不可变>`，不是 `Arc<Mutex<业务态>>`）。
 
 ---
-下一篇 `05-operators.md`：约 70 个算子按类逐一拆（约束/传递/错误传播/并发）。
+下一篇 `05-operators.md`：`ops.rs` 实测 51 个模块的算子逐一拆（约束/传递/错误与完成时机/取消与并发）；
+跨算子的取消与终止次序不变量在 `09-cancellation-and-terminal-ordering.md`。

@@ -8,7 +8,7 @@
 ## 它做什么
 
 - 提供一个 skill `rxrust-source-analysis`：`SKILL.md` 只做**触发条件 + 问题→章节 检索表 + 查阅契约**，
-  八章原文放在 `skills/rxrust-source-analysis/references/`（superpowers 的
+  九章原文放在 `skills/rxrust-source-analysis/references/`（superpowers 的
   "Skill with Heavy Reference" 形态）。
 - 不注入 rule、不带 hook/MCP/command：这是一份查证资料，不是生命周期自动化。
 
@@ -22,9 +22,9 @@ rxrust-source-analysis/
   assets/avatar.svg                  # 自绘图标
   scripts/validate.sh                # 离线校验（shell + node，见下）
   skills/rxrust-source-analysis/
-    SKILL.md                         # 手写：name + description + 检索表（497 words，<500 目标内）
-    references/                      # docs/rxrust-source-analysis 的逐字镜像（9 个文件）
-      README.md  01-…08-….md
+    SKILL.md                         # 手写：name + description + 检索表（实测 518 words；加第 09 章后略超 <500 目标）
+    references/                      # docs/rxrust-source-analysis 的逐字镜像（10 个文件）
+      README.md  01-…09-….md
 ```
 
 ## 出处（provenance）
@@ -107,5 +107,5 @@ sh plugins/rxrust-source-analysis/scripts/validate.sh [plugin-root]
 ## 已知边界
 
 - `references/08-recipes-and-pitfalls.md` §5 是来源项目 `sasspile`/`sasslint`/`ledger` 的验收环，
-  对其它项目只是**示例**；01–07 与 README 是项目中立的。
+  对其它项目只是**示例**；01–07、09 与 README 是项目中立的。
 - 文档口径锁 `rxrust =1.0.0-rc.6`；rxrust 0.15 系列 API 完全不同，不适用本参考。

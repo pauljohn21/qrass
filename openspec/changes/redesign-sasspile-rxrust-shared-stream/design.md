@@ -1,115 +1,138 @@
-# sasspile 框架设计(定稿 · 推式流核心)
+# sasspile 框架设计(定稿 v2 · rxrust 原生分解)
 
-> 唯一权威设计。取代早前所有局部/打补丁记录,并**明确废弃其中"物化 AST + 多趟遍历"的 pull 骨架**
-> (那是 dart-sass 心智)。功能需求以 `specs/<域>/spec.md` 为准;实现约束由 `reactive-stream-architecture`
-> spec + `crates/sasslint` 把关。参照唯一 = `sass-spec/*.hrx` + `element-plus`,**严禁** dart-sass 源码/文档。
+> 唯一权威设计。输入**只有**两个行为需求源:本地 `sass-spec` 语料与 `element-plus` 真实主题(下述测量值
+> 均 2026-10-25 实测);**严禁**以 dart-sass 源码/文档推断行为,也**不以现有实现代码为设计输入**。
+> v1 的三处口径被源码级事实推翻,已在 §1/§5/§6 改正:阶段**不得**用"`scan_map` 发 `Vec` 再 `flat_map(from_iter)`"
+> 的批量外壳;"并发 merge 后 `sort_by_key`"不再是保序手段;错误**不得**只走"in-stream `Result` + 失败兜底成原文"。
+> 属性由 `specs/reactive-stream-architecture/spec.md` + `crates/sasslint` 把关。
 
-## 0. 公理:一切是"推"(push),不是"拉"(pull)
-- **dart-sass = 拉**:driver 从一棵物化 AST 里递归 `visit(node)`、按需取子节点、就地改可变状态。控制权在
-  "消费者何时去取"。
-- **rxrust = 推**:`source` 把 owned 值一个接一个**往前喂**给算子链,值流过 `map/scan_map/flat_map/filter`
-  就地被搬运/展开/丢弃,终点收口。控制权在"源何时发",**没有回头遍历**。
-- **本设计一切按推式建模**:编译 = 一条把 `Tok` 推到 CSS 文本的流。**MUST NOT 出现"先建 AST 再遍历它"**。
+## 0. 语料即需求(实测,决定排序与优先级)
 
-## 1. 主脊:一条推式流
+| 面 | 实测 | 设计后果 |
+|---|---|---|
+| 规范总量 | `spec/` 3,039 个 `.hrx`;**14,345** 条 `input.scss/sass`、**11,808** 条 `output.css`;`**/errors/**` 80 个文件是错误期望;`:todo:` 8 | 分阶段基线按目录簇 scoped(§8);`non_conformant`(941)/`libsass-*`/`:todo:` 不入目标 |
+| 用例分布 | `core_functions` **9,071**、`values` 1,244、`css` 968、`directives` 904、`libsass-closed-issues` 593、`expressions` 250、`callable` 101、`operators` 37、`variables` 20 | **值与内置函数是主体工作量(63%)**;分解必须让"函数按域注册"成为一等结构 |
+| 构造频次 | 标记出现:`@use` 10,414、`@import` 1,481、`@include` 1,453、`@media` 878、`@function` 830、`@extend` 725、`@for` 681、`@mixin` 679、`@forward` 557、`!default` 527、`@supports` 390、`!global` 388、`@at-root` 194、`@each` 95、`@while` 25;值域:`calc(` 2,165、custom property 1,942、`var(--` 720 | 模块系统与可调用是**结构主干**,不是尾部特性 |
+| element-plus(theme-chalk) | 146 个 `.scss` / 18,506 行;实到 `@include` 1,520、`@use` 544、`map.get` 393、`!default` 195、`map.merge` 171、custom property 121、`@each` 82、`calc(` 68、`@mixin` 68、`math.div` 15、`@at-root` 12、`!global` 12、`@extend` 5、`@forward` 13、`@content` 13;**`@import` 0** | 端到端跑通 EP 的硬前置 = **map/list/math 函数 + `@use as *`/`@forward` 链 + mixin `@content` + `!global`/`!default` + 选择器插值(BEM)**;`@extend`/`@while`/`@supports` 可后置 |
+
+**结论(排序由语料决定,不由实现便利决定)**:P1 值/单位/calc → P2 选择器模型 → P3 控制流+作用域+at-root →
+P4 可调用 → P5 模块(真并发唯一处) → P6 `@extend` → P7 CSS 原生透传 → P8 全色域;诊断(真错误通道)贯穿,
+在 P0 就把错误期望计入 harness。
+
+## 1. 主脊:一条冷流 + 每相一个"算子内核"
+
+**框架原生分解口径(v2 核心变更)**:每个编译相都是一个**真算子**,即 rc.6 自己的三件套形状:
+
+```text
+struct Phase<S, Params> { source: S, params }          // 惰性数据:只有源与参数,无每订阅状态
+struct PhaseObserver<O, State> { observer, state }     // 状态在这里(随 subscribe 诞生/死亡)
+impl ObservableType   // Item<'a>(GAT) + Err = SassError
+impl CoreObservable<C: Context>  // subscribe(self, ctx): ctx.transform(→PhaseObserver) → source.subscribe(wrapped)
 ```
-chars ──from_iter──▶ Tok
-   ──scan_map(LexAcc)·flat_map──▶ 结构事件流 (Open{head}/Decl{prop,value}/Close)   ← 分词内联,不旁落 Vec
-   ──scan(程序状态值)──▶ 状态就是被发射的 item（不是 scan_map 私藏的 Acc）:
-        State = { scopes: Vec<OpenScope>, env, next, emitted: Option<StyleRule> }
-        · 框架语义:scan 的 FnMut(Output, Item) -> Output 让**累加值本身沿流 move**；
-          env 因此是流上的值，随位置前进 —— 禁把 env 快照塞进每条声明随身带。
-        · Open  → 把"祖先选择器前缀 + env 快照"压入 scopes(纯数据 push)
-        · Decl  → 就地绑 $var(env) 或把求过值的声明累到当前 scope
-        · Close → 弹栈并把定稿 StyleRule 放进 emitted;链上 filter_map 取出（发射与否由算子决定）
-        · @each/@for/@while → flat_map:一条 item 事件扇出成 body 子流(推)
-        · @if/@else        → filter:按随流 move 的不可变 taken 选支(推)
-   ──collect(仅在"必须看到全体"处做一次)──▶ Vec<StyleRule>
-   ──纯函数 map──▶ 媒体/supports 冒泡与查询合并      (forward fold over the vec)
-   ──纯函数 map──▶ @extend 选择器不动点              (全局需全体,见 §4)
-   ──flat_map(from_iter)·map(leaf_block)·reduce_initial──▶ expanded CSS
-   ──into_future().await──▶ 单次收口
-公开面:仅 async fn compile(...) -> Result<String,SassError>
+
+- 内核在自己的 `next` 里**逐条 `observer.next(..)`** 发射 0..N 项:一到多(词法一字符出多 token、结构一 token
+  出多事件)由内核发射完成,**不再** `scan_map(acc) → Vec<Tok> → flat_map(from_iter)`。
+  该外壳是"给流造的批量中转",框架里没有对应物(v1 口径作废)。
+- 需要"看全体"的相(`@extend` 不动点、媒体冒泡)**仍**用框架自带的 `collect` 物化成 owned `Vec`,再做一次
+  **纯函数** forward fold,然后 `flat_map` 回流:这是唯一的物化点,禁"物化后再递归下降/visitor"。
+- 取消与终止:上游句柄一律 `SingleAssignment<C::RcMut<State<U>>>::channel()` **先建槽后订阅**;
+  "终止只投一次"用 `Option::take()` / `C::RcCell<..>::compare_exchange`,禁裸布尔标志;
+  上游自然终止时**不**取消它(只 retire)。
+
 ```
-**要点**:嵌套不是"树",是"事件流 + `scopes` 数据栈累加子";Close 处规则**被推出来**。除表达式求值外,
-**不构建、也不遍历一棵 AST**。
+chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态在 Observer 内)
+      ─▶ Structurize<S>      (Tok → Event::{Open,Decl,Close},逐条发射)
+      ─▶ Exec<S>             (Event → StyleRule:scopes 栈 + Env 住在 Observer 里,由 `&mut self` 推进;
+                              发射时机 = 开子块冲刷父待定段 / 闭块冲刷残余 —— 见 scss-compilation 规范)
+      ─▶ [全局 pass] collect → 纯 fold(媒体/supports 冒泡合并;@extend 不动点)→ flat_map 回流
+      ─▶ Render<S>           (StyleRule → CSS 文本叶,逐条发射;此处串行,流序即文档序)
+      ─▶ reduce_initial(..)  ─▶ 终点 into_future()  ─▶ Result<String, SassError>
+公开面:仅 async fn compile(content) -> Result<String, SassError>
+```
 
-## 2. 数据模型(owned 值,最小;非 dart-sass 类层级)
-- `Tok`(Word/Punct/Var/Interp)· 结构事件 `Open/Decl/Close`。
-- `SassExpr`(lit/var/interp/concat/bin/cmp/and/or/if/func)→ `eval(Expr, &Env) -> Value`:这是"求一棵
-  表达式",天然自底向上求值、非样式树遍历,允许递归;**禁**的是"对样式/规则树做 visitor"。
-- `Value`:Number(带单位换算表)、Calculation(不可化简则原式保留)、Color(CSS4 空间+gamut)、
-  List(space|comma|slash, bracketed)、Map(插入序)、String(引号态)、Bool/Null/Argument。
-- `Selector`:compound/combinator/伪类/`&`;`@extend` 与 `selector.*` 需要(unify/is-superselector)。
-- `Env`/`OpenScope`:块作用域(`!global`/`!default`),`scopes` 栈是 Acc 里的 owned 数据。
-- `StyleRule{selector, decls, order}`:L3 向前流出的**值**。
-- `Diagnostic{level,id?,message,spans,trace}`。
+**现状(P0′.1/.2/.4 已落)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
+`order` 键/`sort_by_key`/`from_stream` 假并发已不存在;harness 基线 595 → 598。仍待做:0′.3(真 `Err`
+通道,删 `exec.rs` 里 4 处兜底)、0′.6(四条 sasslint 机器闸)、0′.7(`Selector`/`PropName` 结构化)。
 
-## 3. 每个 directive = 流上的一个推式算子(独立、非分派状态机)
-| directive | 推式表达 |
-|---|---|
-| `@each`/`@for`/`@while` | `flat_map`(一项 → body 子流,扇出即循环) |
-| `@if`/`@else` | `filter` + Acc 里随流 move 的不可变 `taken` |
-| 嵌套 | Open 压 `scopes`(数据栈)/ Close 弹栈 emit |
-| `@mixin`+`@include`+`@content` | 定义入注册表(一等值);include 把 body 作为子流推出;一到多 = `share`/`ref_count` |
-| `@function`/`@return` | 纯 `eval` 内联调用 |
-| `@use`/`@forward`/`@import` | 模块 = 子流,编译一次多播喂引用方;独立子图是唯一真并发处 |
-| `@media`/`@supports`/`@at-root` | 全体就绪后的一次纯 `map` pass(见 §4) |
-| `@extend` | 全体就绪后的一次纯 `map` 不动点(见 §4) |
-| `@debug`/`@warn`/`@error` | 流内 diagnostic / `Result` 值 |
+嵌套不是"树",是事件流上的 owned `scopes`;规则在**开子块冲刷父块待定声明段**与**闭块冲刷残余**两个时刻被推出来
+(所以一个块可以出多条规则),而不是"等 `Close` 一次性出整块"。除表达式求值(自底向上,天然递归)
+外,不构建也不遍历任何 AST。
 
-## 4. 唯一的例外:全局不动点也必须"推",不是"遍历"
-`@extend`(可传递)与媒体冒泡需要**看到全体规则**才能定序/合并 —— 但这是**数据依赖**,不等于 pull。
-做法:主脊把规则**推**入一个 owned `Vec<StyleRule>`(`collect`),再做**一次纯函数 forward fold**
-`Vec<StyleRule> → Vec<StyleRule>`(extend 不动点 / media 合并),然后 `flat_map` 把结果**重新推入**序列化流。
-"物化" = 流中一个 owned 值集合(数据),**不是**先建可变 AST 对象图再 visitor 遍历它。
-（若某实现能把 @extend 也做成单遍带累加子,则连这次 collect 都可去掉 —— 优先如此。）
+## 2. 数据模型(owned 值,最小领域值)
 
-## 5. 并发与保序
-- **真并发只在模块加载**(独立子图),`Shared`+`from_stream`/`spawn`;其余**串行推式冷流**(值 owned `Send`)。
-- 每产物带**确定性 `order` 键**;任何并发 `merge` 后 `sort_by_key(order)` 稳定重排再序列化(expanded CSS
-  逐字节 = 文档序)。`from_stream` 单条顺序 poll 保序;`flat_map(|i| from_stream)` 每条起任务→乱序(实测坑)。
-- 跨线程只共享**冻结只读** `Arc<Module>`/`Arc<CompiledCss>`;绝不 `Arc<Mutex<业务态>>`。
+- `Tok`(Word/Space/Op/Punct/Var/Interp/Silent)· `Event::{Open, Decl, Close}` —— **都是结构化值**。
+- **禁"拼串承载语义"**:`Selector` 是结构化值(compound/combinator/伪类/`&`/插值位),不是 `String`;
+  属性名是 `PropName`,不是渲染后的文本;`&` 组合是选择器代数操作,不是 `str::replace`;
+  声明值走 `Vec<Tok> → Expr → eval(owned Env) → Value → to_css`,不存在"渲染成串再 char 游标重扫"。
+  (v1 代码里 `render→canon→split_whitespace` 与 `child.replace('&', p)` 属违规形态,重构须消除。)
+- `Expr`(lit/var/interp/bin/cmp/and/or/if/func-call)· `Value`(Number+单位代数、Calculation(不可化简则**原式
+  保留**)、Color(CSS4)、List(space|comma|slash, bracketed)、Map(插入序)、String(引号态)、Bool/Null/Argument/Module)。
+- 可调用与模块是一等值:`Mixin`/`SassFunction`/`Module` 入注册表;`@content` 是把 body 作为**子流**传进去的值。
+- `Diagnostic{level,id?,message,spans,trace}` —— 诊断格式精确(双源 trace:invocation + declaration)。
 
-## 6. rxrust 即引擎(推;不改、不套壳)
-`from_iter/scan_map/reduce_initial/flat_map/filter/Subject/box_it/into_future` 就是控制流本身。
-**状态用哪个算子有硬性口径**：累加值需要沿流被读/被 move 时用 `scan`（`FnMut(Output, Item) -> Output`，
-发射的就是累加值本身）；只有"状态纯粹私藏、只发射输出"才用 `scan_map`。**禁**把状态拆进自造类型
-的字段里随身带（如给每条声明配一份 `Arc<Env>` 快照），那等于绕过流的 item 自己造传播机制。
-**禁**:自造 `Stage<T>`/`fail`/`drain` 编排、`from_fn`+`VecDeque` 手搓状态机、递归 `stream(node)` AST 解释器、
-在异步核心外套 `std::sync::mpsc`+`block_on` 同步门面、为单测 `pub` 泄漏内部件。入口 = 那条流。
+## 3. directive = 流上的推式分解(不是分派状态机)
 
-## 7. 防 pull/GC 反例索引(命中即按出路改写)
-| 反例 | 报警 |
-|---|---|
-| `parse()` 成 AST 后 `walk(node)`/`visitor`/`visit`/递归下降吐叶 | pull 骨架;`no-recursive-descent`/`no-tree` → 事件流 + `scopes` 累加子,`flat_map` 扇出 |
-| `Acc{ Vec<Frame>, chain_taken }` 用 `&mut self` 驱动 | `mutable-accumulator-drives` → owned 累加子值随流 move;@if 用不可变 taken |
-| `from_fn`+`VecDeque` 消 for | `no-from-fn-driver`/`no-work-queue` → `from_iter().flat_map()` |
-| 攒 body 进 Vec 再 for_each 重放 | `no-imperative-loop` → flat_map;一到多 share |
-| 中途 collect 排空再命令式加工 | 语义 → 留惰性;确需全局再 collect + 纯 map fold + `sort_by_key(order)` |
-| `type Stage`/`fn fail`/`fn drain`;为单测 pub 内部件 | 框架中转/第二真相 → 直接用算子;行为只经 compile 验 |
-| dart-sass 式类名/阶段枚举当骨架 | 语义 review → 由 `sass-spec` 需求倒推最小领域值 |
+| directive | 推式表达 | 语料量级 |
+|---|---|---|
+| `@each`/`@for`/`@while` | 内核内 `flat_map`(一项 → body 子流,扇出即循环);`@while` 用生成式子流而非循环变量 | 95 / 681 / 25 |
+| `@if`/`@else` | `filter` + 随流 move 的**不可变**分支值(禁可变 `taken` 标志对象) | 367/163 |
+| 嵌套 | `Exec` 的 Observer 里 owned `scopes` 数据栈;`Close` 弹栈发射规则 | 全域 |
+| `@mixin`/`@include`/`@content` | 定义入注册表;include 把 body 作为子流推出;**一处定义多处消费 = 多播**(`Subject`/`publish().ref_count()`;rc.6 **无 `share()`**) | 679/1,453/152 |
+| `@function`/`@return` | 纯 `eval` 内联调用;`meta.get-function/call` 取一等函数值 | 830/522 |
+| `@use`/`@forward`/`with`+`!default` | 模块 = 子流,**编译一次多播喂引用方**;`with` 配置在实例化前注入;`!default` 只在未定义时生效 | 10,414/557/527 |
+| legacy `@import` | 弃用路径,单独 pass;CSS `@import` 走原生上提排序 | 1,481 |
+| `@media`/`@supports` | 全体就绪后一次纯 fold(冒泡 + 逐查询合并) | 878/390 |
+| `@at-root`(`with/without`) | `Exec` 内按 `scopes` 数据定作用域根,发射时决定前缀 | 194 |
+| `@extend` | 全局不动点(纯 fold over `Vec<StyleRule>`)+ `!optional` 报错走 Err 通道 | 725/46 |
+| `@debug`/`@warn`/`@error` | 流内 `Diagnostic` 事件 / Err 通道 | 57/40/37 |
 
-## 8. 测试与验收(oracle,不变)
-`tests/hrx.rs` 经**唯一出口 `compile`** 跑 `sass-spec`(排除 `non_conformant`/`libsass-*`/`:todo:`)产快照给
-`ledger`;`regress=0` 按目录簇 scoped、整体单调不降;每阶段六门(无 warning build/test/clippy -D/sasslint 0/
-scoped regress/src 纯产码·无脚本);element-plus 作**非回归自基线,绝不用 dart-sass 生 golden**;诊断三类别归一化、
-`id`/是否报错硬判。
+## 4. 唯一允许的"看全体"pass
 
-## 9. 从零实现路线图(依赖序)
-| 阶段 | 交付 |
-|---|---|
-| P0 | harness(多文件/`:todo:`/三类别)+ `async compile` 唯一出口 + 推式主脊骨架(chars→Tok,`into_future`) |
-| P1 | Value 代数(单位/calc/斜杠 list/map/颜色基础)+ SassExpr 接入声明值(无歧义触发) |
-| P2 | 结构事件流 + `scopes` 数据栈累加子(嵌套/`&`/文档序),**非 AST 树遍历** |
-| P3 | 控制流 `@if/@each/@for/@while`(filter/flat_map)+ 作用域 `!global`/`!default` |
-| P4 | callable:mixin/@content/function/参数绑定(注册表 + 一到多多播) |
-| P5 | 模块 `@use/@forward/@import` + 加载器 + 独立子图并发 + order 键 |
-| P6 | Selector 模型 + `@extend` 不动点(§4 的纯 fold;`:is`/超选择器/链式) |
-| P7 | 媒体/at-root 冒泡合并 + 原生 CSS 透传 + 诊断格式 |
-| P8 | CSS Color 4 全空间 + gamut |
+`@extend`(可传递)与媒体冒泡需要全体规则 —— 这是**数据依赖**,不是 pull。做法:主脊把规则 `collect` 成 owned
+`Vec<StyleRule>`,做**一次纯函数** `Vec → Vec`,再 `flat_map` 推回序列化流。"物化" = 流中一个 owned 值集合,
+**不是**可变对象图 + visitor。若某相能做成单遍带累加子,则连这次 `collect` 都该省掉(优先如此)。
 
-## 10. 与旧记录的关系
-本文件以"**推**"为公理,**取代** §2/§3 早前"parse→物化 AST→多趟遍历"的 pull 表述;"单一 `Shared` 绝对流"
-的旧记忆亦已订正为**推式流为主、全局不动点仅作数据性 collect+纯 fold**。工作树早先 `structure`(树)
-`/eval`(递归)属 pull 形态,实现到 P2 时按推式主脊重构(事件流 + `scopes` 累加子),不作为设计基线保留。
+## 5. 并发与保序(v2 改正:保序靠动词,不靠 sort)
+
+- **真并发只在互不依赖的模块/子图**(P5),`Shared` + `from_stream`/`spawn`。
+- **顺序 intrinsic 处一律用框架动词**:串行段天然保序;需要"逐项展开且保文档序"用
+  `concat_map` / `concat_all()` / `concat_observables()`(实测 = `merge_all(1)`,保序且不丢值)。
+- **`sort_by_key(order)` 不再是并发段的手段**:rc.6 `merge_all` 在并发额度满时会**丢弃仍在排队的内层**期间
+  的发射(`ops/merge_all.rs` 测试 `test_merge_all_concurrency`),这是**缺元素**不是乱序,排序无法恢复。
+  因此并发分支必须满足其一:① 内层"被订阅后才开始生产"(`defer`/`from_stream`/内核 `subscribe` 时才动);
+  ② 直接串行(`concurrent:1`)。`order` 键只保留给**已 collect 的全局 pass 内部**的确定性重排。
+- `flat_map(|i| from_stream(..))`(每条 item 各起任务)实测乱序,禁用。
+- 跨线程只共享**冻结只读** `Arc<CompiledModule>`;共享可变一律取 `C::RcMut`/`C::RcCell`(由 Context 决定
+  `Rc<RefCell>`/`Arc<Mutex>`),业务态永不 `Arc<Mutex<_>>`。
+- 多播不可重入:同一 `Subject` 的回调里再 `next/error/complete` 会 panic;需反馈环就 `delay(0)` 造异步边界。
+
+## 6. 错误通道(v2 改正:真 Err 通道,禁兜底)
+
+- 链的 `Err = SassError`,失败经 `Observer::error(self, SassError)` 一路到底,终点 `into_future()` 给出
+  `Ok(Err(SassError))`;`compile` 直接映射成 `Err(SassError)`。
+- **废止** v1 的"`Err = Infallible` + 流内 `Result` + 失败 `unwrap_or_else(verbatim)`":把求值失败兜底成原文
+  **不是错误策略**,它会静默吞掉真错误并掩盖 hrx 的 error 期望。
+- 保留的例外:仅"局部可恢复且语义上确需原样透传"的 CSS 原生构造(calc 不可化简、custom property 原样文本、
+  未识别 at-rule),这类**由规范定义为透传**,而非由 `Result` 失败降级。
+- 收口只用框架原生口子:`collect`/`reduce_initial` + `into_future()`、`into_stream()`、或 await `TaskHandle`;
+  `std::sync::mpsc` 仅当必须把 `Sender` 交给外部/跨线程时作桥接,禁当终点、禁外套 `block_on`。
+- `into_future()` 实测限制:要求**恰好一个值**(空→`Empty`,多→`MultipleValues`)且**丢弃订阅句柄**(不可取消);
+  故终点必须先 `reduce_initial`/`collect` 收成单项。
+
+## 7. 入口与出口
+
+- 唯一公开面:`async fn compile(content: impl Into<String>) -> Result<String, SassError>`(+ `SassError`);
+  其余(`lexer`/`expr`/`value`/内核)全为 crate 内部,**不为单测 `pub` 泄漏**(行为只经 `compile` 验)。
+- 上下文:`Local` 为默认(wasm32/`!Send` 友好);`Shared` 只在 §5 的真并发段。内核靠 `C: Context` 泛型化,
+  同一份内核代码两态皆可编译(**不**在 kernel 里写死 `Rc`/`Arc`)。
+- 每相用 `tracing::info_span!`(字段 `stage`/`module`/`id`/`elapsed_ms`)在**实际执行的闭包内**记录;禁 `println!`。
+
+## 8. 阶段与验收(oracle 不变)
+
+- P0–P8 顺序由 §0 语料决定;`tasks.md` 逐簇列可验证小步。
+- 每阶段:`tests/hrx.rs` 经**唯一出口 `compile`** 跑 `sass-spec`(排除 `non_conformant`/`libsass-*`/`:todo:`)
+  产快照给 `ledger`;`regress = 0` **按目录簇 scoped** 判定,已过簇不得回退,整体单调不降。
+- 六门:无 warning build / `cargo test` / clippy `-D warnings` / `sasslint count=0` / hrx `regress=0` /
+  element-plus 编译不劣化(**EP 只作非回归自基线,绝不用 dart-sass 生 golden**)。
+- 重构起点(P0'):把 §1 的"批量外壳"改成内核、把 §5/§6 两条口径落进 `sasspile` 与 `sasslint` 规则,
+  再按簇继续 P1 起的语言面。

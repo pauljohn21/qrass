@@ -17,6 +17,48 @@
 > 链(5.1/5.2)+ 选择器插值(2.1)**。⇒ **P3.6/P4/P5 是编译 element-plus 的硬前置;`@forward` 不是后置项**。
 > 真正可后置:仅 **P6 @extend** 与 **P1.7 legacy 裸名**。
 
+## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
+
+> 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 pass=595/14,345）。
+
+- [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
+      `ObservableType`/`CoreObservable`），在自己 `next` 里逐条发射 0..N 项；删除
+      `scan_map(acc)→Vec<Tok>→flat_map(from_iter)` 批量外壳（现 `lib.rs:57-61`）。
+      **已完成**：新增 `src/phases.rs`（两内核，`Err` 泛型不锁错误通道）；`LexAcc::feed`/`MsgAcc::feed`
+      改为向 `Emit` sink 逐条发射，累加子里的 `out: Vec<Tok>`/`events: Vec<Event>` 全拆（含 `events.clone()`）；
+      `compile` 链改用 `.transform(|source| Lexer { source })`。门：build/clippy `-D warnings`/test 39 全过、
+      `sasslint count=0`、hrx 快照与基线 **md5 一致**（`ledger diff regress=0 net=0`）。
+- [x] 0′.2 **Exec 相内核化**：`scopes`/`env`/`next`/`emitted` 住在 `ExecObserver`（随订阅诞生）；上游句柄用
+      `SingleAssignment::channel()` 先建槽后订阅；“终止只投一次”用 `Option::take()`/`C::RcCell` CAS，
+      禁裸标志；上游自然终止时只 retire 不 `unsubscribe`。
+      **已完成**：`Exec<S>`+`ExecObserver{observer, state}` 取代 `scan(State) + filter_map(into_rule)`，`State::step`
+      改 `&mut self` 就地推进 → **每事件不再 `clone` 整个 `State`**（旧形态为了取一条规则而复制全部开块+env），
+      `emitted` 字段随之消失。`SingleAssignment`/CAS 部分本相不适用（单源直递 `Unsub`，同 `map`），
+      高阶/多源处（P5 模块并发、`@content` 子流）才是它们的落地点。
+- [x] 0′.4 **保序改动词**：移除假并发与 `collect`+`sort_by_key`（原 `lib.rs:64-77`）；序列化改串行内核
+      `Render<S>`（`StyleRule → String`，1:1）；`order` 键与 `State::next` 计数器**删除**。
+      **规范驱动的行为更正**（`sass-spec/css/style_rule` `declaration/interleaved/**`）：发射时机 =
+      “开子块先冲刷父块待定声明段 + 闭块冲刷残余”（`State::settle_top`/`settled`），而不是“一个块一条规则
+      再按开启位置排序”。旧写法用 `order`+`sort` 近似它，所以 **`around_style_rule`（一块拆两段）永远过不了**。
+      门：干净 DB 上 `ledger diff pre after` → **`regress=0 net=3`**（595 → 598，+3 全是上述 interleaved 用例）；
+      新增 `tests/interleaved.rs` 把三条规范期望钉成断言；`tests/order.rs` 的旧“并发+order 键”注释按新现实重写。
+      **附带修一个工具缺陷**：`ledger` 重导同名 run 时不清 `run_fail` 旧行 → 已修好的用例会报 phantom REGRESS
+      （一度使我误判为 `regress=1`）；现 `import_rows` 先 `DELETE FROM run_fail WHERE run_id`，并加
+      `crates/ledger/tests/reimport.rs` 两例钉住（该缺陷是旧工具可观测的假数据，不属本阶段验收项）。
+- [ ] 0′.3 **真 `Err = SassError` 通道**：失败经 `Observer::error` 到底，终点 `into_future()` 给 `Ok(Err(..))`；
+      删掉 `.ok()`/`unwrap_or_else(verbatim)` 兜底（现 `exec.rs:118,123,136,143`）；仅规范定义为透传的
+      CSS 原生构造保留原样；harness 的 error 期望（`**/errors/**` 80 文件）从此刻开始计入。
+- [ ] 0′.5 **共享态改 `C::RcMut`/`C::RcCell`**：内核泛型于 `C: Context`，`Local`(wasm32) 与 `Shared` 两份编译均过；
+      禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
+      （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
+      已做到的是：内核 `Err` 泛型 + `C: Context` 泛型，不写死具体指针类型。
+- [ ] 0′.6 **`sasslint` 新规则**：`no-batch-shell`（`scan_map` 返 `Vec` + `flat_map(from_iter)`）、
+      `require-err-channel`（求值路径上的 `.ok()`/`unwrap_or_else` 兜底）、`no-sort-for-order`（并发段
+      `sort_by_key`）、`require-slot-before-subscribe`（高阶/多源未先取 `SingleAssignment` 槽）。
+- [ ] 0′.7 **`Selector`/`PropName` 结构化**：消除 `render→canon→split_whitespace` 与 `&` 的 `str::replace`
+      （现 `lexer.rs:223-257`、`exec.rs:150-155`）；选择器/属性名不再经字符串承载语义。
+
 ## P0 — hrx harness(验收安全网)
 - [~] 0.1 `tests/hrx.rs` 经 `compile` 跑 `sass-spec` 安全子集、产 `ledger` 快照 + 立基线(seed 560/11486)。**已具雏形,待补 0.2/0.3**
 - [ ] 0.2 harness 支持**多文件输入**(partial `_x.scss`/相对 import)与目录型用例
@@ -37,7 +79,8 @@
 - [ ] 2.2 unify / superselector / `selector.nest/parse/unify/is-superselector/simple-selectors`
 
 ## P3 — 管线 + 控制流 + 作用域 + 媒体/at-root
-- [x] 3.1 `async fn compile` 唯一出口;`Shared::from_stream(root.body)` + `scan_map(owned (env,taken))` + `flat_map(Shared::from_iter)` + `reduce_initial` + `into_future().await`;删 `parse::Acc`/`render.rs`。**已做,tests 全绿**
+- [ ] 3.1 `async fn compile` 唯一出口 + **一条冷流串起各相内核**（`Lexer→Structurize→Exec→[全局 pass]→Render→reduce_initial→into_future`）。
+      ⚠ v2 口径已改：旧形态（`scan_map`+`flat_map(from_iter)`+`sort_by_key`）**不再合格** → 由 P0′ 重做，本项随之重开。
 - [~] 3.2 `@if/@else`(filter + 不可变 taken 链)、`@each`/`@for`(flat_map)。**已做 `@each/@for/@if`;缺 `@while`**
 - [ ] 3.3 `@while` 条件循环(`directives/while/**`)
 - [ ] 3.4 **媒体/supports 冒泡 + 逐查询合并**(全局 pass;`css/media/**`)
@@ -53,7 +96,8 @@
 - [ ] 5.2 `@forward`(show/hide/as/with 透传)(`directives/forward/**`)。**BEM 前置**:theme-chalk 内部
   (`mixins.scss` `@forward 'config'/'function'/'_var'`)必须能解析
 - [ ] 5.3 legacy `@import`(弃用路径)+ CSS import 排序(`directives/import/**`)
-- [ ] 5.4 独立模块**并发编译** + order 键稳定合并 + `ref_count`/`behavior_subject` 多播;跨线程只 `Arc<只读>`
+- [ ] 5.4 独立模块**并发编译**：并发分支“订阅后才生产”或直接串行；`ref_count`/`behavior_subject` 多播
+      （守不可重入）；跨线程只 `Arc<只读>`。**禁**用 `sort_by_key` 补救并发乱序（见 P0′.4 / design §5）
 - [ ] 5.5 `meta.load/load-css/get-module/css`(module 为一等 `Value`;`core_functions/meta/**`)
 
 ## P6 — @extend(依赖 P2 选择器代数;**可后置,element-plus 不卡此**)

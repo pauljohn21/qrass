@@ -17,8 +17,11 @@ rxrust = "=1.0.0-rc.6"   # bare `cargo add rxrust` resolves the OLD 0.15 line
 
 Keep default features (`scheduler` gates `Local`/`Shared` + the `LocalBoxedObservable`
 aliases). The 1.0 API differs fundamentally from both RxJS and rxrust 0.15. The authoritative
-per-file walkthrough and the do/don't doctrine live in **`docs/rxrust-source-analysis/`**;
-deep API notes in [reference.md](reference.md); `docs/rxrust-ai-manual.md` is the older copy.
+per-file walkthrough and the do/don't doctrine live in **`docs/rxrust-source-analysis/`** (01–09;
+`09-cancellation-and-terminal-ordering.md` holds the cross-operator invariants — slot-before
+subscribe, terminate-exactly-once, cancel-only-on-early-termination, lock discipline, Subject
+re-entrancy); deep API notes in [reference.md](reference.md); `docs/rxrust-ai-manual.md` is the
+older rc.5 copy kept for history only.
 
 ## The rule that keeps getting broken
 
@@ -27,13 +30,17 @@ Express control flow **as** rxrust operators; do not re-implement it and wrap it
 ## Pick the verb BEFORE you write (this is the step I keep skipping)
 
 Decide "which item flows, through which operator" using the framework's own inventory — read from
-rc.6 `src/observable.rs`, not from memory: `map map_to filter filter_map scan scan_map reduce
-reduce_initial take take_while take_while_inclusive take_until skip skip_while skip_until
-skip_last take_last first first_or last last_or distinct distinct_key distinct_until_changed
-distinct_until_key_changed contains pairwise merge combine_latest with_latest_from merge_all
-concat_all flat_map switch_map zip buffer buffer_count collect collect_into default_if_empty
-start_with tap finalize retry on_error map_err on_complete multicast publish ref_count share
-group_by box_it into_future into_stream observe_on subscribe_on`.
+rc.6 `src/observable.rs` + `src/factory.rs`, not from memory: `map map_to filter filter_map scan
+scan_map reduce reduce_initial collect collect_into take take_while take_while_inclusive take_until
+skip skip_while skip_until skip_last take_last first first_or last last_or average count max min sum
+distinct distinct_key distinct_until_changed distinct_until_key_changed contains pairwise merge
+merge_all concat_all concat_map flat_map switch_map group_by zip combine_latest with_latest_from
+sample throttle throttle_time debounce delay delay_at delay_subscription delay_unsubscription
+buffer buffer_count buffer_time buffer_time_max observe_on subscribe_on start_with default_if_empty
+tap finalize retry on_error on_complete map_err multicast publish ref_count into_future into_stream
+box_it` — plus the factory sources (`of from_iter from_fn create defer empty never throw_err timer
+interval from_future* from_stream* subject* behavior_subject* merge_observables concat_observables`).
+There is **no `share()`, no `and_then`, no `take_until_by`** in rc.6 — verified by `grep "fn share"`.
 **If none of them expresses the step, that is a blocker to report — not a licence to invent a
 mechanism.** Writing first and consulting the source later is exactly how this project reworked
 itself N times.
@@ -41,16 +48,41 @@ itself N times.
 | Need | Use (directly) | Never (retrofit) |
 |------|----------------|------------------|
 | A loop / one item → many (`@each`, nesting fan-out) | `from_iter(items).flat_map(|i| sub_stream(i))` | buffer the body and replay with `for`/`while`/`for_each`; `from_fn`+`VecDeque` work-queue |
+| A **phase** that produces 0..N items per input (lexing, structuring, rendering) | author a real operator kernel (see §Write a phase as a kernel) and `observer.next(..)` per item | `scan_map` returning a `Vec` + `flat_map(from_iter)` — a container where the framework emits items |
 | **State that must travel as a value** (env, selector prefix) | `scan(seed, \|acc, item\| -> acc)` — the emitted item **IS** the accumulation, so state is read/moved downstream as data | `scan_map` with the state hidden in an `Acc` object; per-item `Arc<Env>`-style snapshots welded onto the data to fake "state follows the stream" |
 | State purely private, only an output wanted | `scan_map(seed, \|&mut acc, item\| -> out)` / `reduce_initial` — no `Clone` needed | `Arc<Mutex<S>>` acc; an `Acc` that *drives* traversal with push/pop + control flags (`chain_taken`) |
-| One producer → many consumers (`@use`, `@mixin`) | `Shared::subject` / `behavior_subject`+`peek` / `publish().ref_count()` / `share()` — bus usage is `let mut e = bus.clone(); e.next(v)` then `bus.complete()` (consumes) | collect to a `Vec` and hand-feed each consumer |
+| One producer → many consumers (`@use`, `@mixin`) | `Shared::subject` / `behavior_subject`+`peek` / `publish().ref_count()` — bus usage is `let mut e = bus.clone(); e.next(v)` then `bus.complete()` (consumes). **Never re-emit inside a subscriber callback**: a re-entrant `next`/`error`/`complete` on the same Subject **panics**; put `delay(Duration::ZERO)` between them | collect to a `Vec` and hand-feed each consumer |
 | Two **independent** streams whose latest values must meet | `with_latest_from` / `combine_latest` | manual pairing buffers |
 | ~~State of the event's own position~~ | **no verb does this** — measured (`tests/multicast.rs`): `publish().ref_count()` + `with_latest_from` still gives `[(1,6),(2,6),(3,6)]`, every event paired with the FINAL state, because a synchronous source drains into the first-subscribed branch. Use `scan` (row above). | reaching for pairing/multicast to fix it, then smuggling snapshots when pairing fails |
 | Branch (`@if`) | `filter` on a value computed from moved inputs | a mutable `chain_taken`/state flag threaded by hand |
 | Chain a stage per item | `flat_map` (there is **no `and_then`**) | sequential `run_stage` statements |
-| Ordered merge vs concurrent merge | `concat_all()` = `merge_all(1)` for order-intrinsic; `flat_map`/`merge_all(n)` + a document-order key + one stable sort for real fan-out | `flat_map` and then complain about ordering; a `sort` where `concat_all` was the verb |
+| Ordered merge vs concurrent merge | order-intrinsic → `concat_map`/`concat_all()`/`concat_observables()` (`concurrent: 1`, verified order-preserving). Real fan-out + deterministic output = ONE global pass (`collect` + a pure fold keyed by a deterministic `order` field) — never scattered `sort_by_key` after each merge | `flat_map` then "complain about ordering"; losing values because `merge_all(n)` **drops emissions of an inner while it is still queued** (verified: `test_merge_all_concurrency`) |
 | Type erasure at a signature that truly needs it | `.box_it()` | naming the unnameable chain type (E0107) |
 | Errors | the **Err channel is real**: `Err = SassError` + `map_err` / `on_error`, or in-stream `Result<T,E>` with `Err = Infallible`; close with `into_future()` → `Result<Result<T,E>,_>` | `.ok()` swallowing a failure into a fallback; `.unwrap_or_else(verbatim)` as an error policy; relying on `.subscribe(closure)` — it **silently drops** `error`/`complete` |
+
+## Write a phase as a kernel (the framework's own shape — not a framework layer)
+
+This is what `crates/sasspile/src/phases.rs` does for `Lexer` / `Structurize` / `Exec` / `Render`;
+copy the shape from `ops/map.rs` when a phase emits 0..N items per input:
+
+```text
+struct Phase<S, Params> { source, params }      // lazy data, #[derive(Clone)], NO per-subscription state
+struct PhaseObserver<O, State> { observer, state }   // state born per subscribe, moved not shared
+impl ObservableType  → type Item<'a> = Out where Self: 'a; type Err = S::Err;
+impl CoreObservable<C: Context>
+  → subscribe(self, ctx): let w = ctx.transform(|o| PhaseObserver { observer: o, .. }); source.subscribe(w)
+  → type Unsub = S::Unsub   (multi-source/higher-order: SingleAssignment<C::RcMut<State<U>>>::channel(),
+                              slot before subscribing; unsubscribe only on early termination)
+next(): emit each item with self.observer.next(..)      error(self)/complete(self): consume + forward
+is_closed(): delegate downstream — that is how a source learns to stop early
+```
+
+Keep `Err` generic and use `C::RcMut`/`C::RcCell` for anything shared, so one kernel compiles for
+`Local` (wasm32 / `!Send`) and `Shared`. Destructure `let PhaseObserver { observer, state } = self;`
+when a closure needs the observer while the accumulator is borrowed.
+This is **using** the framework's primitives (the same three impls every `ops/*.rs` file has),
+not a `Stage`/`fail`/`drain` orchestration layer — the ban is on abstractions that replace its
+control flow with yours.
 
 ## Do NOT build a framework layer
 
@@ -108,8 +140,12 @@ Local::create::<i32, Infallible, _, _>(|emitter: &mut dyn Emitter<i32, Infallibl
 
 ## Do / Don't recap
 
-- Move values; `scan_map`/`reduce_initial` carry owned accumulators; drain only via `mpsc`/`into_future`.
-- One-to-many = `Subject`/`share`/`ref_count`; loop = `flat_map`; branch = `filter`; state = owned acc.
+- Move values; `scan` (state **is** the emitted item) or `scan_map`/`reduce_initial` (private acc)
+  carry the accumulator; close only through the framework's terminals — `collect`/`reduce_initial` +
+  `into_future()`, `into_stream()`, or `await`ing the subscription handle. `std::sync::mpsc` is a
+  *bridge* for an API that needs a `Sender`, **not** a terminal.
+- One-to-many = `Subject` / `publish().ref_count()` (there is **no `share()`** in rc.6);
+  loop = `flat_map`; branch = `filter`; state = owned accumulator value.
 - Errors = in-stream `Result` + `Err = Infallible`; `subscribe(closure)` alone swallows `error`/`complete`.
 - **Never** wrap rxrust in a `Stage/fail/drain` framework layer, a `from_fn`+`VecDeque`/hand
   state machine, or a recursive AST interpreter — those all mean "改造框架" and get rejected.

@@ -153,10 +153,12 @@ fn subscribe(self, context: C) -> Self::Unsub {
 可失败流的正规处理：
 - 装一个自定义 `Observer`（`subscribe_with`，`observable.rs:157-163`），或
 - 先 `.on_error(closure)` 消费错误把它变 `Infallible`（`ops/lifecycle.rs`），再 `subscribe`，或
-- `.into_future()`（`ops/into_future.rs`）把"完成时的最后一个值 / 首个错误"变 `Future`。
+- `.into_future()`（`ops/into_future.rs`）：要求**恰好一个值** → `Ok(Ok(v))`；有错 → `Ok(Err(e))`；
+  空流 → `Err(Empty)`；**多于一个值 → `Err(MultipleValues)`**（多项时先 `collect`/`reduce_initial` 收成一项）。
 
 项目里的做法（in-stream `Result` + `Err = Infallible`）就是把错误**当数据**放进 `Item`，
-终点的 mpsc 收口再判——见 `08`。
+终点用框架原生口子收（`collect`/`reduce_initial` + `into_future()`、`into_stream()`、或 await 订阅句柄），
+再用 `match` 判 `Result`——见 `08 §1`（`std::sync::mpsc` 不是框架终点）。
 
 ## 8. 类型擦除：`box_it()`
 

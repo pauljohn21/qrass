@@ -55,6 +55,24 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 
 本阶段目标达成并逐项可验;实现属**“用户定稿后”的下一阶段**(从 P0 harness 起步)。
 
-**定稿前请确认两个已定决策(可一票否决,即改):**
-1. 诊断纳入 v1 达标:`output.css` / `error` / `warning` 三类别 **scoped 基线**,文本走 `ledger` 归一化比对。
-2. `element-plus` 只作**非回归自基线**,**绝不用 dart-sass 生 golden**(守“唯一参照”铁律)。
+**定稿前请确认两个已定决策（可一票否决，即改）：**
+1. 诊断纳入 v1 达标：`output.css` / `error` / `warning` 三类别 **scoped 基线**，文本走 `ledger` 归一化比对。
+2. `element-plus` 只作**非回归自基线**，**绝不用 dart-sass 生 golden**（守“唯一参照”铁律）。
+
+---
+
+## 6 · 现状校正（2026-10-25，逐行读完 rc.6 源码 + P0′ 开工后）
+
+上文是当时快照，结论部分已被源码级事实推翻，以下四项以本节为准：
+
+| 当时说法 | 现况 |
+|---|---|
+| “流算子 + 物化结构上全局 pass”即可 | 不够：**每相必须是真算子内核**（`struct{source}` + `Observer` 持状态 + 三层 impl）。旧写法 `scan_map→Vec→flat_map(from_iter)` 是批量外壳，已于 P0′.1/.2/.4 重写（`crates/sasspile/src/phases.rs`） |
+| “并发 merge 后 `sort_by_key(order)` 保序” | 作废：保序靠动词（`concat_map`/`concat_all` 或串行）；`merge_all` 并发额度满会**丢排队内层的发射**，排序救不回。`order` 键已删除 |
+| “终点 `into_future().await` 即可” | 补充实测限制：要求**恰好一个值**（空→`Empty`、多→`MultipleValues`）且**丢弃订阅句柄**（不可取消） |
+| 基线 560→561 | 现为 **595 → 598**（+3 来自规范驱动的发射时机更正）；`sass-spec` 全量实测 14,345 条 input / 11,808 条 output |
+
+新增权威文档：`docs/rxrust-source-analysis/09-cancellation-and-terminal-ordering.md`（取消/锁/终止投递次序
+不变量 + rc.6 “自带注释与实现不一致”清单）。防回归入口：`README.md`「Anti-GC red lines」、
+`.qoder/rules/rust.md`「新会话起手」与扩充后的「反回归自查」（新增批量外壳/排序代替时机/兜底当错误策略/假并发四行）。
+待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。

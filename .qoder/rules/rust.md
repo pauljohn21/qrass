@@ -5,7 +5,14 @@ alwaysApply: true
 
 ## 技术栈与语言
 - Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释保持 English。
-- 以 **rxrust 为核心**（见「铁律」）。
+- 以 **rxrust 为核心**（见「铁律」）。版本钉 `=1.0.0-rc.6`。
+
+## 🧭 新会话起手（先读这三处再写码，否则必返工）
+1. `docs/rxrust-source-analysis/`（rc.6 逐行取证，01–09；**09** = 取消/锁/终止投递次序不变量 + “库自带注释与实现不一致”清单）；
+2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）；
+3. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md`（现状：四个内核 `Lexer/Structurize/Exec/Render` 已在
+   `crates/sasspile/src/phases.rs`，待做 0′.3 真 Err 通道 / 0′.6 sasslint 机器闸 / 0′.7 Selector 结构化）。
+架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启。
 
 ## 硬性禁止（违反 = 任务失败）
 1. **禁 Python/脚本**：不用 python3/pip，一律 Rust；测试用 `#[test]` 且放 `tests/`（`src/` 保持纯生产码，禁内联测试）。
@@ -30,16 +37,32 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 
 **绕过 rxrust 不便时先假设模型错**：想绕 `'static`/GAT/要 `box`/不能返回引用——正解是把状态改成被 move 的 owned 累加子、喂 owned 值进流（`from_iter` 给 owned 值、跨签名用 `box_it`），**不是** clone 凑数、不是退回命令式、不是加封装。
 
-**程序即一条流**：`from_iter/create/from_stream → scan_map/reduce_initial(owned 累加子) → flat_map 展开 / filter 选支 → collect → 公开入口唯一一次收口（同步 `Local` 链：`subscribe`+`mpsc`；`Shared`/`from_stream` 异步链：`into_future().await`，禁止在异步核心外再套 `mpsc`+`block_on` std 壳）`。状态=被流携带的 owned 累加子；错误=流内 `Result<T,SassError>`（`Err=Infallible`）；一到多才用 `Subject`/`behavior_subject`+`peek`（`Subject` 不是共享可变的挡箭牌）；深度是数据（栈在累加子里）不是调用栈。注：`Shared::from_stream` 单条保序，切勿对每条 item 各起一个 `from_stream`（并发→乱序）；`@if` 链作为 `scan_map` 累加子里 move 的值传递，不是每 item 独立可变标志。
+**程序即一条流**：from_iter/create/from_stream → scan(状态即 item)/scan_map(私藏 acc)/reduce_initial(owned 累加子) → flat_map 展开 / filter 选支 → collect → 公开入口唯一一次收口，**只用框架原生口子**：collect/reduce_initial + `into_future().await`（`into_future` 要求恰好一个值：空→`Empty`、多→`MultipleValues`，且它丢弃订阅句柄=不可取消）、`into_stream()`（只在 `Drop` 时取消）、或 await 订阅句柄（from_stream/timer/observe_on 等返回的 `TaskHandle` 本身就是 Future）。`std::sync::mpsc` **不是终点**，仅用于必须把 `Sender` 交给外部/跨线程的桥接；禁在异步核心外套 mpsc+block_on std 壳。状态=被流携带的 owned 累加子；错误=流内 `Result<T,SassError>`（`Err=Infallible`）；一到多才用 `Subject`/`behavior_subject`+`peek`/`publish().ref_count()`（rc.6 **无 `share()`**；`Subject` 不是共享可变的挡箭牌，且**回调内重入发射会 panic**，需 `delay(0)` 造异步边界）；深度是数据（栈在累加子里）不是调用栈。注：`Shared::from_stream` 单条保序，切勿对每条 item 各起一个 `from_stream`（并发→乱序）；并发额度满时 `merge_all` 会**丢弃仍在排队的内层**期间的发射（`sort` 无法恢复），要不丢就只用 `concat_map`/`concat_all`。`@if` 链作为 `scan_map` 累加子里 move 的值传递，不是每 item 独立可变标志。
 
 **值与控制建模**：值建模成 `Expr`/`Value`，`eval(Expr, owned Env)`（`and`/`or`/`if` 惰性短路），从结构化 token 一次成型，禁"拼串再 char 扫"。嵌套/树必须流式平展成文档序 `Vec<Leaf>`（render=对 leaf 的 `map`、循环=`flat_map`、条件=`filter`），禁 `Vec<Rule>`/`children` 递归下降。`if/else if` 链、多守卫 `return`、`for/while/loop`、自造 `Stage/fail/drain` 框架层、std `.iter().map/fold/collect()` 当数据流替身——全禁；确不可等价表达 → 上报阻塞项，不退回 std。风格：链式 + 闭包(`FnMut`) + fluent builder；例外仅纯值 `Option/Result` 组合子与单个无 `else` 的 `if` guard。
 
 ## 🧾 反回归自查（动手前逐条 grep；命中 = 停手先重构根，再谈加功能）
 - **树/递归**：`Vec<Rule>`、`children`/`.children`、`fn …->Vec<..>` 中转、render/eval 自调用 → 平展 `Vec<Leaf>`，`map/flat_map/filter`。
+- **批量外壳**：`scan_map` 返 `Vec` + `flat_map(from_iter)`、把 body 收集后重放 → **每相写成真算子内核**
+  （`struct Phase{source}` + `PhaseObserver{observer,state}` + `ObservableType`/`CoreObservable<C>`），
+  在自己 `next` 里逐条 `observer.next(..)` 发 0..N 项；状态住 Observer、`Err` 保持泛型、不写死 `Rc`/`Arc`。
+- **排序代替时机**：为输出顺序维护 `order`/序号 + `sort_by_key` → 先问规范里的**发射时刻**（实例：`sass-spec/css/style_rule`
+  `declaration/interleaved/**` = 开子块冲刷父块待定声明段、闭块冲刷残余，一个块可出多条规则），改正后**删掉键**；
+  `merge_all` 并发额度满会丢排队内层的发射，**排序救不回缺失元素**。纯 CPU 活包 `from_stream(stream::once(..))` = 假并发 → 串行或 `concat_map`/`concat_all`。
+- **兜底当错误策略**：求值路径上的 `.ok()` / `unwrap_or_else(原文)` → `Err = SassError` 真通道（终点 `into_future()` 给 `Ok(Err(..))`）；
+  只有**规范定义为透传**的 CSS 原生构造（calc 不可化简、custom property、未识别 at-rule）才原样保留。
 - **命令式循环/分支**：行首 `for`/`while`/`loop`、`if/else if/else` 链、堆叠守卫 `return` → `fold`/`reduce_initial`/`scan_map`/`filter`。
-- **拿字符串凑值**：先拼串再 `split_once` 拆、对串二次 char 扫描 → 结构化 `Vec<Tok>→Expr→eval(owned Env)→to_css`，只在无歧义时求值。
-- **GC/共享可变**：`&mut self` 被闭包共享、手搓 `HashMap` 当单例总线、env 键 `$`/去`$` 混用 → owned 累加子、一到多才 `Subject`、键约定统一。
+- **拿字符串凑值**：先拼串再 `split_once` 拆、对串二次 char 扫描 → 结构化 `Vec<Tok>→Expr→eval(owned Env)→to_css`，只在无歧义时求值；选择器/属性名要是**结构化值**（`&` 组合不是 `str::replace`）。
+- **GC/共享可变**：`&mut self` 被闭包共享、手写 `HashMap` 当单例总线、env 键 `$`/去`$` 混用 → owned 累加子、一到多才 `Subject`、键约定统一。
 - **自造框架层**（`Stage/fail/drain/drain_one` 之类把流压回值的中转）→ 直接用 rxrust 组合子。
+- **多播不可重入**：`Subject` 回调里再 `next/error/complete` 会 panic → 插 `delay(0)`；`Subject::is_closed()` 意思是“无订阅者”，不是“已终止”。
+- **收口只用框架原生口子**：`collect`/`reduce_initial`+`into_future()`、`into_stream()`（仅 `Drop` 取消）、或 await `TaskHandle`；`std::sync::mpsc` 不是终点。
+- 上述新形态对应的 `sasslint` 规则名（**待编成机器闸**，P0′.6 落地前只能靠人肉 grep 把关）：`no-batch-shell`（批量外壳）、`no-sort-for-order`（排序代替时机）、`require-err-channel`（兜底当错误策略）、`require-slot-before-subscribe`（高阶/多源未先建槽）。
+
+### 🧪 验收读数也会骗人（工具级红线）
+- `crates/ledger` 只存失败行；同名 run 重导已改为先 `DELETE FROM run_fail`（旧版会把“已修好”报成 phantom REGRESS）。
+- 断言 `regress=0` 前 MUST 在**空 DB**（`--db=<临时路径>`）重做一次 A/B；行为不变型重构还要用 md5/`diff` 证明快照逐字节相同。
+- “同名两快照完全相同”得到的 `regress=0` 不证明任何事；行为变更 MUST 列出**哪几条用例**变了及其规范依据。
 
 ## 🔌 接线纪律（新功能）
 新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测** 钉死，**不接 `compile`**；接线时只在无歧义处触发：含 `/ * %` 的值跳过（护 `font:12px/1.5`、`grid:1/2` 等 CSS 斜杠分隔符），函数走**白名单** `call_builtin`，未知名 `eval→Err→` 原样兜底（`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；会动全局 truthiness 的比较/布尔单列一步、先护选择器（`a > b` combinator 不得当比较）。每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。

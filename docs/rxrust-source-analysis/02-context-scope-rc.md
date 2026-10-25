@@ -73,7 +73,7 @@ pub trait Context: Sized {
 `LocalCtx`/`SharedCtx` 自身还实现了 `Observer`（委托 inner）和 `Subscription`（委托 inner）
 （`context.rs:406-437`）——这让"包着 observer 的 context"能直接当 observer 往下传。
 
-## 3. `Local` / `Shared` 别名 与 相互转换（`context.rs:357-463`）
+## 3. `Local` / `Shared` 别名与相互转换（`context.rs:357-463`）
 
 ```rust
 pub type Local<T>  = LocalCtx<T,  LocalScheduler>;
@@ -91,7 +91,7 @@ pub type Shared<T> = SharedCtx<T, SharedScheduler>;
 只需 `type MyLocal<T> = LocalCtx<T, MyScheduler>;`（`MyScheduler: Clone+Default` 且实现
 `Scheduler`）。文档示例给了 `SleepProvider` + `Scheduler<Schedulable>` 的最小实现骨架。
 
-## 5. `rc.rs`：共享可变/原子 的四件套 + 统一解引用（`rc.rs`）
+## 5. `rc.rs`：共享可变/原子的四件套 + 统一解引用（`rc.rs`）
 
 | 类型 | 内部 | 用途 | 定义 |
 |------|------|------|------|
