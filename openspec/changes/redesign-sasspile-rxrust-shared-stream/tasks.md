@@ -114,20 +114,26 @@
       并在 harness 里加**撞名断言**（出现重复 key 即整轮判失败）。实测旧方案在 11486 条里有 **1135 个重复
       key**，其中 **33 个 key 同时挂着一条 PASS 和一条 FAIL**（这正是“丢 3 条”被归错文件的机制）；旧 run 落库时
       10891 条失败被压成 7138 个 key。历史 run 与新 run 的 key 不同构，**不得跨制式 diff**（已在 `reports/hrx.db`
-      的 `case-key-scheme` note 里记明，新基线 `target/baselines/head-600-pathkey.tsv`）。
+      的 `case-key-scheme` note 里记明，新基线是 ledger run `head-600-pathkey`）。
   - [x] **0′.3c（已合入）**：`UndefinedVariable` 进 `FATAL`；`tests/fallback.rs::
     unbound_variable_travels_the_err_channel` 去掉 `#[ignore]` 并断言金样消息 `Undefined variable.`
     （语料 23 处该错误的首行都不带变量名，名字属于头下面的 source span，归 P7 7.2）。
   - [~] **0.4 harness 断言 error/warning 期望（部分完成）**：`error` 用例改为比对金样 `Error:` 首行，
       消息不等即 FAIL（旧口径“任何 Err 都算过”会凭空 +384）。未做：span/行列、`Warning:`、
       `DEPRECATION WARNING`（这类首行非 `Error:` 的用例现在一律判不匹配，诚实计为 FAIL）。
-  - **可复核数据**：基线与阶段快照一律存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线导致
-    拿空基线比出 `regress=7134` 的垃圾数）。本轮留存：`head-pathkey-599.tsv`（新 key、旧粗量具）、
-    `tight-empty.tsv`(599)／`tight-fatal.tsv`(600)（新 key、消息金样量具，翻转前后对照）、
-    `head-600-pathkey.tsv`、`after-named-args-600.tsv`、`after-quoted-string-600.tsv`、
-    **`head-616-full-scope.tsv`**、`head-633-concat.tsv`（**往后的基线**）、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
-    行为不变型改动用 `cmp` 证逐字节相同；变型必须在**空库** `ledger diff` 列 NET/REGRESS 具体键，并用
-    `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够。
+  - **可复核数据 = `reports/hrx.db` 里的具名 run，不是快照文件**（本轮改错又改回）：每个增量跑完
+    `tests/hrx.rs` 后，把 harness 的**唯一瞬态输出** `target/hrx-snapshot.tsv` `ledger import <名字> …` 入库，
+    A/B 靠 `ledger diff`、列表靠 `ledger runs`。**曾误做法**：我自己写了“快照存 `target/baselines/`”，
+    于是堆出 15 个文件 / 27 MB，还多建了一个临时 sqlite——这正是 `crates/ledger` 建立时要消灭的
+    `reports/hrx-*.tsv` sprawl（它的模块注释原话），属于“量具已有、却又回到散文件”。已全部
+    import 入库并删除临时文件（指令本身也已从 `rust.md` 改抹）。
+    现有可追溯的 run（path-key 制式）：`head-600-pathkey`(600，粗量具)、`s2-fatal-empty-599`(599)、
+    `s2-fatal-flip-probe-600`(600)、`p1-named-args-600`、`p1-quoted-string-600`、`scope-full-616`(616)、
+    `head-633-concat`(633)、**`head-635-flags`(635，当前基线)**。在此之前的 basename-key run 与它们
+    **不同制式，不得跨制式 diff**（库里 `case-key-scheme` note 已记明）。
+    行为不变型改动用 `cmp` 证两次快照逐字节相同；变型必须在**新建空库**上 `ledger diff` 列 NET/REGRESS
+    具体键，并用 `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够（临时空库只为验收，
+    **不作为记录留存**）。
   - **量具自身必须带阳性对照（P1.3 新血泪）**：一次“仅差空白=0、仅差大小写=0”的读数让我差点得出
     “无 cheap win”的结论，实际是 **`substr` 切片多吞一个引号字符**的 bug；拿一条已知应该为真的用例
     （`calc-size::case_insensitive`）当对照，才暴露出量具错。任何“为 0 / 全通过”的统计必须先过一条阳性对照。
@@ -185,7 +191,7 @@
       即规格引用了一簇而量具不扫它（已写进 `sasspile-conformance` 的 hrx harness 契约）。
       实测：总数 11,486 → **11,533**，PASS 600 → **616**（新覆盖里 operators 4/25、parser 1/3、variables 11/3 通过），
       **旧覆盖集内 PASS→FAIL = 0**（逐条 `comm` 比对，扩面的验收判据就是这条，不是总数上涨）。
-      基线换为 `target/baselines/head-616-full-scope.tsv`。
+      基线换为 ledger run `scope-full-616`。
       **新暴露的 25+3+3 条已有名字**，已归入 P1（见 1.3b/1.4b）与 P3，不再靠猜。
 
 ## P1 — 值地基:单位代数 + calculation + 全色彩空间 + list/map
@@ -234,7 +240,7 @@
       逐条钉住这些反例）。
       实测：`operators/plus` 与 `operators/minus` 两族**全绿**——18 个 section 里 17 条新通过
       （`minus::syntax/comment/both` 本来就过）；空库 `ledger diff base616 concat` = **regress=0 net=17**，
-      基线 616 → **633**（新基线 `target/baselines/head-633-concat.tsv`）。
+      基线 616 → **633**（新基线 ledger run `head-633-concat`）。
       上轮估的“21 条”不准（把 slash/modulo 混进来了）：更正为 plus 9 + minus 9 = 18 个 section。
       `operators` 现仍剩 8 条：**slash 4**（归 1.4b，斜杠空白依赖来源）、**modulo 4**（需 `%` 与 infinity）。
 - [ ] 1.4 **`Calculation` 表达式树**(`calc/clamp/min/max/var()`,可部分化简、否则原式保留)(`values/calculation/**`)
@@ -263,6 +269,14 @@
 - [ ] 3.4 **媒体/supports 冒泡 + 逐查询合并**(全局 pass;`css/media/**`)
 - [ ] 3.5 `@at-root (without/with)`(`directives/at_root/**`)
 - [ ] 3.6 变量块作用域 + `!global`/`!default`(`variables/**`、`libsass/variable-scoping/**`)
+- [x] 3.6a **旗标不是值的一部分（已合入，3.6 的一个子面）**：`lexer::without_flags` 在**绑定**路径上剥掉
+      值尾部的整段 `!default`/`!global` 旗标游程（`Token` 层判据：`Word` 以 `!` 开 + ident 字符，不看渲染后的串）。
+      依据：`variables/double_flag.hrx::default`（`$a: b !default !default;` → `d: b`）与 `::global`。
+      **只剥绑定值**：普通声明/自定义属性的 `!important` 是 CSS 文本（`css/custom_properties/exclamation.hrx`
+      在基线里就是 PASS，作为反向保险写进 `tests/flags.rs`）。**故意不做语义**：“已绑定则 `!default` 不覆盖”
+      与 `!global` 的提升作用域不在这里——前者唯一直证在多文件的 `directives/use/with/*`（harness 暂跳过），
+      归 3.6/P5.1；现在 flat env 下两者可见结果相同，两条金样已过。实测：`ledger diff head-633-concat head-635-flags`
+      = **regress=0 net=2**（就这两条），基线 633 → **635**（ledger run `head-635-flags`）。
 
 ## P4 — 可调用:mixin / function / @content / 参数绑定
 - [ ] 4.1 `@mixin`/`@include`/`@content`/`@yield` + 参数(位置/默认/`$r...`/named-splat)绑定 + 动态作用域;注册表 + 一到多多播(`directives/mixin/**`、`callable/**`)

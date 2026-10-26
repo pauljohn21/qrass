@@ -1,6 +1,14 @@
 //! hrx ledger — one SQLite table set for all sass-spec A/B snapshots,
 //! replacing the per-round `reports/hrx-*.tsv` sprawl (262 files / 154 MB).
 //!
+//! **The database is the record, and it stays local**: `reports/hrx.db` is gitignored because a
+//! multi-megabyte binary would be rewritten into history on every import. A fresh clone therefore starts
+//! with an empty ledger; the conclusions of past runs live in `openspec/.../tasks.md` (which names the
+//! run, the NET/REGRESS count and the cases that moved), and each new increment re-imports from there.
+//! Do not go back to loose snapshot files, and do not open a second database: import every harness run
+//! into this one under a name that says what it measured (`ledger runs` lists them, `ledger diff A B`
+//! compares two).
+//!
 //! Model: PASS rows are implicit. `case` is the global key dictionary, `run`
 //! records one snapshot (name/total/pass), `run_fail` stores only the failing
 //! set per run. A/B semantics fall straight out of set differences:

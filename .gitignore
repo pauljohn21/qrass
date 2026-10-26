@@ -1,3 +1,6 @@
 /target
 .DS_Store
 .codegraph/
+# hrx A/B ledger: the local record, imported per increment (`ledger runs`).
+# A multi-MB binary must not be rewritten into history on every measurement.
+reports/hrx.db

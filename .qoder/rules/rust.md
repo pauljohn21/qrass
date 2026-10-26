@@ -79,13 +79,16 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - **用例 key MUST 唯一**：旧 `tests/hrx.rs` 用 `<basename>.hrx::<case>` 做 key，而语料在不同目录重名（两个
   `function.hrx`），11,486 条里实测 **1,135 个重复 key / 33 个同时挂着 PASS 与 FAIL** → 一个文件的通过会
   掩盖另一个的失败（一度把回归归到错误的文件上）。现在 key = 相对 `spec/` 的全路径，且 harness **有撞名断言**；
-  旧制式的 run 与新 run **不得跨制式 diff**（`reports/hrx.db` 的 `case-key-scheme` note 已记明，基线
-  `target/baselines/head-600-pathkey.tsv`）。
+  旧制式的 run 与新 run **不得跨制式 diff**（`reports/hrx.db` 的 `case-key-scheme` note 已记明）。
 - **“报了个错”≠“按金样报错”**：旧 harness 把任意 `Err` 当 `error` 用例通过，使 `FATAL` 翻转虚报 **+385**；
   逐条比对金样 `Error:` 首行后真值是 **+1**（384 条的期望消息是 `Expected identifier.`、单位错误、
   `DEPRECATION WARNING`——它们属 P1/P7 待实现的消息，不是错误管道）。批量新增/回退 MUST 抽样看**期望文本**，
   并区分“指标修正”与“真收益”。
-- 基线/阶段快照存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线而拿空基线比出垃圾读数）。
+- **A/B 记录只住 `reports/hrx.db` 的具名 run**：harness 的唯一瞬态输出是 `target/hrx-snapshot.tsv`，跑完立刻
+  `ledger import <增量名> target/hrx-snapshot.tsv`，事后靠 `ledger runs` / `ledger diff` 追溯。
+  **MUST NOT** 攒快照文件或第二个 sqlite（`crates/ledger` 的存在理由就是取代旧的 `reports/hrx-*.tsv` sprawl；
+  本轮曾误把基线存成 `target/baselines/*.tsv`，15 个文件 / 27 MB，已全部入库并删除）。
+  为验收新建的空库（`--db=<临时路径>`）只用于复算，**不作为记录留存**；`/tmp` 会被系统清理。
 - **任何“为 0 / 全通过”的统计读数 MUST 先过一条阳性对照**（已知应该为真的用例）。本轮实错：一个
   `substr` 切片多吞一个引号字符，使“仅差空白/仅差大小写”都报 0，差点得出“无 cheap win”的结论。
 - **量具覆盖面 MUST 等于计划引用的簇**：`tests/hrx.rs` 的 `SPEC_DIRS` 长期缺 `operators`/`parser`/`variables`
