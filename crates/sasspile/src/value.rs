@@ -126,6 +126,15 @@ fn measure(unit: &str) -> (&str, f64) {
 /// round-trip precision (so `1in + 1px` is `97px`, and a parsed `f64::MAX` literal keeps
 /// the 17 digits that actually identify it).
 fn format_number(value: f64) -> String {
+    if value.is_infinite() {
+        // Sass spells the infinities `infinity` / `-infinity`; Rust's `Display` gives `inf`, which CSS
+        // would not read (`values/calculation/calc/constant::infinity/math/unsimplified/from_variable`).
+        return if value > 0.0 {
+            "infinity".to_string()
+        } else {
+            "-infinity".to_string()
+        };
+    }
     if value == 0.0 || (value.fract() == 0.0 && value.abs() < 1e15) {
         return format!("{}", value as i64);
     }

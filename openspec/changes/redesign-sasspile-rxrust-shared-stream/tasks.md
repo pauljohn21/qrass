@@ -283,7 +283,7 @@
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
-- [ ] 1.7a **调用脊柱（下一轮的主入刀；本轮已把契约从语料读全，不再靠想）**。选型依据（逐条量具）：
+- [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
       期望 `true`/`false`/`null` 的 616 条失败里 **397/400 需要模块或内置函数**，只有 3 条是纯值比较
       ⇒ 先做比较/布尔 `Expr` **不是杠杆**；杠杆是“调用求值”。`math` 家频次：`div` 185、`pow` 149、
       `clamp` 43、`hypot` 33。**以下均为 `core_functions/math/div.hrx` 实测期望，不是推定**：
@@ -308,6 +308,26 @@
       新增致命错误类（arity 两条）必须走 0′.3b 的流程：空库重跑全量 `regress=0`，否则改为非致命（保留逐字）。
       **本切片验收判据**：`div.hrx` 的 `unitless/{whole,fraction,named}` + `unit/{numerator,denominator,same,compatible}`
       转 PASS，且无效错误不增。
+  - **已落地与实测**：翻转了 `unitless/{whole,fraction,named}`、`unit/{numerator,same,compatible}`、
+        `error/{too_few_args,too_many_args}` 共 9 条，外加 1 条因 `format_number` 拼写修正而过的
+        `values/calculation/calc/constant::infinity/math/unsimplified/from_variable`（`math.div(1,0)` 得
+        Rust 的 `inf`，而 Sass 写 `infinity`；NaN 两边拼写本就一致所以无需特例）。合计
+        **643 → 653（实质 478 → 488）**，新空库重跑两侧 `ledger diff prev spine` = **regress=0 net=10**，
+        入库 run = `call-spine-653`；无效错误保持 55 不增。**未达成项**：`unit/denominator`、
+        `unit/incompatible`、`unit/unknown`、`non_numeric/*` —— 它们要的正是复合（有理）单位，属单位代数，
+        本轮按契约“推辞不猜”（测试里钉住逐字输出）。
+  - **两个真实教训（已入代码注释）**：
+        ① **词法事实错两次**：`(` 与 `)` 都不是 STRUCTURAL，且 `(` 不冲刷当前 word，所以
+           `math.div(6)` 到达时是**一个**词素 `Word("math.div(6")`（被调名+括号+首个实参粘在一起）。
+           我前两版都建立在“`Word` 以 `(` 结尾”上，结果**判定集完全不动**（net=0）——这就是
+           “分类粒度不能超过词法”的代价；修法是在 `calls.rs` 里局部规范化括号边界（`brackets`/`cut`），
+           不动上游词法，`url(http://x)`、`-a-calc(` 的现有行为不受影响。
+        ② **`sasslint` 真的拦住了我**：`no-recursive-descent` 的子串禁 `fn resolve(`（记录已删的拉式引擎
+           递归解算器），新写的签名查表刚好叫 `resolve(` 就撞上门。选择是**改名 `signature` 而不是放松闸**
+           ——放松会把真模式以后放过去；测试 `gate_sasspile_is_clean` 仍是绿的。
+  - **往后变便宜了**：注册表添加一个函数 = 一条 `Builtin`（名字+params+body），arity 消息与 `$label:` 绑定
+        自动到位；下一个目标按频次是 `math.pow`(149)、`math.clamp`(43)、`math.hypot`(33)。`@use` 的别名
+        (`as foo`) 仍属 P5.1（现在按字面名匹配，所以 `math.div` 无需加载器就能跑）。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)

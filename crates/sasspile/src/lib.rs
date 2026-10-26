@@ -12,6 +12,8 @@ use std::fmt;
 
 use rxrust::prelude::*;
 
+mod builtins;
+mod calls;
 mod env;
 mod exec;
 mod expr;
@@ -32,6 +34,12 @@ use crate::phases::{Exec, Lexer, Render, Structurize};
 pub enum ErrorKind {
     /// a variable reference with no binding at this position
     UndefinedVariable,
+    /// a known builtin called with fewer arguments than its signature has parameters; the message is
+    /// the oracle's own (`Missing argument $number2.`, `core_functions/math/div.hrx::error/too_few_args`)
+    MissingArgument,
+    /// a known builtin called with more arguments than its signature accepts, again stated by the
+    /// oracle (`Only 2 arguments allowed, but 3 were passed.`, `div.hrx::error/too_many_args`)
+    TooManyArguments,
     /// everything else
     Other,
 }
@@ -59,7 +67,11 @@ pub enum ErrorKind {
 /// (`Expected identifier.`, `$red: Expected 0.5px to have unit "%"…`, `DEPRECATION WARNING …`) that we
 /// do not produce. Those cases stay FAIL until P1's unit algebra and P7's diagnostics emit the message
 /// the oracle names.
-const FATAL: &[ErrorKind] = &[ErrorKind::UndefinedVariable];
+const FATAL: &[ErrorKind] = &[
+    ErrorKind::UndefinedVariable,
+    ErrorKind::MissingArgument,
+    ErrorKind::TooManyArguments,
+];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
 /// value a fallback can quietly swallow.

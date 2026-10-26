@@ -10,6 +10,7 @@
 //! whitespace on both sides, so `10px - 5px` subtracts while `10px -5px` is a two-item list.
 
 use crate::SassError;
+use crate::calls::Argument;
 use crate::env::Env;
 use crate::lexer::{Tok, canon, render, token_text};
 use crate::value::Value;
@@ -29,6 +30,12 @@ pub enum Expr {
     Text(String),
     /// `$name` — the lookup key never carries the `$` (see [`Env`])
     Var(String),
+    /// a call into a builtin whose signature we have (`1.7a`); each argument keeps its `$label:` so
+    /// binding can be by name rather than by position
+    Call {
+        name: String,
+        args: Vec<Argument>,
+    },
     /// the parts of an interpolated run, concatenated with **no extra space** at eval
     Concat(Vec<Expr>),
 }
@@ -127,11 +134,24 @@ pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
     if protected(toks) {
         return None;
     }
+    // A call is tried first because its run is frequently dynamic (`math.div($number2: 3, …)`): the
+    // `$label:` there is an argument name, and only the signature check inside [`crate::calls`] can tell
+    // that apart from a reference. Nothing else about a run changes when it is a call.
+    if let Some((name, args)) = crate::calls::known_call(toks) {
+        return Some(Expr::Call { name, args });
+    }
     if has_dynamic(toks) {
         interpolation(toks)
     } else {
         arithmetic(toks).or_else(|| concatenation(toks))
     }
+}
+
+/// One argument's expression. Unlike a declaration value, an argument **is** an expression even when it is
+/// a lone number (`math.div(6, 3)` → `2`), so the "a bare number is not an expression yet" filter that
+/// [`crate::exec::State::evaluated`] applies to whole declaration values does not apply here.
+pub fn argument_expr(toks: &[Tok]) -> Option<Expr> {
+    from_tokens(toks)
 }
 
 /// The interpolation shape only — what a **selector** may use, because a selector's lexemes
@@ -367,6 +387,15 @@ impl Expr {
             Expr::Num(value, unit) => Ok(Value::Number(*value, unit.clone())),
             Expr::Text(text) => Ok(Value::Raw(text.clone())),
             Expr::Var(name) => env.get(name),
+            Expr::Call { name, args } => args
+                .iter()
+                .map(|arg| {
+                    let value = argument_expr(&arg.toks)
+                        .ok_or_else(|| SassError::new("argument is not an expression yet"))?;
+                    value.eval(env).map(|value| (arg.label.clone(), value))
+                })
+                .collect::<Result<Vec<(Option<String>, Value)>, SassError>>()
+                .and_then(|given| crate::builtins::evaluate(name, given)),
             Expr::Binary(lhs, op, rhs) => op.apply(&lhs.eval(env)?, &rhs.eval(env)?),
             Expr::Concat(parts) => parts
                 .iter()

@@ -284,9 +284,6 @@ impl State {
     /// evaluating the run at all would resolve a reference that does not exist
     /// (`expr::named_argument`; measured as 1,611 cases given an invalid `Undefined variable`).
     fn evaluated(&self, toks: &[Tok], plain: bool) -> Result<Option<Value>, SassError> {
-        if expr::named_argument(toks) {
-            return Ok(None);
-        }
         let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
             other => Some(other),
@@ -294,6 +291,13 @@ impl State {
         let Some(expr) = arithmetic.or_else(|| expr::interpolated(toks)) else {
             return Ok(None);
         };
+        // A run that **passes named arguments** is evaluated only when it resolved to a call we have a
+        // signature for. Its `$name:` is an argument label, so evaluating anything else would resolve a
+        // reference that does not exist (`expr::named_argument`; measured as 1,611 cases given an invalid
+        // `Undefined variable`). An unknown callee such as `color.hwb($hue: 180)` therefore keeps its text.
+        if expr::named_argument(toks) && !matches!(expr, Expr::Call { .. }) {
+            return Ok(None);
+        }
         match expr.eval(&self.env) {
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_fatal() && !(plain || expr::special_call(toks)) => Err(err),

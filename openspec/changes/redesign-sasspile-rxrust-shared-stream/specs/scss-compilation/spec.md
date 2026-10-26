@@ -269,6 +269,36 @@ mixin 体按实参代入**调用处选择器上下文**展开;`@content` MUST �
 - **WHEN** `@function twice($n){ @return $n*2 } a { w: twice(3px) }`
 - **THEN** `a { w: 6px; }`
 
+### Requirement: 内置函数调用分派（签名驱动）
+
+当一个声明值**整体**是一个调用且 callee 在注册表里有签名时，MUST 按签名绑定实参并求值；参数个数与
+签名不符时 MUST 终止编译并报出规范自己的消息（而不是默默不报错地输出逐字文本）。`$name:` 形实参 MUST 当作
+**参数标签**按名绑定（与书写顺序无关），不得去环境里查这个变量（参 1.2b）。
+
+无签名或当前代数无法表达的值 MUST 保持逐字文本，不得猜测：callee 未知（如 `color.hwb`）、调用只是长串的
+一部分（`math.div(6, 3) * 1px`）、结果需要**复合（有理）单位**（`math.div(6in, 3s)`、`math.div(6c, 3d)`）。
+括号边界在词法上是**粘在词素里**的（`(` 与 `)` 非 STRUCTURAL且 `(` 不冲刷），读调用时先局部规范化括号边界，
+不得因此改动上游分类（`url(http://x)`、`-a-calc(` 的行为不变）。
+
+参照：`core_functions/math/div.hrx`（已落地的签名：`math.div`）。
+
+#### Scenario: 单位律按金样
+- **WHEN** `math.div(6, 3)` / `math.div(6px, 3)` / `math.div(6px, 3px)` / `math.div(6in, 3px)`
+- **THEN** 依次为 `2` / `2px` / `2` / `192`（可换算单位先换算再约，`1in = 96px`）
+
+#### Scenario: 具名实参与顺序无关
+- **WHEN** `a {b: math.div($number2: 3, $number1: 6)}`
+- **THEN** `b: 2`（两个 `$label:` 按参数名绑定，均未报 `Undefined variable`）
+
+#### Scenario: arity 消息就是规范的消息
+- **WHEN** `math.div(6)` 与 `math.div(6, 3, 1)`
+- **THEN** 分别报 `Missing argument $number2.` 与 `Only 2 arguments allowed, but 3 were passed.`
+      （单/复数两侧各自变化：`Only 1 argument allowed, but 2 were passed.`）
+
+#### Scenario: 不知道的就不猜
+- **WHEN** `color.hwb(180, 50%, 50%)` 或 `math.div(6in, 3s)` 或 `math.div(6, 3) * 1px`
+- **THEN** 逐字输出原表达式（不产出臆造的数值，也不臆造错误）
+
 ### Requirement: 模块系统 `@use`/`@forward`/`@import` 与加载器
 
 `@use "path" [as ns|as *|as null] [with (…) | (…)]` MUST 加载模块、按命名空间访问成员、`with` 配置
