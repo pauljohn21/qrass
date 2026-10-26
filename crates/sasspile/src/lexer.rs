@@ -326,6 +326,47 @@ pub fn token_text(tok: &Tok) -> String {
     text_of(std::slice::from_ref(tok), false)
 }
 
+/// A declaration flag on a binding: `!` glued to an identifier (`!default`, `!global`). The lexer keeps
+/// it as one `Word`, so the test never re-scans rendered text.
+fn is_flag(tok: &Tok) -> bool {
+    matches!(tok, Tok::Word(word) if word.starts_with('!')
+        && word.len() > 1
+        && word[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+}
+
+/// A **binding's** value without its trailing declaration flags: `!default` / `!global` describe the
+/// binding, they are not part of the value, and Sass never serialises them —
+/// `$a: b !default !default;` then `c {d: $a}` prints `d: b`
+/// (`variables/double_flag.hrx::default`; the `!global` twin is `::global`). Repeated flags are
+/// deprecated but still parsed, which is exactly what those two fixtures state.
+///
+/// Only a binding goes through this. In an ordinary declaration `!important` is CSS text and must
+/// survive (P7 7.1), so [`crate::exec`] must not call this there. The *meaning* of `!default` (do not
+/// overwrite an existing binding) is likewise untouched here — the only fixtures for it configure a
+/// module (`directives/use/with/*`), so it belongs to P3.6/P5.1, not to this peel.
+pub fn without_flags(toks: &[Tok]) -> &[Tok] {
+    let meaningful: Vec<usize> = toks
+        .iter()
+        .enumerate()
+        .filter(|(_, tok)| !matches!(tok, Tok::Space(_) | Tok::Silent(_)))
+        .map(|(index, _)| index)
+        .collect();
+    let ends_with_flag = meaningful
+        .last()
+        .is_some_and(|index| is_flag(&toks[*index]));
+    if !ends_with_flag {
+        return toks;
+    }
+    // Cut after the last meaningful lexeme that is not a flag, so the whole trailing run goes —
+    // `b !default !default` yields `b`, not `b !default`.
+    let cut = meaningful
+        .iter()
+        .rev()
+        .find(|index| !is_flag(&toks[**index]))
+        .map_or(0, |index| index + 1);
+    &toks[..cut]
+}
+
 /// Collapse runs of whitespace to single spaces and trim, the canonical CSS text form.
 pub fn canon(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")

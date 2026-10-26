@@ -13,7 +13,7 @@
 
 use crate::env::Env;
 use crate::expr::{self, Expr};
-use crate::lexer::{Event, Tok, render, render_raw, token_text};
+use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
 use crate::selector::{Piece, PropName, Selector};
 use crate::value::Value;
 
@@ -109,7 +109,9 @@ impl State {
                     // declaration reads the value this position has, so document order holds
                     // without any snapshot being carried around.
                     Target::Variable(var) => {
-                        let bound = self.value_of(&value)?;
+                        // `!default` / `!global` describe the binding, not its value, and never reach
+                        // CSS (`lexer::without_flags`); a declaration's `!important` keeps its text.
+                        let bound = self.value_of(without_flags(&value))?;
                         self.env.bind(&var, bound);
                     }
                     Target::Property(name) => {

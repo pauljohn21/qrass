@@ -73,6 +73,16 @@ custom property `--*` MUST 保留其原始值字面(**内部不做 Sass 求值**
 - **WHEN** `a { $x: 1 !global } b { c: $x }`
 - **THEN** `b { c: 1; }`
 
+#### Scenario: 旗标不是值的一部分
+- **WHEN** `$a: b !default !default;` 后 `c {d: $a}`(及 `!global` 同形)
+- **THEN** `c { d: b; }` —— 重复旗标仅 deprecated 但仍可解析,且旗标 MUST NOT 出现在输出里
+  (`variables/double_flag.hrx::default` / `::global`)
+
+#### Scenario: 普通声明的 `!` 文本逐字保留
+- **WHEN** `.x { --important: value !important; --multiple: !important !important; }`
+- **THEN** 两个自定义属性值原样输出(它们不属上述绑定旗标剔除)
+  (`css/custom_properties/exclamation.hrx`)
+
 ### Requirement: `@debug` / `@warn` / `@error` 与 deprecation
 
 `@debug` MUST 输出调试值(流式诊断,不中断);`@warn` MUST 输出 `[…]`/消息形式的 warning 不中断;
