@@ -328,6 +328,20 @@
   - **往后变便宜了**：注册表添加一个函数 = 一条 `Builtin`（名字+params+body），arity 消息与 `$label:` 绑定
         自动到位；下一个目标按频次是 `math.pow`(149)、`math.clamp`(43)、`math.hypot`(33)。`@use` 的别名
         (`as foo`) 仍属 P5.1（现在按字面名匹配，所以 `math.div` 无需加载器就能跑）。
+  - **第二批（同轮紧接看落地）：`math.round`/`abs`/`ceil`/`floor` + 类型校验 + 带符号字面量**。
+        实测 **653 → 692**（新空库 `ledger diff prev math-family` = **regress=0 net=39**，入库 run
+        `math-family-692`），新通过 39 条中 **38 条就在 `core_functions/math`**（目标家族），实质通过
+        488 → **527**；无效错误仍 **55**（没有臆造出新错误）。
+        两个语料细节决定了形状，**不是统一规则**：
+        • **类型校验按函数而不按全局**：`round.hrx::error/type` 要致命错 `$number: c is not a number.`
+          （值按 CSS 形式渲染：无引号标识符不加引号、串保留引号 ⇒ `$number: "0" is not a number.`），
+          而 `div.hrx::non_numeric/numerator` 要的是 **deprecation warning + 仍然出值**——所以 `div` 的体
+          对非数字“推辞”而不是报错。把校验做成全局一律致命就是臆造错误。
+        • **前导符号属于数字**：`math.round(-5.6)` 一度报出假错 `$number: -5.6 is not a number.`，因为
+          `number_lexeme` 不吃 `-`/`+`（与 `@for` 负界限同一缺口）；修后 `10px -5px` 这类“无运算符的两
+          个操作数”仍按原路逐字（`arithmetic` 因 operators 不匹配而 bail），未把空格列表误当成减法。
+        未达成项不变：`atan2`/`pow`/`clamp`/`log`/`hypot`/三角函数需要真正的数值格式精度与单位规则（含
+        `1.4999999999949998` 这类精度边界），复合单位仍是 `unit/{denominator,incompatible,unknown}` 的卡点。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)

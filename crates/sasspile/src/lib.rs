@@ -40,6 +40,9 @@ pub enum ErrorKind {
     /// a known builtin called with more arguments than its signature accepts, again stated by the
     /// oracle (`Only 2 arguments allowed, but 3 were passed.`, `div.hrx::error/too_many_args`)
     TooManyArguments,
+    /// a builtin's number parameter received another value type; again the oracle's own words
+    /// (`$number: c is not a number.`, `core_functions/math/round.hrx::error/type`)
+    NotANumber,
     /// everything else
     Other,
 }
@@ -71,6 +74,7 @@ const FATAL: &[ErrorKind] = &[
     ErrorKind::UndefinedVariable,
     ErrorKind::MissingArgument,
     ErrorKind::TooManyArguments,
+    ErrorKind::NotANumber,
 ];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a

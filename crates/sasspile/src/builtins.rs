@@ -57,7 +57,63 @@ fn to_base(unit: &str) -> Option<f64> {
     }
 }
 
-static BUILTINS: &[&Builtin] = &[&MATH_DIV];
+static BUILTINS: &[&Builtin] = &[&MATH_DIV, &MATH_ROUND, &MATH_ABS, &MATH_CEIL, &MATH_FLOOR];
+
+/// The rounding family shares one parameter name and one type contract, both stated by the corpus:
+/// `Missing argument $number.` and `$number: c is not a number.` (`core_functions/math/{round,abs,ceil,
+/// floor}.hrx::error/*`). Their units are preserved (`7px / 4em` cases need compound units and are out of
+/// reach), and every unitless golden here is matched exactly: `round(2.2)` → `2`, `round(-5.6)` → `-6`,
+/// `round(0.2)` → `0`, `abs(-17)` → `17`, `ceil(-1.2)` → `-1`, `floor(-1.2)` → `-2`.
+static MATH_ROUND: Builtin = Builtin {
+    name: "math.round",
+    params: &["number"],
+    apply: |args| {
+        number_arg("number", &args).map(|(value, unit)| Value::Number(value.round(), unit))
+    },
+};
+
+static MATH_ABS: Builtin = Builtin {
+    name: "math.abs",
+    params: &["number"],
+    apply: |args| number_arg("number", &args).map(|(value, unit)| Value::Number(value.abs(), unit)),
+};
+
+static MATH_CEIL: Builtin = Builtin {
+    name: "math.ceil",
+    params: &["number"],
+    apply: |args| {
+        number_arg("number", &args).map(|(value, unit)| Value::Number(value.ceil(), unit))
+    },
+};
+
+static MATH_FLOOR: Builtin = Builtin {
+    name: "math.floor",
+    params: &["number"],
+    apply: |args| {
+        number_arg("number", &args).map(|(value, unit)| Value::Number(value.floor(), unit))
+    },
+};
+
+/// A parameter that must be a number. The message is the oracle's own, and the value renders in CSS form
+/// so a quoted string keeps its quotes (`$number: "0" is not a number.`) while an unquoted identifier does
+/// not (`$number: c is not a number.`).
+///
+/// Not every builtin uses this: `math.div` with a non-number emits a deprecation **warning** and still
+/// produces a value (`div.hrx::non_numeric/numerator`), so its body declines instead of failing — the
+/// difference lives in the body, because that is where the corpus differs.
+fn number_arg(param: &str, bound: &[Value]) -> Result<(f64, String), SassError> {
+    match bound.first() {
+        Some(Value::Number(value, unit)) => Ok((*value, unit.clone())),
+        Some(other) => Err(SassError::typed(
+            ErrorKind::NotANumber,
+            format!("${param}: {} is not a number.", other.to_css()),
+        )),
+        None => Err(SassError::typed(
+            ErrorKind::MissingArgument,
+            format!("Missing argument ${param}."),
+        )),
+    }
+}
 
 /// The signature for a callee name, if we have one. Unknown names (`color.hwb`, `var`, `map.merge`) are
 /// `None`, so `calls::known_call` leaves the run exactly as it is today.

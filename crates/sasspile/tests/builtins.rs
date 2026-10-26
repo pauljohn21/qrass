@@ -68,6 +68,49 @@ async fn arity_diagnostics_are_the_oracle_words() {
     }
 }
 
+/// `core_functions/math/{round,abs,ceil,floor}.hrx` — the rounding family the spine makes cheap: one
+/// `Builtin` each, same parameter name, unitless results matched exactly. `round` breaks ties away from
+/// zero (`-5.6` → `-6`) and a value just under `.5` inside Sass's precision still gives `1`.
+#[tokio::test]
+async fn rounding_family_matches_goldens() {
+    assert_eq!(css("a {b: math.round(2.2)}").await, "a {\n  b: 2;\n}\n");
+    assert_eq!(css("a {b: math.round(-5.6)}").await, "a {\n  b: -6;\n}\n");
+    assert_eq!(css("a {b: math.round(0.2)}").await, "a {\n  b: 0;\n}\n");
+    assert_eq!(
+        css("a {b: math.round(1.4999999999949998)}").await,
+        "a {\n  b: 1;\n}\n"
+    );
+    assert_eq!(css("a {b: math.abs(-17)}").await, "a {\n  b: 17;\n}\n");
+    assert_eq!(
+        css("a {b: math.abs(-123.456)}").await,
+        "a {\n  b: 123.456;\n}\n"
+    );
+    assert_eq!(css("a {b: math.ceil(1.2)}").await, "a {\n  b: 2;\n}\n");
+    assert_eq!(css("a {b: math.floor(-1.2)}").await, "a {\n  b: -2;\n}\n");
+}
+
+/// The type contract differs **per function**, and the corpus is what says so: `round` wants
+/// `$number: c is not a number.` (value rendered in CSS form — a bare identifier unquoted, a string
+/// quoted), while `div.hrx::non_numeric/numerator` expects a deprecation **warning** and a real output.
+/// So `div` declines on a non-number instead of inventing an error the oracle does not state.
+#[tokio::test]
+async fn number_parameters_validate_their_own_way() {
+    for (input, want) in [
+        ("a {b: math.round(c)}", "$number: c is not a number."),
+        ("a {b: math.ceil(\"0\")}", "$number: \"0\" is not a number."),
+        ("a {b: math.abs()}", "Missing argument $number."),
+    ] {
+        let err = compile(input)
+            .await
+            .expect_err("a non-number argument to a number parameter is an error");
+        assert_eq!(err.message, want, "for input {input}");
+    }
+    assert_eq!(
+        css("a {b: math.div(c, 3)}").await,
+        "a {\n  b: math.div(c, 3);\n}\n"
+    );
+}
+
 /// A builtin's result is a value, so it also has to be *spelled* the way Sass spells it:
 /// `values/calculation/calc/constant::infinity/math/unsimplified/from_variable` binds
 /// `$var: math.div(1, 0)` and prints `calc(infinity * (1% + 1px))` — Rust's `inf` would not read as CSS.

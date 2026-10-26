@@ -185,17 +185,30 @@ fn classify<'a>(tok: &'a Tok, index: usize, run: &[Tok]) -> Option<Piece<'a>> {
 /// identifier-shaped unit. `52)` or `1px)` are not numbers — a unit is alphanumeric, so a
 /// CSS call like `rgb(18 none 66)` bails to verbatim text instead of losing its paren.
 fn number_lexeme(word: &str) -> Option<(f64, &str)> {
-    let digits = word
+    // A leading sign belongs to the number: the lexer defers a boundary `-` until it sees the next
+    // character, so `-5.6` and `-7px` arrive as one lexeme and Sass reads them as negative numbers
+    // (`math.round(-5.6)` → `-6`). This was already required for `@for`'s negative bounds, and reading it
+    // as text instead produced a false `$number: -5.6 is not a number.`.
+    let signed = word.starts_with(&['-', '+'][..]);
+    let (sign, digits_area) = if signed {
+        (&word[..1], &word[1..])
+    } else {
+        ("", word)
+    };
+    let digits = digits_area
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(word.len());
+        .unwrap_or(digits_area.len());
     if digits == 0 {
         return None;
     }
-    let (numeric, unit) = word.split_at(digits);
+    let (numeric, unit) = digits_area.split_at(digits);
     if !unit.chars().all(|c| c.is_ascii_alphanumeric()) {
         return None;
     }
-    numeric.parse::<f64>().ok().map(|value| (value, unit))
+    format!("{sign}{numeric}")
+        .parse::<f64>()
+        .ok()
+        .map(|value| (value, unit))
 }
 
 /// Identifiers joined by `+`/`-` are Sass's **string concatenation**, and the two operators print
@@ -390,9 +403,15 @@ impl Expr {
             Expr::Call { name, args } => args
                 .iter()
                 .map(|arg| {
-                    let value = argument_expr(&arg.toks)
-                        .ok_or_else(|| SassError::new("argument is not an expression yet"))?;
-                    value.eval(env).map(|value| (arg.label.clone(), value))
+                    // An argument that is not (yet) an expression is still a **value** in Sass — an
+                    // unquoted identifier, a color, a list — so it is carried as text and left to the
+                    // builtin's own parameter check, which is what produces the corpus's
+                    // `$number: c is not a number.` instead of skipping the call in silence.
+                    let value = match argument_expr(&arg.toks) {
+                        Some(expr) => expr.eval(env)?,
+                        None => Value::Raw(canon(&render(&arg.toks))),
+                    };
+                    Ok((arg.label.clone(), value))
                 })
                 .collect::<Result<Vec<(Option<String>, Value)>, SassError>>()
                 .and_then(|given| crate::builtins::evaluate(name, given)),

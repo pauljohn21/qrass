@@ -31,10 +31,10 @@ workspace** (its dangling member entry was breaking every `cargo` invocation). D
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Tests | `cargo test --all-targets` | **72 passed / 0 failed / 0 ignored** |
+| Tests | `cargo test --all-targets` | **74 passed / 0 failed / 0 ignored** |
 | Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
 | Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
-| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=653` (**5.7 %**), of which **`pass_substantive=488`** and `pass_empty_expectation=165` |
+| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=692` (**6.0 %**), of which **`pass_substantive=527`** and `pass_empty_expectation=165` |
 | Clippy | `cargo clippy --all-targets -- -D warnings` | **clean (exit 0)** |
 | Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` | valid |
 
@@ -198,9 +198,11 @@ exists to remove.
 - Language coverage is early-phase: value/type semantics (`*`, `/` and the slash-vs-list ambiguity,
   `Calculation`, **compound units**, colours), selectors/`@extend`, module `@use`/`@forward`/`@import`,
   callables and CSS at-rules are each specified in the OpenSpec change but only partially implemented.
-- The builtin call spine exists (`calls.rs` + `builtins.rs`, tasks 1.7a) with **one** signature so far
-  (`math.div`); a callee without a signature is never guessed and stays verbatim, which is why the large
-  `core_functions/*` clusters are still red.
+- The builtin call spine exists (`calls.rs` + `builtins.rs`, tasks 1.7a) with **five** signatures so far
+  (`math.div`, `round`, `abs`, `ceil`, `floor`); a callee without a signature is never guessed and stays
+  verbatim, which is why the large `core_functions/*` clusters are still red. Parameter type checks are
+  **per function** because the corpus differs: `math.round(c)` must fail with
+  `$number: c is not a number.`, while `math.div(c, 3)` only warns and still produces a value.
 - Most of the remaining `core_functions/color` failures need **real messages and real function
   behaviour** (P1.5/P1.7 + P7 diagnostics), not error plumbing: the corpus was bucketed case by case to
   establish that, and the numbers are in `tasks.md`.

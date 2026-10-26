@@ -295,6 +295,17 @@ mixin 体按实参代入**调用处选择器上下文**展开;`@content` MUST �
 - **THEN** 分别报 `Missing argument $number2.` 与 `Only 2 arguments allowed, but 3 were passed.`
       （单/复数两侧各自变化：`Only 1 argument allowed, but 2 were passed.`）
 
+#### Scenario: 类型校验按函数而非全局
+- **WHEN** `math.round(c)` 与 `math.ceil("0")`
+- **THEN** 分别报 `$number: c is not a number.` 与 `$number: "0" is not a number.`
+      （值按 CSS 形式渲染：无引号标识符不加引号，串保留引号）
+- **AND** `math.div(c, 3)` **不得**报错：该簇金样要的是 deprecation warning 且仍然出值
+      （`div.hrx::non_numeric/numerator`），所以它对非数字推辞而非致命
+
+#### Scenario: 前导符号属于数字
+- **WHEN** `math.round(-5.6)` / `math.abs(-17)` / `math.floor(-1.2)`
+- **THEN** 依次为 `-6` / `17` / `-2`；而 `10px -5px`（两个操作数之间无运算符）仍按空格列表逐字，不被误读为减法
+
 #### Scenario: 不知道的就不猜
 - **WHEN** `color.hwb(180, 50%, 50%)` 或 `math.div(6in, 3s)` 或 `math.div(6, 3) * 1px`
 - **THEN** 逐字输出原表达式（不产出臆造的数值，也不臆造错误）
