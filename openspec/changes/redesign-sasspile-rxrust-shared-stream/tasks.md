@@ -20,8 +20,8 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=600/11,486**，量具 =
-> 相对 `spec/` 全路径 key + 错误消息金样，见 0′.3 末“可复核数据”）。
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=616/11,533**，量具 =
+> 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全子集目录，见 0′.3 末“可复核数据”与 0.6）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
       `ObservableType`/`CoreObservable`），在自己 `next` 里逐条发射 0..N 项；删除
@@ -124,9 +124,13 @@
   - **可复核数据**：基线与阶段快照一律存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线导致
     拿空基线比出 `regress=7134` 的垃圾数）。本轮留存：`head-pathkey-599.tsv`（新 key、旧粗量具）、
     `tight-empty.tsv`(599)／`tight-fatal.tsv`(600)（新 key、消息金样量具，翻转前后对照）、
-    `head-600-pathkey.tsv`（**往后的基线**）、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
+    `head-600-pathkey.tsv`、`after-named-args-600.tsv`、`after-quoted-string-600.tsv`、
+    **`head-616-full-scope.tsv`（往后的基线，含 0.6 扩面）**、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
     行为不变型改动用 `cmp` 证逐字节相同；变型必须在**空库** `ledger diff` 列 NET/REGRESS 具体键，并用
     `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够。
+  - **量具自身必须带阳性对照（P1.3 新血泪）**：一次“仅差空白=0、仅差大小写=0”的读数让我差点得出
+    “无 cheap win”的结论，实际是 **`substr` 切片多吞一个引号字符**的 bug；拿一条已知应该为真的用例
+    （`calc-size::case_insensitive`）当对照，才暴露出量具错。任何“为 0 / 全通过”的统计必须先过一条阳性对照。
 - [ ] 0′.5 **共享态改 `C::RcMut`/`C::RcCell`**：内核泛型于 `C: Context`，`Local`(wasm32) 与 `Shared` 两份编译均过；
       禁 kernel 里写死 `Rc`/`Arc`。**现状**：四个内核（`Lexer`/`Structurize`/`Exec`/`Render`）状态全为观察者**独有**
       （无跨观察者共享），故本项当前**无可改之物**；它真正的触发点是 P4（`@content` 闭包流）与 P5（模块多播）。
@@ -176,6 +180,13 @@
 - [ ] 0.3 harness 解析 `options.yml`:尊重 `:todo:`(skip/xfail,不入基线)、`precision`、`--indented` 语法
 - [~] 0.4 harness 断言 `error`/`warning`/`deprecation` 期望(按 P7 诊断范围决定是否计入)。**`error` 已收**：
       比对金样 `Error:` 首行（详见 0′.3 的 0.4 条）；`warning`/`deprecation` 与 span 仍未计入
+- [x] 0.6 **安全子集目录清单补齐（已合入，量具缺陷）**：`operators`、`parser`、`variables` 三个目录从未被
+      `SPEC_DIRS` 扫到，共 **79 例不在计量内**——而任务 1.6 自己写着“经 `operators/**` 金样验 regress=0”，
+      即规格引用了一簇而量具不扫它（已写进 `sasspile-conformance` 的 hrx harness 契约）。
+      实测：总数 11,486 → **11,533**，PASS 600 → **616**（新覆盖里 operators 4/25、parser 1/3、variables 11/3 通过），
+      **旧覆盖集内 PASS→FAIL = 0**（逐条 `comm` 比对，扩面的验收判据就是这条，不是总数上涨）。
+      基线换为 `target/baselines/head-616-full-scope.tsv`。
+      **新暴露的 25+3+3 条已有名字**，已归入 P1（见 1.3b/1.4b）与 P3，不再靠猜。
 
 ## P1 — 值地基:单位代数 + calculation + 全色彩空间 + list/map
 - [~] 1.1 `Value`(带单位 Number/引号态 String/Color/List/Map/Bool/Null)+ `to_css` 规范化。**已有基础,缺单位换算/calc/CSS4 色**
@@ -213,7 +224,22 @@
       • 12 条 = 其他，待逐条再看。
       注：这些**不得用“兜底不报错”抹平**（铁律禁），只能按归属把特征实现掉。
 - [ ] 1.3 **单位换算代数**(length/time/angle/…)+ 精度(`values/numbers/**`)
+- [ ] 1.3b **无引号串拼接的 `+` / `-`（来由 0.6 扩面后新见的 21 条）**：`operators/plus::syntax/*` 要
+      `c+d` / `c + d` / `c/*x*/+d` 均序列化为 `cd`（两加数都是无引号串时是**拼接**，`+` 本身消失）；
+      `operators/minus::syntax/*` 要 `c - d` → `c-d`（`-` 作为字面文本保留且不留空白）。
+      当前我们原样输出 `c + d`/`c -(d)` 等 ⇒ 全族失败。另外 `operators/minus::syntax/comment/*` 还
+      暴露了“串的边界受注释/括号词法影响”（`c-(d)` 应折成 `c-d`）。归 P1 值模型，不是格式修复
+      （不许靠“删空格”凑：期望值依赖操作数类型）。
 - [ ] 1.4 **`Calculation` 表达式树**(`calc/clamp/min/max/var()`,可部分化简、否则原式保留)(`values/calculation/**`)
+- [ ] 1.4b **斜杠两侧的空白取决于来源，不得一刀切（本轮否掉了一个诱人但错的方案）**：
+      表面上看 56 条失败“仅差空白”，全部是 `b / 25%` 应为 `b/25%`（相对颜色语法，
+      `core_functions/color/hwb/one_arg::relative_color/*/alpha` 等）。但语料同时给出**反例**：
+      `values/lists/slash.hrx` 要 `list.slash(c, d)` → `c / d`（带空格），且全库期望输出里
+      **含 `X / Y` 带空格的行有 1,060 处**（如 `calc(infinity / 1px)`）。⇒ 斜杠空白是
+      “这个列表来自**源码文本**还是由**函数构造**”的上下文属性，所以下列两个做法都是假的：
+      ① 序列化时无条件删空格；② 无条件保留。必须等 1.4 的 Calculation/`Value::List`（三种分隔符 +
+      来源标记）与 1.5 的相对颜色解析一起定；`operators/slash::separator/calculation/simplified/*`
+      （`calc(1)/calc(2)` → `1/2`）是同一条依赖。
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)

@@ -86,6 +86,12 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
   `DEPRECATION WARNING`——它们属 P1/P7 待实现的消息，不是错误管道）。批量新增/回退 MUST 抽样看**期望文本**，
   并区分“指标修正”与“真收益”。
 - 基线/阶段快照存 `target/baselines/`（`/tmp` 会被系统清理，已真实丢过一次基线而拿空基线比出垃圾读数）。
+- **任何“为 0 / 全通过”的统计读数 MUST 先过一条阳性对照**（已知应该为真的用例）。本轮实错：一个
+  `substr` 切片多吞一个引号字符，使“仅差空白/仅差大小写”都报 0，差点得出“无 cheap win”的结论。
+- **量具覆盖面 MUST 等于计划引用的簇**：`tests/hrx.rs` 的 `SPEC_DIRS` 长期缺 `operators`/`parser`/`variables`
+  （共 79 例未计量），而任务 1.6 自己写着“经 `operators/**` 金样验”——引用了却扫不到，等于用不存在的
+  判据宣称 regress=0。目录清单以 `sasspile-conformance` 的 hrx harness 契约为准；扩面算范围变更，验收判据是
+  **旧覆盖集内不得有 PASS→FAIL**，不是总数上涨（扩面后基线 600 → 616，总数 11,533）。
 
 ## 🔌 接线纪律（新功能）
 新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测** 钉死，**不接 `compile`**；接线时只在无歧义处触发：含 `/ * %` 的值跳过（护 `font:12px/1.5`、`grid:1/2` 等 CSS 斜杠分隔符），函数走**白名单** `call_builtin`，未知名 `eval→Err→` 原样兜底（`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；会动全局 truthiness 的比较/布尔单列一步、先护选择器（`a > b` combinator 不得当比较）。每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。

@@ -33,6 +33,17 @@ partial `_x.scss`/相对 import 解析);解析 `options.yml`(`:todo:`→skip/xfa
 `output.css`/`error`/`warning` 分**三类别**分别记账(见诊断闸)。harness MUST NOT 用 `eprintln!`,
 统计经 `tracing` 输出。
 
+安全子集的**目录清单一律以本需求为准**(当前为 `core_functions`、`directives`、`values`、`expressions`、
+`css`、`callable`、`operators`、`parser`、`variables`),排除 `non_conformant`、`libsass-*`、`helpers`。
+规格内引用的金样路径 MUST 全部落在该清单内:**任务书引用了某簇而 harness 不扫它,属于量具缺陷**
+(P1.3 才发现 `operators`/`parser`/`variables` 共 79 例从未计量,其中包括任务 1.6 自己点名的 `operators/**`)。
+扩大清单算**范围变更**:总数会变,验收判据为“**旧覆盖集内不得有 PASS→FAIL**”,新簇失败单独归因。
+
+#### Scenario: 量具覆盖补齐不得拿旧用例换分数
+- **WHEN** 向安全子集新增一个目录(如 `operators`)
+- **THEN** 先前已覆盖的 case 逐条比对必须仍为 PASS(允许总数与 PASS 数上升);
+  任何一条由 PASS 转 FAIL 即视为回归, MUST 回退本次扩面
+
 #### Scenario: 多文件模块用例
 - **WHEN** 一个 hrx 含 `input.scss` + `_other.scss`
 - **THEN** harness 按同 case key 聚合、以 `input.scss` 为入口经 `compile` 跑,结果计入该 key

@@ -11,14 +11,23 @@ use std::path::{Path, PathBuf};
 
 use sasspile::compile;
 
-/// Directories we treat as the in-scope oracle (exclude non_conformant/* and libsass*).
-const SPEC_DIRS: [&str; 6] = [
+/// The in-scope oracle directories. Excluded by policy: `non_conformant` (documents behaviour the
+/// spec itself calls non-conformant), `libsass*` (legacy engine issues), and `helpers` (not tests).
+///
+/// `operators`, `parser` and `variables` were missing here until P1.3, although the change's own task
+/// 1.6 cites `operators/**` as its golden source — 79 cases were never measured, which is how a
+/// coverage gap turns into an unfalsifiable "regress=0". Adding them is a scope change: the total moves,
+/// and the acceptance rule is that no previously-covered case may move from PASS to FAIL.
+const SPEC_DIRS: [&str; 9] = [
     "core_functions",
     "directives",
     "values",
     "expressions",
     "css",
     "callable",
+    "operators",
+    "parser",
+    "variables",
 ];
 
 /// One parsed Hyrax case: keyed by its directory path inside the `.hrx`.
