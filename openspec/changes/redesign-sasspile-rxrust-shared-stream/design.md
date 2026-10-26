@@ -73,6 +73,10 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
   (v1 代码里 `render→canon→split_whitespace` 与 `child.replace('&', p)` 属违规形态,重构须消除。)
 - `Expr`(lit/var/interp/bin/cmp/and/or/if/func-call)· `Value`(Number+单位代数、Calculation(不可化简则**原式
   保留**)、Color(CSS4)、List(space|comma|slash, bracketed)、Map(插入序)、String(引号态)、Bool/Null/Argument/Module)。
+  **单位的已定形态**：它是两个有序多重集 `Unit { num, den }`（构造时即排序并抵消同名项），不是单位
+  字符串——所以“抵消”是结构相等而非后置算法，序列化只在 `to_css` 一处（输出律与候选集见 `tasks.md` 1.4d，
+  细节不在此重复以免漂移）。当前实现仍为扁平字符串（`Value::Number(f64, String)`），`math.unit` 因而只能
+  回答单单位，复合单位用例逐项推辞而非猜（已量：强行进入函数体会把 `1/1px` 报成假类型错）。
 - 可调用与模块是一等值:`Mixin`/`SassFunction`/`Module` 入注册表;`@content` 是把 body 作为**子流**传进去的值。
 - `Diagnostic{level,id?,message,spans,trace}` —— 诊断格式精确(双源 trace:invocation + declaration)。
 

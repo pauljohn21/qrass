@@ -280,6 +280,33 @@
       的调用求值），序列化才有依据；**禁止用小写化的补丁“先赢 20 条”**，它会把后两族写错。
       另外 `directives/function/name::error/special/*` 要 `Invalid function name.`（声明 `element()` 等
       保留名非法，且大小写不敏感），它属 P7 诊断，不在本条。
+- [ ] 1.4d **有理（复合）单位：`Unit { num, den }` 取代单位字符串（本轮已从语料钉死判据，未开码——
+      尺寸必须与 1.4 同批，拆开会留下不能提交的死码）**
+      词法输出律（全来自 `core_functions/math/unit.hrx`，不推定）：
+      • `math.unit(1px)` → `"px"`；`math.unit(1)` → `""`；
+      • `1px * 1em * 1rad` → `"px*em*rad"`（分子用 `*` 连接）；
+      • `1px / 1em` → `"px/em"`；`1/1px` → `"px^-1"`（单一分母不加括号）；
+      • `1px * 1em / 1rad / 1s` → `"px*em/(rad*s)"`（多个分母加括号）。
+      求值律（来自 `div.hrx` 与 `units/multiple.hrx`）：
+      • `math.div(6in, 3s) * 1s` → `2in`；`math.div(6c, 3d) * 1d` → `2c`（不可换算时**不约**，成为 `in/s`）；
+      • `calc(1 / (1 / 1px / 1rad))` → `calc(1px * 1rad)`、`calc(1 / (1px * 1rad))` → `calc(1 / 1px / 1rad)`
+        ⇒ 这些期望写在 `calc(…)` 内部，所以**真正的门禁是 1.4 的 `Calculation`**，不是 `Value` 字段本身；
+      • `calc(calc(1px * 1rad / 1ms / 1Hz) / (1px / 1ms))` → `calc(1rad / 1ms / 1Hz)`（同单位两边同时抵消）。
+      数据模型决定：单位是**两个有序多重集**（`num`/`den`），构造时即按名字排序并抵消相同项，
+      因此“抵消”是结构相等而非后置算法；序列化只在 `Value::to_css` 一处按上述律输出。这是**值**，
+      自底向上求值，不引入可遍历的 AST（不违反“禁物化 AST 再遍历”）。
+      必须同批改完的点（任一缺失就编译不过或语义不闭合）：`value.rs`（变体 + `to_css`）、`expr.rs`
+      （`number_lexeme` 产出 `Unit`；`BinOp` 需先有 `Mul`/`Div`）、`calls.rs`/`builtins.rs`
+      （`unit`/`is-unitless`/`compatible`/`min`/`max`/`div` 改用 `Unit`）、`exec.rs` 的 `protected` 精化。
+      **`protected` 精化不能靠“看空白”**：本轮已量到 1,060 处期望输出保留 `X / Y` 反例（如
+      `calc(infinity / 1px)`），而 `1/2` 在普通声明值里仍是**斜杠 list** ⇒ `/` 的语义是上下文属性，
+      必须由“是否在 `calc(…)`/调用参数内”判定，而这正是 1.4 的开关。
+      验收序：先 1.4 的 `Calculation` 框架（原式保留 + 可部分化简），再本项接上 `*`/`/`；
+      候选转 PASS 集：`math/unit::*` 的 6 条复合行、`comparable::unit/to_inverse`、
+      `div::unit/{denominator,incompatible,unknown}`、`values/numbers/units/multiple::division/*`；
+      硬约束：`operators/slash`（`1/2` 仍为 list）不得动，无效错误不得从 55 上涨。
+      尚缺证据因而**暂不做**：同一单位重复出现时的书写（`px^2` 一类幂次记法）——语料里没找到对比用例，
+      实现前必须先取到金样。
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
