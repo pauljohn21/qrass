@@ -86,10 +86,14 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 
 ### 🧪 验收读数也会骗人（工具级红线）
 - `crates/ledger` 只存失败行；同名 run 重导已改为先 `DELETE FROM run_fail`（旧版会把“已修好”报成 phantom REGRESS）。
-- 断言 `regress=0` 前 MUST 在**空 DB**（`--db=<临时路径>`）重做一次 A/B；行为不变型重构还要用 md5/`diff` 证明快照逐字节相同。
-- “同名两快照完全相同”得到的 `regress=0` 不证明任何事；行为变更 MUST 列出**哪几条用例**变了及其规范依据。
+- 断言 `regress=0` 前 MUST 在**另一个空库**重做一次 A/B（`HRX_DB=<临时路径> HRX_RUN=<名> cargo test -p sasspile --test hrx`）；
+  行为不变型重构改为两侧各入同一临时库后 `ledger diff` 证 **net=0**（快照文件已不存在，md5/`diff` 无对象可用）。
+- “同名两结果完全相同”得到的 `regress=0` 不证明任何事； 行为变更 MUST 列出**哪几条用例**变了及其规范依据。
+  “FAIL 变成另一种 FAIL”在 pass 读数上看不见 ⇒ MUST 另数无效错误：`ledger failures <run> "unexpected error"`
+  （它同时匹配 key 与失败详情；这个查询曾因 `LIKE` 绑定 + 吞错而永远返回 0，现由
+  `crates/ledger/tests/failures_query.rs` 钉住，当前基线读数 55）。
 - **通过率必须同时报“实质通过”**：`tests/hrx.rs` 会输出 `pass_substantive`（期望 CSS 非空而通过）与
-  `pass_empty_expectation`（期望输出为空，“啥也不输出”也能对）。当前 635 PASS = **471 实质 + 164 空期望**。
+  `pass_empty_expectation`（期望输出为空，“啥也不输出”也能对）。当前 746 PASS = **581 实质 + 165 空期望**。
   实证：`directives/{if,for,while}` 簇的 39 条“PASS”**全部**是空期望 ⇒ `@if`/`@each`/`@for` 其实一行也没实现，
   而 `tasks.md` 3.2 却写着“已做”（从已删的 v1 流水线带过来的假状态，已更正）。**声称某特征能用时，
   MUST 看该簇的非空期望通过数，而不是看总 pass。**

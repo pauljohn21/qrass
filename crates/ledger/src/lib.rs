@@ -21,7 +21,7 @@
 //!   ledger import <run-name> <file.tsv> [more.tsv...]   (run-name applies to all)
 //!   ledger diff <a> <b>                                  (regressions / net)
 //!   ledger runs                                           (summary table)
-//!   ledger failures <run> [key-substring]
+//!   ledger failures <run> [key-or-detail-substring]
 
 use rusqlite::params;
 use rusqlite::{Connection, Result as QResult};
@@ -105,7 +105,11 @@ fn import_rows(conn: &Connection, name: &str, lines: &[String]) -> QResult<(usiz
         .filter_map(|l| {
             let (status, rest) = l.split_once('\t')?;
             let (key, detail) = rest.split_once('\t').unwrap_or((rest, ""));
-            Some((status.trim().to_string(), key.trim().to_string(), detail.to_string()))
+            Some((
+                status.trim().to_string(),
+                key.trim().to_string(),
+                detail.to_string(),
+            ))
         })
         .collect();
     let total = rows.len();
@@ -116,7 +120,9 @@ fn import_rows(conn: &Connection, name: &str, lines: &[String]) -> QResult<(usiz
          ON CONFLICT(name) DO UPDATE SET ts = excluded.ts, total = excluded.total, pass = excluded.pass",
         params![name, total as i64, pass as i64],
     )?;
-    let ref_run: i64 = tx.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| r.get(0))?;
+    let ref_run: i64 = tx.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| {
+        r.get(0)
+    })?;
     // A re-import replaces the whole verdict for this run: only failures are stored, so without
     // this delete a case that now PASSES keeps its old row and `diff` reports a phantom REGRESS.
     tx.execute("DELETE FROM run_fail WHERE run_id = ?1", params![ref_run])?;
@@ -128,16 +134,17 @@ fn import_rows(conn: &Connection, name: &str, lines: &[String]) -> QResult<(usiz
                 COALESCE((SELECT id FROM case_key WHERE key = ?2), 0),
                 (SELECT id FROM fail_detail WHERE text = ?3)",
     )?;
-    rows.iter().try_fold((), |(), (status, key, detail)| -> QResult<()> {
-        case_ins.execute(params![key])?;
-        (status != "PASS")
-            .then(|| {
-                detail_ins.execute(params![detail])?;
-                fail_ins.execute(params![ref_run, key, detail])
-            })
-            .transpose()?;
-        Ok(())
-    })?;
+    rows.iter()
+        .try_fold((), |(), (status, key, detail)| -> QResult<()> {
+            case_ins.execute(params![key])?;
+            (status != "PASS")
+                .then(|| {
+                    detail_ins.execute(params![detail])?;
+                    fail_ins.execute(params![ref_run, key, detail])
+                })
+                .transpose()?;
+            Ok(())
+        })?;
     drop(case_ins);
     drop(detail_ins);
     drop(fail_ins);
@@ -153,9 +160,13 @@ pub fn note_store(topic: &str, db_path: &Path, lines: &[String]) -> QResult<usiz
     migrate(&conn)?;
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM note WHERE topic = ?1", params![topic])?;
-    let mut ins = tx.prepare("INSERT OR REPLACE INTO note(topic, ord, text) VALUES (?1, ?2, ?3)")?;
+    let mut ins =
+        tx.prepare("INSERT OR REPLACE INTO note(topic, ord, text) VALUES (?1, ?2, ?3)")?;
     let n = lines.iter().enumerate().fold(0usize, |n, (o, line)| {
-        n + ins.execute(params![topic, o as i64, line]).map(|_| 1).unwrap_or(0)
+        n + ins
+            .execute(params![topic, o as i64, line])
+            .map(|_| 1)
+            .unwrap_or(0)
     });
     drop(ins);
     tx.commit()?;
@@ -172,20 +183,21 @@ pub fn note_import(conn: &Connection, args: &[String]) -> QResult<()> {
     };
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM note WHERE topic = ?1", params![topic])?;
-    let mut ins = tx.prepare("INSERT OR REPLACE INTO note(topic, ord, text) VALUES (?1, ?2, ?3)")?;
-    files.iter().try_fold(0usize, |mut ord, f| -> QResult<usize> {
-        let text = std::fs::read_to_string(f).unwrap_or_else(|e| {
-            warn!(file = f, ?e, "unreadable note file");
-            String::new()
-        });
-        ord = text
-            .lines()
-            .fold(ord, |o, line| {
+    let mut ins =
+        tx.prepare("INSERT OR REPLACE INTO note(topic, ord, text) VALUES (?1, ?2, ?3)")?;
+    files
+        .iter()
+        .try_fold(0usize, |mut ord, f| -> QResult<usize> {
+            let text = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                warn!(file = f, ?e, "unreadable note file");
+                String::new()
+            });
+            ord = text.lines().fold(ord, |o, line| {
                 ins.execute(params![topic, o as i64, line]).ok();
                 o + 1
             });
-        Ok(ord)
-    })?;
+            Ok(ord)
+        })?;
     drop(ins);
     tx.commit()?;
     info!(topic, files = files.len(), "note imported");
@@ -206,7 +218,9 @@ fn note_dump(conn: &Connection, args: &[String]) -> QResult<()> {
 }
 
 fn import(conn: &Connection, args: &[String]) -> QResult<()> {
-    let (run, files) = args.split_first().map_or(("", args), |(r, f)| (r.as_str(), f));
+    let (run, files) = args
+        .split_first()
+        .map_or(("", args), |(r, f)| (r.as_str(), f));
     files.iter().enumerate().try_fold((), |(), (i, f)| {
         // with several files and one run name, each file keeps its own name
         // stripped of `hrx-` / `.tsv` unless the caller gave exactly one run
@@ -226,7 +240,9 @@ fn import(conn: &Connection, args: &[String]) -> QResult<()> {
 }
 
 fn run_id(conn: &Connection, name: &str) -> QResult<i64> {
-    conn.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| r.get(0))
+    conn.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| {
+        r.get(0)
+    })
 }
 
 /// A/B verdict: regressions (failing in b, passing in a) and net gains.
@@ -257,7 +273,9 @@ fn diff(conn: &Connection, args: &[String]) -> QResult<()> {
          WHERE f.run_id = ?1
            AND NOT EXISTS (SELECT 1 FROM run_fail g WHERE g.run_id = ?2 AND g.case_id = f.case_id)",
     )?;
-    regress.iter().for_each(|k| info!(target: "ledger", "REGRESS {k}"));
+    regress
+        .iter()
+        .for_each(|k| info!(target: "ledger", "REGRESS {k}"));
     net.iter().for_each(|k| info!(target: "ledger", "NET {k}"));
     info!(a, b, regress = regress.len(), net = net.len(), "AB diff");
     Ok(())
@@ -270,26 +288,52 @@ fn runs(conn: &Connection) -> QResult<()> {
          FROM run ORDER BY id",
     )?;
     let mut rows = st.query_map([], |r| {
-        let (name, total, pass, rate, fails, ts): (String, i64, i64, Option<f64>, i64, String) =
-            (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?);
-        Ok(format!("{name}\t{pass}/{total}\t{}%\tfails={fails}\t{ts}", rate.unwrap_or_default()))
+        let (name, total, pass, rate, fails, ts): (String, i64, i64, Option<f64>, i64, String) = (
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+        );
+        Ok(format!(
+            "{name}\t{pass}/{total}\t{}%\tfails={fails}\t{ts}",
+            rate.unwrap_or_default()
+        ))
     })?;
-    rows.try_fold((), |(), line| line.map(|l: String| info!(target: "ledger", "{l}")))
+    rows.try_fold((), |(), line| {
+        line.map(|l: String| info!(target: "ledger", "{l}"))
+    })
 }
 
+/// List one run's failures. The optional pattern matches the **case key or the failure detail**, because
+/// the second is what the `FAIL → FAIL` blind spot needs: a pass count cannot see that an invented
+/// `Undefined variable` became a different wrong answer, so `ledger failures <run> "unexpected error"` has
+/// to be countable straight from the record (the harness no longer keeps a TSV to grep).
 fn failures(conn: &Connection, args: &[String]) -> QResult<()> {
     let run = args.first().cloned().unwrap_or_default();
     let needle = args.get(1).cloned().unwrap_or_default();
-    let rid = run_id(conn, &run)?;
+    let rows = failing(conn, &run, &needle)?;
+    rows.iter()
+        .for_each(|line| info!(target: "ledger", "{line}"));
+    Ok(())
+}
+
+/// One run's failures whose key **or** detail contains `needle` (empty = all). The pattern is built here
+/// rather than with SQL-side `'%' || ?n`: with that form every filtered lookup returned zero rows —
+/// including a substring plainly present in the unfiltered listing — and `line.map(..).ok()` hid the
+/// error, so a broken query was indistinguishable from “no such failure”. Verified against the harness
+/// measurement: `failing(<baseline>, "unexpected error")` = 55, the number the snapshot had given.
+/// Exposed as a function so a test can assert rows instead of parsing log output.
+pub fn failing(conn: &Connection, run: &str, needle: &str) -> rusqlite::Result<Vec<String>> {
+    let rid = run_id(conn, run)?;
+    let pattern = format!("%{needle}%");
     let mut st = conn.prepare(
         "SELECT c.key || ' | ' || COALESCE(d.text, '')
          FROM run_fail f JOIN case_key c ON c.id = f.case_id
          LEFT JOIN fail_detail d ON d.id = f.detail_id
-         WHERE f.run_id = ?1 AND c.key LIKE '%' || ?2",
+         WHERE f.run_id = ?1 AND (c.key LIKE ?2 OR COALESCE(d.text, '') LIKE ?3)",
     )?;
-    let rows = st.query_map(params![rid, needle], |r| r.get::<_, String>(0))?;
-    rows.for_each(|line| {
-        line.map(|l| info!(target: "ledger", "{l}")).ok();
-    });
-    Ok(())
+    st.query_map(params![rid, pattern, pattern], |r| r.get::<_, String>(0))?
+        .collect()
 }

@@ -153,15 +153,17 @@ rediscover them:
 
 **Verification is not self-evident either.** `ledger` stores only failures, so re-importing a run name
 must clear that run's old `run_fail` rows (it does now, with tests) — otherwise a fixed case reports a
-phantom REGRESS. Before trusting `regress=0`, redo the A/B on an empty `--db`, and for behaviour-neutral
-refactors prove it by a byte-identical snapshot (md5/`diff`), not by a matching pass count. Two more
+phantom REGRESS. Before trusting `regress=0`, redo the A/B against a separate database
+(`HRX_DB=<scratch path> HRX_RUN=<name> cargo test -p sasspile --test hrx`), and for behaviour-neutral
+refactors prove it by recording both sides and showing `ledger diff` gives **net = 0** — there is no
+snapshot file left to `md5` any more. Two more
 traps this repo actually fell into: (a) a statistic that reads **0** is a bug until a known-positive case
 proves the measuring code works (an off-by-one `substr` swallowed a quote and reported "0 rows differ
 only by whitespace/case", nearly producing a false conclusion); (b) **a FAIL that becomes another FAIL is
-invisible in the pass count**, so also count invalid errors (e.g. `grep` the snapshot for
-`unexpected error`) when touching the error path. The A/B record is a **named run in `reports/hrx.db`**
-(import the harness output every increment) — never loose snapshot files, which is the sprawl `ledger`
-exists to remove.
+invisible in the pass count**, so also count invalid errors — `ledger failures <run> "unexpected error"`
+filters on the stored detail text (55 today; that query's own bug and its test are recorded in
+`crates/ledger/tests/failures_query.rs`). The A/B record is a **named run in `reports/hrx.db`**, written
+directly by the harness — never loose snapshot files, which is the sprawl `ledger` exists to remove.
 
 ## Where the rules and knowledge live
 

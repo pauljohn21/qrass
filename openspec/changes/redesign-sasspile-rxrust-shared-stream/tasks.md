@@ -230,7 +230,7 @@
       新增 `tests/named_args.rs` 4 例包边界（全具名/嵌 map/命名空间 callee，以及`hwb($missing)` 仍必错——
       防它退成万能兜底）。需求已写进 `callables/spec.md`“具名实参的位置是标签”。
       **指标教训**（归 0.4 后续）：“FAIL 变 FAIL”在 pass 读数上看不见，所以下一步除了净涨还必须直接测
-      **无效错误计数**（`awk … unexpected error` 行数），否则假错会一直藏在失败阴影里阻塞 P1.7。
+      **无效错误计数**（`ledger failures <run> "unexpected error"` 的行数，当前基线 55），否则假错会一直藏在失败阴影里阻塞 P1.7。
 - [x] 1.2c **串内的 `$` 不是引用（已合入）**：词法新增 `quote`/`escaped` 状态——进入 `"`/`'` 后，反斜杠转义下一
       字符（`\"` 不提前闭合）、遇到同名引号闭合、**`$` 当普通文本**不再开 `Tok::Var`。依据是语料自身：
       `core_functions/selector/extend/simple/pseudo/arg::class/equal` 就传 `selector.extend(":c(@#$)", …)`。

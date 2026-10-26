@@ -8,8 +8,7 @@ use tracing::info;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with_target(false)
         .init();
@@ -18,7 +17,11 @@ fn main() {
         .iter()
         .find(|a| a.starts_with("--db="))
         .map_or(ledger::DB, |a| a.trim_start_matches("--db="));
-    let argv: Vec<String> = args.iter().filter(|a| !a.starts_with("--db=")).cloned().collect();
+    let argv: Vec<String> = args
+        .iter()
+        .filter(|a| !a.starts_with("--db="))
+        .cloned()
+        .collect();
     match Connection::open(Path::new(db)).and_then(|conn| ledger::run(&conn, &argv)) {
         Ok(()) => {}
         Err(e) => info!(?e, "ledger error"),
