@@ -13,11 +13,15 @@ alwaysApply: true
 3. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` + `tasks.md`（现状：**P0′ 已收尾**——四个内核
    `Lexer/Structurize/Exec/Render` 在 `crates/sasspile/src/phases.rs`；0′.1/.2/.3/.4/.6/.7 均已合入：真 `Err` 通道已接且
    `UndefinedVariable` 已致命（守卫：头部只认 `#{}`、special 调用参数、plain-CSS at-rule 体）、选择器/属性名是
-   `src/selector.rs` 的结构化值（`&` 就是词素，`str::replace` 已删）、四条铁律已成 `sasslint` 机器闸。
-   **不得重做这三项**。当前基线 hrx **600/11,486**；唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，
-   触发点在 P4 `@content` / P5 模块多播）。下一步主战场：P1 值地基（单位代数/`Calculation`）与 P7 诊断消息
-   ——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
-架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启。
+   `src/selector.rs` 的结构化值（`&` 就是词素，`str::replace` 已删）、四条铁律已成 `sasslint` 机器闸（CI 门已去
+   `#[ignore]`）。P1 也已落三块：具名实参不当引用（`expr::named_argument`）、标识符 `+`/`-` 拼接
+   （`expr::concatenation`：`c+d`→`cd`、`c - d`→`c-d`）、绑定旗标剔除（`lexer::without_flags`）。
+   **以上均不得重做/重新发明**。当前基线 hrx **635/11,533**（5.51%；A/B 记录 = `reports/hrx.db` 里的具名 run）；
+   唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
+   下一步主战场：P1 剩下的 `*`、`/` 与斜杠歧义、1.4 `Calculation`（同时解锁 degenerate/precision/units 多族）、
+   1.5 色彩与 1.7 内置函数；以及 P7 诊断消息——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
+架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
+成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 
 ## 硬性禁止（违反 = 任务失败）
 1. **禁 Python/脚本**：不用 python3/pip，一律 Rust；测试用 `#[test]` 且放 `tests/`（`src/` 保持纯生产码，禁内联测试）。
@@ -57,6 +61,14 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - **兜底当错误策略**：求值路径上的 `.ok()` / `unwrap_or_else(原文)` → `Err = SassError` 真通道（终点 `into_future()` 给 `Ok(Err(..))`）；
   只有**规范定义为透传**的 CSS 原生构造（calc 不可化简、custom property、未识别 at-rule）才原样保留。
 - **命令式循环/分支**：行首 `for`/`while`/`loop`、`if/else if/else` 链、堆叠守卫 `return` → `fold`/`reduce_initial`/`scan_map`/`filter`。
+- **名字位置当引用**（本轮三类，全在真通道打开后变成假错）：`@for $i from` 的头部、`f($hue: 180)` 的
+  具名实参、`$a: b !default` 的旗标——都是**标签/绑定位**，去查环境就报出假 `Undefined variable`
+  （实测 1,611 + 118 + 2 条）。接线时先问“这个名字是在引用还是在命名”；已落地的判据：
+  `expr::named_argument`、`exec::head_pieces`（只认 `#{}`）、`lexer::without_flags`。
+- **分类粒度不能超过词法**：要判“是不是厂商前缀 CSS 调用”、“这里 `&` 是不是父选择器”、“串里的 `$`
+  是不是引用”，必须先在 `lexer.rs` 里把该构造**做成一个词素**（`-a-calc(`、`&`、带引号串）；否则
+  任何字符串启发式都是错的（已三次实测推翻）。同理：行注释结尾的换行要是 `Space`而不是 `Word(" ")`，
+  否则“首个非空白词素是不是 `Var`”这类词素级判定会静默失效。
 - **拿字符串凑值**：先拼串再 `split_once` 拆、对串二次 char 扫描 → 结构化 `Vec<Tok>→Expr→eval(owned Env)→to_css`，只在无歧义时求值；选择器/属性名要是**结构化值**（`&` 组合不是 `str::replace`）。
 - **GC/共享可变**：`&mut self` 被闭包共享、手写 `HashMap` 当单例总线、env 键 `$`/去`$` 混用 → owned 累加子、一到多才 `Subject`、键约定统一。
 - **自造框架层**（`Stage/fail/drain/drain_one` 之类把流压回值的中转）→ 直接用 rxrust 组合子。

@@ -3,7 +3,7 @@
   "originRepository": "https://github.com/pauljohn21/qrass",
   "sourcePath": "docs/rxrust-source-analysis",
   "sourceCommit": "39994b7e77088bd462ee29f0906b876b391dc1d1",
-  "packagingSnapshot": "working tree of docs/rxrust-source-analysis as of 2026-10-25 (includes the rc.6 line-by-line re-read corrections, which are not yet committed)",
+  "packagingSnapshot": "working tree of docs/rxrust-source-analysis as of 2026-10-26 (P0' closed + first P1 landings; 08 §5 now lists the four machine gates and the ledger-run rule)",
   "sourceOfTruth": "docs/rxrust-source-analysis in the qrass repository",
   "packaged": [
     "README.md",

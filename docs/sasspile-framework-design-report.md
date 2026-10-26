@@ -76,3 +76,25 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 不变量 + rc.6 “自带注释与实现不一致”清单）。防回归入口：`README.md`「Anti-GC red lines」、
 `.qoder/rules/rust.md`「新会话起手」与扩充后的「反回归自查」（新增批量外壳/排序代替时机/兜底当错误策略/假并发四行）。
 待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。
+
+> ⚠️ 上面这行已过期，以下面一节为准（不作历史改写，只加校正）。
+
+## 第二次校正（2026-10-26，源码级）
+
+| 上次说法 | 现况 |
+|---|---|
+| 待做 0′.3 / 0′.6 / 0′.7 | **均已合入**：真 `Err` 通道已接且 `UndefinedVariable` 已致命（三道守卫：头部只认
+  `#{}`、special 调用参数、plain-CSS at-rule 体）；四条铁律已编成 `sasslint` 机器闸，CI 门 `gate_sasspile_is_clean`
+  已去 `#[ignore]`；选择器/属性名是 `src/selector.rs` 的结构化值（`&` 成词素，`str::replace` 已删）。**P0′ 已收尾** |
+| 基线 595 → 598 | **595 → 635/11,533**（5.51%）。量具换了三项：key = 相对 `spec/` 全路径（旧制式 11,486 条里有
+  1,135 个重复 key）、`error` 用例比对金样 `Error:` 首行（旧口径“任何 Err 都算过”使一阶改动虚报 +385，真值 +1）、
+  安全子集补上 `operators`/`parser`/`variables`（曾有 79 例从未计量，而任务书自己引用 `operators/**`） |
+| 未提及 | 新铁律三条（均已在 `rust.md`/`README.md`）：**名字的位置不是引用**（`@for $i` 头部 / `f($hue: 1)`
+  具名实参 / `!default` 旗标，共三类假错）、**分类粒度不能超过词法**（`-a-calc(`、`&`、带引号串均需先成词素）、
+  **量具覆盖面要等于计划引用的簇，任何“为 0”读数先过阳性对照** |
+| 未提及 | `crates/docsizer` 已从 workspace 成员里删除（悬空引用会让所有 `cargo` 命令失败）；其逐行教程 change
+  与 `docs/rxrust-from-scratch/` 仅作历史，不得 apply 或重启 |
+
+现行权威入口：`openspec/.../design.md` + `tasks.md`（每个结论背面的实测数字都记在那里）、`README.md`
+「Anti-GC red lines」（现为 9 条）、`.qoder/rules/rust.md`。A/B 记录 = `reports/hrx.db` 里的具名 run
+（该库不入库跟踪，只存本地），散存快照文件的做法已被废除。

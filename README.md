@@ -1,10 +1,11 @@
 # qrass — workspace hosting **sasspile**
 
-A clean-room **SCSS → CSS** compiler written as a reactive *push* pipeline: every stage is an
-rxrust `Observable` that moves **owned** tokens, expressions and values forward through
-operators (`from_iter → scan/scan_map → flat_map → filter → collect → reduce_initial →
-into_future`). There is no materialized AST walked by recursion, and no `Arc<Mutex<_>>`
-business state anywhere in the path.
+A clean-room **SCSS → CSS** compiler written as a reactive *push* pipeline: each compile phase is a
+real rxrust **operator kernel** (`struct Phase { source }` + `PhaseObserver { observer, state }` +
+`ObservableType`/`CoreObservable<C: Context>`) that moves **owned** tokens, events, rules and values
+forward and emits its own `0..N` items — `from_iter → Lexer → Structurize → Exec → Render →
+reduce_initial → into_future`. There is no materialized AST walked by recursion, and no
+`Arc<Mutex<_>>` business state anywhere in the path.
 
 > History: this repository once contained `crates/qrass` (a pull-shaped compiler). It was
 > **deleted** when the project adopted the push doctrine; the crate directory no longer
@@ -13,30 +14,40 @@ business state anywhere in the path.
 
 ## Workspace
 
-| Crate | Role | Size (measured 2026-10-25) |
+| Crate | Role | Size (measured 2026-10-26) |
 | --- | --- | --- |
-| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 6 `src/*.rs`, 891 lines, 6 test targets |
-| `crates/ledger` | A/B harness: diffs two hrx snapshots, reports `regress` | 310 lines |
-| `crates/sasslint` | deterministic rule gate for the project's hard rules (+ `sasslint-mcp` bin) | 226 lines, 5 tests |
-| `crates/docsizer` | doc-counting tooling, dormant (its tutorial programme was cancelled) | 942 lines, 10 tests |
+| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 8 `src/*.rs`, 1,815 lines, 12 test targets |
+| `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress` | 396 lines |
+| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 596 lines, 10 tests |
 
-Source layout of the compiler: `lib.rs` (the single chain), `lexer.rs`, `exec.rs`, `expr.rs`,
-`value.rs`, `env.rs`. The directories `src/builtins/` and `src/directives/` are currently
-empty placeholders for later phases.
+Source layout of the compiler: `lib.rs` (the single chain), `phases.rs` (the four kernels),
+`lexer.rs`, `exec.rs`, `expr.rs`, `value.rs`, `selector.rs`, `env.rs`. Two module directories,
+`src/builtins/` and `src/directives/`, are still empty placeholders for P1.7/P3+.
 
-## Status (all numbers re-measured on 2026-10-25)
+`crates/docsizer` — the counting tool of a cancelled tutorial programme — has been **removed from the
+workspace** (its dangling member entry was breaking every `cargo` invocation). Do not reinvent it.
+
+## Status (all numbers re-measured on 2026-10-26)
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Tests | `cargo test --workspace` | **39 passed / 0 failed** (1 ignored) |
-| Rule gate | `cargo run -p sasslint --bin sasslint -- crates/sasspile/src` | **`count=0`** |
-| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11486 pass=595 skipped=1232` (**5.2 %**) |
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | **clean (exit 0)**, verified the same day |
+| Tests | `cargo test --all-targets` | **58 passed / 0 failed / 0 ignored** |
+| Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
+| Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
+| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=635 fail=10,898` (**5.51 %**) |
+| Clippy | `cargo clippy --all-targets -- -D warnings` | **clean (exit 0)** |
+| Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` | valid |
 
-The 5.2 % pass rate is **not** a regression signal: the compiler is deliberately incomplete
-while the architecture is rebuilt phase by phase (P0–P8). What a round must never do is lose
-previously passing cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**,
-not by the raw rate. `tests/hrx.rs` asserts nothing case-by-case for the same reason.
+**P0′ (the framework-native rewrite) is closed**: phases are kernels (0′.1/.2), order comes from the
+stream (0′.4), the `Err` channel is real with `UndefinedVariable` fatal (0′.3), the four iron rules are
+machine-gated (0′.6) and selectors/property names are structured values (0′.7). Only 0′.5 (shared state
+as `C::RcMut`/`C::RcCell`) is open, and it has nothing to change until P4/P5 introduce shared state.
+The next front is **P1 (value foundation) + P7 (diagnostic messages)**.
+
+The 5.5 % pass rate is **not** a regression signal: the compiler is deliberately incomplete while the
+architecture is rebuilt phase by phase (P0–P8). What a round must never do is lose previously passing
+cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**, not by the raw rate.
+`tests/hrx.rs` asserts nothing case-by-case for the same reason.
 
 ## Conformance authority
 
@@ -69,18 +80,24 @@ RUST_LOG=info cargo test -p sasspile --test hrx -- --nocapture   # `trace` adds 
 
 ## Pipeline
 
-One cold chain, written in `compile` and nowhere else — no stage function takes or returns an
-observable type, no `box_it()` seams, no `Stage`/`fail`/`drain` orchestration layer:
+One cold chain of six rings, written in `compile` and nowhere else — no stage function takes or returns
+an observable type, no `box_it()` seam, no `Stage`/`fail`/`drain` orchestration layer:
 
 ```
-chars ─▶ scan_map(LexAcc) ─▶ scan_map(MsgAcc) ─▶ scan(State) ─▶ filter_map(into_rule)
-       ─▶ flat_map(per-rule work, ordered by an owned `order` key)
-       ─▶ collect ─▶ pure fold ─▶ reduce_initial ─▶ into_future().await
+chars ─▶ Lexer ─▶ Structurize ─▶ Exec ─▶ [global passes] ─▶ Render ─▶ reduce_initial ─▶ into_future()
+             (each ▶ is a kernel: struct{source} + Observer holding this phase's state,
+              emitting 0..N items with observer.next(..); Err stays generic)
 ```
 
-Cross-cutting passes that genuinely need the whole rule set (`@extend` fixpoint, media
-bubbling) are expressed as `collect` + a **pure forward fold**, then pushed back into the
-stream via `flat_map` — never a mutable object graph visited by a walker.
+The chain it replaced (`scan_map → Vec<Tok> → flat_map(from_iter)`, then `scan(State)` +
+`filter_map` + an `order` key + `collect`/`sort_by_key`) is **deleted**, and re-introducing any part of
+it fails `sasslint`. Nesting is not a tree: `Exec` carries an owned `scopes` vector and settles a rule
+at two moments (a nested block opening flushes the parent's pending declarations; a block closing
+flushes the rest), which is why the output needs no sort and one block can emit several rules.
+
+Cross-cutting passes that genuinely need the whole rule set (`@extend` fixpoint, media bubbling) are
+expressed as `collect` + a **pure forward fold**, then pushed back into the stream via `flat_map` —
+never a mutable object graph visited by a walker.
 
 ## Anti-GC red lines (read before writing any pipeline code)
 
@@ -111,22 +128,48 @@ rediscover them:
 6. **Multicast is not re-entrant**: `next`/`error`/`complete` on a `Subject` from inside its own
    subscriber callback panics; insert `delay(Duration::ZERO)` for feedback loops. And `Subject::
    is_closed()` means "no subscribers", not "terminated".
+7. **A name position is not a variable reference.** Three shapes were measured, all the same mistake of
+   looking a `$name` up where Sass means a *label*: a block head that binds (`@for $i from …`), an
+   argument label (`color.hwb($hue: 180, …)` — 1,611 cases), and a binding's declaration flag
+   (`$a: b !default`). A head resolves only `#{ … }`; a run that passes named arguments is not evaluated
+   at all; `!default`/`!global` are peeled from a binding value only.
+8. **A classifier can never be finer than the lexer's lexemes.** Deciding "is this a vendor-prefixed CSS
+   call?" or "is this `&` the parent reference?" failed while `-a-calc(` was three lexemes and `&` was
+   glued into a word — the fixes were lexical (`-` deferred one character, `&` is a `STRUCTURAL` lexeme,
+   a quoted string tracks `$`/`\`). Two more lexeme-level truths: a `//` comment's newline is `Space`,
+   not `Word(" ")`; a `&` inside a `#{&}` is text substitution, not the parent position.
+9. **The oracle must judge the thing the spec states.** An `error` case passes only when the compiler's
+   message equals the fixture's `Error:` header — counting "any error" reported a fake **+385** where
+   the true gain was **+1**. Likewise: case keys must be unique (`<basename>.hrx::<case>` collided 1,135
+   times, 33 with both a PASS and a FAIL), and the harness's scanned directory list must equal the dirs
+   the plan cites — `operators`/`parser`/`variables` had 79 cases nobody was measuring.
 
 **Verification is not self-evident either.** `ledger` stores only failures, so re-importing a run name
 must clear that run's old `run_fail` rows (it does now, with tests) — otherwise a fixed case reports a
 phantom REGRESS. Before trusting `regress=0`, redo the A/B on an empty `--db`, and for behaviour-neutral
-refactors prove it by a byte-identical snapshot (md5/`diff`), not by a matching pass count.
+refactors prove it by a byte-identical snapshot (md5/`diff`), not by a matching pass count. Two more
+traps this repo actually fell into: (a) a statistic that reads **0** is a bug until a known-positive case
+proves the measuring code works (an off-by-one `substr` swallowed a quote and reported "0 rows differ
+only by whitespace/case", nearly producing a false conclusion); (b) **a FAIL that becomes another FAIL is
+invisible in the pass count**, so also count invalid errors (e.g. `grep` the snapshot for
+`unexpected error`) when touching the error path. The A/B record is a **named run in `reports/hrx.db`**
+(import the harness output every increment) — never loose snapshot files, which is the sprawl `ledger`
+exists to remove.
 
 ## Where the rules and knowledge live
 
 | Document | Authority |
 | --- | --- |
-| `.qoder/rules/rust.md` | hard project rules (always-on): rxrust as the engine, tracing spans, ≤500-line files, tests in `tests/`, no `println!`, no Python/scripts, SSH push |
+| `.qoder/rules/rust.md` | hard project rules (always-on): new-session pre-flight, rxrust as the engine, tracing spans, ≤500-line files, tests in `tests/`, no `println!`, no Python/scripts, SSH push, and the measurement red lines |
 | `docs/rxrust-source-analysis/` (01–09 + README) | **authoritative** rxrust rc.6 source reading; `09-…-ordering.md` holds the cancellation / terminal-ordering invariants and the list of places where the library's own doc comments contradict its implementation |
 | `.qoder/skills/rxrust-reactive/` | the do/don't doctrine applied when writing pipelines (`SKILL.md` + `reference.md`) |
+| `openspec/changes/redesign-sasspile-rxrust-shared-stream/` | **the active plan**: architecture (`design.md`), phase tasks (`tasks.md`, incl. every measured number behind a claim) and the requirement deltas being implemented (P0′, P0–P8) |
 | `docs/rxrust-ai-manual.md` | **historical** (written against rc.5); superseded by the two above — verify against source before trusting a detail |
-| `openspec/changes/redesign-sasspile-rxrust-shared-stream/` | the architecture plan and requirement deltas being implemented (P0–P8) |
-| `reports/` | assembly snapshots |
+| `docs/sasspile-framework-design-report.md` | a dated snapshot of the design report, with its "现状校正" section carrying the corrections |
+| `openspec/changes/add-rxrust-line-by-line-tutorial/`, `docs/rxrust-from-scratch/` | **CANCELLED** tutorial programme, kept only for history: do not apply, continue or cite it as a source of behaviour |
+
+`reports/hrx.db` (gitignored, local) is the A/B ledger; `ledger runs` lists the recorded runs and
+`ledger diff A B` re-computes any claim made in the documents above.
 
 ## Ground rules
 
@@ -143,13 +186,15 @@ refactors prove it by a byte-identical snapshot (md5/`diff`), not by a matching 
 
 ## Known gaps (recorded, not hidden)
 
-- Language coverage is early-phase: value/type semantics, selectors/`@extend`, module
-  `@use`/`@forward`/`@import`, callables and CSS at-rules are each specified in the OpenSpec
-  change but only partially implemented.
+- Language coverage is early-phase: value/type semantics (`*`, `/` and the slash-vs-list ambiguity,
+  `Calculation`, units, colours), selectors/`@extend`, module `@use`/`@forward`/`@import`, callables and
+  CSS at-rules are each specified in the OpenSpec change but only partially implemented.
+- Most of the remaining `core_functions/color` failures need **real messages and real function
+  behaviour** (P1.5/P1.7 + P7 diagnostics), not error plumbing: the corpus was bucketed case by case to
+  establish that, and the numbers are in `tasks.md`.
 - No CLI binary yet — the crate is library-only by design (`compile` is the sole exit).
-- `crates/docsizer` and `docs/rxrust-from-scratch/` are leftovers of a cancelled tutorial
-  programme; they remain tracked pending an explicit decision and are not part of the
-  compiler's gate set.
+- The harness runs `.scss` only (no `--indented`), skips multi-file and `options.yml` cases, and compares
+  only the `Error:` header (no span/`Warning:`/deprecation) — tasks 0.2/0.3/0.4.
 
 ## License
 

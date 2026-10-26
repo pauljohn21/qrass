@@ -191,11 +191,23 @@ let b = shared.clone().filter(fb);
 ## 5. 验收闭环（项目现状）
 
 改 sasspile 值/函数/流任一层，动手前后各跑：
-1. `cargo run -p sasslint -- crates/sasspile/src`（或 MCP `review{path}`）→ **0 命中**；
-2. `cargo test -p sasspile` + `cargo clippy --all-targets -- -D warnings` → 绿；
-3. `ledger diff <base> <run>` → **`regress = 0`** 才合入，否则回退。
+1. `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src`（或 MCP `review{path}`）→ **0 命中**；
+   该闸现在**不靠人自觉**：`cargo test -p sasslint` 里的 `gate_sasspile_is_clean` 已不再是 `#[ignore]`，
+   命中即红。规则集除旧日八条外已添四条同族代名：`no-batch-shell`（`scan_map` 返 `Vec` +
+   `flat_map(from_iter)`）、`require-err-channel`（求值路径上的 `.ok()`/无 `is_fatal` 的 blanket
+   `unwrap_or_else`）、`no-sort-for-order`（`sort_by_key` 类）、`require-slot-before-subscribe`
+   （高阶/多源未先取 `SingleAssignment`）。**它们是代理而非证明**，不代替第 3 步的结果证据；
+   也故意放过只用了一半签名的合法代码（`from_iter` 作源、1:1 内核的 `source.subscribe(..)`）。
+2. `cargo test --all-targets` + `cargo clippy --all-targets -- -D warnings` → 绿；
+3. 把 harness 刚生成的 `target/hrx-snapshot.tsv` `ledger import <增量名> …` 入 `reports/hrx.db`，再在
+   **新建空库**上 `ledger diff <base> <run>` → **`regress = 0`** 才合入，否则回退。A/B 记录 = 库里具名 run
+   （`ledger runs` 可查），**不存散文件也不开第二个库**；行为不变型重构另需用 `cmp` 证两次快照逐字节相同。
 新算子/函数先做成 **pub 独立件 + 金样单测、不接 `compile`**，接线时**只在无歧义处触发**
 （函数白名单、`/ * %` 跳过护 CSS），逐片守门（见项目记忆"sasspile 值/函数层安全生长范式"）。
+
+两条量具纪律（本轮真实代价）：`error` 类用例 MUST 比对金样 `Error:` 首行，“报了个错”不等于
+“按金样报错”；harness 扫的目录清单 MUST 等于计划引用的簇。具体数字与推导过程记在
+`openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md`。
 
 ---
 核心一句话：**rxrust 本身就是引擎**——用它的 `flat_map`/多播/owned 累加子/冷流惰性
