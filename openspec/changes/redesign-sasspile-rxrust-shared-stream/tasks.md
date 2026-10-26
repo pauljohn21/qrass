@@ -195,6 +195,20 @@
       **新暴露的 25+3+3 条已有名字**，已归入 P1（见 1.3b/1.4b）与 P3，不再靠猜。
 
 ## P1 — 值地基:单位代数 + calculation + 全色彩空间 + list/map
+
+> **P1 地形（2026-10-26 逐条量具实扣，免得下一轮重量）**：基线 run `head-635-flags`（635/11,533）。
+> 失败最大家：`core_functions/color` 6,323（占全库失败 58%）、`values/calculation` 900、
+> `core_functions/selector` 898、`core_functions/math` 482。两个结论决定了顺序：
+> 1. **不存在“便宜的批量赢法”**：`values/calculation` 的 900 = 436 条期望已无 `calc(`（需真化简）
+>    + 439 条需逐条错误消息 + 20 条消息不符；非-calc 上下文里含 `*` 的 53 条 input **全部带 `math.`**
+>    （⇒ 单独做 `*` 运算符零收益，它是前置不是赢面）；“仅差空白/仅差大小写”两类候选均被语料
+>    反例推翻（见 1.4b/1.4c）。
+> 2. **`color` 家不是策略问题而是能力问题**：1,945 条“期望错误却给了 CSS”按金样首行分桶后是长尾
+>    （实参个数 128、逐参数类型/单位校验 259、calc 内禁用 79、plain-CSS 内禁用 61、解析器期望符 261、
+>    选择器代数 67…）——需要内置函数注册表 + 每参签名校验（P1.7）与 `Value::Color`（P1.5），
+>    **不得用兜底不报错抹平**。⇒ P1 真实关键路径 = 1.4 `Calculation` + 1.7 内置函数分派（含参数绑定，
+>    1.2b 现在跳过含具名实参的 run）+ P4 的“声明不求值体”（解开 31 条假错）。
+
 - [~] 1.1 `Value`(带单位 Number/引号态 String/Color/List/Map/Bool/Null)+ `to_css` 规范化。**已有基础,缺单位换算/calc/CSS4 色**
 - [x] 1.2 `Expr` 折叠 + 惰性 `eval(owned Env)`;算术/比较/布尔;`/ * %` 跳过、CSS 原生函数保留。**已做(未接入 compile 值路径)**
 - [x] 1.2b **具名实参不是引用**（本轮实测发现并修）：`color.hwb($hue: 180, …)` 里的 `$hue:` 是参数**标签**，
@@ -253,6 +267,18 @@
       ① 序列化时无条件删空格；② 无条件保留。必须等 1.4 的 Calculation/`Value::List`（三种分隔符 +
       来源标记）与 1.5 的相对颜色解析一起定；`operators/slash::separator/calculation/simplified/*`
       （`calc(1)/calc(2)` → `1/2`）是同一条依赖。
+- [ ] 1.4c **special 调用名的大小写不是字符串规则，而是“走了哪条解析路径”的产物（本轮量出一个诱人的假赢法并弃用）**：
+      “仅差大小写”的 24 条看似可用“输出时把 special 名转小写”一刀收，但同一文件
+      `css/functions/special/prefixed/uppercase.hrx` 内部三族期望互斥：
+      • `-A-CALC($c)` → `-a-calc($c)`、`-C-ELEMENT(...)` → `-c-element(...)`：走 plain-CSS 的
+        calc/element/expression 路径 ⇒ 名**小写、前缀保留**；
+      • `-C-URL(0)` → `url(0)`：字面量 url 被当 plain-CSS url **重新序列化** ⇒ **前缀被去掉**；
+      • `-E-URL($a)`（`$a: b` 已绑定）→ `-E-URL(b)`：实参是变量时按 SassScript 解析，变成**未知函数调用**
+        ⇒ 名字**原大小写逐字保留**（与 1.2b 同一条“special 参数里绑定变量仍解析”的推论）。
+      ⇒ 所以必须先有“这个调用到底按哪条路径解析”的判别（= 1.4 的 Calculation/特殊调用解析 + P1.7
+      的调用求值），序列化才有依据；**禁止用小写化的补丁“先赢 20 条”**，它会把后两族写错。
+      另外 `directives/function/name::error/special/*` 要 `Invalid function name.`（声明 `element()` 等
+      保留名非法，且大小写不敏感），它属 P7 诊断，不在本条。
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
