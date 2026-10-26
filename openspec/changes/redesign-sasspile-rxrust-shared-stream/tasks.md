@@ -283,6 +283,31 @@
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
+- [ ] 1.7a **调用脊柱（下一轮的主入刀；本轮已把契约从语料读全，不再靠想）**。选型依据（逐条量具）：
+      期望 `true`/`false`/`null` 的 616 条失败里 **397/400 需要模块或内置函数**，只有 3 条是纯值比较
+      ⇒ 先做比较/布尔 `Expr` **不是杠杆**；杠杆是“调用求值”。`math` 家频次：`div` 185、`pow` 149、
+      `clamp` 43、`hypot` 33。**以下均为 `core_functions/math/div.hrx` 实测期望，不是推定**：
+      | 输入 | 期望 | 要点 |
+      |---|---|---|
+      | `math.div(6, 3)` | `2` | 无单位 |
+      | `math.div(6, 5)` | `1.2` | 格式（见 `format_number`，最长 10 位） |
+      | `math.div($number2: 3, $number1: 6)` | `2` | **具名实参按标签绑定，与书写顺序无关**（终结 1.2b 的“整段跳过”） |
+      | `math.div(6px, 3)` | `2px` | 分子带单位/分母无单位 → 保留分子单位 |
+      | `math.div(6px, 3px)` | `2` | 同单位 → 约掉 |
+      | `math.div(6in, 3px)` | `192` | **可换算单位先换算再约**（定死 `1in = 96px`） |
+      | `math.div(6in, 3s) * 1s` | `2in` | 不可换算时是**复合（有理）单位** `in/s` —— **不属本切片**，不得猜 |
+      | `math.div(6c, 3d) * 1d` | `2c` | 未知单位也是复合单位 ⇒ 同上，留给单位代数 |
+      | `math.div(b, 3)` | `value: b/3; type: string;` | 串/非数值分支（带 `warning` 段）——不属本切片 |
+      | `math.div(6)` | `Error: Missing argument $number2.` | **harness 只比 `Error:` 首行** ⇒ 消息可精确实现 |
+      | `math.div(6, 3, 1)` | `Error: Only 2 arguments allowed, but 3 were passed.` | 同上，两条都是**签名通用**而非逐函数 |
+      实现拆解（必须同批落地，缺任一件就是不可提交的死码）：① 词素层切分实参（callee 的 `Word("…(")` 开深度，
+      顶层 `Punct(',')` 分割，`)` 收；嵌套 `(`/`)` 计深度）；② `$label:` 识别为**标签**并参与绑定（与 1.2b 的
+      `named_argument` 拒绝共存：有签名可查时绑定，无签名时仍逐字保留）；③ `Expr::Call` + `builtins.rs` 注册表
+      （按域拆文件是已定惯例），签名统一声明 `params` 以派生上述两条 arity 消息；④ 数值相除的单位律与
+      `1in = 96px` 表（只加能由金样证实的单位）；⑤ `format_number` 已存在，不得用新格式推翻现有 PASS。
+      新增致命错误类（arity 两条）必须走 0′.3b 的流程：空库重跑全量 `regress=0`，否则改为非致命（保留逐字）。
+      **本切片验收判据**：`div.hrx` 的 `unitless/{whole,fraction,named}` + `unit/{numerator,denominator,same,compatible}`
+      转 PASS，且无效错误不增。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)
