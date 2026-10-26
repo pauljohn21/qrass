@@ -420,6 +420,17 @@
       所以下一个真实需求是把 body 改成接 `Expr`+`Env`（只评估用到的分支）——那就得同时改掉已有 11 个签名，
       属于批尺寸改动。⇒ **推荐顺序不变**：1.4 `Calculation` → 1.4d 有理单位 → 1.7 其余分派（含惰性 `if()`）。
 
+- [ ] 1.9 **模块常量查找(`<ns>.$name`)不是“一张表 14 条”**（本轮量完）。`core_functions/math/variables.hrx`
+      看名字像是只需加 `math.$pi`/`$e`/`$epsilon`… 的常数表，实则输入多为
+      `a {b: math.$e * 1e15}` → `2718281828459045`（全部乘了 `1e15`）——**卡在 `*` 运算符**（属 1.3/1.4）。
+      直接可得的只有 `math.$max-safe-integer` → `9007199254740991` 与 `math.$min-safe-integer` →
+      `-9007199254740991` 两条（`$max-number`/`$min-number` 要 309 位展开与 `1e300*1e39`，也不可用）。
+      ⇒ 做它的正确时机是 **P5.1（命名空间）**：到时它顺带解决“`@use` 后的 `math.$pi` 报假
+      `Undefined variable.`”（那 14 条就是当前 55 条无效错误的主要成分，用
+      `ledger failures <run> "unexpected error"` 可数），而不是现在为 2 条判定新建一套词素机制。
+      另：`error/assignment/*` 那几条要求给 `math.$pi` 赋值时报错（保留名不可写）——它需要的是赋值路径
+      上的名字表，同一批做。
+
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)
 - [ ] 2.2 unify / superselector / `selector.nest/parse/unify/is-superselector/simple-selectors`
