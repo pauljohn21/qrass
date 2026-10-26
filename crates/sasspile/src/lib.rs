@@ -19,9 +19,11 @@ mod env;
 mod exec;
 mod expr;
 mod lexer;
+mod operations;
 mod phases;
 mod selector;
 mod trace;
+mod unit;
 mod value;
 
 use crate::phases::{Exec, Lexer, Render, Structurize};

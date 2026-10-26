@@ -101,15 +101,27 @@ async fn a_bound_plain_number_is_not_collapsible_yet() {
 }
 
 /// The refusal half. `calc/simplify.hrx`'s own README states that only "number + number where both are
-/// compatible" simplifies — and 1.4a puts that with `*`/`/` and the rational units of 1.4d, so this
-/// slice keeps the expression as written rather than inventing the fold early.
+/// compatible" simplifies — and 1.4d pairs that with `*`/`/` and the rational units, so a `+`/`*` run
+/// inside `calc( … )` keeps its text rather than being folded by a half-built algebra.
+///
+/// Division is the exception the corpus already grants: `/` carries no operator lexeme here (it stays
+/// inside the word until `expr::release_slashes` reads an argument), so it resolves — `calc(1px / 2)` is
+/// `0.5px` (`values/calculation/calc/operator/divide::simplified`) and `calc(1px / 2px)` is `0.5`
+/// (`calc/operator/units::division`). What cannot be printed outside a calculation keeps the shell:
+/// `calc(1 / 1px / 1rad)` (`values/numbers/units/multiple::multiple_denominators`).
 #[tokio::test]
 async fn simplification_is_not_guessed() {
     assert_eq!(value("a {b: calc(1px + 2px)}").await, "calc(1px + 2px)");
     assert_eq!(value("a {b: calc(1px + 1%)}").await, "calc(1px + 1%)");
-    // A slash inside a calculation stays the calculation's own syntax, not a division, until 1.4d.
-    assert_eq!(value("a {b: calc(1px / 2)}").await, "calc(1px / 2)");
     assert_eq!(value("a {b: calc(3px * 2)}").await, "calc(3px * 2)");
+    assert_eq!(value("a {b: calc(1px / 2)}").await, "0.5px");
+    assert_eq!(value("a {b: calc(1px / 2px)}").await, "0.5");
+    assert_eq!(
+        value("a {b: calc(1 / 1px / 1rad)}").await,
+        "calc(1 / 1px / 1rad)"
+    );
+    // A slash in a plain declaration value is still the separator the CSS shorthand depends on.
+    assert_eq!(value("a {b: 1/2}").await, "1/2");
 }
 
 /// The five cases this cluster already passed before any calculation rule existed — the corpus wants
@@ -146,6 +158,9 @@ async fn outside_a_calculation_nothing_is_newly_read() {
         "12px/1.5 sans-serif"
     );
     assert_eq!(value("a {b: 1/2}").await, "1/2");
+    // A URL's slashes are literal text: `release_slashes` only ever reads a call argument, and a
+    // declaration value still goes through the protection rule.
+    assert_eq!(value("a {b: url(http://x/y)}").await, "url(http://x/y)");
 }
 
 /// An unbound `$x` inside a calc must not become a fatal error — the fixture family

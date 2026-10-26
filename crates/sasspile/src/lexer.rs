@@ -243,6 +243,15 @@ impl LexAcc {
                 self.flush_word(emit);
                 self.push(Tok::Op(ch), emit);
             }
+            // `*` is never part of an identifier or a URL, and a `/*` comment is consumed by the block
+            // state above, so it can be its own lexeme outright. Leaving it inside the word made
+            // `1px * 1em` unreadable as an operation (`Word("1px * 1em")`), which is what 1.4d's unit
+            // algebra needs. `/` deliberately stays inside the word: outside `calc( … )` it is a list
+            // separator (`font: 12px/1.5`, `a {b: 1/2}`), and `url(http://x)` relies on that too.
+            '*' => {
+                self.flush_word(emit);
+                self.push(Tok::Op(ch), emit);
+            }
             // Defer: whether a `-` is Sass's operator (whitespace on both sides) or part of an
             // identifier (`-a-calc(`, `10px -5px`) is only knowable once the next char arrives.
             '-' => self.minus = true,

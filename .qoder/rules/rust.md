@@ -18,13 +18,16 @@ alwaysApply: true
    （`expr::concatenation`）、绑定旗标剔除（`lexer::without_flags`）、**调用脊柱**（`calls.rs`+`builtins.rs` 注册表：
    `math.div/round/abs/ceil/floor/min/max/unit/is-unitless/percentage/compatible`，含 arity 与类型消息金样）、
    `Value::Bool` 与 Sass 十位有效数字、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
-   单项出壳 / 嵌套脱一层壳 / 否则原式保留；**同单位化简与 `*` `/` 故意未做**，归 1.4d）。
-   **以上均不得重做/重新发明**。当前基线 hrx **768/11,533**（6.66%，**实质通过 603** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `calc-14a-768`）；
+   单项出壳 / 嵌套脱一层壳 / 否则原式保留）、**1.4d 前半：有理单位**（`src/unit.rs` 的 `Unit{num,den}` 是
+   **保序**多重集 + 构造时同名抵消，`Value::Number(f64, Unit)`，`BinOp::{Mul,Div}` 与 `build()` 优先级；
+   词法已把 `*` 提成 `Op`，`/` 只在调用参数内由 `expr::release_slashes` 变算子；复合单位不得离开 `calc( )`；
+   **同单位 `+` 化简仍故意未做**，它跟 calc 内表达式树同批）。
+   **以上均不得重做/重新发明**。当前基线 hrx **778/11,533**（6.75%，**实质通过 613** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `units-rational-768`）；
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一步主战场：**1.4d 有理（复合）单位**（判据已钉死，必须与 `*` `/` 同批，拆开会留死码）→ 1.5 色彩 →
-   1.7 其余分派（含惰性 `if()`，已被实测否定为快收益）；以及 P7 诊断消息——语料里大量 `error` 用例缺的是
-   **消息**，不是错误管道。
+   下一步主战场：**1.4d 后半 = calc 内容成为表达式树**（parse + 部分化简 + Sass 形式序列化，先读完
+   `calc/operator/*` 与 `simplify.hrx` 把括号律钉死）→ 1.5 色彩 → 1.7 其余分派（含惰性 `if()`，已被实测否定为快收益）；
+   以及 P7 诊断消息——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 

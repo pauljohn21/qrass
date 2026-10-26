@@ -13,18 +13,27 @@ use crate::SassError;
 use crate::calls::Argument;
 use crate::env::Env;
 use crate::lexer::{Tok, canon, render, token_text};
+use crate::operations::{arithmetic, concatenation, number_lexeme};
+use crate::unit::Unit;
 use crate::value::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Sub,
+    /// `*`, which the lexer emits as its own lexeme and Sass always reads as multiplication
+    Mul,
+    /// division, recognised only where a `/` cannot mean anything else (see [`crate::unit`] and
+    /// `calculation`): in a declaration value a `/` is the slash-separated list.
+    Div,
 }
 
 /// An expression over declaration-value lexemes. Numbers carry their unit text verbatim.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Num(f64, String),
+    /// a number literal: the magnitude and the **unit it was read with** (never a compound one — those
+    /// only come out of `*` and `/`, which is what [`BinOp`] produces)
+    Num(f64, Unit),
     Binary(Box<Expr>, BinOp, Box<Expr>),
     /// verbatim lexeme text around an interpolation (`".col-"`, `"0 "`)
     Text(String),
@@ -46,13 +55,6 @@ pub enum Expr {
 }
 
 /// One classified lexeme of the arithmetic path.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Piece<'a> {
-    Num(f64, &'a str),
-    Op(BinOp),
-    Other,
-}
-
 /// A value that may not be arithmetic at all: a slash, star or percent anywhere in a lexeme
 /// is a CSS separator (or a percentage unit) until the value algebra covers them.
 fn protected(toks: &[Tok]) -> bool {
@@ -170,22 +172,51 @@ pub fn from_tokens(toks: &[Tok], env: &Env) -> Option<Expr> {
 /// a lone number (`math.div(6, 3)` → `2`), so the "a bare number is not an expression yet" filter that
 /// [`crate::exec::State::evaluated`] applies to whole declaration values does not apply here.
 pub fn argument_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
-    from_tokens(toks, env).or_else(|| {
+    let divided = release_slashes(toks);
+    from_tokens(&divided, env).or_else(|| {
         // A single lexeme inside an argument is read as a number even when the `protected` rule would
         // refuse the same text in a declaration value — that rule exists for CSS shorthands
         // (`font: 12px/1.5`), and `math.percentage(1%)` is not one: the corpus wants
         // `$number: Expected 1% to have no units.` from the body, not an unread value.
-        let meaningful = toks
+        let meaningful = divided
             .iter()
             .filter(|tok| !matches!(tok, Tok::Space(_)))
             .collect::<Vec<&Tok>>();
         match meaningful.as_slice() {
             [Tok::Word(word)] => {
-                number_lexeme(word).map(|(value, unit)| Expr::Num(value, unit.to_string()))
+                number_lexeme(word).map(|(value, unit)| Expr::Num(value, Unit::named(unit)))
             }
             _ => None,
         }
     })
+}
+
+/// A call argument's lexemes with every `/` released as its own operator: `Word("1/1px")` becomes
+/// `1`, `/`, `1px`, so `math.unit(1/1px)` can reach the division that gives `"px^-1"`
+/// (`core_functions/math/unit::one_denominator`).
+///
+/// This is the context decision 1.4d asks for — `/` means division **here** and in `calc( … )`, while a
+/// declaration value keeps it as the list separator (`a {b: 1/2}` → `1/2`, `font: 12px/1.5`) and a URL
+/// keeps it inside the literal. Nothing outside an argument is re-cut, and a quoted lexeme is never
+/// split, because `"a/b"` is text. `Expr::Call`'s verbatim branch still renders the **original**
+/// `arg.toks`, so a run this cannot read comes out byte-for-byte as before.
+fn release_slashes(toks: &[Tok]) -> Vec<Tok> {
+    let quotable = |word: &str| word.starts_with('"') || word.starts_with('\'');
+    toks.iter()
+        .flat_map(|tok| match tok {
+            Tok::Word(word) if word.contains('/') && !quotable(word) => word
+                .split('/')
+                .enumerate()
+                .flat_map(|(index, part)| {
+                    (index > 0)
+                        .then_some(Tok::Op('/'))
+                        .into_iter()
+                        .chain((!part.is_empty()).then(|| Tok::Word(part.to_string())))
+                })
+                .collect(),
+            other => vec![other.clone()],
+        })
+        .collect()
 }
 
 /// The interpolation shape only — what a **selector** may use, because a selector's lexemes
@@ -194,193 +225,6 @@ pub fn interpolated(toks: &[Tok], env: &Env) -> Option<Expr> {
     has_dynamic(toks)
         .then(|| interpolation(toks, env))
         .flatten()
-}
-
-/// Classify one token, given its position in the run. Only whitespace is dropped; a lexeme
-/// that is not a number must mark `Other` so the whole run bails — silently dropping it would
-/// shift the alternation and turn `rgb(18 52 none)` into the number `52`.
-/// `+`/`-` is an operator **only** when whitespace sits on both sides.
-fn classify<'a>(tok: &'a Tok, index: usize, run: &[Tok]) -> Option<Piece<'a>> {
-    let spaced = |side: Option<usize>| matches!(side.and_then(|i| run.get(i)), Some(Tok::Space(_)));
-    match tok {
-        Tok::Space(_) => None,
-        Tok::Word(w) => {
-            Some(number_lexeme(w).map_or(Piece::Other, |(value, unit)| Piece::Num(value, unit)))
-        }
-        Tok::Op('+') if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => {
-            Some(Piece::Op(BinOp::Add))
-        }
-        Tok::Op('-') if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => {
-            Some(Piece::Op(BinOp::Sub))
-        }
-        _ => Some(Piece::Other),
-    }
-}
-
-/// A whole lexeme as `value + unit`: digits (with optional fraction) followed by an
-/// identifier-shaped unit. `52)` or `1px)` are not numbers — a unit is alphanumeric, so a
-/// CSS call like `rgb(18 none 66)` bails to verbatim text instead of losing its paren.
-fn number_lexeme(word: &str) -> Option<(f64, &str)> {
-    // A leading sign belongs to the number: the lexer defers a boundary `-` until it sees the next
-    // character, so `-5.6` and `-7px` arrive as one lexeme and Sass reads them as negative numbers
-    // (`math.round(-5.6)` → `-6`). This was already required for `@for`'s negative bounds, and reading it
-    // as text instead produced a false `$number: -5.6 is not a number.`.
-    let signed = word.starts_with(&['-', '+'][..]);
-    let (sign, digits_area) = if signed {
-        (&word[..1], &word[1..])
-    } else {
-        ("", word)
-    };
-    let digits = digits_area
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(digits_area.len());
-    if digits == 0 {
-        return None;
-    }
-    let (numeric, unit) = digits_area.split_at(digits);
-    // `%` is a unit character for Sass; it stays out of every other reading of a run because `protected`
-    // still refuses to evaluate a run that carries one outside a known call
-    // (`math.percentage(1%)` must reach its body to report the unit, not be told it is not a number).
-    if !unit.chars().all(|c| c.is_ascii_alphanumeric() || c == '%') {
-        return None;
-    }
-    format!("{sign}{numeric}")
-        .parse::<f64>()
-        .ok()
-        .map(|value| (value, unit))
-}
-
-/// Identifiers joined by `+`/`-` are Sass's **string concatenation**, and the two operators print
-/// differently: `operators/plus.hrx::syntax/*` folds `c+d`, `c + d`, `c +d`, `c+ d` and `c/**/+/**/d`
-/// all into `cd` (the `+` disappears), while `operators/minus.hrx::syntax/*` folds `(c)-(d)`, `c - d`,
-/// `c -(d)` and `(c)- d` all into `c-d` — the `-` survives as text because Sass parses `-` on an
-/// unquoted string as adding its negation.
-///
-/// Deliberately narrow, so nothing that works today moves: **every** operand must be an identifier
-/// lexeme (a whole-paren wrapper is peeled first), at least one operator must appear, and any number in
-/// the run sends it back to the arithmetic path — which is what keeps the spacing law and the two-item
-/// list `10px -5px` intact, and leaves `1px+2px` un-evaluated as before. Whitespace *is* data for
-/// numbers but not for this shape: the fixtures collapse all four spacings to one result.
-fn concatenation(toks: &[Tok]) -> Option<Expr> {
-    let lexemes: Vec<&Tok> = toks
-        .iter()
-        .filter(|tok| !matches!(tok, Tok::Space(_)))
-        .collect();
-    let operands = lexemes
-        .iter()
-        .step_by(2)
-        .map(operand_identifier)
-        .collect::<Option<Vec<&str>>>()?;
-    let operators = lexemes
-        .iter()
-        .skip(1)
-        .step_by(2)
-        .map(operator_sign)
-        .collect::<Option<Vec<char>>>()?;
-    if operands.len() < 2 || operators.len() + 1 != operands.len() {
-        return None;
-    }
-    Some(Expr::Text(
-        operands[1..]
-            .iter()
-            .zip(&operators)
-            .fold(operands[0].to_string(), |joined, (operand, op)| {
-                joined + if *op == '+' { "" } else { "-" } + operand
-            }),
-    ))
-}
-
-/// One non-whitespace lexeme as an operand name, if it is an identifier (possibly paren-wrapped).
-/// Named lifetimes because the `&str` comes out of a `Tok` reached through a double reference — the
-/// same elision trap that already bit this crate twice.
-fn operand_identifier<'tok>(tok: &'tok &Tok) -> Option<&'tok str> {
-    match tok {
-        Tok::Word(word) => identifier(unwrapped(word)),
-        _ => None,
-    }
-}
-
-/// One lexeme in an operator position: only a standalone `+`/`-` counts here.
-fn operator_sign(tok: &&Tok) -> Option<char> {
-    match tok {
-        Tok::Op(op @ ('+' | '-')) => Some(*op),
-        _ => None,
-    }
-}
-
-/// A lexeme that is an identifier: ASCII letter or `_` first, then letters, digits, `_` and `-`
-/// (the hyphen inside `foo-bar` never reaches us as an operator, since the lexer glues it).
-fn identifier(text: &str) -> Option<&str> {
-    let mut chars = text.chars();
-    let first = chars.next()?;
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return None;
-    }
-    chars
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        .then_some(text)
-}
-
-/// Strip every whole-paren wrapper: `(c)` and `((c))` give `c`, while `(c)(d)` gives nothing because
-/// its first `(` is closed before the end. One `successors` fold, no scanning loop.
-fn unwrapped(text: &str) -> &str {
-    std::iter::successors(Some(text), |open| whole_wrap(open))
-        .last()
-        .unwrap_or(text)
-}
-
-/// The inside of `text` when the whole lexeme is one balanced parenthesis group: dropping the outer
-/// pair must leave a run whose depth never returns to zero early (`()(c)` is two groups, not one).
-fn whole_wrap(text: &str) -> Option<&str> {
-    let inner = text.strip_prefix('(')?.strip_suffix(')')?;
-    let balanced = inner.chars().try_fold(0i32, |depth, c| match c {
-        '(' => Some(depth + 1),
-        ')' => (depth > 0).then_some(depth - 1),
-        _ => Some(depth),
-    })?;
-    (balanced == 0).then_some(inner)
-}
-
-/// Numbers joined by spaced `+`/`-`, left-associative; a lone number counts (it is what a
-/// `$var: 5px` binding needs).
-fn arithmetic(toks: &[Tok]) -> Option<Expr> {
-    let lexemes: Vec<Piece<'_>> = toks
-        .iter()
-        .enumerate()
-        .filter_map(|(index, tok)| classify(tok, index, toks))
-        .collect();
-    let numbers: Vec<(f64, &str)> = lexemes
-        .iter()
-        .step_by(2)
-        .map(|piece| match piece {
-            Piece::Num(value, unit) => Some((*value, *unit)),
-            Piece::Op(_) | Piece::Other => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let operators: Vec<BinOp> = lexemes
-        .iter()
-        .skip(1)
-        .step_by(2)
-        .map(|piece| match piece {
-            Piece::Op(op) => Some(*op),
-            Piece::Num(_, _) | Piece::Other => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    if numbers.is_empty() || operators.len() + 1 != numbers.len() {
-        return None;
-    }
-    let mut numbers = numbers.into_iter();
-    let (head, head_unit) = numbers.next()?;
-    Some(numbers.zip(operators).fold(
-        Expr::Num(head, head_unit.to_string()),
-        |acc, ((value, unit), op)| {
-            Expr::Binary(
-                Box::new(acc),
-                op,
-                Box::new(Expr::Num(value, unit.to_string())),
-            )
-        },
-    ))
 }
 
 /// An interpolated run folded into the parts to concatenate: literal text, `$var` reads and
@@ -430,6 +274,8 @@ impl BinOp {
         match self {
             BinOp::Add => lhs.plus(rhs),
             BinOp::Sub => lhs.minus(rhs),
+            BinOp::Mul => lhs.times(rhs),
+            BinOp::Div => lhs.divided_by(rhs),
         }
     }
 }

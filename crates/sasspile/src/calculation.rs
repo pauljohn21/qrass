@@ -338,6 +338,9 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
             // `$a: calc(1px + 1%)` prints `calc(1px + 1%)` — one shell, not two.
             Ok(Value::Calculation(_, inner)) => Outcome::Nested(inner.clone()),
             Ok(value) if collapsible(&value) => Outcome::Collapsed(value),
+            // A bound number with a compound unit is calculation-only too: decline rather than print a
+            // bare `1(px*rad)^-1` outside any `calc( … )`.
+            Ok(Value::Number(_, unit)) if !unit.is_plain() => Outcome::Opaque,
             Ok(value) => Outcome::Kept(value.to_css()),
             Err(_) => Outcome::Opaque,
         };
@@ -364,6 +367,10 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
         // because the fixture's own comment says an interpolated value "is always treated as an unquoted
         // string".
         Some(Ok(value)) if collapsible(&value) => Outcome::Collapsed(value),
+        // Division can produce a compound unit (`1 / 1px / 1rad`), and such a number is
+        // calculation-only: the run keeps the text the source wrote
+        // (`values/numbers/units/multiple::multiple_denominators`), which is what `Opaque` means here.
+        Some(Ok(Value::Number(_, unit))) if !unit.is_plain() => Outcome::Opaque,
         Some(Ok(value)) => Outcome::Kept(value.to_css()),
         Some(Err(_)) | None => Outcome::Opaque,
     }
@@ -417,11 +424,16 @@ fn without_leading_sign(content: &[Tok]) -> Vec<Tok> {
     }
 }
 
-/// Whether a value may leave its shells: only a **number** or a **boolean**. A `Raw` never qualifies,
-/// and that one boundary is what keeps the already-green cases of this cluster green (`calc(foobar)`,
-/// `calc(c())`, `calc(var(--c))`, `calc(#{1px + 2px})`, `calc((#{1px + 2px}))`).
+/// Whether a value may leave its shells: a **boolean**, or a number whose unit is expressible outside a
+/// calculation (see [`Unit::is_plain`]). A `Raw` never qualifies, and that one boundary is what keeps the
+/// already-green cases of this cluster green (`calc(foobar)`, `calc(c())`, `calc(var(--c))`,
+/// `calc(#{1px + 2px})`, `calc((#{1px + 2px}))`).
 fn collapsible(value: &Value) -> bool {
-    matches!(value, Value::Number(..) | Value::Bool(..))
+    match value {
+        Value::Bool(..) => true,
+        Value::Number(_, unit) => unit.is_plain(),
+        _ => false,
+    }
 }
 
 /// The readable parts of an argument list, joined the way the corpus separates them (`, `).

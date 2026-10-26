@@ -5,51 +5,27 @@
 //! [`Value::to_css`] emitted it verbatim, so the value path was already shaped as
 //! "structured value moves through operators, serialises once at the end" instead of
 //! "string travels through the pipeline and gets re-parsed". P1 adds
-//! [`Value::Number`] — a magnitude with its unit text — and the conversion table the
-//! arithmetic in [`crate::expr`] folds through. The rest of the algebra still arrives
-//! stage by stage (`Calculation`, `Color`, `List` with space/comma/slash separators,
-//! insertion-ordered `Map`, `String` with quote state, `Bool`/`Null`/`Argument`) per
+//! [`Value::Number`] — a magnitude with a [`crate::unit::Unit`], which since 1.4d is a rational
+//! (compound) unit rather than a name — and the conversion table that the arithmetic in
+//! [`crate::expr`] folds through. The rest of the algebra still arrives
+//! stage by stage (`Color`, `List` with space/comma/slash separators,
+//! insertion-ordered `Map`, `String` with quote state, `Null`/`Argument`/`Module`) per
 //! `openspec/changes/.../specs/value-types`.
 //!
 //! The type stays crate-internal (`mod value` is private in the crate root) — behaviour is
 //! observable only through the sole `compile` exit, never by leaking a `pub` for tests.
 
-use std::f64::consts::PI;
-
 use crate::SassError;
-
-/// Convertible units as `(unit, family, factor to the family base)`. Sass converts only
-/// inside one family, and only these ones: `em`/`rem`/`vh`/`vw`/`vmin`/`vmax`/`ch`/`ex`
-/// are relative to a context Sass cannot see, so each stands in its own family and
-/// combines only with itself.
-const UNITS: &[(&str, (&str, f64))] = &[
-    ("px", ("length", 1.0)),
-    ("cm", ("length", 96.0 / 2.54)),
-    ("mm", ("length", 96.0 / 25.4)),
-    ("in", ("length", 96.0)),
-    ("pt", ("length", 96.0 / 72.0)),
-    ("pc", ("length", 96.0 / 6.0)),
-    ("q", ("length", 96.0 / 25.4 / 4.0)),
-    ("deg", ("angle", 1.0)),
-    ("grad", ("angle", 0.9)),
-    ("rad", ("angle", 180.0 / PI)),
-    ("turn", ("angle", 360.0)),
-    ("s", ("time", 1.0)),
-    ("ms", ("time", 0.001)),
-    ("hz", ("frequency", 1.0)),
-    ("khz", ("frequency", 1000.0)),
-    ("dpi", ("resolution", 1.0)),
-    ("dpcm", ("resolution", 1.0 / 2.54)),
-    ("dppx", ("resolution", 96.0)),
-];
+use crate::unit::{Unit, measure};
 
 /// An owned declaration value flowing forward through the pipeline.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// Source text carried to CSS unchanged (anything P1 does not evaluate yet).
     Raw(String),
-    /// A magnitude with its unit text; `""` is unitless, `%` is a percentage.
-    Number(f64, String),
+    /// A magnitude with its unit; a unitless number carries [`Unit::unitless`], `%` is a percentage, and
+    /// a compound unit (`px*em/(rad*s)`) is the result of `*` and `/` rather than of a lexeme.
+    Number(f64, Unit),
     /// Sass's boolean, printed as the bare word `true` / `false` (`math.is-unitless`, `math.compatible`,
     /// and later `@if`'s truthiness). Kept a separate variant so a boolean is never re-parsed out of text.
     Bool(bool),
@@ -74,7 +50,7 @@ impl Value {
     pub fn to_css(&self) -> String {
         match self {
             Value::Raw(text) => text.clone(),
-            Value::Number(value, unit) => format_number(*value) + unit,
+            Value::Number(value, unit) => format_number(*value) + &unit.to_css(),
             Value::Bool(value) => value.to_string(),
             Value::Calculation(name, inner) => format!("{name}({inner})"),
         }
@@ -90,9 +66,43 @@ impl Value {
         self.combine(rhs, |left, right| left - right)
     }
 
+    /// `a * b`: the magnitudes multiply and the units combine, so `px * em` is `px*em` while
+    /// `px/em * em` is `px` — the cancellation is structural, in [`Unit::times`].
+    pub fn times(&self, rhs: &Value) -> Result<Value, SassError> {
+        self.operate(rhs, |left, right| left * right, Unit::times)
+    }
+
+    /// `a / b`: the magnitudes divide and the divisor's units flip sides, so `6 / 3px` is `2/px`.
+    ///
+    /// A zero divisor is **not** a special case here: f64 division yields infinity and
+    /// `format_number` already spells it the way Sass does (`math.div(1, 0)` → `infinity`,
+    /// `values/calculation/calc/constant::infinity`), so no panic and no invented `NaN`.
+    pub fn divided_by(&self, rhs: &Value) -> Result<Value, SassError> {
+        self.operate(rhs, |left, right| left / right, Unit::over)
+    }
+
+    /// The shape `*` and `/` share: both sides must be numbers, the magnitudes go through one operation
+    /// and the units through one combination. Unlike `+`/`-` there is no conversion or adoption step —
+    /// `1px * 1s` is a compound unit, not an error.
+    fn operate(
+        &self,
+        rhs: &Value,
+        magnitude: impl Fn(f64, f64) -> f64,
+        units: impl Fn(&Unit, &Unit) -> Unit,
+    ) -> Result<Value, SassError> {
+        let (Value::Number(left, left_unit), Value::Number(right, right_unit)) = (self, rhs) else {
+            return Err(SassError::new("Undefined operation."));
+        };
+        Ok(Value::Number(
+            magnitude(*left, *right),
+            units(left_unit, right_unit),
+        ))
+    }
+
     /// The unit law behind `+`/`-`: identical units operate directly, a unitless side adopts
-    /// the counterpart's unit, convertible units are normalised into the **left** operand's
-    /// unit (so `1px + 1in` is `97px`), and anything else is a Sass error.
+    /// the counterpart's unit, convertible single units are normalised into the **left** operand's
+    /// unit (so `1px + 1in` is `97px`), and anything else — including a compound unit that has no
+    /// single-unit counterpart to line up with — is a Sass error.
     fn combine(
         &self,
         rhs: &Value,
@@ -104,35 +114,36 @@ impl Value {
         if left_unit == right_unit {
             return Ok(Value::Number(arithmetic(*left, *right), left_unit.clone()));
         }
-        let unitless = match (left_unit.as_str(), right_unit.as_str()) {
-            ("", other) | (other, "") => Some(other.to_string()),
+        let adopted = match (left_unit.is_unitless(), right_unit.is_unitless()) {
+            (true, _) => Some(right_unit.clone()),
+            (_, true) => Some(left_unit.clone()),
             _ => None,
         };
-        if let Some(unit) = unitless {
+        if let Some(unit) = adopted {
             return Ok(Value::Number(arithmetic(*left, *right), unit));
         }
-        let (left_family, left_factor) = measure(left_unit);
-        let (right_family, right_factor) = measure(right_unit);
-        if left_family == right_family {
-            let normalised = right * right_factor / left_factor;
+        // Conversion is a single-unit affair: the tables key on unit names, so a compound side has no
+        // proven factor and the operands stay incompatible rather than being half-converted.
+        let convertible = match (left_unit.single(), right_unit.single()) {
+            (Some(left_name), Some(right_name)) => {
+                let (left_family, left_factor) = measure(left_name);
+                let (right_family, right_factor) = measure(right_name);
+                (left_family == right_family).then(|| right * right_factor / left_factor)
+            }
+            _ => None,
+        };
+        if let Some(normalised) = convertible {
             return Ok(Value::Number(
                 arithmetic(*left, normalised),
                 left_unit.clone(),
             ));
         }
         Err(SassError::new(format!(
-            "Incompatible units: '{right_unit}' and '{left_unit}'."
+            "Incompatible units: '{}' and '{}'.",
+            right_unit.to_css(),
+            left_unit.to_css()
         )))
     }
-}
-
-/// `(family, factor to the family base)`; an unknown or relative unit is its own family, so
-/// it can only ever combine with an identical unit.
-fn measure(unit: &str) -> (&str, f64) {
-    UNITS
-        .iter()
-        .find(|(name, _)| *name == unit)
-        .map_or((unit, 1.0), |(_, (family, factor))| (*family, *factor))
 }
 
 /// Sass number output: integers lose the fraction, everything else prints at the shortest

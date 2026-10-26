@@ -288,8 +288,42 @@
       的调用求值），序列化才有依据；**禁止用小写化的补丁“先赢 20 条”**，它会把后两族写错。
       另外 `directives/function/name::error/special/*` 要 `Invalid function name.`（声明 `element()` 等
       保留名非法，且大小写不敏感），它属 P7 诊断，不在本条。
-- [ ] 1.4d **有理（复合）单位：`Unit { num, den }` 取代单位字符串（本轮已从语料钉死判据，未开码——
-      尺寸必须与 1.4 同批，拆开会留下不能提交的死码）**
+- [~] 1.4d **有理（复合）单位：`Unit { num, den }` 取代单位字符串（前半已合入，calc 内化简待做）**
+      **三条语料纠正了本项原本钉死的判据**（都不靠推定，逐条有 fixture）：
+      1. **不是“构造时按名字排序”**：`math.unit(1px * 1em * 1rad)` 要 `"px*em*rad"`、
+         `math.unit(1px * 1em / 1rad / 1s)` 要 `"px*em/(rad*s)"` —— 都是**输入顺序**，排序会变 `em*px*rad` 而全错。
+         所以 `src/unit.rs` 是**保序多重集**，只有同名抵消是结构性的（`cancel` 一次遍历分子，分母同步扣）。
+      2. **输出律比记的细**：无分子时分母走**负幂** —— `1/1px` → `"px^-1"`、`1 / 1px / 3em / 4rad` →
+         `"(px*em*rad)^-1"`；有分子才写分数：单分母 `px/em`、多分母 `px*em/(rad*s)`。
+      3. **复合单位不能离开 `calc( )`**（`Unit::is_plain`）：`calc(1px / 2px)` → `0.5` 出壳
+         （`calc/operator/units::division`）、`calc(1px / 2)` → `0.5px`（`divide::simplified`），而
+         `calc(1 / 1px / 1rad)` 必须留壳（`values/numbers/units/multiple::multiple_denominators`）。
+         这条是落地时由**一条真回退**发现的：旧写法先把 `1(px*rad)^-1` 裸打印出来，簇内 `regress=1`。
+      4. **重复单位的写法仍无金样**：全语料只有 `libsass-closed-issues/issue_783.hrx` 的**注释行**（该目录不入
+         基线），所以 `px*px` 保留重复而不造 `px^2`；`unit.hrx` 自己的 README 也说该函数“仅供调试、
+         不要求各实现完全一致”。
+      **已合入部分**：`src/unit.rs`（转换表从 `value.rs` 搬入 + `Unit`）；`Value::Number(f64, Unit)` 全线
+      改用（`value.rs`/`expr.rs`/`builtins.rs`/`exec.rs` 共 37 处持有面）；`BinOp::{Mul, Div}` + `build()`
+      优先级（最右 `+`/`-` 为根，所以左结合且 `*` 绑得紧；递归只在**值表达式**上，不是文档树）；
+      词法把 `*` 提成 `Op`（`/` 故意不提成，否则 `font: 12px/1.5`、`1/2` 斜杠 list 与 `url(http://x)` 全错），
+      而 `/` 只在**调用参数内**由 `expr::release_slashes` 释放为算子（就是计划说的“斜杠语义是上下文属性”，
+      且引号内不切）；`+`/`-` 的单位律改为只看 `single()` 单位（复合单位不得半换算）。
+      **拆分补记**：`expr.rs` 涨到 542 行（超单文件 500 红线），按“词素→运算树”这个边界切出
+      `src/operations.rs`（234 行，`classify`/`number_lexeme`/`concatenation`/`arithmetic`/`build`），
+      `expr.rs` 保留读取顺序与 `eval`（326 行）；拆分后用 A/B 证 **net=0 regress=0**（run `split-check`）。
+      **实测**：hrx **768 → 778（实质 603 → 613，空期望 165 不变）**，`ledger diff trace-instr-768
+      units-rational-768` = **`regress=0 net=10`**；10 条全在候选集内：`math/unit::{one_denominator,
+      multiple_denominators, multiple_numerators, numerator_and_denominator/{single,multiple}}`、
+      `math/unitless::{denominator, numerator_and_denominator}`、`calc/operator/divide::{simplified,
+      no_whitespace}`、`calc/operator/units::division`；无效错误仍 **53**（不涨）；
+      94 测试/0 失败/0 ignored，clippy `-D warnings` **exit 0**（不再用无条件 `echo OK` 冒充门禁），
+      `sasslint` CLI `count=0`。
+      **尚缺（后半，未动）**：`values/numbers/units/multiple` 剩 14 条与 `calc/simplify.hrx` 一族需要
+      **calc 内容成为表达式树**（`1 / (1 / 1px / 1rad)` → `1px * 1rad`、`1px + 2px + 1%` → `3px + 1%`），
+      而 1.4a 存的是一致的**文本**；需新模块（`calculation.rs` 已 498 行贴线，不能再加）包含 parse / 部分化简 /
+      Sass 形式的序列化（括号只在必要处：除以一个积可展平、除以一个和不展平），并且必须先读完
+      `calc/operator/{plus,minus,times,precedence,var}` 与 `simplify.hrx` 把括号律钉死，不能边写边猜。
+      硬约束不变：`operators/slash`（`1/2` 仍为 list）不得动，无效错误不得从 53 上涨。
       词法输出律（全来自 `core_functions/math/unit.hrx`，不推定）：
       • `math.unit(1px)` → `"px"`；`math.unit(1)` → `""`；
       • `1px * 1em * 1rad` → `"px*em*rad"`（分子用 `*` 连接）；
@@ -300,9 +334,10 @@
       • `calc(1 / (1 / 1px / 1rad))` → `calc(1px * 1rad)`、`calc(1 / (1px * 1rad))` → `calc(1 / 1px / 1rad)`
         ⇒ 这些期望写在 `calc(…)` 内部，所以**真正的门禁是 1.4 的 `Calculation`**，不是 `Value` 字段本身；
       • `calc(calc(1px * 1rad / 1ms / 1Hz) / (1px / 1ms))` → `calc(1rad / 1ms / 1Hz)`（同单位两边同时抵消）。
-      数据模型决定：单位是**两个有序多重集**（`num`/`den`），构造时即按名字排序并抵消相同项，
-      因此“抵消”是结构相等而非后置算法；序列化只在 `Value::to_css` 一处按上述律输出。这是**值**，
-      自底向上求值，不引入可遍历的 AST（不违反“禁物化 AST 再遍历”）。
+      数据模型决定（已按上面第 1 条纠正）：单位是**两个多重集**（`num`/`den`），**保持输入顺序**并在构造时
+      抵消相同项（不是“按名字排序”——那会把 `px*em*rad` 排成 `em*px*rad` 而违背金样），因此“抵消”是结构相等
+      而非后置算法；序列化只在 `Unit::to_css` 一处按上述律输出。这是**值**，自底向上求值，不引入可遍历的 AST
+      （不违反“禁物化 AST 再遍历”）。
       必须同批改完的点（任一缺失就编译不过或语义不闭合）：`value.rs`（变体 + `to_css`）、`expr.rs`
       （`number_lexeme` 产出 `Unit`；`BinOp` 需先有 `Mul`/`Div`）、`calls.rs`/`builtins.rs`
       （`unit`/`is-unitless`/`compatible`/`min`/`max`/`div` 改用 `Unit`）、`exec.rs` 的 `protected` 精化。

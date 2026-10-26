@@ -9,6 +9,7 @@
 //! this compiler does not model yet, and guessing a scalar would print a wrong number where Sass would
 //! divide on.
 
+use crate::unit::Unit;
 use crate::value::Value;
 use crate::{ErrorKind, SassError};
 
@@ -37,14 +38,16 @@ static MATH_DIV: Builtin = Builtin {
     apply: |args| match args.as_slice() {
         [Value::Number(from, from_unit), Value::Number(by, by_unit)] => {
             if from_unit == by_unit {
-                Ok(Value::Number(from / by, String::new()))
-            } else if by_unit.is_empty() {
+                Ok(Value::Number(from / by, Unit::unitless()))
+            } else if by_unit.is_unitless() {
                 Ok(Value::Number(from / by, from_unit.clone()))
-            } else if let (Some(from_base), Some(by_base)) = (to_base(from_unit), to_base(by_unit))
-            {
+            } else if let (Some(from_base), Some(by_base)) = (
+                from_unit.single().and_then(to_base),
+                by_unit.single().and_then(to_base),
+            ) {
                 Ok(Value::Number(
                     from * from_base / (by * by_base),
-                    String::new(),
+                    Unit::unitless(),
                 ))
             } else {
                 Err(SassError::new("units are not convertible"))
@@ -82,14 +85,16 @@ static BUILTINS: &[&Builtin] = &[
     &MATH_COMPATIBLE,
 ];
 
-/// `math.unit(1px)` → `"px"`, `math.unit(1)` → `""`. Only a **single** unit is expressible: the
-/// multi-unit goldens (`"px*em"`, `"px/em"`, `"px^-1"`) describe compound units, which the flat unit text
-/// cannot state, so those cases stay red rather than printing a guess.
+/// `math.unit(1px)` → `"px"`, `math.unit(1)` → `""`, and the compound forms the corpus states
+/// (`"px*em*rad"`, `"px/em"`, `"px^-1"`, `"px*em/(rad*s)"`) — all of them come out of
+/// [`Unit::to_css`], which is the single place a unit becomes text.
 static MATH_UNIT: Builtin = Builtin {
     name: "math.unit",
     params: &["number"],
     variadic: false,
-    apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Raw(format!("\"{unit}\""))),
+    apply: |args| {
+        number_arg("number", &args).map(|(_, unit)| Value::Raw(format!("\"{}\"", unit.to_css())))
+    },
 };
 
 /// `math.is-unitless(1px)` → `false` — the file is `unitless.hrx`, but the function the corpus calls is
@@ -98,7 +103,7 @@ static MATH_IS_UNITLESS: Builtin = Builtin {
     name: "math.is-unitless",
     params: &["number"],
     variadic: false,
-    apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Bool(unit.is_empty())),
+    apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Bool(unit.is_unitless())),
 };
 
 /// `math.percentage(0.246)` → `24.6%`. A unit on the argument is the corpus's own message
@@ -110,8 +115,8 @@ static MATH_PERCENTAGE: Builtin = Builtin {
     variadic: false,
     apply: |args| {
         let (value, unit) = number_arg("number", &args)?;
-        if unit.is_empty() {
-            Ok(Value::Number(value * 100.0, "%".to_string()))
+        if unit.is_unitless() {
+            Ok(Value::Number(value * 100.0, Unit::named("%")))
         } else {
             Err(SassError::typed(
                 ErrorKind::WrongUnits,
@@ -139,7 +144,7 @@ static MATH_COMPATIBLE: Builtin = Builtin {
         };
         let (_, first_unit) = number_arg("number1", std::slice::from_ref(first))?;
         let (_, second_unit) = number_arg("number2", std::slice::from_ref(second))?;
-        if first_unit == second_unit || first_unit.is_empty() || second_unit.is_empty() {
+        if first_unit == second_unit || first_unit.is_unitless() || second_unit.is_unitless() {
             return Ok(Value::Bool(true));
         }
         match (dimension(&first_unit), dimension(&second_unit)) {
@@ -191,7 +196,7 @@ fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
                 format!("{} is not a number.", other.to_css()),
             )),
         })
-        .collect::<Result<Vec<(f64, String)>, SassError>>()?;
+        .collect::<Result<Vec<(f64, Unit)>, SassError>>()?;
     let (head, tail) = numbers
         .split_first()
         .expect("variadic arity is checked by `evaluate`");
@@ -211,11 +216,14 @@ fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
 /// The two magnitudes to compare, in a common scale: equal units (or either side unitless) compare as
 /// written, known convertible lengths are scaled to px, and known different dimensions are the corpus's
 /// `1px and 2s have incompatible units.` — anything else declines.
-fn comparable(a: &(f64, String), b: &(f64, String)) -> Result<(f64, f64), SassError> {
-    if a.1 == b.1 || a.1.is_empty() || b.1.is_empty() {
+fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError> {
+    if a.1 == b.1 || a.1.is_unitless() || b.1.is_unitless() {
         return Ok((a.0, b.0));
     }
-    match (to_base(&a.1), to_base(&b.1)) {
+    match (
+        a.1.single().and_then(to_base),
+        b.1.single().and_then(to_base),
+    ) {
         (Some(from_a), Some(from_b)) => Ok((a.0 * from_a, b.0 * from_b)),
         _ if dimension(&a.1).is_some() && dimension(&b.1).is_some() => Err(SassError::typed(
             ErrorKind::IncompatibleUnits,
@@ -235,11 +243,11 @@ fn comparable(a: &(f64, String), b: &(f64, String)) -> Result<(f64, f64), SassEr
 /// dimension because `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false`.
 /// `ex`/`ch`/`rem`/`deg`… are deliberately absent: no fixture contrasts them, so they stay unproven and
 /// every function that would need to judge them declines.
-fn dimension(unit: &str) -> Option<&'static str> {
-    match unit {
-        "px" | "in" | "cm" | "mm" | "pc" | "pt" => Some("length"),
-        "s" | "ms" => Some("time"),
-        "em" => Some("em"),
+fn dimension(unit: &Unit) -> Option<&'static str> {
+    match unit.single() {
+        Some("px" | "in" | "cm" | "mm" | "pc" | "pt") => Some("length"),
+        Some("s" | "ms") => Some("time"),
+        Some("em") => Some("em"),
         _ => None,
     }
 }
@@ -290,7 +298,7 @@ static MATH_FLOOR: Builtin = Builtin {
 /// Not every builtin uses this: `math.div` with a non-number emits a deprecation **warning** and still
 /// produces a value (`div.hrx::non_numeric/numerator`), so its body declines instead of failing — the
 /// difference lives in the body, because that is where the corpus differs.
-fn number_arg(param: &str, bound: &[Value]) -> Result<(f64, String), SassError> {
+fn number_arg(param: &str, bound: &[Value]) -> Result<(f64, Unit), SassError> {
     match bound.first() {
         Some(Value::Number(value, unit)) => Ok((*value, unit.clone())),
         Some(other) => Err(SassError::typed(

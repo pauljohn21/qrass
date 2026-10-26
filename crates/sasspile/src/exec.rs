@@ -16,6 +16,7 @@ use crate::expr::{self, Expr};
 use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
 use crate::selector::{Piece, PropName, Selector};
 use crate::trace;
+use crate::unit::Unit;
 use crate::value::Value;
 
 use crate::SassError;
@@ -192,7 +193,7 @@ impl State {
         };
         values.into_iter().try_for_each(|value| {
             self.env
-                .bind(&var, Value::Number(value as f64, String::new()));
+                .bind(&var, Value::Number(value as f64, Unit::unitless()));
             body.iter().try_for_each(|event| match event {
                 Event::Decl { prop, value } => self.declare(prop, value),
                 // A nested block inside a loop body is dropped: replaying it needs a rule emitted per
