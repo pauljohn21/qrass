@@ -88,6 +88,11 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - `crates/ledger` 只存失败行；同名 run 重导已改为先 `DELETE FROM run_fail`（旧版会把“已修好”报成 phantom REGRESS）。
 - 断言 `regress=0` 前 MUST 在**空 DB**（`--db=<临时路径>`）重做一次 A/B；行为不变型重构还要用 md5/`diff` 证明快照逐字节相同。
 - “同名两快照完全相同”得到的 `regress=0` 不证明任何事；行为变更 MUST 列出**哪几条用例**变了及其规范依据。
+- **通过率必须同时报“实质通过”**：`tests/hrx.rs` 会输出 `pass_substantive`（期望 CSS 非空而通过）与
+  `pass_empty_expectation`（期望输出为空，“啥也不输出”也能对）。当前 635 PASS = **471 实质 + 164 空期望**。
+  实证：`directives/{if,for,while}` 簇的 39 条“PASS”**全部**是空期望 ⇒ `@if`/`@each`/`@for` 其实一行也没实现，
+  而 `tasks.md` 3.2 却写着“已做”（从已删的 v1 流水线带过来的假状态，已更正）。**声称某特征能用时，
+  MUST 看该簇的非空期望通过数，而不是看总 pass。**
 - **用例 key MUST 唯一**：旧 `tests/hrx.rs` 用 `<basename>.hrx::<case>` 做 key，而语料在不同目录重名（两个
   `function.hrx`），11,486 条里实测 **1,135 个重复 key / 33 个同时挂着 PASS 与 FAIL** → 一个文件的通过会
   掩盖另一个的失败（一度把回归归到错误的文件上）。现在 key = 相对 `spec/` 的全路径，且 harness **有撞名断言**；

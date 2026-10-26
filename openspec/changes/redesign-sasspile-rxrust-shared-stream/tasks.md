@@ -20,8 +20,9 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=633/11,533**，量具 =
-> 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全子集目录，见 0′.3 末“可复核数据”与 0.6）。
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=635/11,533**，其中
+> **实质通过 471**（非空期望）、空期望蒙对 164；量具 = 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全
+> 子集目录，现直接输出 `pass_substantive`/`pass_empty_expectation`，见 0′.3 末“可复核数据”与 0.6）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
       `ObservableType`/`CoreObservable`），在自己 `next` 里逐条发射 0..N 项；删除
@@ -290,8 +291,14 @@
 ## P3 — 管线 + 控制流 + 作用域 + 媒体/at-root
 - [ ] 3.1 `async fn compile` 唯一出口 + **一条冷流串起各相内核**（`Lexer→Structurize→Exec→[全局 pass]→Render→reduce_initial→into_future`）。
       ⚠ v2 口径已改：旧形态（`scan_map`+`flat_map(from_iter)`+`sort_by_key`）**不再合格** → 由 P0′ 重做，本项随之重开。
-- [~] 3.2 `@if/@else`(filter + 不可变 taken 链)、`@each`/`@for`(flat_map)。**已做 `@each/@for/@if`;缺 `@while`**
-- [ ] 3.3 `@while` 条件循环(`directives/while/**`)
+- [ ] 3.2 `@if/@else`、`@each`、`@for` —— **更正：当前内核链里三者均未实现**（原“已做”是从已删除的 v1 流水线
+      带过来的假状态）。实测依据：`exec.rs`/`lib.rs` 里 `@for`/`@each`/`@while` 只出现在注释中，无处理代码；
+      `directives/{if,for,while}` 簇的 **39 条“PASS”全部是空期望输出**（即“啥也不输出”蒙对），
+      实质通过为 **0**；另有 14 条 `directives/for` 因循环变量未绑定而报假 `Undefined variable`（见 1.2d）。
+      实现方向（不回到 v1 的形状）：循环 = `flat_map` 在**已绑定的范围**上重放 body（body 作为携带的
+      owned 事件数据，到 `}` 时一次性展开为一到多），分支 = `filter` 选 taken 分支；`@if` 需要比较/布尔
+      `Expr`（现在只有 `+ -`）与真值判定，那一步要单独守“不动全局 truthiness”的接线纪律。
+- [ ] 3.3 `@while` 条件循环(`directives/while/**`)——同 3.2：簇内 1/1 “PASS”也是空期望，未实现。
 - [ ] 3.4 **媒体/supports 冒泡 + 逐查询合并**(全局 pass;`css/media/**`)
 - [ ] 3.5 `@at-root (without/with)`(`directives/at_root/**`)
 - [ ] 3.6 变量块作用域 + `!global`/`!default`(`variables/**`、`libsass/variable-scoping/**`)

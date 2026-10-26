@@ -158,6 +158,11 @@ async fn hrx_snapshot() {
 
     let mut rows: Vec<String> = Vec::new();
     let (mut total, mut pass, mut skipped) = (0usize, 0usize, 0usize);
+    // Of the passes, how many were earned against an **empty** expected output. They are legitimately
+    // correct (Sass really emits nothing for e.g. `@if true {}`), but they are also what a compiler that
+    // produces nothing scores, so they must never be read as evidence that a feature works — measured at
+    // 176 of 635 overall, and 39 of 39 in `directives/{{if,for,while}}` before loops/branches existed.
+    let mut trivial_empty = 0usize;
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut collision: Vec<String> = Vec::new();
 
@@ -186,6 +191,9 @@ async fn hrx_snapshot() {
             match (result, &case.output, want_error) {
                 (Ok(css), Some(expected), None) if norm(&css) == norm(expected) => {
                     pass += 1;
+                    if norm(expected).is_empty() {
+                        trivial_empty += 1;
+                    }
                     rows.push(format!("PASS\t{id}"));
                 }
                 // An error case is satisfied only by the message the oracle states, never by any error.
@@ -234,6 +242,9 @@ async fn hrx_snapshot() {
         stage = "hrx",
         total,
         pass,
+        // The number a round must actually move: passes earned against a non-empty expected output.
+        pass_substantive = pass - trivial_empty,
+        pass_empty_expectation = trivial_empty,
         skipped,
         pass_rate = format!("{:.1}%", 100.0 * pass as f64 / total as f64),
         snapshot = %out.display(),
