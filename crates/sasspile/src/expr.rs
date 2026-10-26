@@ -86,6 +86,35 @@ fn has_dynamic(toks: &[Tok]) -> bool {
         .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)))
 }
 
+/// Whether a run **passes named arguments** — `f(1, $w: 30%)`, `color.hwb($hue: 180, …)`. There the `$w`
+/// is an argument *label*, not a variable reference, so looking it up invents an `Undefined variable`
+/// error for a program Sass accepts (`core_functions/color/hwb/four_args::named`,
+/// `core_functions/color/is_powerless/named`; measured as 1,611 in-scope cases).
+///
+/// The test is lexeme-level because a map literal writes the same shape with the opposite intent:
+/// `($z: null)` **is** a reference to `$z` as a key. The lexer distinguishes them — a call's `(` is glued
+/// to its callee (`Word("hwb(")`) while a group's `(` stands alone (`Word("(")`) — so an argument starts
+/// only after a glued `(` or a `,`, and whitespace is not meaningful here.
+///
+/// A run holding one is not an expression P1 evaluates at all: it keeps its verbatim text, which also
+/// means any *other* reference inside it stays unresolved for now (call evaluation arrives with P4).
+pub fn named_argument(toks: &[Tok]) -> bool {
+    let meaningful: Vec<&Tok> = toks
+        .iter()
+        .filter(|tok| !matches!(tok, Tok::Space(_)))
+        .collect();
+    let opens_argument = |tok: &&Tok| match tok {
+        Tok::Word(word) => word.ends_with('(') && word.len() > 1,
+        Tok::Punct(',') => true,
+        _ => false,
+    };
+    let names_argument = |tok: &&Tok| matches!(tok, Tok::Var(_));
+    let is_colon = |tok: &&Tok| matches!(tok, Tok::Punct(':'));
+    meaningful.windows(3).any(|window| {
+        opens_argument(&window[0]) && names_argument(&window[1]) && is_colon(&window[2])
+    })
+}
+
 /// Build an `Expr` from a token run, or `None` when the run holds a shape P1 must not read.
 pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
     if protected(toks) {

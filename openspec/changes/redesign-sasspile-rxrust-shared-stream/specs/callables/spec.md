@@ -64,6 +64,26 @@ MUST 报错。
 - **WHEN** `@mixin a($args...){ n: meta.keywords($args) } @include a($c: 1)`
 - **THEN** `n: (c: 1);`
 
+### Requirement: 具名实参的位置是标签,不是引用
+
+实参列表里的 `$name:`(`(` 粘合在 callee 名后或 `,` 之后开始的实参)MUST 按**参数名**理解,
+**不得**去环境查找该名字;把它当变量引用会对外观正常的程序报出假的 `Undefined variable`
+(实测影面 1,611 条在用用例,主要为 `core_functions/color` 的具名写法)。区分必须落在**词素**上:
+调用的 `(` 与 callee 粘合为一个词素(`Word("hwb(")`),而 map 字面量的 `(` 是独立词素(`Word("(")`),
+故 `($z: null)` 里的 `$z` 仍按 `map` 键的引用处理。调用尚未参与求值(属本能力边界)时,含具名实参
+的整个值 run MUST 保持原样文本,不得部分求值。
+
+参照:`core_functions/color/hwb/four_args::named`、`core_functions/color/is_powerless/named`、
+`core_functions/map/has_key.hrx`(具名实参内嵌套 map 字面量)。
+
+#### Scenario: 全具名实参不报错
+- **WHEN** `a {b: color.hwb($hue: 180, $whiteness: 30%, $blackness: 40%, $alpha: 0.4)}`
+- **THEN** 编译不得失败(四个 `$` 名字都是参数名);待 P4 调用求值后输出金样 `hwb(180, 30%, 40%, 0.4)`
+
+#### Scenario: 不得退成万能兜底
+- **WHEN** `a { b: hwb($missing) }`($missing 是真实引用,无 `name:` 形)
+- **THEN** 仍 MUST 在真 `Err` 通道上以 `UndefinedVariable` 终止
+
 ### Requirement: 一等函数/mixin 引用与自省
 
 `meta.get-function/get-mixin` MUST 返回可调用一等值(跨模块、作用域正确);`meta.call/apply` MUST 以

@@ -188,7 +188,14 @@ impl State {
     /// result/sass_script`). Anywhere else a fatal failure travels down the real `Err` channel — the
     /// decision is explicit per shape and per kind, never one blanket `.ok()` that also eats real
     /// errors.
+    ///
+    /// A run that **passes named arguments** is excluded outright: its `$name:` is an argument label, so
+    /// evaluating the run at all would resolve a reference that does not exist
+    /// (`expr::named_argument`; measured as 1,611 cases given an invalid `Undefined variable`).
     fn evaluated(&self, toks: &[Tok], plain: bool) -> Result<Option<Value>, SassError> {
+        if expr::named_argument(toks) {
+            return Ok(None);
+        }
         let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
             other => Some(other),

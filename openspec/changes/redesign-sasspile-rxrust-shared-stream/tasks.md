@@ -180,6 +180,22 @@
 ## P1 — 值地基:单位代数 + calculation + 全色彩空间 + list/map
 - [~] 1.1 `Value`(带单位 Number/引号态 String/Color/List/Map/Bool/Null)+ `to_css` 规范化。**已有基础,缺单位换算/calc/CSS4 色**
 - [x] 1.2 `Expr` 折叠 + 惰性 `eval(owned Env)`;算术/比较/布尔;`/ * %` 跳过、CSS 原生函数保留。**已做(未接入 compile 值路径)**
+- [x] 1.2b **具名实参不是引用**（本轮实测发现并修）：`color.hwb($hue: 180, …)` 里的 `$hue:` 是参数**标签**，
+      旧逻辑去环境查它 ⇒ 对外观正常的程序报出假的 `Undefined variable`。全库实测 **1,611 条**在用用例受此影响
+      （`core_functions/color` 1,376 条，另 list/meta/math/selector 等）——与已修的 `@for $i` 头部是同一类建模错（绑定/命名位当引用）。
+      判据 `expr::named_argument` 落在**词素**上：调用的 `(` 与 callee 粘合（`Word("hwb(")`）而 map 字面量的 `(` 独立
+      （`Word("(")`），所以 `($z: null)` 里的 `$z` 仍按引用处理（语料反例：`map.remove($map: (c: d), $key: c)`）。
+      含具名实参的整个值 run 保持原文（调用求值属 P4）。实测：无效错误行 **1,611 → 118**；
+      判定集合未移动（空库 `ledger diff base600 named-args` = **regress=0 net=0**，因这些用例仍缺调用求值）。
+      新增 `tests/named_args.rs` 4 例包边界（全具名/嵌 map/命名空间 callee，以及`hwb($missing)` 仍必错——
+      防它退成万能兜底）。需求已写进 `callables/spec.md`“具名实参的位置是标签”。
+      **指标教训**（归 0.4 后续）：“FAIL 变 FAIL”在 pass 读数上看不见，所以下一步除了净涨还必须直接测
+      **无效错误计数**（`awk … unexpected error` 行数），否则假错会一直藏在失败阴影里阻塞 P1.7。
+- [ ] 1.2c **下一个同类成因：字符串里的 `$`**（本轮量出 118 条）：`selector.extend(":c(@#$)", …)` 里引号内的 `$` 被
+      当引用起始（`core_functions/selector/extend/simple/pseudo/arg::*` 等）。正解在词法：带引号串必须是**一个
+      词素**（并带引号态），它同时是 1.1 `Value::String` 与 `values/strings/**`（129 条失败）的前置。
+      注：语料里未找到“串内 `$` 期望原样输出”的直接 fixture，所以不先改行为——下一步要么找到 fixture，
+      要么在实现引号词素时顺带取到它的金样依据。
 - [ ] 1.3 **单位换算代数**(length/time/angle/…)+ 精度(`values/numbers/**`)
 - [ ] 1.4 **`Calculation` 表达式树**(`calc/clamp/min/max/var()`,可部分化简、否则原式保留)(`values/calculation/**`)
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
