@@ -145,7 +145,7 @@ fn norm(css: &str) -> String {
 }
 
 #[tokio::test]
-async fn hrx_snapshot() {
+async fn hrx_run() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sass-spec/spec");
     let _span = tracing::info_span!("hrx").entered();
     let _ = tracing_subscriber::fmt()
@@ -223,9 +223,30 @@ async fn hrx_snapshot() {
         }
     }
 
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/hrx-snapshot.tsv");
-    fs::create_dir_all(out.parent().unwrap()).ok();
-    fs::write(&out, rows.join("\n")).expect("write snapshot");
+    // The record is the ledger database, never a file. `HRX_RUN=<name>` writes this run straight into
+    // `reports/hrx.db` (`HRX_DB=<path>` aims it at another database, which is how the mandated fresh-empty
+    // A/B re-check is done); without `HRX_RUN` the harness only measures and logs, leaving no artefact.
+    // This replaces the old `target/hrx-snapshot.tsv` + `ledger import <file>` hop, which forced every A/B
+    // to hold two files — and made me rebuild the “before” side with `git stash`, the maneuver that once
+    // collided with `index.lock` and left a stale number in the transcript.
+    let recorded = std::env::var("HRX_RUN").ok().map(|name| {
+        let db = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(std::env::var("HRX_DB").unwrap_or_else(|_| "../../reports/hrx.db".into()));
+        let (stored_total, stored_pass) = ledger::record(&name, &db, &rows)
+            .unwrap_or_else(|e| panic!("ledger record {name}: {e}"));
+        // The database is now the only record, so what it stored must equal what was measured: a silent
+        // mismatch would make every later `ledger diff` compare the wrong sets.
+        assert_eq!(
+            stored_total,
+            rows.len(),
+            "ledger stored a different total for {name}"
+        );
+        assert_eq!(
+            stored_pass, pass,
+            "ledger stored a different pass count for {name}"
+        );
+        name
+    });
 
     // Sanity: the harness found and ran cases. Individual failures are expected (the
     // compiler is incomplete); regress tracking is via `ledger diff`, not this assert.
@@ -247,7 +268,7 @@ async fn hrx_snapshot() {
         pass_empty_expectation = trivial_empty,
         skipped,
         pass_rate = format!("{:.1}%", 100.0 * pass as f64 / total as f64),
-        snapshot = %out.display(),
-        "hrx snapshot written"
+        recorded_run = recorded.as_deref().unwrap_or("<not recorded>"),
+        "hrx run measured"
     );
 }

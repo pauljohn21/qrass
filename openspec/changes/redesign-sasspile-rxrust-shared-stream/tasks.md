@@ -122,17 +122,25 @@
   - [~] **0.4 harness 断言 error/warning 期望（部分完成）**：`error` 用例改为比对金样 `Error:` 首行，
       消息不等即 FAIL（旧口径“任何 Err 都算过”会凭空 +384）。未做：span/行列、`Warning:`、
       `DEPRECATION WARNING`（这类首行非 `Error:` 的用例现在一律判不匹配，诚实计为 FAIL）。
-  - **可复核数据 = `reports/hrx.db` 里的具名 run，不是快照文件**（本轮改错又改回）：每个增量跑完
-    `tests/hrx.rs` 后，把 harness 的**唯一瞬态输出** `target/hrx-snapshot.tsv` `ledger import <名字> …` 入库，
-    A/B 靠 `ledger diff`、列表靠 `ledger runs`。**曾误做法**：我自己写了“快照存 `target/baselines/`”，
-    于是堆出 15 个文件 / 27 MB，还多建了一个临时 sqlite——这正是 `crates/ledger` 建立时要消灭的
-    `reports/hrx-*.tsv` sprawl（它的模块注释原话），属于“量具已有、却又回到散文件”。已全部
-    import 入库并删除临时文件（指令本身也已从 `rust.md` 改抹）。
+  - **可复核数据 = `reports/hrx.db` 里的具名 run，而且不再经任何中间文件**（本轮改错又改回、最后连文件接口都干掉了）：
+    要留记录就 `HRX_RUN=<增量名> cargo test -p sasspile --test hrx`，harness **直接写库**
+    （`ledger::record`，早在 sasspile 的 dev-dependencies 里却从未被接；`HRX_DB=<临时路径>` 用于强制的
+    空库复算）；不设 `HRX_RUN` 则只量不写、不留产物。A/B 靠 `ledger diff`、列表 `ledger runs`、
+    失败详情 `ledger failures <run>`。入库与旧的 `import <tsv>` 通路已验证等价：
+    `ledger diff bool-units-746 db-direct-746` = **regress=0 net=0**。
+    **曾误做法（两层）**：① 我自己写过“快照存 `target/baselines/`”，堆出 15 个文件 / 27 MB 并多建一个
+    临时 sqlite——那正是 `crates/ledger` 建立时要消灭的 `reports/hrx-*.tsv` sprawl；② 改入库后仍保留
+    “harness 写一个 TSV + `ledger import <file>`”的中间步骤，于是 A/B 必须凑两个文件，我只能用
+    `git stash` 重建“改动前”快照——它就撞过一次 `index.lock`，让一组旧码读数差点进入结论。
+    现已无散文件、无 import、无 stash 重建。
     现有可追溯的 run（path-key 制式）：`head-600-pathkey`(600，粗量具)、`s2-fatal-empty-599`(599)、
     `s2-fatal-flip-probe-600`(600)、`p1-named-args-600`、`p1-quoted-string-600`、`scope-full-616`(616)、
-    `head-633-concat`(633)、**`head-635-flags`(635，当前基线)**。在此之前的 basename-key run 与它们
+    `head-633-concat`(633)、`head-635-flags`(635)、`inert-callable-bodies`(635)、`for-loop-643`(643)、
+    `call-spine-653`(653)、`math-family-692`(692)、`variadic-minmax-714`(714)、**`bool-units-746`(746，当前基线)**
+    与等价的 `db-direct-746`（第一个由 harness 直接写入库的 run）。在此之前的 basename-key run 与它们
     **不同制式，不得跨制式 diff**（库里 `case-key-scheme` note 已记明）。
-    行为不变型改动用 `cmp` 证两次快照逐字节相同；变型必须在**新建空库**上 `ledger diff` 列 NET/REGRESS
+    行为不变型改动改为：把两侧各以一个 run 名入**同一个空库**（`HRX_DB=<临时库>`）后 `ledger diff` 证 net=0
+    （TSV 已不存在，`cmp` 无对象可用）；变型则另在空库上 `diff` 列 NET/REGRESS
     具体键，并用 `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够（临时空库只为验收，
     **不作为记录留存**）。
   - **量具自身必须带阳性对照（P1.3 新血泪）**：一次“仅差空白=0、仅差大小写=0”的读数让我差点得出
@@ -401,6 +409,16 @@
         命名坑第二次命中：`unitless.hrx` 里的函数实为 **`math.is-unitless`**。
         工具事故（不并入库）：本批一次 `git stash pop` 撞 `index.lock` 导致工作区一度回到旧码，
         当时那组“76 passed”是旧码的读数，已当场识别并在恢复后重测为 78/0/0。
+
+- [ ] 1.8 **`if()` 不是“一个签名就能赢”的快收益（本轮量过并否定）**。当前失败最多的文件：
+      `expressions/if/sass`(48)、`core_functions/selector/unify/simple/pseudo`(44)、`css/plain/import/conditions`(42)、
+      `core_functions/color/{lab/special_functions/alpha,change/hsl,rgb/one_arg/…,hwb/four_args,hsl/…}`(各 35+)、
+      `expressions/if/error/raw`(34)、`directives/forward/error/syntax`(34)、`values/calculation/calc/no_operator`(33)。
+      看似最便宜的 `if()` 实际卡三件事：① 语料写的是**缩进语法的 if 表达式**
+      `if(sass(true): c; else: d)`（关键字参数形，不是 3 个位置实参）；② `if(sass(false): c) == null` → `true`
+      需 `==` 与 `Null`；③ Sass 的 `if()` 是**惰性**的，而现在 `Expr::Call` 把所有实参先求成 `Value`，
+      所以下一个真实需求是把 body 改成接 `Expr`+`Env`（只评估用到的分支）——那就得同时改掉已有 11 个签名，
+      属于批尺寸改动。⇒ **推荐顺序不变**：1.4 `Calculation` → 1.4d 有理单位 → 1.7 其余分派（含惰性 `if()`）。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)

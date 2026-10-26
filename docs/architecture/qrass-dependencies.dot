@@ -1,0 +1,95 @@
+// qrass workspace 依赖图 — 由 codegraph_explore 两次查询 + Cargo.toml/use 语句取证生成
+// 视图问题：crate 之间如何依赖？sasspile 内部模块之间如何依赖？内核流的数据形态是什么？
+// 阅读顺序：右上外部生态 ← workspace crates（左 cluster）→ sasspile 模块（下 cluster）；实线 = compile-time，虚线 = dev/test。
+digraph qrass_dependencies {
+  rankdir=TB;
+  nodesep=0.35;
+  ranksep=0.6;
+  fontname="Helvetica";
+  label="qrass 依赖图（L2 crates + L3 sasspile 模块）\n证据：codegraph_explore ×2 + Cargo.toml + use crate:: 全量扫描 · 2026-10-26";
+  labelloc=t;
+
+  // ---------- workspace crates (L2) ----------
+  subgraph cluster_crates {
+    label="workspace crates";
+    style=rounded;
+
+    sasspile [shape=box3d, label="sasspile\n(clean-room Sass 编译器)", penwidth=2];
+    ledger   [shape=box3d, label="ledger\n(A/B 快照库, rusqlite)"];
+    sasslint [shape=box3d, label="sasslint\n(铁律机器闸 + MCP)"];
+
+    // ---------- 外部依赖 ----------
+    subgraph cluster_external {
+      label="外部依赖";
+      style=dashed;
+      rxrust   [shape=ellipse, style=dashed, label="rxrust\n=1.0.0-rc.6 (引擎)"];
+      tracing  [shape=ellipse, style=dashed, label="tracing"];
+      trsub    [shape=ellipse, style=dashed, label="tracing-subscriber"];
+      rusqlite [shape=ellipse, style=dashed, label="rusqlite\n(bundle)"];
+      serde    [shape=ellipse, style=dashed, label="serde /\nserde_json"];
+    }
+  }
+
+  sasspile -> rxrust  [label="compile-time:\n唯一流引擎"];
+  sasspile -> tracing;
+  ledger   -> rusqlite;
+  ledger   -> tracing;
+  ledger   -> trsub;
+  sasslint -> tracing;
+  sasslint -> trsub;
+  sasslint -> serde;
+
+  // dev-dependency：仅 hrx 测试 harness 使用（crates/sasspile/tests/hrx.rs）
+  sasspile -> ledger [style=dashed, color="#666666", constraint=false,
+                      label="dev-dependency:\nhrx 快照写入 ledger run"];
+
+  // ---------- sasspile 内部模块 (L3) ----------
+  subgraph cluster_sasspile {
+    label="crates/sasspile/src 模块依赖";
+    style=rounded;
+
+    lib       [shape=note, label="lib.rs\nSassError/ErrorKind·FATAL·compile()"];
+    phases    [shape=box, label="phases.rs\nLexer·Structurize·Exec·Render\n(四个真算子内核)"];
+    lexer     [shape=box, label="lexer.rs\nTok·Event·LexAcc·MsgAcc\nrender/canon"];
+    exec      [shape=box, label="exec.rs\nState·StyleRule·step"];
+    expr      [shape=box, label="expr.rs\nExpr 代数·from_tokens·eval"];
+    value     [shape=box, label="value.rs\nValue·单位代数"];
+    env       [shape=box, label="env.rs\nEnv 变量环境"];
+    selector  [shape=box, label="selector.rs\nSelector·Piece·PropName"];
+    calls     [shape=box, label="calls.rs\n调用签名/实参"];
+    builtins  [shape=box, label="builtins.rs\nBUILTINS 内置函数表"];
+  }
+
+  // 管线数据形态（订阅链 = lib::compile 的 transform 顺序）
+  lib -> phases [label="compile() 串联\ntransform×4"];
+
+  phases -> lexer [label="Tok/Event/LexAcc/MsgAcc"];
+  phases -> exec  [label="State/StyleRule"];
+
+  exec -> env;
+  exec -> expr;
+  exec -> lexer;
+  exec -> selector;
+  exec -> value;
+
+  expr -> calls;
+  expr -> env;
+  expr -> lexer;
+  expr -> value;
+
+  calls -> builtins;
+  calls -> lexer;
+
+  builtins -> value;
+  env -> value;
+  selector -> lexer;
+
+  // ---------- 内核流的数据形态（文档性边，用粗线标出）----------
+  { rank=same; pipe_lex; pipe_str; pipe_exec; pipe_render; }
+  pipe_lex   [shape=none, label="char\n→ Tok\n(Lexer)"];
+  pipe_str   [shape=none, label="Tok\n→ Event\n(Structurize)"];
+  pipe_exec  [shape=none, label="Event\n→ StyleRule\n(Exec)"];
+  pipe_render[shape=none, label="StyleRule\n→ String\n(Render)"];
+  pipe_lex -> pipe_str -> pipe_exec -> pipe_render [penwidth=2, color="#1d4ed8"];
+  lib -> pipe_lex [style=invis];
+}

@@ -199,9 +199,11 @@ let b = shared.clone().filter(fb);
    （高阶/多源未先取 `SingleAssignment`）。**它们是代理而非证明**，不代替第 3 步的结果证据；
    也故意放过只用了一半签名的合法代码（`from_iter` 作源、1:1 内核的 `source.subscribe(..)`）。
 2. `cargo test --all-targets` + `cargo clippy --all-targets -- -D warnings` → 绿；
-3. 把 harness 刚生成的 `target/hrx-snapshot.tsv` `ledger import <增量名> …` 入 `reports/hrx.db`，再在
+3. 需要留记录时直接让 harness 写库：`HRX_RUN=<增量名> cargo test -p sasspile --test hrx`（默认入
+   `reports/hrx.db`；`HRX_DB=<临时路径>` 入另一个库，供强制的空库复算），再在
    **新建空库**上 `ledger diff <base> <run>` → **`regress = 0`** 才合入，否则回退。A/B 记录 = 库里具名 run
-   （`ledger runs` 可查），**不存散文件也不开第二个库**；行为不变型重构另需用 `cmp` 证两次快照逐字节相同。
+   （`ledger runs` 列表、`ledger failures <run>` 看失败详情），**不存快照文件也不开第二个记录库**；
+   不设 `HRX_RUN` 时只量不写。行为不变型重构另应用两个 run 名入同一个空库后 `diff`，证 net=0。
 新算子/函数先做成 **pub 独立件 + 金样单测、不接 `compile`**，接线时**只在无歧义处触发**
 （函数白名单、`/ * %` 跳过护 CSS），逐片守门（见项目记忆"sasspile 值/函数层安全生长范式"）。
 

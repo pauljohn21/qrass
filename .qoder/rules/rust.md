@@ -101,8 +101,10 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
   逐条比对金样 `Error:` 首行后真值是 **+1**（384 条的期望消息是 `Expected identifier.`、单位错误、
   `DEPRECATION WARNING`——它们属 P1/P7 待实现的消息，不是错误管道）。批量新增/回退 MUST 抽样看**期望文本**，
   并区分“指标修正”与“真收益”。
-- **A/B 记录只住 `reports/hrx.db` 的具名 run**：harness 的唯一瞬态输出是 `target/hrx-snapshot.tsv`，跑完立刻
-  `ledger import <增量名> target/hrx-snapshot.tsv`，事后靠 `ledger runs` / `ledger diff` 追溯。
+- **A/B 记录只住 `reports/hrx.db` 的具名 run，且不再经任何中间文件**：需要入库时用
+  `HRX_RUN=<增量名> cargo test -p sasspile --test hrx`，harness 直接写库（`HRX_DB=<路径>` 指向另一个库，
+  供强制的空库复算用）；不设 `HRX_RUN` 时只量不写、不留任何产物。事后靠 `ledger runs` / `ledger diff` / `ledger failures <run>` 追溯。
+  MUST NOT 再写回“先导出 TSV 再 `ledger import`”的做法，也不得开第二个库当记录。
   **MUST NOT** 攒快照文件或第二个 sqlite（`crates/ledger` 的存在理由就是取代旧的 `reports/hrx-*.tsv` sprawl；
   本轮曾误把基线存成 `target/baselines/*.tsv`，15 个文件 / 27 MB，已全部入库并删除）。
   为验收新建的空库（`--db=<临时路径>`）只用于复算，**不作为记录留存**；`/tmp` 会被系统清理。
