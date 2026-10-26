@@ -109,7 +109,17 @@ channel()/*-powerless()`;跨空间换算与 gamut 映射按金样。命名色(MU
 插值内未定义变量 MUST 求值失败(丢该声明或按金样报错)。字符串 MUST 管引号态(quote/unquote/length/
 slice/index/to-upper-case/to-lower-case/insert);`ident` 转义/规范化按金样。
 
-参照:`values/interpolation/**`、`values/strings/**`、`core_functions/string/**`。
+参照:`values/interpolation/**`、`values/strings.hrx`、`core_functions/string/**` 。
+
+字符串字面量内的 `$` MUST 是**普通文本**,不得当作变量引用(Sass 不在串里解析变量);串内的
+`$` 去查环境会对外观正常的程序报出假的 `Undefined variable`(实测 118 条在用用例,
+如 `core_functions/selector/extend/simple/pseudo/arg::class/equal` 的 `selector.extend(":c(@#$)", …)`)。
+转义引号(`\"`)MUST 不提前结束该串。注:本要求目前只约束 `$`;把带引号串当作**单一词素**
+(串内 `:` / `;` / `//` 不再拆词与误判为注释)属下面的引号态与 `Value::String` 工作。
+
+#### Scenario: 串内美元符不查环境
+- **WHEN** `a {b: selector.extend(":c(@#$)", ":c(@#$)", "e")}`
+- **THEN** 编译不得失败(三个实参里的 `$` 都是串内文本;调用求值属 P4,现在保留原文)
 
 #### Scenario: 选择器插值
 - **WHEN** `$k: 2; .col-#{$k} { w: 1px }`

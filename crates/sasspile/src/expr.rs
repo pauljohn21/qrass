@@ -68,11 +68,18 @@ fn base_call_name(name: &str) -> &str {
     name.rsplit('-').next().unwrap_or(name)
 }
 
-/// Whether a run calls a special (or namespaced, `progid:`-style) function.
+/// Whether a run calls a special (or namespaced, `progid:`-style) function. The name match ignores
+/// case, because the corpus keeps `-C-EXPRESSION($d)` verbatim too
+/// (`css/functions/special/prefixed/uppercase::expression/script_like`).
 pub fn special_call(toks: &[Tok]) -> bool {
     toks.iter().any(|tok| match tok {
         Tok::Word(word) => match word.strip_suffix('(') {
-            Some(name) => SPECIAL_CALLS.contains(&base_call_name(name)) || name.contains(':'),
+            Some(name) => {
+                SPECIAL_CALLS
+                    .iter()
+                    .any(|call| base_call_name(name).eq_ignore_ascii_case(call))
+                    || name.contains(':')
+            }
             None => false,
         },
         _ => false,

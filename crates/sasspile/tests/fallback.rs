@@ -85,4 +85,11 @@ async fn unbound_variable_inside_a_special_call_stays_text() {
             .expect("bound var resolves"),
         "b {\n  c: calc(foobar);\n}\n"
     );
+    // The name match ignores case: the corpus states the same shape upper-cased
+    // (`css/functions/special/prefixed/uppercase::expression/script_like`, `-C-EXPRESSION($d)`), which
+    // must not fail either. Sass also lower-cases the printed name, which we do not do yet — the
+    // assertion is that no error is raised, not the exact text.
+    compile("a {b: -C-EXPRESSION($d)}")
+        .await
+        .expect("a prefixed special call is plain CSS whatever its case");
 }

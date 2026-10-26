@@ -51,3 +51,26 @@ async fn lone_slash_stays_division_text() {
         "a {\n  b: 1px / 2px;\n}\n"
     );
 }
+
+/// A `$` inside a quoted string is text, never the start of a variable reference: Sass resolves no
+/// variable inside a string literal, and the corpus passes strings like `":c(@#$)"` as ordinary
+/// arguments (`core_functions/selector/extend/simple/pseudo/arg::class/equal`). Before the lexer
+/// tracked quotes, this shape raised an `Undefined variable` error for a program Sass accepts
+/// (measured as 118 in-scope cases).
+#[tokio::test]
+async fn dollar_inside_a_quoted_string_is_text() {
+    let out = compile(r#"a {b: selector.extend(":c(@#$)", ":c(@#$)", "e")}"#)
+        .await
+        .expect("a quoted `$` must not be looked up");
+    assert!(
+        out.contains("selector.extend("),
+        "the run keeps its text until calls evaluate (P4), got {out}"
+    );
+    // The other quote form behaves the same, and an escape must not close the string early.
+    compile(r"a {b: 'cost: $5'}")
+        .await
+        .expect("single-quoted $");
+    compile(r#"a {b: "escaped \" still one string: $x"}"#)
+        .await
+        .expect("an escaped quote does not end the literal");
+}

@@ -191,11 +191,27 @@
       防它退成万能兜底）。需求已写进 `callables/spec.md`“具名实参的位置是标签”。
       **指标教训**（归 0.4 后续）：“FAIL 变 FAIL”在 pass 读数上看不见，所以下一步除了净涨还必须直接测
       **无效错误计数**（`awk … unexpected error` 行数），否则假错会一直藏在失败阴影里阻塞 P1.7。
-- [ ] 1.2c **下一个同类成因：字符串里的 `$`**（本轮量出 118 条）：`selector.extend(":c(@#$)", …)` 里引号内的 `$` 被
-      当引用起始（`core_functions/selector/extend/simple/pseudo/arg::*` 等）。正解在词法：带引号串必须是**一个
-      词素**（并带引号态），它同时是 1.1 `Value::String` 与 `values/strings/**`（129 条失败）的前置。
-      注：语料里未找到“串内 `$` 期望原样输出”的直接 fixture，所以不先改行为——下一步要么找到 fixture，
-      要么在实现引号词素时顺带取到它的金样依据。
+- [x] 1.2c **串内的 `$` 不是引用（已合入）**：词法新增 `quote`/`escaped` 状态——进入 `"`/`'` 后，反斜杠转义下一
+      字符（`\"` 不提前闭合）、遇到同名引号闭合、**`$` 当普通文本**不再开 `Tok::Var`。依据是语料自身：
+      `core_functions/selector/extend/simple/pseudo/arg::class/equal` 就传 `selector.extend(":c(@#$)", …)`。
+      实测：无效 `Undefined variable` 行 **118 → 93**；判定集合仍不动（空库 `ledger diff base600 quoted-string`
+      = **regress=0 net=0**，因这些用例仍缺调用求值）。新增 `tests/lexer.rs::dollar_inside_a_quoted_string_is_text`。
+      **同时修一处 special 名过严**：`css/functions/special/prefixed/uppercase.hrx::expression/script_like`
+      输入 `a {b: -C-EXPRESSION($d)}` 期望原样保留 ⇒ `expr::special_call` 的基名匹配改为**大小写无关**
+      （实测同一输入的 lowercase 一直 PASS、uppercase 因名字不匹配而报错）。
+      **边界说清（不粉饰）**：本项只把 `$` 从串里抓回来，**带引号串仍不是一个词素**——串内的
+      `:` / `;` / `{` / `//` 依旧会拆词与误判为注释（例如 `content: "a: b"`、`"a//b"`）；把它做成带
+      引号态的单一词素是 1.1 `Value::String` 的真前置，单独立项。
+      **修正上一轮的错引**：我写的 `values/strings/**（129 条失败）` 两处都不对——该路径是**文件**
+      `values/strings.hrx`（入基线 4 条，现均 FAIL：`new-line/*` 需要“串内裸换行报 parse 错”与引号态转换），
+      而 129 是 `values/numbers` 的数。串类函数在 `core_functions/string/*`（153 条失败）。
+- [ ] 1.2d **剩余 93 条假错的真实归属（逐条分桶而来，不是策略问题而是能力缺失）**：
+      • 36 条 = **模块变量未加载**：`@use "sass:math"` 后的 `math.$pi`/`math.$e`（归 P5.1）；
+      • 31 条 = **可调用体在声明处被求值**：`@mixin add_two($v) {b: $v + 2}` 未调用也应不报错（归 P4.1，
+        它是 P4 的第一个前置：声明只登记体，执行等到调用点）；
+      • 14 条 = **循环变量未绑定**：`@for $i from …` 里的 `$i` 头部已不查（P0′.3b-1）但循环体未绑定（归 P3.2）；
+      • 12 条 = 其他，待逐条再看。
+      注：这些**不得用“兜底不报错”抹平**（铁律禁），只能按归属把特征实现掉。
 - [ ] 1.3 **单位换算代数**(length/time/angle/…)+ 精度(`values/numbers/**`)
 - [ ] 1.4 **`Calculation` 表达式树**(`calc/clamp/min/max/var()`,可部分化简、否则原式保留)(`values/calculation/**`)
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)

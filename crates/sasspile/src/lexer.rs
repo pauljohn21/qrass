@@ -79,6 +79,13 @@ pub struct LexAcc {
     /// a `-` seen at a token boundary whose role is not decided yet: Sass's spacing law needs the
     /// next character, exactly like the pending-slash fold
     minus: bool,
+    /// the quote character of the string literal we are inside, if any. Today its only effect is that
+    /// `$` stays text rather than starting a reference — Sass resolves no variable inside a quoted
+    /// string (`core_functions/selector/extend/simple/pseudo/arg::class/equal` passes
+    /// `selector.extend(":c(@#$)", …)` and must not fail).
+    quote: Option<char>,
+    /// a backslash seen inside a string: it escapes the next character, so `\"` does not close it
+    escaped: bool,
 }
 
 impl LexAcc {
@@ -138,6 +145,24 @@ impl LexAcc {
                 c => self.comment.push(c),
             }
             return;
+        }
+        if let Some(open) = self.quote {
+            // Inside a quoted string the character is content: a backslash escapes the next one, the
+            // matching quote ends the literal, and `$` must not be read as a variable reference
+            // (`core_functions/selector/extend/simple/pseudo/arg::class/equal`).
+            if self.escaped {
+                self.escaped = false;
+            } else if ch == '\\' {
+                self.escaped = true;
+            } else if ch == open {
+                self.quote = None;
+                self.buf.push(ch);
+                self.flush_word(emit);
+                return;
+            } else if ch == '$' {
+                self.buf.push(ch);
+                return;
+            }
         }
         if self.slash {
             self.slash = false;
@@ -221,6 +246,12 @@ impl LexAcc {
             // Defer: whether a `-` is Sass's operator (whitespace on both sides) or part of an
             // identifier (`-a-calc(`, `10px -5px`) is only knowable once the next char arrives.
             '-' => self.minus = true,
+            // A quote opens a string literal; its counterpart closes it above. The lexeme keeps the
+            // quote characters, so rendering still reproduces the source exactly.
+            quote @ ('"' | '\'') if self.quote.is_none() => {
+                self.quote = Some(quote);
+                self.buf.push(quote);
+            }
             c => self.buf.push(c),
         }
     }
