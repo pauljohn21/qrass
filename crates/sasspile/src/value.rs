@@ -149,7 +149,7 @@ impl Value {
 /// Sass number output: integers lose the fraction, everything else prints at the shortest
 /// round-trip precision (so `1in + 1px` is `97px`, and a parsed `f64::MAX` literal keeps
 /// the 17 digits that actually identify it).
-fn format_number(value: f64) -> String {
+pub(crate) fn format_number(value: f64) -> String {
     if value.is_infinite() {
         // Sass spells the infinities `infinity` / `-infinity`; Rust's `Display` gives `inf`, which CSS
         // would not read (`values/calculation/calc/constant::infinity/math/unsimplified/from_variable`).
@@ -177,7 +177,11 @@ fn format_number(value: f64) -> String {
     if significant <= 10 {
         return natural;
     }
-    let exponent = value.abs().log10().floor().max(0.0) as i32;
+    // The exponent is **not** clamped at zero: a value in `(0, 1)` starts its significant digits one
+    // place right of the point, so clamping cost `calc(2 * 3 / 5 * 7 / 11)` a digit — the fixture wants
+    // `0.7636363636` (`operator/precedence::simplified/multiplicative`), and `1 / (2 * 3)` wants
+    // `0.1666666667` (`precedence::simplified/parens/multiplicative`).
+    let exponent = value.abs().log10().floor() as i32;
     format!("{:.1$}", value, (10 - 1 - exponent).max(0) as usize)
         .trim_end_matches('0')
         .trim_end_matches('.')

@@ -100,28 +100,104 @@ async fn a_bound_plain_number_is_not_collapsible_yet() {
     assert_eq!(value("$a: 1px;\nb {c: calc($a)}").await, "calc(1px)");
 }
 
-/// The refusal half. `calc/simplify.hrx`'s own README states that only "number + number where both are
-/// compatible" simplifies — and 1.4d pairs that with `*`/`/` and the rational units, so a `+`/`*` run
-/// inside `calc( … )` keeps its text rather than being folded by a half-built algebra.
-///
-/// Division is the exception the corpus already grants: `/` carries no operator lexeme here (it stays
-/// inside the word until `expr::release_slashes` reads an argument), so it resolves — `calc(1px / 2)` is
-/// `0.5px` (`values/calculation/calc/operator/divide::simplified`) and `calc(1px / 2px)` is `0.5`
-/// (`calc/operator/units::division`). What cannot be printed outside a calculation keeps the shell:
-/// `calc(1 / 1px / 1rad)` (`values/numbers/units/multiple::multiple_denominators`).
+/// What 1.4d *grants*: a chain folds while every step is computable. Each expectation is quoted from a
+/// fixture, not derived — `calc/operator/times::simplified` (`1px * 2` → `2px`), `…/times::no_whitespace`
+/// (`1px*2` → `2px`), `…/minus::simplified` (`1px - 2px` → `-1px`), and the four
+/// `…/precedence::simplified/*` rows that settle associativity and that `*` binds tighter than `+`.
 #[tokio::test]
-async fn simplification_is_not_guessed() {
-    assert_eq!(value("a {b: calc(1px + 2px)}").await, "calc(1px + 2px)");
-    assert_eq!(value("a {b: calc(1px + 1%)}").await, "calc(1px + 1%)");
-    assert_eq!(value("a {b: calc(3px * 2)}").await, "calc(3px * 2)");
-    assert_eq!(value("a {b: calc(1px / 2)}").await, "0.5px");
-    assert_eq!(value("a {b: calc(1px / 2px)}").await, "0.5");
-    assert_eq!(
-        value("a {b: calc(1 / 1px / 1rad)}").await,
-        "calc(1 / 1px / 1rad)"
-    );
-    // A slash in a plain declaration value is still the separator the CSS shorthand depends on.
-    assert_eq!(value("a {b: 1/2}").await, "1/2");
+async fn chains_fold_while_every_step_is_computable() {
+    for (input, want) in [
+        ("a {b: calc(1px + 2px)}", "3px"),
+        ("a {b: calc(1px - 2px)}", "-1px"),
+        ("a {b: calc(1px * 2)}", "2px"),
+        ("a {b: calc(1px*2)}", "2px"),
+        (
+            "a {b: calc(1px + 20px - 300px + 4000px - 50000px)}",
+            "-46279px",
+        ),
+        ("a {b: calc(2 * 3 / 5 * 7 / 11)}", "0.7636363636"),
+        ("a {b: calc(2 * 3 + 4 / 5 - 6)}", "0.8"),
+        ("a {b: calc(2 * (3 + 4) / (5 - 6))}", "-14"),
+        ("a {b: calc(1 / (2 * 3))}", "0.1666666667"),
+        // An incompatible step stops only itself (`operator/minus::preserved/number`,
+        // `operator/units::percent/and_known`).
+        ("a {b: calc(1px + 1%)}", "calc(1px + 1%)"),
+        ("a {b: calc(1px - 2%)}", "calc(1px - 2%)"),
+        ("a {b: calc(1px + 2%)}", "calc(1px + 2%)"),
+        // The left-associative reading the corpus states: `(1% + 1px) + 2px` does not fold
+        // (`calc/simplify.hrx`'s own README), and neither does the right-leaning one.
+        ("a {b: calc(1% + 1px + 2px)}", "calc(1% + 1px + 2px)"),
+        // A compound unit is calculation-only, so the shell stays
+        // (`values/numbers/units/multiple::multiple_denominators`).
+        ("a {b: calc(1 / 1px / 1rad)}", "calc(1 / 1px / 1rad)"),
+        // And a slash in a plain declaration value is still the separator CSS shorthands need.
+        ("a {b: 1/2}", "1/2"),
+    ] {
+        assert_eq!(value(input).await, want, "for {input}");
+    }
+}
+
+/// Parentheses are re-derived from precedence, never copied: `operator/var` and
+/// `operator/precedence::preserved/*` together spell out when a group survives. The two sides of the law
+/// are the same expression written with a group and with a nested `calc( … )` — both print identically,
+/// which is why the nested form is not a special case here.
+#[tokio::test]
+async fn parentheses_follow_precedence_not_source() {
+    for (input, want) in [
+        // Dropped where the algebra allows.
+        ("a {b: calc((1 + var(--c)))}", "calc(1 + var(--c))"),
+        ("a {b: calc(1px + (2% - 3em))}", "calc(1px + 2% - 3em)"),
+        (
+            "a {b: calc(1px * (2 / var(--c)))}",
+            "calc(1px * 2 / var(--c))",
+        ),
+        ("a {b: calc(1px + calc(2% - 3em))}", "calc(1px + 2% - 3em)"),
+        (
+            "a {b: calc(1px * calc(2 / var(--c)))}",
+            "calc(1px * 2 / var(--c))",
+        ),
+        // Kept where dropping them would change the value.
+        (
+            "a {b: calc(1px / (2 * var(--c)))}",
+            "calc(1px / (2 * var(--c)))",
+        ),
+        (
+            "a {b: calc(1px / calc(2 * var(--c)))}",
+            "calc(1px / (2 * var(--c)))",
+        ),
+        (
+            "a {b: calc(1px * (2 + var(--c)))}",
+            "calc(1px * (2 + var(--c)))",
+        ),
+        (
+            "a {b: calc(1px - (2% + var(--c)))}",
+            "calc(1px - (2% + var(--c)))",
+        ),
+        (
+            "a {b: calc(1px - (2% - var(--c)))}",
+            "calc(1px - (2% - var(--c)))",
+        ),
+        // A group around an unmodellable operand keeps its parentheses whatever precedence says.
+        ("a {b: calc(1 + (var(--c)))}", "calc(1 + (var(--c)))"),
+        ("a {b: calc(1 + calc(var(--c)))}", "calc(1 + (var(--c)))"),
+    ] {
+        assert_eq!(value(input).await, want, "for {input}");
+    }
+}
+
+/// What stays **unreadable**, so nothing 1.4a printed correctly moves: a run that does not alternate into
+/// operands and operators keeps the source text. `values/calculation/calc/space.hrx::var/before`
+/// (`calc(var(--c) 1)` → `calc(var(--c) 1)`) is the fixture that states adjacent operands are a
+/// space-separated list rather than a product.
+#[tokio::test]
+async fn text_this_cannot_model_stays_as_written() {
+    assert_eq!(value("a {b: calc(foobar)}").await, "calc(foobar)");
+    assert_eq!(value("a {b: calc(var(--c))}").await, "calc(var(--c))");
+    assert_eq!(value("a {b: calc(c())}").await, "calc(c())");
+    assert_eq!(value("a {b: calc(var(--c) 1)}").await, "calc(var(--c) 1)");
+    assert_eq!(value("a {b: calc(1 var(--c))}").await, "calc(1 var(--c))");
+    // A leading sign glued to its number is part of the literal (`no_operator::number/leading_plus`).
+    assert_eq!(value("a {b: calc(+1px)}").await, "1px");
 }
 
 /// The five cases this cluster already passed before any calculation rule existed — the corpus wants

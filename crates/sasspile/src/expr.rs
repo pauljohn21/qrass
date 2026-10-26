@@ -200,7 +200,7 @@ pub fn argument_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
 /// keeps it inside the literal. Nothing outside an argument is re-cut, and a quoted lexeme is never
 /// split, because `"a/b"` is text. `Expr::Call`'s verbatim branch still renders the **original**
 /// `arg.toks`, so a run this cannot read comes out byte-for-byte as before.
-fn release_slashes(toks: &[Tok]) -> Vec<Tok> {
+pub(crate) fn release_slashes(toks: &[Tok]) -> Vec<Tok> {
     let quotable = |word: &str| word.starts_with('"') || word.starts_with('\'');
     toks.iter()
         .flat_map(|tok| match tok {
@@ -269,6 +269,16 @@ fn interpolation(toks: &[Tok], env: &Env) -> Option<Expr> {
 }
 
 impl BinOp {
+    /// The operator's own character, for printing a calculation back out.
+    pub(crate) fn symbol(self) -> char {
+        match self {
+            BinOp::Add => '+',
+            BinOp::Sub => '-',
+            BinOp::Mul => '*',
+            BinOp::Div => '/',
+        }
+    }
+
     /// Apply one operator to two evaluated operands, leaving the unit law to `Value`.
     fn apply(self, lhs: &Value, rhs: &Value) -> Result<Value, SassError> {
         match self {

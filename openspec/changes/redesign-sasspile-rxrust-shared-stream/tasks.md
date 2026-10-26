@@ -318,12 +318,27 @@
       no_whitespace}`、`calc/operator/units::division`；无效错误仍 **53**（不涨）；
       94 测试/0 失败/0 ignored，clippy `-D warnings` **exit 0**（不再用无条件 `echo OK` 冒充门禁），
       `sasslint` CLI `count=0`。
-      **尚缺（后半，未动）**：`values/numbers/units/multiple` 剩 14 条与 `calc/simplify.hrx` 一族需要
-      **calc 内容成为表达式树**（`1 / (1 / 1px / 1rad)` → `1px * 1rad`、`1px + 2px + 1%` → `3px + 1%`），
-      而 1.4a 存的是一致的**文本**；需新模块（`calculation.rs` 已 498 行贴线，不能再加）包含 parse / 部分化简 /
-      Sass 形式的序列化（括号只在必要处：除以一个积可展平、除以一个和不展平），并且必须先读完
-      `calc/operator/{plus,minus,times,precedence,var}` 与 `simplify.hrx` 把括号律钉死，不能边写边猜。
-      硬约束不变：`operators/slash`（`1/2` 仍为 list）不得动，无效错误不得从 53 上涨。
+      **后半已合入（平展归约，不是树）**：`src/calc.rs` + `src/brackets.rs`。`brackets.rs` 把词素 run **一次 fold**
+      成带 `level`/`owner` 的文档序 run（深度成为数据），并把`var(--c)` 这类调用与其平衡参数列**折成一个词素**；
+      `calc.rs` 按**层自底向上归约成摘要项** `Term{value, printed, precedence}`（不存子节点、不递归、不拿旗标
+      表达“看不懂”——那走 `Reading::Declined` 错误通道），括号只在 join 那一刻由优先级定一次。
+      **两个真实调头**（都是同一课：分类粒度不能超过词法）：① `opens` 最初把任何以 `(` 结尾的词素当开括号，
+      于是 `var(` 的 `)` 被组吃掉，`calc((1 + var(--c)))` 读不懂；② 合并后的 `var(--c)` 以 `)` 结尾，又被
+      `closes` 当闭括号删掉 —— 现仅 `Punct(')')` 算闭合。另外 `calc(min(...))` 与 `calc(math.round(2.3))` 这类
+      **整个参数就是一个调用**的形状仍由内置表/`find` 求值（`whole_call`），与其它操作数混排则无金样依据→decline。
+      **实测**：hrx **778 → 823（实质 613 → 658，空期望 165 不变）**，`ledger diff units-rational-768 calc-flat`
+      = **`regress=0 net=45`**；按簇：`values/calculation` net=43（`precedence` 13、`simplify` 6、`constant` 6、
+      `plus` 4、`minus` 3、`times` 2、`var` 2、`parens` 1）、`min`/`max` 各 3、`values/numbers/units` net=2
+      （`multiple::division/by/{multiple_denominators,multiple_numerators}`）；无效错误仍 **53**。
+      中途曾出现两条真错，均由 A/B 揭出而非推定：一是 `var(` 被当组导致 `function/sass/namespace` 归退，
+      二是 `format_number` 的 `exponent.max(0.0)` 使 `(0,1)` 少一位（`0.763636364` vs 金样 `0.7636363636`）。
+      **仍剩（不属 1.4d 字面范围，但候选集点了名）**：`math/div::unit/{denominator,incompatible,unknown}` 与
+      `math/comparable::unit/to_inverse`、`calc/operator/units/{denominators,multiplication}`、
+      `multiple::division/cancels/*` —— 它们缺的是**调用/已绑定计算作为外部算术的操作数**
+      （`math.div(6, 3px) * 1px`、`calc($number / (1 / 1ms))`）：声明值解析在 `operations::classify` 里把非数字
+      词素一律记 `Other` 而整串放弃。下一刀是把它换成 `Piece::Operand(Expr)`（并让 `Value::Calculation` 携带
+      可参与运算的值），而 `calc/cancels` 一族还要求绑定计算能拆回项（得把文本换成树）。
+      `calc.rs` 400 行、`brackets.rs` 207 行、`calculation.rs` 446 行（均在 500 红线内）。
       词法输出律（全来自 `core_functions/math/unit.hrx`，不推定）：
       • `math.unit(1px)` → `"px"`；`math.unit(1)` → `""`；
       • `1px * 1em * 1rad` → `"px*em*rad"`（分子用 `*` 连接）；

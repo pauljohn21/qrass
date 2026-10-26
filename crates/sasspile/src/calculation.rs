@@ -35,6 +35,7 @@
 //! trailing `(`, gluing the `(` onto the piece *after* it, and filtering layout before the spacing rule
 //! ran. [`cut_open`] is the normalisation that survived the traces; structure is then read off lexemes.
 
+use crate::calc;
 use crate::calls;
 use crate::env::Env;
 use crate::expr;
@@ -303,18 +304,9 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
     if run.is_empty() {
         return Outcome::Opaque;
     }
-    // Redundant parentheses are peeled only far enough to *try*: `(1px)` is the number `1px`
-    // (`calc/parens::number` wants `calc((1px))` → `1px`), while `(var(--c))`, `((var(--c)))` and `(d)`
-    // are content that keeps its wrapper (`::var/direct`, `::double_preserved`, `::identifier`), so a
-    // group that yields no value puts its own parentheses back.
-    let group = wrapped(&content);
-    if let Some(inside) = group {
-        return match classify(inside.to_vec(), env) {
-            outcome @ (Outcome::Collapsed(_) | Outcome::Nested(_) | Outcome::Named(_)) => outcome,
-            Outcome::Kept(text) => Outcome::Kept(format!("({text})")),
-            Outcome::Opaque => Outcome::Kept(format!("({})", resolved(inside, env))),
-        };
-    }
+    // Redundant parentheses are **not** peeled here: whether a group survives is a property of what it
+    // holds, and `calc::read` decides it from the data (`parens::operation` drops `calc((1px + 1%))` to
+    // `calc(1px + 1%)` while `parens::var/direct` keeps `calc((var(--c)))` as written).
     if let Some(shell) = find(&content) {
         return match to_value(&shell, &arguments(&shell, env), env) {
             Some(value @ (Value::Number(..) | Value::Bool(..))) => Outcome::Collapsed(value),
@@ -345,43 +337,26 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
             Err(_) => Outcome::Opaque,
         };
     }
-    // An unknown callee is not evidence of a value: `calc(c())` keeps its `calc` (`::function/css`).
-    if !calls_are_readable(&run) {
-        return Outcome::Opaque;
-    }
     // A leading sign that is glued to its number is part of the **literal**, not an operation:
     // `::number/leading_plus` wants `calc(+1px)` → `1px` while the lexer delivered `Op('+')` and
-    // `Word("1px")` as two lexemes. Any other operator stays unreadable (1.4d owns it).
+    // `Word("1px")` as two lexemes; every other operator is read by `crate::calc`.
     let signed = without_leading_sign(&content);
-    let run = meaningful(&signed);
-    // A real operation stays **unevaluated in this slice**: `calc(1px + 1%)` and `calc(1px + 2px)` both
-    // keep their text, because deciding when a `+` inside a calculation folds is 1.4d's question (its own
-    // `simplify.hrx` README limits the real rule to "number + number where both are compatible").
-    if run.iter().any(|tok| matches!(tok, Tok::Op(_))) {
-        return Outcome::Opaque;
+    // The group is then read as an **expression** (`crate::calc`): it folds while every step is
+    // computable, and prints with Sass's own parentheses. A run it cannot alternate into operands and
+    // operators — `foobar`, `c()`, `var(--c) 1` — stays on the text path, so nothing 1.4a already printed
+    // correctly moves.
+    let reading = calc::read(&signed, env);
+    match reading {
+        // Nothing was modelled (`foobar`, `c()`, `var(--c)`, a space-separated list, an interpolation body
+        // that failed to evaluate): keep the source text, exactly as before this module.
+        calc::Reading::Declined => Outcome::Opaque,
+        // A plain folded value leaves the shells (`calc(1px * 2)` → `2px`).
+        calc::Reading::Value(value) if collapsible(&value) => Outcome::Collapsed(value),
+        // Everything else prints inside the shell — a chain that stopped at an incompatible step, a
+        // compound unit (`1 / 1px / 1rad`), or a resolved interpolation (`calc(#{1px + 2px})` → `3px`).
+        calc::Reading::Value(value) => Outcome::Kept(value.to_css()),
+        calc::Reading::Expression(text) => Outcome::Kept(text),
     }
-    match expr::argument_expr(&signed, env).map(|built| built.eval(env)) {
-        // A number or a boolean leaves its shells; anything else is content that stays inside them.
-        // Interpolation falls in the second group by the type it produces — `Expr::Concat` evaluates to a
-        // `Raw` — which is what `::interpolation/number` asks for: `calc(#{1px + 2px})` → `calc(3px)`,
-        // because the fixture's own comment says an interpolated value "is always treated as an unquoted
-        // string".
-        Some(Ok(value)) if collapsible(&value) => Outcome::Collapsed(value),
-        // Division can produce a compound unit (`1 / 1px / 1rad`), and such a number is
-        // calculation-only: the run keeps the text the source wrote
-        // (`values/numbers/units/multiple::multiple_denominators`), which is what `Opaque` means here.
-        Some(Ok(Value::Number(_, unit))) if !unit.is_plain() => Outcome::Opaque,
-        Some(Ok(value)) => Outcome::Kept(value.to_css()),
-        Some(Err(_)) | None => Outcome::Opaque,
-    }
-}
-
-/// The content of a whole parenthesised group, or `None` when the run is not one.
-fn wrapped(content: &[Tok]) -> Option<&[Tok]> {
-    let first = content.iter().position(|tok| !is_layout(tok))?;
-    let last = content.iter().rposition(|tok| !is_layout(tok))?;
-    (last > first + 1 && opens_group(&content[first]) && closes_group(&content[last]))
-        .then(|| &content[first + 1..last])
 }
 
 /// An argument's text, in the form the corpus states it: whitespace runs folded, and only the spaces a
@@ -458,17 +433,8 @@ fn is_layout(tok: &Tok) -> bool {
     matches!(tok, Tok::Space(_) | Tok::Silent(_))
 }
 
-/// Whether a lexeme opens a group. After [`cut_open`] a grouping paren is always its own `Punct`.
-fn opens_group(tok: &Tok) -> bool {
-    matches!(tok, Tok::Punct('('))
-}
-
-/// Whether a lexeme closes a group. `Op('-')` deliberately does **not**: `--c` starts with that dash, and
-/// reading it as a closer turned `calc(var(--c))` into `calc(--c)`.
-fn closes_group(tok: &Tok) -> bool {
-    matches!(tok, Tok::Punct(')'))
-}
-
+/// Which names are calculations whose shell the corpus keeps. `var` is deliberately absent: a `var( … )`
+/// is an operand this compiler does not model, not a calculation it can rebuild.
 fn name_exists(name: &str) -> bool {
     CALCULATION_NAMES
         .iter()
@@ -477,22 +443,4 @@ fn name_exists(name: &str) -> bool {
 
 fn is_calc(name: &str) -> bool {
     name == "calc"
-}
-
-/// Whether every call lexeme in a run is one this slice can read: a registered builtin (so
-/// `calc(math.round(2.3))` → `2`, which `::function/sass/namespace` asks for) or another calculation
-/// shell. Anything else — `c()`, `var()` — answers "not evidence", which is how `::function/css`
-/// (`calc(c())` → `calc(c())`) survives this rule.
-fn calls_are_readable(run: &[&Tok]) -> bool {
-    run.iter()
-        .filter_map(|tok| {
-            let Tok::Word(word) = *tok else {
-                return None;
-            };
-            (word.ends_with('(') && word.len() > 1).then_some(word)
-        })
-        .all(|word| {
-            let name = word.trim_end_matches('(');
-            crate::builtins::signature(name).is_some() || name_exists(name)
-        })
 }

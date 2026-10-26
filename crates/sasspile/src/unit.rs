@@ -176,6 +176,28 @@ impl Unit {
             (_, many) => format!("{numerator}/({})", many.join("*")),
         }
     }
+
+    /// A number **inside a calculation**: the magnitude is written once, then every remaining unit with
+    /// its own `1`, because a compound unit has no plain-CSS spelling and the fixtures show the product
+    /// form (`values/numbers/units/multiple.hrx`: `calc(1px * 1rad)`, `calc(1 / 1px / 1rad)`,
+    /// `calc(1px * 1rad / 1ms / 1Hz)`).
+    pub fn calc_form(&self, value: f64) -> String {
+        let magnitude = crate::value::format_number(value);
+        let with = |prefix: &str, unit: &str| format!("{prefix}{unit}");
+        let head = match self.numerator.split_first() {
+            Some((first, rest)) => std::iter::once(with(&magnitude, first))
+                .chain(rest.iter().map(|unit| with("1", unit)))
+                .collect::<Vec<String>>()
+                .join(" * "),
+            // A pure reciprocal (or a unitless number): the magnitude stands on its own in front.
+            None => magnitude,
+        };
+        head + &self
+            .denominator
+            .iter()
+            .map(|unit| format!(" / 1{unit}"))
+            .collect::<String>()
+    }
 }
 
 /// Cancel the two sides against each other: every name the denominator also holds removes one copy of

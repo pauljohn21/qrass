@@ -12,7 +12,9 @@ use std::fmt;
 
 use rxrust::prelude::*;
 
+mod brackets;
 mod builtins;
+mod calc;
 mod calculation;
 mod calls;
 mod env;
