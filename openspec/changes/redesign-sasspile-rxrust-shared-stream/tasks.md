@@ -238,8 +238,8 @@
       而 129 是 `values/numbers` 的数。串类函数在 `core_functions/string/*`（153 条失败）。
 - [ ] 1.2d **剩余 93 条假错的真实归属（逐条分桶而来，不是策略问题而是能力缺失）**：
       • 36 条 = **模块变量未加载**：`@use "sass:math"` 后的 `math.$pi`/`math.$e`（归 P5.1）；
-      • 31 条 = **可调用体在声明处被求值**：`@mixin add_two($v) {b: $v + 2}` 未调用也应不报错（归 P4.1，
-        它是 P4 的第一个前置：声明只登记体，执行等到调用点）；
+      • 31 条 = **可调用体在声明处被求值**：`@mixin add_two($v) {b: $v + 2}` 未调用也应不报错（✅ 已由 4.0 解开，
+        本轮实测无效错误 93 → 64）；
       • 14 条 = **循环变量未绑定**：`@for $i from …` 里的 `$i` 头部已不查（P0′.3b-1）但循环体未绑定（归 P3.2）；
       • 12 条 = 其他，待逐条再看。
       注：这些**不得用“兜底不报错”抹平**（铁律禁），只能按归属把特征实现掉。
@@ -305,6 +305,19 @@
       = **regress=0 net=2**（就这两条），基线 633 → **635**（ledger run `head-635-flags`）。
 
 ## P4 — 可调用:mixin / function / @content / 参数绑定
+- [x] 4.0 **声明不求值体（已合入，P4 的前置）**：`Scope` 新增 `inert`（与 `plain_css` 一样向内继承），
+      `callable_declaration` 在**词素层**认出 `@mixin`/`@function`（关键字与名字各为一个 `Word`，关键字大小写
+      无关），命中则该体：不求值声明、**不向外层环境绑定参数**、不出规则；又因为它不是 CSS 子块，
+      开它时**不冲刷父块待定声明段**（`a { b: c; @mixin m {…} d: e }` 仍是一条规则）。
+      **边界（判据必须排除 `--` 开头名字）**：`@function --a()` 是 plain-CSS at-rule，它的体**就是要输出的 CSS**
+      （`css/function.hrx::lowercase/result/sass_script` 现在在用，误判就会删掉已通过的规则）——
+      `tests/callables.rs` 同时钉住“声明不出规则”与“plain-CSS 仍出体”两侧。
+      实测：无效 `Undefined variable` 行 **93 → 64**；判定集合不动（新空库重做一次两侧后
+      `ledger diff base635 inert-bodies` = **regress=0 net=0**，入库 run = `inert-callable-bodies`）。
+      **不说过头话**：那 29 条仍不转 PASS——它们下一步需要 `@include`/调用求值与 `meta.*`（本条只清掉
+      “假错打断整个程序”这一层）；第 4 条金样的“拆块”行为是由两条规则推论而非 fixture，已在测试里标明。
+      剩下的 64 条已重新归属：`core_functions/list` 25 + `math` 9 + `meta` 2 属**模块未加载**（P5.1），
+      `directives/for` 14 属**循环变量未绑定**（P3.2），`expressions/if` 10 属分支/短路（P3）。
 - [ ] 4.1 `@mixin`/`@include`/`@content`/`@yield` + 参数(位置/默认/`$r...`/named-splat)绑定 + 动态作用域;注册表 + 一到多多播(`directives/mixin/**`、`callable/**`)
 - [ ] 4.2 `@function`/`@return` + 用户函数求值 + `meta.get-function/call`(`directives/function/**`、`callable/**`)
 

@@ -53,6 +53,13 @@ struct Scope {
     /// `#{1 + 1}` → `2`), so this suppresses fatality only. (`css/plain/function.hrx` states the same
     /// bodies through `@use "plain"`; those cases still fail for want of the P5 loader, not here.)
     plain_css: bool,
+    /// This block is the body of a **callable declaration** (`@mixin name(…)` / `@function name(…)`),
+    /// which Sass does not *execute* at the place it is written: nothing is evaluated, nothing is bound
+    /// into the surrounding environment, and no rule comes out. Invoking it (`@include` / a call) is what
+    /// would evaluate the body, and that is 4.1/4.2 — until then treating the body as ordinary CSS raises
+    /// an `Undefined variable` for its own parameter (measured as 31 in-scope cases, e.g.
+    /// `core_functions/meta/get_mixin/same_module::dash_insensitive/*`).
+    inert: bool,
 }
 
 /// The program state the `Exec` kernel mutates as events flow: open blocks and the lexical
@@ -86,17 +93,28 @@ impl State {
                     .map(|s| s.selector.clone())
                     .unwrap_or_default();
                 let child = self.head_selector(&head, &parent.to_css())?;
-                let settled = self.settle_top();
-                // A nested block inherits the plain-CSS context: it is still inside that body.
+                // A nested block inherits both contexts: it is still inside that body.
                 let plain_css = self.in_plain_css() || plain_css_body(&child.to_css());
+                let inert = self.in_inert() || (!plain_css && callable_declaration(&head));
+                // A callable declaration is not a CSS block: opening it must neither flush the enclosing
+                // rule's pending declarations nor ever settle one of its own — the enclosing rule keeps
+                // accumulating around it (`a { b: c; @mixin m { x: $v } d: e }` is one rule, `b: c; d: e`).
+                let settled = if inert { None } else { self.settle_top() };
                 self.scopes.push(Scope {
                     selector: child.nest(&parent),
                     decls: Vec::new(),
                     plain_css,
+                    inert,
                 });
                 Ok(settled)
             }
             Event::Decl { prop, value } => {
+                // Inside a callable declaration's body the event is inert: evaluating it would resolve the
+                // callable's own parameters (`$v`) against an environment that only a call supplies, and
+                // binding it would leak a parameter into the scope where the mixin was declared.
+                if self.in_inert() {
+                    return Ok(None);
+                }
                 // The left side of `$x: …` is a **binding target**, named by the variable itself; an
                 // ordinary property name is a structured [`PropName`]. No `"${var}"` round-trip that a
                 // later `strip_prefix('$')` would have to undo.
@@ -132,7 +150,12 @@ impl State {
         self.scopes.last().is_some_and(|scope| scope.plain_css)
     }
 
-    /// Settle the innermost block's pending declaration run **without** popping it: the block stays
+    /// Is the innermost open block inside a callable declaration's body?
+    fn in_inert(&self) -> bool {
+        self.scopes.last().is_some_and(|scope| scope.inert)
+    }
+
+    /// The innermost open block's pending declaration run **without** popping it: the block stays
     /// open for later declarations and children, but its text so far becomes a rule right now.
     fn settle_top(&mut self) -> Option<StyleRule> {
         let top = self.scopes.last_mut()?;
@@ -143,6 +166,7 @@ impl State {
             selector: top.selector.clone(),
             decls: std::mem::take(&mut top.decls),
             plain_css: top.plain_css,
+            inert: top.inert,
         }))
     }
 
@@ -294,4 +318,24 @@ fn plain_css_body(text: &str) -> bool {
     let mut words = resolved.strip_prefix('@').unwrap_or("").split_whitespace();
     matches!(words.next(), Some("function"))
         && words.next().is_some_and(|name| name.starts_with("--"))
+}
+
+/// Whether a block head **declares a callable**: `@mixin name(…)` or `@function name(…)` (the keyword's
+/// case is irrelevant, as for every Sass at-rule).
+///
+/// Decided on lexemes, like every other classifier here: the first meaningful lexeme must be the
+/// keyword glued as one `Word`, and the name that follows must **not** begin with `--` — `@function --a()`
+/// is a plain-CSS at-rule (`css/function.hrx`), whose body *is* emitted CSS, so mistaking it for a Sass
+/// declaration would delete working rules.
+fn callable_declaration(toks: &[Tok]) -> bool {
+    let mut meaningful = toks
+        .iter()
+        .filter(|tok| !matches!(tok, Tok::Space(_) | Tok::Silent(_)));
+    let (Some(Tok::Word(keyword)), Some(Tok::Word(name))) = (meaningful.next(), meaningful.next())
+    else {
+        return false;
+    };
+    let declares =
+        keyword.eq_ignore_ascii_case("@mixin") || keyword.eq_ignore_ascii_case("@function");
+    declares && !name.starts_with("--")
 }
