@@ -31,10 +31,10 @@ workspace** (its dangling member entry was breaking every `cargo` invocation). D
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Tests | `cargo test --all-targets` | **62 passed / 0 failed / 0 ignored** |
+| Tests | `cargo test --all-targets` | **66 passed / 0 failed / 0 ignored** |
 | Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
 | Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
-| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=635` (**5.51 %**), of which **`pass_substantive=471`** and `pass_empty_expectation=164` |
+| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=643` (**5.6 %**), of which **`pass_substantive=478`** and `pass_empty_expectation=165` |
 | Clippy | `cargo clippy --all-targets -- -D warnings` | **clean (exit 0)** |
 | Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` | valid |
 
@@ -49,12 +49,12 @@ architecture is rebuilt phase by phase (P0–P8). What a round must never do is 
 cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**, not by the raw rate.
 `tests/hrx.rs` asserts nothing case-by-case for the same reason.
 
-**Read `pass_substantive`, not `pass`.** 164 of the 635 passes are against fixtures whose expected CSS is
+**Read `pass_substantive`, not `pass`.** 165 of the 643 passes are against fixtures whose expected CSS is
 empty — legitimately correct (Sass really emits nothing there), but also what a compiler that produces
 nothing scores, so they prove nothing about a feature. The audit that found this: `directives/{if,for,while}`
 showed 39 “passing” cases, **all 39** with empty expectations, i.e. `@if`/`@each`/`@for` were
-implemented nowhere despite `tasks.md` claiming otherwise (now corrected). The harness reports both
-numbers on every run.
+implemented nowhere despite `tasks.md` claiming otherwise (now corrected, and `@for` over literal integer
+ranges has since been built and moves 8 real cases). The harness reports both numbers on every run.
 
 ## Conformance authority
 

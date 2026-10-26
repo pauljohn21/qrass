@@ -20,8 +20,8 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=635/11,533**，其中
-> **实质通过 471**（非空期望）、空期望蒙对 164；量具 = 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=643/11,533**，其中
+> **实质通过 478**（非空期望）、空期望蒙对 165；量具 = 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全
 > 子集目录，现直接输出 `pass_substantive`/`pass_empty_expectation`，见 0′.3 末“可复核数据”与 0.6）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
@@ -291,13 +291,22 @@
 ## P3 — 管线 + 控制流 + 作用域 + 媒体/at-root
 - [ ] 3.1 `async fn compile` 唯一出口 + **一条冷流串起各相内核**（`Lexer→Structurize→Exec→[全局 pass]→Render→reduce_initial→into_future`）。
       ⚠ v2 口径已改：旧形态（`scan_map`+`flat_map(from_iter)`+`sort_by_key`）**不再合格** → 由 P0′ 重做，本项随之重开。
-- [ ] 3.2 `@if/@else`、`@each`、`@for` —— **更正：当前内核链里三者均未实现**（原“已做”是从已删除的 v1 流水线
-      带过来的假状态）。实测依据：`exec.rs`/`lib.rs` 里 `@for`/`@each`/`@while` 只出现在注释中，无处理代码；
-      `directives/{if,for,while}` 簇的 **39 条“PASS”全部是空期望输出**（即“啥也不输出”蒙对），
-      实质通过为 **0**；另有 14 条 `directives/for` 因循环变量未绑定而报假 `Undefined variable`（见 1.2d）。
-      实现方向（不回到 v1 的形状）：循环 = `flat_map` 在**已绑定的范围**上重放 body（body 作为携带的
-      owned 事件数据，到 `}` 时一次性展开为一到多），分支 = `filter` 选 taken 分支；`@if` 需要比较/布尔
-      `Expr`（现在只有 `+ -`）与真值判定，那一步要单独守“不动全局 truthiness”的接线纪律。
+- [~] 3.2 `@for` 字面整数界限——**已落第一个切片（本轮）**；`@if/@else`、`@each` 仍未实现。
+      先破掉一个**假完成**：原条目写“已做 `@each/@for/@if`”，那是从已删除的 v1 流水线带来的旧状态——
+      代码里 `@for`/`@each`/`@while` 只出现在注释；该簇 39 条“PASS”**全是空期望蒙对**，实质通过 0（已写进
+      `rust.md` 工具红线：声称特征能用前 MUST 看该簇非空期望通过数）。
+      实现：`exec::for_loop` 在**词素层**只认 `@for $v from <int> through|to <int>`（六词素恰好形），
+      循环体声明作为 `ForLoop.body` 数据挂在开块上，`Close` 时 `values.try_for_each` 逐个绑定变量并重放
+      到**外层待定声明段**（循环不是 CSS 子块：不开新规则、也不冲刷父段）；`sequence` 按金样定
+      `through` 含端点/`to` 不含/倒序递减/空区间不回包。`declare` 从 `step` 里抽出来供两处复用。
+      实测：**8 条新通过**（`for.hrx` 的正向族 + `empty/scss`），`directives/for` 由 20/40 → 28/40；
+      无效 `Undefined variable` 64 → **55**；新空库重跑两侧后 `ledger diff prev for-loop` =
+      **regress=0 net=8**；基线 635 → **643（实质 471 → 478）**，入库 run `for-loop-643`。
+      `tests/loops.rs` 钉住金样与边界（变量界限/浮点界限**不猜**→ 仍报未绑定，而语料要的是
+      `1.5 is not an int.`，那属 P7）。
+      **已记账的未完面**：3.2b 体内嵌套块（需每轮发射**规则**，现在被捕获后丢弃）、3.2c 界限为变量/表达式
+      （`to_scope`：还需“循环开始前一次性求值界限”与循环变量作用域）、3.2d `@each`（入基线用例为 0，
+      不做无法度量的特征）、`@for` 错误消息族（6 条，归 P7）。
 - [ ] 3.3 `@while` 条件循环(`directives/while/**`)——同 3.2：簇内 1/1 “PASS”也是空期望，未实现。
 - [ ] 3.4 **媒体/supports 冒泡 + 逐查询合并**(全局 pass;`css/media/**`)
 - [ ] 3.5 `@at-root (without/with)`(`directives/at_root/**`)

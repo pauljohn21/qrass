@@ -207,8 +207,14 @@ nest/unify/is-superselector/append/replace/simple-selectors`。选择器组合�
 ### Requirement: `@if`/`@each`/`@for`/`@while` 控制流
 
 `@if`/`@else if`/`@else` MUST 按真值(仅 `false`/`null`/空为假)选唯一命中分支,其余内容丢弃。`@each`
-MUST 支持 list/map 迭代;`@for` 支持 `from…to`(不含)/`through`(含);`@while` 条件循环且体中对循环变量的
+MUST 支持 list/map 迭代;`@for` 支持 `from…to`(不含)/`through`(含),**且起止颠倒时 MUST 递减而非输出空**
+(`directives/for/for.hrx::inclusive_backward`);`@while` 条件循环且体中对循环变量的
 重定义影响下一轮。**这些是流式扇出/选支,不是命令式重放**(见 reactive spec)。
+
+当前实现边界(逐项已量):`@for` 仅在**头部为字面整数**(`@for $v from <int> through|to <int>` 恰好六个词素)
+时展开;循环体中的**声明**逐轮重放到**循环所在的规则**(不开新规则、也不打断父块待定声明段),而体内嵌套块、
+变量/表达式界限、`@each`/`@while`/`@if` 仍**未实现**(分别 3.2b/3.2c/3.2d/3.2)。界限无法读出时
+MUST NOT 猜测区间(`for.hrx::error/from_float` 期望的是 `1.5 is not an int.` 报错,而不是“凑”一个循环)。
 
 参照:`directives/if/**`、`each.hrx`、`for/**`、`while.hrx`。
 
@@ -223,6 +229,18 @@ MUST 支持 list/map 迭代;`@for` 支持 `from…to`(不含)/`through`(含);`@w
 #### Scenario: @for 区间
 - **WHEN** `@for $i from 1 through 3 { .x#{$i}{b:$i} }`
 - **THEN** `.x1{b:1}.x2{b:2}.x3{b:3}`
+
+#### Scenario: @for 声明体重放到所在规则
+- **WHEN** `a { @for $i from 1 through 5 {b: $i;} }`
+- **THEN** 一条规则 `a { b: 1; b: 2; b: 3; b: 4; b: 5; }`(`for.hrx::inclusive_forward/scss`)
+
+#### Scenario: @for 递减与空区间
+- **WHEN** `@for $i from 5 through 1` 与 `@for $i from 1 to 1`
+- **THEN** 前者依次为 5,4,3,2,1;后者不产生任何声明(空区间不回包、也不拆外层规则)
+
+#### Scenario: 界限读不出时不猜
+- **WHEN** `@for $i from 1.5 through 2 { b: $i; }`
+- **THEN** 不得展开为任何循环体(当前表现为体未求值);等 P7 后应报 `1.5 is not an int.`
 
 ### Requirement: `@mixin`/`@include`/`@content`/`@yield`
 

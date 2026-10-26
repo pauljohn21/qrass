@@ -53,6 +53,8 @@ struct Scope {
     /// `#{1 + 1}` → `2`), so this suppresses fatality only. (`css/plain/function.hrx` states the same
     /// bodies through `@use "plain"`; those cases still fail for want of the P5 loader, not here.)
     plain_css: bool,
+    /// `@for`/`@each` loop captured for replay; `None` for every other block.
+    loop_: Option<ForLoop>,
     /// This block is the body of a **callable declaration** (`@mixin name(…)` / `@function name(…)`),
     /// which Sass does not *execute* at the place it is written: nothing is evaluated, nothing is bound
     /// into the surrounding environment, and no rule comes out. Invoking it (`@include` / a call) is what
@@ -93,18 +95,29 @@ impl State {
                     .map(|s| s.selector.clone())
                     .unwrap_or_default();
                 let child = self.head_selector(&head, &parent.to_css())?;
-                // A nested block inherits both contexts: it is still inside that body.
-                let plain_css = self.in_plain_css() || plain_css_body(&child.to_css());
-                let inert = self.in_inert() || (!plain_css && callable_declaration(&head));
-                // A callable declaration is not a CSS block: opening it must neither flush the enclosing
-                // rule's pending declarations nor ever settle one of its own — the enclosing rule keeps
-                // accumulating around it (`a { b: c; @mixin m { x: $v } d: e }` is one rule, `b: c; d: e`).
-                let settled = if inert { None } else { self.settle_top() };
+                let text = child.to_css();
+                // A nested block inherits the contexts of the block around it: it is still inside that body.
+                let plain_css = self.in_plain_css() || plain_css_body(&text);
+                let loop_ = (!self.in_inert() && !plain_css)
+                    .then(|| for_loop(&head))
+                    .flatten();
+                let inert = self.in_inert()
+                    || self.in_loop()
+                    || (!plain_css && callable_declaration(&head));
+                // Neither a callable declaration nor a loop is a CSS block: opening one must not flush the
+                // enclosing rule's pending declarations — `a { b: 0; @for $i from 1 to 2 {b: $i} }` is one
+                // rule with `b: 0; b: 1`.
+                let settled = if inert || loop_.is_some() {
+                    None
+                } else {
+                    self.settle_top()
+                };
                 self.scopes.push(Scope {
                     selector: child.nest(&parent),
                     decls: Vec::new(),
                     plain_css,
                     inert,
+                    loop_,
                 });
                 Ok(settled)
             }
@@ -115,34 +128,84 @@ impl State {
                 if self.in_inert() {
                     return Ok(None);
                 }
-                // The left side of `$x: …` is a **binding target**, named by the variable itself; an
-                // ordinary property name is a structured [`PropName`]. No `"${var}"` round-trip that a
-                // later `strip_prefix('$')` would have to undo.
-                let target = match prop.iter().find(|tok| !skipped_in_name(tok)) {
-                    Some(Tok::Var(var)) => Target::Variable(var.clone()),
-                    _ => Target::Property(PropName::from_pieces(&self.head_pieces(&prop, "")?)),
-                };
-                match target {
-                    // A binding updates the environment inside the flowing state; a later
-                    // declaration reads the value this position has, so document order holds
-                    // without any snapshot being carried around.
-                    Target::Variable(var) => {
-                        // `!default` / `!global` describe the binding, not its value, and never reach
-                        // CSS (`lexer::without_flags`); a declaration's `!important` keeps its text.
-                        let bound = self.value_of(without_flags(&value))?;
-                        self.env.bind(&var, bound);
+                // Inside a loop, the body's declarations are **carried as data** and replayed per
+                // iteration on `Close`, because each iteration needs its own value of the loop variable.
+                if self.in_loop() {
+                    if let Some(loop_) = self.scopes.last_mut().and_then(|s| s.loop_.as_mut()) {
+                        loop_.body.push(Event::Decl { prop, value });
                     }
-                    Target::Property(name) => {
-                        let owned = self.decl_value(&name, &value, self.in_plain_css())?;
-                        if let Some(top) = self.scopes.last_mut() {
-                            top.decls.push((name, owned));
-                        }
-                    }
+                    return Ok(None);
                 }
+                self.declare(&prop, &value)?;
                 Ok(None)
             }
-            Event::Close => Ok(Self::settled(self.scopes.pop())),
+            Event::Close => match self.scopes.pop() {
+                Some(scope) if scope.loop_.is_some() => {
+                    self.replay(scope)?;
+                    Ok(None)
+                }
+                scope => Ok(Self::settled(scope)),
+            },
         }
+    }
+
+    /// One declaration where it appears: a binding updates the flowing environment, a property joins the
+    /// innermost block's pending declaration run.
+    fn declare(&mut self, prop: &[Tok], value: &[Tok]) -> Result<(), SassError> {
+        // The left side of `$x: …` is a **binding target**, named by the variable itself; an ordinary
+        // property name is a structured [`PropName`]. No `"${var}"` round-trip that a later
+        // `strip_prefix('$')` would have to undo.
+        let target = match prop.iter().find(|tok| !skipped_in_name(tok)) {
+            Some(Tok::Var(var)) => Target::Variable(var.clone()),
+            _ => Target::Property(PropName::from_pieces(&self.head_pieces(prop, "")?)),
+        };
+        match target {
+            // A binding updates the environment inside the flowing state; a later declaration reads the
+            // value this position has, so document order holds without any snapshot being carried around.
+            Target::Variable(var) => {
+                // `!default` / `!global` describe the binding, not its value, and never reach CSS
+                // (`lexer::without_flags`); a declaration's `!important` keeps its text.
+                let bound = self.value_of(without_flags(value))?;
+                self.env.bind(&var, bound);
+            }
+            Target::Property(name) => {
+                let owned = self.decl_value(&name, value, self.in_plain_css())?;
+                if let Some(top) = self.scopes.last_mut() {
+                    top.decls.push((name, owned));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Close a `@for` scope: bind the loop variable to each value in turn and re-run the captured body
+    /// declarations in source order inside that iteration, so the results land in the pending declaration
+    /// run of the block the loop sat in — `directives/for/for.hrx::inclusive_forward/scss` prints one
+    /// `a { b: 1; b: 2; b: 3; b: 4; b: 5; }`, and two declarations in the body interleave per iteration.
+    ///
+    /// A `try_for_each` over owned iteration values, not a cursor-driven loop: the range is data, the
+    /// body is data, and the state moves forward exactly as it would for declarations written there.
+    fn replay(&mut self, scope: Scope) -> Result<(), SassError> {
+        let Some(ForLoop { var, values, body }) = scope.loop_ else {
+            return Ok(());
+        };
+        values.into_iter().try_for_each(|value| {
+            self.env
+                .bind(&var, Value::Number(value as f64, String::new()));
+            body.iter().try_for_each(|event| match event {
+                Event::Decl { prop, value } => self.declare(prop, value),
+                // A nested block inside a loop body is dropped: replaying it needs a rule emitted per
+                // iteration, which is 3.2b (it stays captured, so nothing leaks out half-evaluated).
+                Event::Open(_) | Event::Close => Ok(()),
+            })
+        })
+    }
+
+    /// Is the innermost open block a loop being captured for replay?
+    fn in_loop(&self) -> bool {
+        self.scopes
+            .last()
+            .is_some_and(|scope| scope.loop_.is_some())
     }
 
     /// Is the innermost open block a plain-CSS at-rule body?
@@ -167,6 +230,8 @@ impl State {
             decls: std::mem::take(&mut top.decls),
             plain_css: top.plain_css,
             inert: top.inert,
+            // The flushed run is a rule, never a loop: only an open block captures a body.
+            loop_: None,
         }))
     }
 
@@ -338,4 +403,65 @@ fn callable_declaration(toks: &[Tok]) -> bool {
     let declares =
         keyword.eq_ignore_ascii_case("@mixin") || keyword.eq_ignore_ascii_case("@function");
     declares && !name.starts_with("--")
+}
+
+/// A `@for` loop captured on the way in: the variable it binds, the values it walks, and the body
+/// declarations held for replay. Held as data inside the open block — the same nesting-as-value the
+/// `scopes` stack already uses, not a tree walked after the fact.
+#[derive(Debug, Clone)]
+struct ForLoop {
+    var: String,
+    values: Vec<i64>,
+    body: Vec<Event>,
+}
+
+/// Recognise **`@for $i from <int> through|to <int>`** and nothing else, decided on lexemes: exactly
+/// `@for`, a variable, `from`, an integer, a direction, an integer. Any other shape (an expression as a
+/// bound, `@each`, a nested parenthesised header) returns `None` and keeps today's behaviour, so the
+/// replay only happens where the header was read without guessing.
+///
+/// Goldens: `directives/for/for.hrx::{inclusive_forward/scss, exclusive_forward, inclusive_backward,
+/// negative_to_positive, empty/scss}`.
+fn for_loop(toks: &[Tok]) -> Option<ForLoop> {
+    let header: Vec<&Tok> = toks.iter().filter(|tok| !skipped_in_name(tok)).collect();
+    let [
+        Tok::Word(keyword),
+        Tok::Var(var),
+        Tok::Word(from_kw),
+        Tok::Word(from),
+        Tok::Word(direction),
+        Tok::Word(to),
+    ] = header.as_slice()
+    else {
+        return None;
+    };
+    if !keyword.eq_ignore_ascii_case("@for") || !from_kw.eq_ignore_ascii_case("from") {
+        return None;
+    }
+    let inclusive = if direction.eq_ignore_ascii_case("through") {
+        true
+    } else if direction.eq_ignore_ascii_case("to") {
+        false
+    } else {
+        return None;
+    };
+    let (first, last) = (from.parse::<i64>().ok()?, to.parse::<i64>().ok()?);
+    Some(ForLoop {
+        var: var.clone(),
+        values: sequence(first, last, inclusive),
+        body: Vec::new(),
+    })
+}
+
+/// The `@for` value sequence: `through` includes its endpoint, `to` excludes it, and a start above the
+/// end walks downwards (`5 through 1` → 5,4,3,2,1); an empty range stays empty instead of wrapping
+/// (`1 to 1` contributes nothing).
+fn sequence(first: i64, last: i64, inclusive: bool) -> Vec<i64> {
+    if first <= last {
+        let bound = if inclusive { last } else { last - 1 };
+        (first..=bound).collect()
+    } else {
+        let bound = if inclusive { last } else { last + 1 };
+        (bound..=first).rev().collect()
+    }
 }
