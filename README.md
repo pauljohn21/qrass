@@ -181,7 +181,9 @@ exists to remove.
   in `docs/rxrust-source-analysis/09-…`.
 - No `println!` / `eprintln!` — `tracing` macros, with spans around cross-function stages.
 - No inline tests: everything under `tests/`. ≤ 500 lines per source or test file.
-- CodeGraph CLI (`callers`, `impact`, `explore`, `node`) for code queries.
+- Code queries go through the **`codegraph_explore` MCP tool first** (see `.qoder/rules/codegraph.md`);
+  the `codegraph` CLI (`explore`/`node`/`callers`/`impact`) is the same-semantics fallback when no MCP is
+  available. Correctness is still decided by the compiler and tests.
 - Push over SSH: `git push github main`.
 
 ## Known gaps (recorded, not hidden)
