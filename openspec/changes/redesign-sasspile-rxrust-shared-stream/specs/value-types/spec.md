@@ -17,6 +17,22 @@ angle(deg/grad/rad/turn)、time(s/ms)、frequency(Hz/kHz)、resolution(dpi/dpcm/
 
 参照:`values/numbers/**`、`values/numbers/units/**`、`operators/**`。
 
+两个操作数**都是标识符**时,`+`/`-` MUST 按**无引号串拼接**处理而非数值运算,且两者序列化不同:
+`+` 消失(`c+d`、`c + d`、`c +d`、`c+ d`、`c/**/+/**/d` 均为 `cd`),`-` 作为文本保留且不留空白
+(`(c)-(d)`、`c - d`、`c -(d)`、`(c)- d` 均为 `c-d`)。整体被平衡括号包裹的操作数 MUST 先剥括号
+(`(c)`→`c`;`(c)(d)` 不属一组,不剥)。只要 run 里出现任何**数字**操作数,MUST 退回数值路径(保间距律与
+`10px -5px` 二分列表、`1px+2px` 逐字保留)。
+
+参照:`operators/plus.hrx::syntax/*`、`operators/minus.hrx::syntax/*`。
+
+#### Scenario: 标识符拼接保留减号而去掉加号
+- **WHEN** `a {b: c - d}` 与 `a {b: c+d}`
+- **THEN** 分别为 `c-d` 与 `cd`(不保留操作数间空白)
+
+#### Scenario: 掺数字不触发拼接
+- **WHEN** `a {b: 10px -5px}`
+- **THEN** 仍为二分列表 `10px -5px`,不得折成 `10px-5px`
+
 #### Scenario: 同单位相加
 - **WHEN** `a { w: 10px + 5px }`
 - **THEN** `a { w: 15px; }`

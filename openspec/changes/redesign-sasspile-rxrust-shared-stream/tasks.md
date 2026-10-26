@@ -20,7 +20,7 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=616/11,533**，量具 =
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=633/11,533**，量具 =
 > 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全子集目录，见 0′.3 末“可复核数据”与 0.6）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
@@ -125,7 +125,7 @@
     拿空基线比出 `regress=7134` 的垃圾数）。本轮留存：`head-pathkey-599.tsv`（新 key、旧粗量具）、
     `tight-empty.tsv`(599)／`tight-fatal.tsv`(600)（新 key、消息金样量具，翻转前后对照）、
     `head-600-pathkey.tsv`、`after-named-args-600.tsv`、`after-quoted-string-600.tsv`、
-    **`head-616-full-scope.tsv`（往后的基线，含 0.6 扩面）**、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
+    **`head-616-full-scope.tsv`**、`head-633-concat.tsv`（**往后的基线**）、`probe-*.tsv`（中间态，供复核 +385/−3 是怎么来的）。
     行为不变型改动用 `cmp` 证逐字节相同；变型必须在**空库** `ledger diff` 列 NET/REGRESS 具体键，并用
     `awk|sort|comm` 复核集合差——本轮两次证明单看一个量具不够。
   - **量具自身必须带阳性对照（P1.3 新血泪）**：一次“仅差空白=0、仅差大小写=0”的读数让我差点得出
@@ -224,12 +224,19 @@
       • 12 条 = 其他，待逐条再看。
       注：这些**不得用“兜底不报错”抹平**（铁律禁），只能按归属把特征实现掉。
 - [ ] 1.3 **单位换算代数**(length/time/angle/…)+ 精度(`values/numbers/**`)
-- [ ] 1.3b **无引号串拼接的 `+` / `-`（来由 0.6 扩面后新见的 21 条）**：`operators/plus::syntax/*` 要
-      `c+d` / `c + d` / `c/*x*/+d` 均序列化为 `cd`（两加数都是无引号串时是**拼接**，`+` 本身消失）；
-      `operators/minus::syntax/*` 要 `c - d` → `c-d`（`-` 作为字面文本保留且不留空白）。
-      当前我们原样输出 `c + d`/`c -(d)` 等 ⇒ 全族失败。另外 `operators/minus::syntax/comment/*` 还
-      暴露了“串的边界受注释/括号词法影响”（`c-(d)` 应折成 `c-d`）。归 P1 值模型，不是格式修复
-      （不许靠“删空格”凑：期望值依赖操作数类型）。
+- [x] 1.3b **无引号标识符的 `+` / `-` 拼接（已合入）**：`expr::concatenation` 是数字折叠之外的**另一条折叠**，
+      由 `from_tokens` 在 `arithmetic` 返回 `None` 后 `or_else` 尝试。规则全由金样定：
+      `operators/plus.hrx::syntax/*` 把 `c+d`/`c + d`/`c +d`/`c+ d`/`c/**/+/**/d` 全折叠为 `cd`（`+` 消失），
+      `operators/minus.hrx::syntax/*` 把 `(c)-(d)`/`c - d`/`c -(d)`/`(c)- d` 全折叠为 `c-d`（`-` 作为文本保留）。
+      括号靠 `unwrapped`/`whole_wrap` 剥**完整包裹**层（`(c)(d)` 不剥）。
+      **守住的边界**（故意窄到只吃这些形）：操作数必须**全是标识符**且至少有一个运算符，掺数字则退回原路
+      ⇒ 间距律与 `10px -5px` 二分列表、`1px+2px` 逐字输出、单标识符、`c-d` 词素均不变（`tests/operators.rs`
+      逐条钉住这些反例）。
+      实测：`operators/plus` 与 `operators/minus` 两族**全绿**——18 个 section 里 17 条新通过
+      （`minus::syntax/comment/both` 本来就过）；空库 `ledger diff base616 concat` = **regress=0 net=17**，
+      基线 616 → **633**（新基线 `target/baselines/head-633-concat.tsv`）。
+      上轮估的“21 条”不准（把 slash/modulo 混进来了）：更正为 plus 9 + minus 9 = 18 个 section。
+      `operators` 现仍剩 8 条：**slash 4**（归 1.4b，斜杠空白依赖来源）、**modulo 4**（需 `%` 与 infinity）。
 - [ ] 1.4 **`Calculation` 表达式树**(`calc/clamp/min/max/var()`,可部分化简、否则原式保留)(`values/calculation/**`)
 - [ ] 1.4b **斜杠两侧的空白取决于来源，不得一刀切（本轮否掉了一个诱人但错的方案）**：
       表面上看 56 条失败“仅差空白”，全部是 `b / 25%` 应为 `b/25%`（相对颜色语法，

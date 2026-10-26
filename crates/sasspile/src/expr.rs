@@ -130,7 +130,7 @@ pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
     if has_dynamic(toks) {
         interpolation(toks)
     } else {
-        arithmetic(toks)
+        arithmetic(toks).or_else(|| concatenation(toks))
     }
 }
 
@@ -176,6 +176,97 @@ fn number_lexeme(word: &str) -> Option<(f64, &str)> {
         return None;
     }
     numeric.parse::<f64>().ok().map(|value| (value, unit))
+}
+
+/// Identifiers joined by `+`/`-` are Sass's **string concatenation**, and the two operators print
+/// differently: `operators/plus.hrx::syntax/*` folds `c+d`, `c + d`, `c +d`, `c+ d` and `c/**/+/**/d`
+/// all into `cd` (the `+` disappears), while `operators/minus.hrx::syntax/*` folds `(c)-(d)`, `c - d`,
+/// `c -(d)` and `(c)- d` all into `c-d` — the `-` survives as text because Sass parses `-` on an
+/// unquoted string as adding its negation.
+///
+/// Deliberately narrow, so nothing that works today moves: **every** operand must be an identifier
+/// lexeme (a whole-paren wrapper is peeled first), at least one operator must appear, and any number in
+/// the run sends it back to the arithmetic path — which is what keeps the spacing law and the two-item
+/// list `10px -5px` intact, and leaves `1px+2px` un-evaluated as before. Whitespace *is* data for
+/// numbers but not for this shape: the fixtures collapse all four spacings to one result.
+fn concatenation(toks: &[Tok]) -> Option<Expr> {
+    let lexemes: Vec<&Tok> = toks
+        .iter()
+        .filter(|tok| !matches!(tok, Tok::Space(_)))
+        .collect();
+    let operands = lexemes
+        .iter()
+        .step_by(2)
+        .map(operand_identifier)
+        .collect::<Option<Vec<&str>>>()?;
+    let operators = lexemes
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .map(operator_sign)
+        .collect::<Option<Vec<char>>>()?;
+    if operands.len() < 2 || operators.len() + 1 != operands.len() {
+        return None;
+    }
+    Some(Expr::Text(
+        operands[1..]
+            .iter()
+            .zip(&operators)
+            .fold(operands[0].to_string(), |joined, (operand, op)| {
+                joined + if *op == '+' { "" } else { "-" } + operand
+            }),
+    ))
+}
+
+/// One non-whitespace lexeme as an operand name, if it is an identifier (possibly paren-wrapped).
+/// Named lifetimes because the `&str` comes out of a `Tok` reached through a double reference — the
+/// same elision trap that already bit this crate twice.
+fn operand_identifier<'tok>(tok: &'tok &Tok) -> Option<&'tok str> {
+    match tok {
+        Tok::Word(word) => identifier(unwrapped(word)),
+        _ => None,
+    }
+}
+
+/// One lexeme in an operator position: only a standalone `+`/`-` counts here.
+fn operator_sign(tok: &&Tok) -> Option<char> {
+    match tok {
+        Tok::Op(op @ ('+' | '-')) => Some(*op),
+        _ => None,
+    }
+}
+
+/// A lexeme that is an identifier: ASCII letter or `_` first, then letters, digits, `_` and `-`
+/// (the hyphen inside `foo-bar` never reaches us as an operator, since the lexer glues it).
+fn identifier(text: &str) -> Option<&str> {
+    let mut chars = text.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    chars
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        .then_some(text)
+}
+
+/// Strip every whole-paren wrapper: `(c)` and `((c))` give `c`, while `(c)(d)` gives nothing because
+/// its first `(` is closed before the end. One `successors` fold, no scanning loop.
+fn unwrapped(text: &str) -> &str {
+    std::iter::successors(Some(text), |open| whole_wrap(open))
+        .last()
+        .unwrap_or(text)
+}
+
+/// The inside of `text` when the whole lexeme is one balanced parenthesis group: dropping the outer
+/// pair must leave a run whose depth never returns to zero early (`()(c)` is two groups, not one).
+fn whole_wrap(text: &str) -> Option<&str> {
+    let inner = text.strip_prefix('(')?.strip_suffix(')')?;
+    let balanced = inner.chars().try_fold(0i32, |depth, c| match c {
+        '(' => Some(depth + 1),
+        ')' => (depth > 0).then_some(depth - 1),
+        _ => Some(depth),
+    })?;
+    (balanced == 0).then_some(inner)
 }
 
 /// Numbers joined by spaced `+`/`-`, left-associative; a lone number counts (it is what a
