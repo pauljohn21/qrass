@@ -13,10 +13,16 @@ use crate::value::Value;
 use crate::{ErrorKind, SassError};
 
 /// A builtin's contract. `params` are the labels a `$label:` argument binds to, in declaration order.
+///
+/// `variadic` functions (`math.min`/`math.max`) take any number of positional arguments instead:
+/// `params` is empty and the corpus's own messages replace both fixed-arity ones —
+/// `At least one argument must be passed.` and, for a type failure, `c is not a number.` **without** a
+/// `$parameter:` prefix, because there is no parameter to name (`core_functions/math/{min,max}.hrx::error/*`).
 #[derive(Debug)]
 pub struct Builtin {
     pub name: &'static str,
     pub params: &'static [&'static str],
+    pub variadic: bool,
     pub apply: fn(Vec<Value>) -> Result<Value, SassError>,
 }
 
@@ -27,6 +33,7 @@ pub struct Builtin {
 static MATH_DIV: Builtin = Builtin {
     name: "math.div",
     params: &["number1", "number2"],
+    variadic: false,
     apply: |args| match args.as_slice() {
         [Value::Number(from, from_unit), Value::Number(by, by_unit)] => {
             if from_unit == by_unit {
@@ -47,17 +54,120 @@ static MATH_DIV: Builtin = Builtin {
     },
 };
 
-/// Convertible lengths, in px. Only factors the corpus proves are listed — an unlisted unit declines
-/// rather than being converted by a remembered number.
+/// Convertible lengths, in px, with the factors the oracle states (`libsass/units/conversion/size.hrx`).
+/// An unlisted unit declines rather than being converted by a remembered number.
 fn to_base(unit: &str) -> Option<f64> {
     match unit {
         "px" => Some(1.0),
         "in" => Some(96.0),
+        "cm" => Some(37.7952755906),
+        "mm" => Some(3.7795275591),
+        "pc" => Some(16.0),
+        "pt" => Some(1.3333333333),
         _ => None,
     }
 }
 
-static BUILTINS: &[&Builtin] = &[&MATH_DIV, &MATH_ROUND, &MATH_ABS, &MATH_CEIL, &MATH_FLOOR];
+static BUILTINS: &[&Builtin] = &[
+    &MATH_DIV,
+    &MATH_ROUND,
+    &MATH_ABS,
+    &MATH_CEIL,
+    &MATH_FLOOR,
+    &MATH_MIN,
+    &MATH_MAX,
+];
+
+/// `math.max(1px, 1in, 1cm)` → `1in`: the arguments are compared under the unit law and the **original**
+/// value wins (it is not rewritten into a common unit).
+///
+/// The length factors come from the oracle itself (`libsass/units/conversion/size.hrx`: `1in` → `96px`,
+/// `1cm` → `37.7952755906px`, `1mm` → `3.7795275591px`, `1pc` → `16px`, `1pt` → `1.3333333333px`), and
+/// `max.hrx::error/incompatible_units` states that `px` and `s` are different dimensions.
+/// Two **known** different dimensions produce the corpus's message; an unlisted unit declines to verbatim
+/// instead of inventing that error, because `1px and 2q have incompatible units.` is not something the
+/// fixtures assert and an unknown unit is not evidence of incompatibility.
+static MATH_MIN: Builtin = Builtin {
+    name: "math.min",
+    params: &[],
+    variadic: true,
+    apply: |args| extremum(Ordering::Less, args),
+};
+
+static MATH_MAX: Builtin = Builtin {
+    name: "math.max",
+    params: &[],
+    variadic: true,
+    apply: |args| extremum(Ordering::Greater, args),
+};
+
+/// Which way an extremum picks. A named choice keeps one body for `min` and `max` rather than two copies
+/// that can drift apart.
+#[derive(Clone, Copy, PartialEq)]
+enum Ordering {
+    Less,
+    Greater,
+}
+
+/// Fold the arguments down to the smallest or largest, comparing them pairwise under the unit law.
+fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
+    let numbers = args
+        .into_iter()
+        .map(|value| match value {
+            Value::Number(number, unit) => Ok((number, unit)),
+            other => Err(SassError::typed(
+                ErrorKind::NotANumber,
+                format!("{} is not a number.", other.to_css()),
+            )),
+        })
+        .collect::<Result<Vec<(f64, String)>, SassError>>()?;
+    let (head, tail) = numbers
+        .split_first()
+        .expect("variadic arity is checked by `evaluate`");
+    tail.iter()
+        .try_fold(head.clone(), |best, candidate| {
+            comparable(&best, candidate).map(|(left, right)| {
+                match (wants, left.partial_cmp(&right)) {
+                    (Ordering::Less, Some(core::cmp::Ordering::Greater)) => candidate.clone(),
+                    (Ordering::Greater, Some(core::cmp::Ordering::Less)) => candidate.clone(),
+                    _ => best,
+                }
+            })
+        })
+        .map(|(number, unit)| Value::Number(number, unit))
+}
+
+/// The two magnitudes to compare, in a common scale: equal units (or either side unitless) compare as
+/// written, known convertible lengths are scaled to px, and known different dimensions are the corpus's
+/// `1px and 2s have incompatible units.` — anything else declines.
+fn comparable(a: &(f64, String), b: &(f64, String)) -> Result<(f64, f64), SassError> {
+    if a.1 == b.1 || a.1.is_empty() || b.1.is_empty() {
+        return Ok((a.0, b.0));
+    }
+    match (to_base(&a.1), to_base(&b.1)) {
+        (Some(from_a), Some(from_b)) => Ok((a.0 * from_a, b.0 * from_b)),
+        _ if dimension(&a.1).is_some() && dimension(&b.1).is_some() => Err(SassError::typed(
+            ErrorKind::IncompatibleUnits,
+            format!(
+                "{} and {} have incompatible units.",
+                Value::Number(a.0, a.1.clone()).to_css(),
+                Value::Number(b.0, b.1.clone()).to_css()
+            ),
+        )),
+        // At least one unit is outside the proven table: decline rather than claim incompatibility.
+        _ => Err(SassError::new("unit comparison not modelled yet")),
+    }
+}
+
+/// The physical dimension of a unit, only for the groups the corpus evidences: the lengths that carry a
+/// px factor and time (`max.hrx::error/incompatible_units` contrasts `1px` with `2s`).
+fn dimension(unit: &str) -> Option<&'static str> {
+    match unit {
+        "px" | "in" | "cm" | "mm" | "pc" | "pt" => Some("length"),
+        "s" | "ms" => Some("time"),
+        _ => None,
+    }
+}
 
 /// The rounding family shares one parameter name and one type contract, both stated by the corpus:
 /// `Missing argument $number.` and `$number: c is not a number.` (`core_functions/math/{round,abs,ceil,
@@ -67,6 +177,7 @@ static BUILTINS: &[&Builtin] = &[&MATH_DIV, &MATH_ROUND, &MATH_ABS, &MATH_CEIL, 
 static MATH_ROUND: Builtin = Builtin {
     name: "math.round",
     params: &["number"],
+    variadic: false,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.round(), unit))
     },
@@ -75,12 +186,14 @@ static MATH_ROUND: Builtin = Builtin {
 static MATH_ABS: Builtin = Builtin {
     name: "math.abs",
     params: &["number"],
+    variadic: false,
     apply: |args| number_arg("number", &args).map(|(value, unit)| Value::Number(value.abs(), unit)),
 };
 
 static MATH_CEIL: Builtin = Builtin {
     name: "math.ceil",
     params: &["number"],
+    variadic: false,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.ceil(), unit))
     },
@@ -89,6 +202,7 @@ static MATH_CEIL: Builtin = Builtin {
 static MATH_FLOOR: Builtin = Builtin {
     name: "math.floor",
     params: &["number"],
+    variadic: false,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.floor(), unit))
     },
@@ -134,6 +248,27 @@ pub fn signature(name: &str) -> Option<&'static Builtin> {
 pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value, SassError> {
     let builtin =
         signature(name).ok_or_else(|| SassError::new(format!("unknown builtin {name}")))?;
+    // A variadic signature takes every positional argument and has no parameter names for a `$label:` to
+    // bind to, so a labelled run declines (the 1.2b rule) rather than guessing which parameter was meant.
+    // Its one arity rule is the corpus's own: no arguments at all is an error.
+    if builtin.variadic {
+        if given.is_empty() {
+            return Err(SassError::typed(
+                ErrorKind::MissingArgument,
+                "At least one argument must be passed.",
+            ));
+        }
+        return given
+            .into_iter()
+            .map(|(label, value)| match label {
+                Some(_) => Err(SassError::new(
+                    "named arguments are not bound for a variadic builtin",
+                )),
+                None => Ok(value),
+            })
+            .collect::<Result<Vec<Value>, SassError>>()
+            .and_then(|bound| (builtin.apply)(bound));
+    }
     let positional = given
         .iter()
         .filter(|(label, _)| label.is_none())

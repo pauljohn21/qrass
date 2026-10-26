@@ -306,6 +306,14 @@ mixin 体按实参代入**调用处选择器上下文**展开;`@content` MUST �
 - **WHEN** `math.round(-5.6)` / `math.abs(-17)` / `math.floor(-1.2)`
 - **THEN** 依次为 `-6` / `17` / `-2`；而 `10px -5px`（两个操作数之间无运算符）仍按空格列表逐字，不被误读为减法
 
+#### Scenario: 变参函数无参名可绑
+- **WHEN** `math.max(1px, 1in, 1cm)` 与 `math.max()` 与 `math.min(1px, 2s)`
+- **THEN** 依次为 `1in`（换算后比大小但**返回原值**）、`At least one argument must be passed.`、
+      `1px and 2s have incompatible units.`
+- **AND** 变参的类型错**不带 `$参数:` 前缀**（`c is not a number.`），因为无参数可命名
+- **AND** `math.max(1px, 2q)`（表外单位）与 `math.max($number1: 1, 2)`（变参无参名）逐字保留：
+      **未知不等于冲突**，也不猜标签属于哪个参数
+
 #### Scenario: 不知道的就不猜
 - **WHEN** `color.hwb(180, 50%, 50%)` 或 `math.div(6in, 3s)` 或 `math.div(6, 3) * 1px`
 - **THEN** 逐字输出原表达式（不产出臆造的数值，也不臆造错误）

@@ -43,6 +43,10 @@ pub enum ErrorKind {
     /// a builtin's number parameter received another value type; again the oracle's own words
     /// (`$number: c is not a number.`, `core_functions/math/round.hrx::error/type`)
     NotANumber,
+    /// two numbers of **known** different dimensions were compared; the oracle names them in the message
+    /// (`1px and 2s have incompatible units.`, `core_functions/math/max.hrx::error/incompatible_units`).
+    /// An unlisted unit never produces this — declining to verbatim is not the same as claiming a clash
+    IncompatibleUnits,
     /// everything else
     Other,
 }
@@ -75,6 +79,7 @@ const FATAL: &[ErrorKind] = &[
     ErrorKind::MissingArgument,
     ErrorKind::TooManyArguments,
     ErrorKind::NotANumber,
+    ErrorKind::IncompatibleUnits,
 ];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a

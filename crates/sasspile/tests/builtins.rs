@@ -111,6 +111,55 @@ async fn number_parameters_validate_their_own_way() {
     );
 }
 
+/// The variadic pair. `min`/`max` compare under the unit law and return the **original** argument (never
+/// a value rewritten into a common unit): `max(2px, 1)` → `2px` (a unitless argument is comparable),
+/// `max(1px, 1in, 1cm)` → `1in` (lengths scaled by the factors the oracle itself states in
+/// `libsass/units/conversion/size.hrx`). Their messages differ from a fixed-arity signature's: no
+/// `$parameter:` prefix (`c is not a number.`) and `At least one argument must be passed.`.
+#[tokio::test]
+async fn variadic_extremes_compare_units_and_keep_the_original() {
+    assert_eq!(css("a {b: math.max(1, 2)}").await, "a {\n  b: 2;\n}\n");
+    assert_eq!(css("a {b: math.max(3, 1, 2)}").await, "a {\n  b: 3;\n}\n");
+    assert_eq!(css("a {b: math.max(1)}").await, "a {\n  b: 1;\n}\n");
+    assert_eq!(css("a {b: math.max(2px, 1)}").await, "a {\n  b: 2px;\n}\n");
+    assert_eq!(
+        css("a {b: math.max(1px, 1in, 1cm)}").await,
+        "a {\n  b: 1in;\n}\n"
+    );
+    assert_eq!(
+        css("a {b: math.min(1px, 1in, 1cm)}").await,
+        "a {\n  b: 1px;\n}\n"
+    );
+    for (input, want) in [
+        ("a {b: math.max()}", "At least one argument must be passed."),
+        ("a {b: math.min(1, c)}", "c is not a number."),
+        (
+            "a {b: math.max(1px, 2s)}",
+            "1px and 2s have incompatible units.",
+        ),
+    ] {
+        let err = compile(input)
+            .await
+            .expect_err("a variadic arity/type/unit mistake is an error");
+        assert_eq!(err.message, want, "for input {input}");
+    }
+}
+
+/// Two more guards on the same code path, both about **not guessing**:
+/// a unit outside the proven factor table is not evidence of a clash (`max.hrx` only contrasts `px` with
+/// `s`), and a variadic call with a `$label:` has no parameter to bind to, so it keeps its text.
+#[tokio::test]
+async fn unknown_units_and_labels_on_a_variadic_decline() {
+    assert_eq!(
+        css("a {b: math.max(1px, 2q)}").await,
+        "a {\n  b: math.max(1px, 2q);\n}\n"
+    );
+    assert_eq!(
+        css("a {b: math.max($number1: 1, 2)}").await,
+        "a {\n  b: math.max($number1: 1, 2);\n}\n"
+    );
+}
+
 /// A builtin's result is a value, so it also has to be *spelled* the way Sass spells it:
 /// `values/calculation/calc/constant::infinity/math/unsimplified/from_variable` binds
 /// `$var: math.div(1, 0)` and prints `calc(infinity * (1% + 1px))` — Rust's `inf` would not read as CSS.

@@ -328,7 +328,7 @@
   - **往后变便宜了**：注册表添加一个函数 = 一条 `Builtin`（名字+params+body），arity 消息与 `$label:` 绑定
         自动到位；下一个目标按频次是 `math.pow`(149)、`math.clamp`(43)、`math.hypot`(33)。`@use` 的别名
         (`as foo`) 仍属 P5.1（现在按字面名匹配，所以 `math.div` 无需加载器就能跑）。
-  - **第二批（同轮紧接看落地）：`math.round`/`abs`/`ceil`/`floor` + 类型校验 + 带符号字面量**。
+  - **第二批（紧接首片落地）：`math.round`/`abs`/`ceil`/`floor` + 类型校验 + 带符号字面量**。
         实测 **653 → 692**（新空库 `ledger diff prev math-family` = **regress=0 net=39**，入库 run
         `math-family-692`），新通过 39 条中 **38 条就在 `core_functions/math`**（目标家族），实质通过
         488 → **527**；无效错误仍 **55**（没有臆造出新错误）。
@@ -342,6 +342,24 @@
           个操作数”仍按原路逐字（`arithmetic` 因 operators 不匹配而 bail），未把空格列表误当成减法。
         未达成项不变：`atan2`/`pow`/`clamp`/`log`/`hypot`/三角函数需要真正的数值格式精度与单位规则（含
         `1.4999999999949998` 这类精度边界），复合单位仍是 `unit/{denominator,incompatible,unknown}` 的卡点。
+  - **第三批：变参 `math.min`/`math.max`**。实测 **692 → 714**（新空库 `ledger diff prev minmax` =
+        **regress=0 net=22**，入库 run `variadic-minmax-714`），新通过 **恰好** `min` 11 + `max` 11（其余
+        是本家的 `global/*` 裸名与 `%` 变体），实质通过 527 → **549**，无效错误仍 **55**。
+        • `Builtin` 新增 `variadic`：`params` 为空 ⇒ **无参名可绑**，带 `$label:` 的变参调用直接推辞（与 1.2b
+          同一条“不得猜哪个是标签”）；零个实参报语料自己的 `At least one argument must be passed.`（复用
+          `MissingArgument` 类，不新增错误类）。
+        • 变参的类型消息**没有 `$参数:` 前缀**（`c is not a number.`），因为无参数可命名——这个差异是从
+          `min/max.hrx::error/type/*` 原文读出来的，不是把固定 arity 的消息模板套用。
+        • 单位律：同单位或一方无单位 ⇒ 直接比大小；两边都在**因子表**内 ⇒ 换算后比，但**返回原值**
+          （`max(1px, 1in, 1cm)` → `1in`，不会被改写成 `96px`）。长度因子全部引自语料自己给出的数字
+          （`libsass/units/conversion/size.hrx`：`1in`→`96px`、`1cm`→`37.7952755906px`、`1mm`→
+          `3.7795275591px`、`1pc`→`16px`、`1pt`→`1.3333333333px`）。
+        • **不臆造“单位不可比”错**：只有两边都在已证维度表内且维度不同时才报
+          `1px and 2s have incompatible units.`（`max.hrx::error/incompatible_units`）；表外单位（如 `2q`）
+          逐字推辞——未知不等于冲突。此条已有金样测试。
+        • 另一个取证教训：那个 hrx 文件叫 `comparable.hrx`，但语料里的真函数名是 **`math.compatible`**，
+          而 `math.comparable(...)` 那条要的是 `Undefined function.`——按**文件名**猜名字就会写错。
+          `compatible`(12) / `unit`(11) / `unitless`(9) / `percentage`(10) 需 `Value::Bool`，下一批再做。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)
