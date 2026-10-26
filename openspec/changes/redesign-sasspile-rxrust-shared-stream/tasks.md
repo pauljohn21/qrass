@@ -431,6 +431,19 @@
       另：`error/assignment/*` 那几条要求给 `math.$pi` 赋值时报错（保留名不可写）——它需要的是赋值路径
       上的名字表，同一批做。
 
+- [ ] 1.4a **`Calculation` 的第一片（本轮把契约取到了可直接动手的程度，但没开码）**。候选已验证自足：
+      `values/calculation/calc/no_operator`（33 条）里有一组**不需 `*`/`/`、不需有理单位**就能定死的小规则：
+      • `CaLc(1px)` → `1px`（名大小写无关，**单项就塌缩**）；`calc( 1px )` → `1px`（空白归一）；
+      • `calc(calc(1px))` → `1px`（嵌套塌缩）；`calc(calc(1px + 1%))` → `calc(1px + 1%)`
+        （内层不可化简时**只拆一层的壳**，保留内式）。
+      以上四条是 `ledger failures bool-units-746 "values/calculation/calc/no_operator"` 里 got/want 逐项
+      比对得出的原文，不是推定；同簇的 `{min,max,clamp}/…::simplified` 同构，`::preserved` 则要求保留外壳。
+      要动的形状（就这些，不牵扯 1.4d）：`Value` 加一个“原式保留”形态（携带已归一的内部表达式或
+      文本），`expr::from_tokens` 在 `known_call` 旁试 `calculation`（复用 `calls::brackets` 的括号规范化，
+      因为 `calc(1px` 也是一个词素），塌缩规则为“单项→取值；嵌套 calc→拆一层壳；否则 `calc(…)` 保留”。
+      **验收判据**：上述四条转 PASS，且 `calc/operator`(35) 与 `div::unit/*` 不得被顺手“猜”出来；
+      无效错误仍用 `ledger failures <run> "unexpected error"` 数（基线 55，不得上涨）。
+
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)
 - [ ] 2.2 unify / superselector / `selector.nest/parse/unify/is-superselector/simple-selectors`
