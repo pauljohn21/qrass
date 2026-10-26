@@ -77,6 +77,12 @@ next(): emit each item with self.observer.next(..)      error(self)/complete(sel
 is_closed(): delegate downstream — that is how a source learns to stop early
 ```
 
+A kernel that can fail **and** finish must deliver one terminal, not two: `Observer::error/complete` take
+`self`, so hold the downstream observer as `Option<O>` and deliver through `self.observer.take()`
+(`crates/sasspile/src/phases.rs` does exactly that). Without the `Option`, a phase that reports an error and
+then reaches its normal end forwards both, and rxrust has no assert to catch it — the second delivery is
+just a silent extra event on a stream the subscriber already closed.
+
 Keep `Err` generic and use `C::RcMut`/`C::RcCell` for anything shared, so one kernel compiles for
 `Local` (wasm32 / `!Send`) and `Shared`. Destructure `let PhaseObserver { observer, state } = self;`
 when a closure needs the observer while the accumulator is borrowed.
