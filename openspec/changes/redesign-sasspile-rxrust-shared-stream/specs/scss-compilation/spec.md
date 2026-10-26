@@ -314,6 +314,17 @@ mixin 体按实参代入**调用处选择器上下文**展开;`@content` MUST �
 - **AND** `math.max(1px, 2q)`（表外单位）与 `math.max($number1: 1, 2)`（变参无参名）逐字保留：
       **未知不等于冲突**，也不猜标签属于哪个参数
 
+#### Scenario: 建不出表达式的参数不构成类型判定证据
+- **WHEN** `math.unit(1px * 1em)` 或 `math.compatible(1px, 1/1px)`（复合单位参数）
+- **THEN** 整个调用推辞逐字，**不得**报 `… is not a number.`（该值在 Sass 里就是数字，语料要的是
+      `"px*em"` 这类结果）；只有不带 `/` `*` 的非数字值（`c`、`"0"`）才触发参数类型错
+
+#### Scenario: 布尔返回与百分比精度
+- **WHEN** `math.is-unitless(1px)` / `math.compatible(1px, 2em)` / `math.unit(1px)` / `math.percentage(0.246)`
+- **THEN** 依次为 `false` / `false`（`em` 与 `px` 不同维度）/ `"px"` / `24.6%`；而
+      `math.percentage(1%)` 报 `$number: Expected 1% to have no units.`
+- **AND** 任何计算值按 Sass 的**十位有效数字**输出（`0.246 × 100` 不得印成 `24.600000000000001`）
+
 #### Scenario: 不知道的就不猜
 - **WHEN** `color.hwb(180, 50%, 50%)` 或 `math.div(6in, 3s)` 或 `math.div(6, 3) * 1px`
 - **THEN** 逐字输出原表达式（不产出臆造的数值，也不臆造错误）

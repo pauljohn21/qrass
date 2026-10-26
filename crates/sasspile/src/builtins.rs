@@ -76,7 +76,78 @@ static BUILTINS: &[&Builtin] = &[
     &MATH_FLOOR,
     &MATH_MIN,
     &MATH_MAX,
+    &MATH_UNIT,
+    &MATH_IS_UNITLESS,
+    &MATH_PERCENTAGE,
+    &MATH_COMPATIBLE,
 ];
+
+/// `math.unit(1px)` → `"px"`, `math.unit(1)` → `""`. Only a **single** unit is expressible: the
+/// multi-unit goldens (`"px*em"`, `"px/em"`, `"px^-1"`) describe compound units, which the flat unit text
+/// cannot state, so those cases stay red rather than printing a guess.
+static MATH_UNIT: Builtin = Builtin {
+    name: "math.unit",
+    params: &["number"],
+    variadic: false,
+    apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Raw(format!("\"{unit}\""))),
+};
+
+/// `math.is-unitless(1px)` → `false` — the file is `unitless.hrx`, but the function the corpus calls is
+/// `math.is-unitless`; naming it after the file would have implemented nothing.
+static MATH_IS_UNITLESS: Builtin = Builtin {
+    name: "math.is-unitless",
+    params: &["number"],
+    variadic: false,
+    apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Bool(unit.is_empty())),
+};
+
+/// `math.percentage(0.246)` → `24.6%`. A unit on the argument is the corpus's own message
+/// (`$number: Expected 1% to have no units.` — plural “units” even for one unit, as written), and the
+/// result only fits Sass's ten-significant-digit output for a computed number.
+static MATH_PERCENTAGE: Builtin = Builtin {
+    name: "math.percentage",
+    params: &["number"],
+    variadic: false,
+    apply: |args| {
+        let (value, unit) = number_arg("number", &args)?;
+        if unit.is_empty() {
+            Ok(Value::Number(value * 100.0, "%".to_string()))
+        } else {
+            Err(SassError::typed(
+                ErrorKind::WrongUnits,
+                format!(
+                    "$number: Expected {} to have no units.",
+                    Value::Number(value, unit).to_css()
+                ),
+            ))
+        }
+    },
+};
+
+/// `math.compatible(1px, 2in)` → `true`: two numbers are comparable when they carry the same unit, either
+/// is unitless, or both units belong to a dimension the corpus evidences. An unknown unit **declines**
+/// rather than answering `false`, because `px` vs `q` is not something the fixtures state. Each parameter
+/// is validated under its own name, as `comparable.hrx::error/type/*` demands
+/// (`$number1: c is not a number.`, `$number2: c is not a number.`).
+static MATH_COMPATIBLE: Builtin = Builtin {
+    name: "math.compatible",
+    params: &["number1", "number2"],
+    variadic: false,
+    apply: |args| {
+        let (Some(first), Some(second)) = (args.first(), args.get(1)) else {
+            return Err(missing("number2".to_string()));
+        };
+        let (_, first_unit) = number_arg("number1", std::slice::from_ref(first))?;
+        let (_, second_unit) = number_arg("number2", std::slice::from_ref(second))?;
+        if first_unit == second_unit || first_unit.is_empty() || second_unit.is_empty() {
+            return Ok(Value::Bool(true));
+        }
+        match (dimension(&first_unit), dimension(&second_unit)) {
+            (Some(left), Some(right)) => Ok(Value::Bool(left == right)),
+            _ => Err(SassError::new("unit dimension not proven")),
+        }
+    },
+};
 
 /// `math.max(1px, 1in, 1cm)` → `1in`: the arguments are compared under the unit law and the **original**
 /// value wins (it is not rewritten into a common unit).
@@ -160,11 +231,15 @@ fn comparable(a: &(f64, String), b: &(f64, String)) -> Result<(f64, f64), SassEr
 }
 
 /// The physical dimension of a unit, only for the groups the corpus evidences: the lengths that carry a
-/// px factor and time (`max.hrx::error/incompatible_units` contrasts `1px` with `2s`).
+/// px factor and time (`max.hrx::error/incompatible_units` contrasts `1px` with `2s`), plus `em` as its own
+/// dimension because `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false`.
+/// `ex`/`ch`/`rem`/`deg`… are deliberately absent: no fixture contrasts them, so they stay unproven and
+/// every function that would need to judge them declines.
 fn dimension(unit: &str) -> Option<&'static str> {
     match unit {
         "px" | "in" | "cm" | "mm" | "pc" | "pt" => Some("length"),
         "s" | "ms" => Some("time"),
+        "em" => Some("em"),
         _ => None,
     }
 }

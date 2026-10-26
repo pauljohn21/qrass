@@ -47,6 +47,9 @@ pub enum ErrorKind {
     /// (`1px and 2s have incompatible units.`, `core_functions/math/max.hrx::error/incompatible_units`).
     /// An unlisted unit never produces this — declining to verbatim is not the same as claiming a clash
     IncompatibleUnits,
+    /// a number parameter required a specific unit (or none); again the oracle's words
+    /// (`$number: Expected 1% to have no units.`, `core_functions/math/percentage.hrx::error/unit`)
+    WrongUnits,
     /// everything else
     Other,
 }
@@ -80,6 +83,7 @@ const FATAL: &[ErrorKind] = &[
     ErrorKind::TooManyArguments,
     ErrorKind::NotANumber,
     ErrorKind::IncompatibleUnits,
+    ErrorKind::WrongUnits,
 ];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a

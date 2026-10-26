@@ -131,14 +131,16 @@ pub fn named_argument(toks: &[Tok]) -> bool {
 
 /// Build an `Expr` from a token run, or `None` when the run holds a shape P1 must not read.
 pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
-    if protected(toks) {
-        return None;
-    }
-    // A call is tried first because its run is frequently dynamic (`math.div($number2: 3, …)`): the
-    // `$label:` there is an argument name, and only the signature check inside [`crate::calls`] can tell
-    // that apart from a reference. Nothing else about a run changes when it is a call.
+    // A call is tried **first**, because its arguments live inside the parentheses: `math.percentage(1%)`
+    // carries a `%`, which the CSS-shorthand protection below exists to keep unread — yet here the callee has
+    // a signature and the run *is* an expression. This stays safe because `known_call` only matches a name
+    // the registry knows, so `calc(1% + 1px)`, `font: 12px/1.5` and `grid: 1/2` fall through to the
+    // protection unchanged.
     if let Some((name, args)) = crate::calls::known_call(toks) {
         return Some(Expr::Call { name, args });
+    }
+    if protected(toks) {
+        return None;
     }
     if has_dynamic(toks) {
         interpolation(toks)
@@ -151,7 +153,22 @@ pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
 /// a lone number (`math.div(6, 3)` → `2`), so the "a bare number is not an expression yet" filter that
 /// [`crate::exec::State::evaluated`] applies to whole declaration values does not apply here.
 pub fn argument_expr(toks: &[Tok]) -> Option<Expr> {
-    from_tokens(toks)
+    from_tokens(toks).or_else(|| {
+        // A single lexeme inside an argument is read as a number even when the `protected` rule would
+        // refuse the same text in a declaration value — that rule exists for CSS shorthands
+        // (`font: 12px/1.5`), and `math.percentage(1%)` is not one: the corpus wants
+        // `$number: Expected 1% to have no units.` from the body, not an unread value.
+        let meaningful = toks
+            .iter()
+            .filter(|tok| !matches!(tok, Tok::Space(_)))
+            .collect::<Vec<&Tok>>();
+        match meaningful.as_slice() {
+            [Tok::Word(word)] => {
+                number_lexeme(word).map(|(value, unit)| Expr::Num(value, unit.to_string()))
+            }
+            _ => None,
+        }
+    })
 }
 
 /// The interpolation shape only — what a **selector** may use, because a selector's lexemes
@@ -202,7 +219,10 @@ fn number_lexeme(word: &str) -> Option<(f64, &str)> {
         return None;
     }
     let (numeric, unit) = digits_area.split_at(digits);
-    if !unit.chars().all(|c| c.is_ascii_alphanumeric()) {
+    // `%` is a unit character for Sass; it stays out of every other reading of a run because `protected`
+    // still refuses to evaluate a run that carries one outside a known call
+    // (`math.percentage(1%)` must reach its body to report the unit, not be told it is not a number).
+    if !unit.chars().all(|c| c.is_ascii_alphanumeric() || c == '%') {
         return None;
     }
     format!("{sign}{numeric}")
@@ -409,6 +429,14 @@ impl Expr {
                     // `$number: c is not a number.` instead of skipping the call in silence.
                     let value = match argument_expr(&arg.toks) {
                         Some(expr) => expr.eval(env)?,
+                        // An argument that cannot be turned into an expression **yet** — one carrying `/`
+                        // or `*`, i.e. a compound unit like `1/1px` or `1px * 1em`, which Sass does treat as
+                        // a number — is not evidence of a type error. The whole call declines and keeps its
+                        // verbatim text; claiming `1/1px is not a number.` would be an invented failure
+                        // (measured: the first version produced exactly that on 8 compound fixtures).
+                        None if protected(&arg.toks) => {
+                            return Err(SassError::new("argument needs algebra P1 does not have"));
+                        }
                         None => Value::Raw(canon(&render(&arg.toks))),
                     };
                     Ok((arg.label.clone(), value))

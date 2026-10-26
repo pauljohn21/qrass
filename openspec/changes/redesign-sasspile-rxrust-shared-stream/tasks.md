@@ -360,6 +360,20 @@
         • 另一个取证教训：那个 hrx 文件叫 `comparable.hrx`，但语料里的真函数名是 **`math.compatible`**，
           而 `math.comparable(...)` 那条要的是 `Undefined function.`——按**文件名**猜名字就会写错。
           `compatible`(12) / `unit`(11) / `unitless`(9) / `percentage`(10) 需 `Value::Bool`，下一批再做。
+  - **第四批：`Value::Bool` + `math.unit` / `is-unitless` / `percentage` / `compatible` + 十位有效数字**。
+        实测 **714 → 746**（新空库 `ledger diff prev bools` = **regress=0 net=32**，入库 run
+        `bool-units-746`），实质通过 549 → **581**；`format_number` 新增“只在自然表示超过 10 位有效数字
+        时才截”的规则（`0.246×100` 要印 `24.6` 而不是 f64 尾巴），因此短值与小值文本不变——实测 0 回退。
+        **本轮差点臆造 8 条错误（已逐项坐实并修正）**：把 `known_call` 提到 `protected` 前面后，
+        `1/1px`、`1px * 1em * 1rad` 这类**复合单位参数**进入了函数体，被 `number_arg` 报成
+        `… is not a number.`——而语料要的是 `"px*em"` 这种结果。区分补上后无效错误从 63 **回到 55、新增 0**：
+        “表达式还建不出来的参数（带 `/` `*`）不构成类型判定的证据”，整个调用推辞逐字。
+        另外 `math.unit(1px)` 仅支持**单单位**；`em` 入维度表是因为
+        `comparable.hrx::unit/to_different` 直接写了 `compatible(1px, 2em)` → `false`，
+        而 `ex/ch/rem/deg` 无一对比用例 ⇒ 故意不入表（宁可推辞）。
+        命名坑第二次命中：`unitless.hrx` 里的函数实为 **`math.is-unitless`**。
+        工具事故（不并入库）：本批一次 `git stash pop` 撞 `index.lock` 导致工作区一度回到旧码，
+        当时那组“76 passed”是旧码的读数，已当场识别并在恢复后重测为 78/0/0。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)

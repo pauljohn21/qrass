@@ -160,6 +160,58 @@ async fn unknown_units_and_labels_on_a_variadic_decline() {
     );
 }
 
+/// The boolean-returning family, which needed `Value::Bool` (and the corpus’s own spelling of a name:
+/// the file is `unitless.hrx`, the function is `math.is-unitless`). `math.compatible` answers only for
+/// units whose dimension is evidenced — an unknown pair declines to verbatim rather than guessing `false`.
+#[tokio::test]
+async fn booleans_and_unit_strings() {
+    assert_eq!(
+        css("a {b: math.is-unitless(1px)}").await,
+        "a {\n  b: false;\n}\n"
+    );
+    assert_eq!(css("a {b: math.unit(1px)}").await, "a {\n  b: \"px\";\n}\n");
+    assert_eq!(css("a {b: math.unit(1)}").await, "a {\n  b: \"\";\n}\n");
+    assert_eq!(
+        css("a {b: math.compatible(1px, 2in)}").await,
+        "a {\n  b: true;\n}\n"
+    );
+    assert_eq!(
+        css("a {b: math.compatible(1px, 2em)}").await,
+        "a {\n  b: false;\n}\n"
+    );
+    assert_eq!(
+        css("a {b: math.compatible(1px, 2q)}").await,
+        "a {\n  b: math.compatible(1px, 2q);\n}\n"
+    );
+}
+
+/// `math.percentage` is where Sass's **ten-significant-digit** output becomes visible: `0.246 × 100` must
+/// print `24.6`, not the f64 tail. The clamp in `format_number` applies only when the natural rendering is
+/// longer than ten significant digits, so short values keep their text (and no currently-passing case
+/// moved when it landed — measured `regress=0`). A unit on the argument is the corpus’s message, plural
+/// “units” even for one, exactly as the fixture writes it.
+#[tokio::test]
+async fn percentage_scales_and_respects_precision() {
+    for (input, want) in [
+        ("a {b: math.percentage(42)}", "4200%"),
+        ("a {b: math.percentage(0.246)}", "24.6%"),
+        ("a {b: math.percentage(123.456)}", "12345.6%"),
+        ("a {b: math.percentage(-0.4)}", "-40%"),
+        ("a {b: math.percentage(0)}", "0%"),
+        ("a {b: math.percentage($number: 1)}", "100%"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+    let err = compile("a {b: math.percentage(1%)}")
+        .await
+        .expect_err("percentage requires a unitless argument");
+    assert_eq!(err.message, "$number: Expected 1% to have no units.");
+}
+
 /// A builtin's result is a value, so it also has to be *spelled* the way Sass spells it:
 /// `values/calculation/calc/constant::infinity/math/unsimplified/from_variable` binds
 /// `$var: math.div(1, 0)` and prints `calc(infinity * (1% + 1px))` — Rust's `inf` would not read as CSS.

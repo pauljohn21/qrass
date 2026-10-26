@@ -50,6 +50,9 @@ pub enum Value {
     Raw(String),
     /// A magnitude with its unit text; `""` is unitless, `%` is a percentage.
     Number(f64, String),
+    /// Sass's boolean, printed as the bare word `true` / `false` (`math.is-unitless`, `math.compatible`,
+    /// and later `@if`'s truthiness). Kept a separate variant so a boolean is never re-parsed out of text.
+    Bool(bool),
 }
 
 impl Value {
@@ -64,6 +67,7 @@ impl Value {
         match self {
             Value::Raw(text) => text.clone(),
             Value::Number(value, unit) => format_number(*value) + unit,
+            Value::Bool(value) => value.to_string(),
         }
     }
 
@@ -138,5 +142,24 @@ fn format_number(value: f64) -> String {
     if value == 0.0 || (value.fract() == 0.0 && value.abs() < 1e15) {
         return format!("{}", value as i64);
     }
-    format!("{value}")
+    let natural = format!("{value}");
+    // Sass prints at most **10 significant digits** — a computed `0.246 × 100` must say `24.6`, not the
+    // f64 tail `24.600000000000001` (`core_functions/math/percentage.hrx::small`). The clamp is applied
+    // only when the natural rendering is actually longer than ten significant digits, so short values and
+    // tiny ones like `0.000000000000001` (one significant digit) keep the text they already have.
+    let significant = natural
+        .trim_start_matches(['-', '+'])
+        .replace('.', "")
+        .trim_start_matches('0')
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .count();
+    if significant <= 10 {
+        return natural;
+    }
+    let exponent = value.abs().log10().floor().max(0.0) as i32;
+    format!("{:.1$}", value, (10 - 1 - exponent).max(0) as usize)
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
