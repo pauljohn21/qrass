@@ -11,7 +11,7 @@
 //!   context to the source.
 //!
 //! `Err` stays generic: a phase never decides the chain's error channel, so the same kernel works
-//! on a `Local` (wasm32, `!Send`) or `Shared` context and with any `Err`.
+//! on a `Local` (`!Send`) or `Shared` context and with any `Err`.
 
 use std::convert::Infallible;
 
@@ -22,6 +22,10 @@ use rxrust::observer::Observer;
 use crate::SassError;
 use crate::exec::{State, StyleRule};
 use crate::lexer::{Event, LexAcc, MsgAcc, Tok};
+use crate::trace::Phase;
+
+// The phase handle each observer carries is `crate::trace::Phase`: a span that lives as long as the
+// subscription, so `elapsed_ms` covers the streaming rather than just the wiring of the chain.
 
 /// `char → Tok`: one emission per completed token, driven by [`LexAcc`].
 #[derive(Clone)]
@@ -32,6 +36,8 @@ pub struct Lexer<S> {
 pub struct LexerObserver<O> {
     observer: O,
     acc: LexAcc,
+    timing: Phase,
+    items: usize,
 }
 
 impl<O, Err> Observer<char, Err> for LexerObserver<O>
@@ -39,18 +45,41 @@ where
     O: Observer<Tok, Err>,
 {
     fn next(&mut self, ch: char) {
-        // Destructuring keeps the accumulator and the downstream observer as two disjoint
-        // borrows, so the sink can emit straight into the stream.
-        let LexerObserver { observer, acc } = self;
-        acc.feed(ch, &mut |tok| observer.next(tok));
+        // Destructuring keeps the accumulator, the downstream observer, the span and the counter as
+        // separate borrows, so the sink can emit straight into the stream while counting its own output.
+        let LexerObserver {
+            observer,
+            acc,
+            timing,
+            items,
+        } = self;
+        let _current = timing.enter();
+        acc.feed(ch, &mut |tok| {
+            observer.next(tok);
+            *items += 1;
+        });
     }
 
     fn error(self, err: Err) {
-        self.observer.error(err);
+        let LexerObserver {
+            observer,
+            mut timing,
+            items,
+            ..
+        } = self;
+        timing.close(items);
+        observer.error(err);
     }
 
     fn complete(self) {
-        self.observer.complete();
+        let LexerObserver {
+            observer,
+            mut timing,
+            items,
+            ..
+        } = self;
+        timing.close(items);
+        observer.complete();
     }
 
     fn is_closed(&self) -> bool {
@@ -78,11 +107,11 @@ where
 
     fn subscribe(self, context: C) -> Self::Unsub {
         let Lexer { source } = self;
-        let span = tracing::debug_span!("phase", stage = "lex");
-        let _entered = span.enter();
         let wrapped = context.transform(|observer| LexerObserver {
             observer,
             acc: LexAcc::default(),
+            timing: Phase::new("lex"),
+            items: 0,
         });
         source.subscribe(wrapped)
     }
@@ -97,6 +126,8 @@ pub struct Structurize<S> {
 pub struct StructurizeObserver<O> {
     observer: O,
     acc: MsgAcc,
+    timing: Phase,
+    items: usize,
 }
 
 impl<O, Err> Observer<Tok, Err> for StructurizeObserver<O>
@@ -104,16 +135,39 @@ where
     O: Observer<Event, Err>,
 {
     fn next(&mut self, tok: Tok) {
-        let StructurizeObserver { observer, acc } = self;
-        acc.feed(tok, &mut |event| observer.next(event));
+        let StructurizeObserver {
+            observer,
+            acc,
+            timing,
+            items,
+        } = self;
+        let _current = timing.enter();
+        acc.feed(tok, &mut |event| {
+            observer.next(event);
+            *items += 1;
+        });
     }
 
     fn error(self, err: Err) {
-        self.observer.error(err);
+        let StructurizeObserver {
+            observer,
+            mut timing,
+            items,
+            ..
+        } = self;
+        timing.close(items);
+        observer.error(err);
     }
 
     fn complete(self) {
-        self.observer.complete();
+        let StructurizeObserver {
+            observer,
+            mut timing,
+            items,
+            ..
+        } = self;
+        timing.close(items);
+        observer.complete();
     }
 
     fn is_closed(&self) -> bool {
@@ -141,11 +195,11 @@ where
 
     fn subscribe(self, context: C) -> Self::Unsub {
         let Structurize { source } = self;
-        let span = tracing::debug_span!("phase", stage = "structure");
-        let _entered = span.enter();
         let wrapped = context.transform(|observer| StructurizeObserver {
             observer,
             acc: MsgAcc::default(),
+            timing: Phase::new("structure"),
+            items: 0,
         });
         source.subscribe(wrapped)
     }
@@ -164,6 +218,8 @@ pub struct Exec<S> {
 pub struct ExecObserver<O> {
     observer: Option<O>,
     state: State,
+    timing: Phase,
+    items: usize,
 }
 
 impl<O> Observer<Event, Infallible> for ExecObserver<O>
@@ -174,15 +230,29 @@ where
         if self.observer.is_none() {
             return; // already terminated on the Err channel
         }
-        match self.state.step(ev) {
+        // The phase span is entered only around `step`, so the declaration spans it opens nest inside
+        // it, and the guard is released before `close` moves the timing out.
+        let settled = {
+            let _current = self.timing.enter();
+            self.state.step(ev)
+        };
+        let ExecObserver {
+            observer,
+            timing,
+            items,
+            ..
+        } = self;
+        match settled {
             Ok(Some(rule)) => {
-                if let Some(observer) = &mut self.observer {
-                    observer.next(rule);
+                if let Some(downstream) = observer {
+                    downstream.next(rule);
+                    *items += 1;
                 }
             }
             Ok(None) => {}
             Err(err) => {
-                if let Some(terminated) = self.observer.take() {
+                if let Some(terminated) = observer.take() {
+                    timing.close(*items);
                     terminated.error(err);
                 }
             }
@@ -195,7 +265,14 @@ where
     }
 
     fn complete(self) {
-        if let Some(observer) = self.observer {
+        let ExecObserver {
+            observer,
+            mut timing,
+            items,
+            ..
+        } = self;
+        timing.close(items);
+        if let Some(observer) = observer {
             observer.complete();
         }
     }
@@ -225,11 +302,11 @@ where
 
     fn subscribe(self, context: C) -> Self::Unsub {
         let Exec { source } = self;
-        let span = tracing::debug_span!("phase", stage = "exec");
-        let _entered = span.enter();
         let wrapped = context.transform(|observer| ExecObserver {
             observer: Some(observer),
             state: State::default(),
+            timing: Phase::new("exec"),
+            items: 0,
         });
         source.subscribe(wrapped)
     }
@@ -247,6 +324,8 @@ pub struct Render<S> {
 
 pub struct RenderObserver<O> {
     observer: O,
+    timing: Phase,
+    items: usize,
 }
 
 impl<O, Err> Observer<StyleRule, Err> for RenderObserver<O>
@@ -254,15 +333,34 @@ where
     O: Observer<String, Err>,
 {
     fn next(&mut self, rule: StyleRule) {
-        self.observer.next(rule.to_css());
+        let RenderObserver {
+            observer,
+            timing,
+            items,
+        } = self;
+        let _current = timing.enter();
+        observer.next(rule.to_css());
+        *items += 1;
     }
 
     fn error(self, err: Err) {
-        self.observer.error(err);
+        let RenderObserver {
+            observer,
+            mut timing,
+            items,
+        } = self;
+        timing.close(items);
+        observer.error(err);
     }
 
     fn complete(self) {
-        self.observer.complete();
+        let RenderObserver {
+            observer,
+            mut timing,
+            items,
+        } = self;
+        timing.close(items);
+        observer.complete();
     }
 
     fn is_closed(&self) -> bool {
@@ -290,9 +388,11 @@ where
 
     fn subscribe(self, context: C) -> Self::Unsub {
         let Render { source } = self;
-        let span = tracing::debug_span!("phase", stage = "render");
-        let _entered = span.enter();
-        let wrapped = context.transform(|observer| RenderObserver { observer });
+        let wrapped = context.transform(|observer| RenderObserver {
+            observer,
+            timing: Phase::new("render"),
+            items: 0,
+        });
         source.subscribe(wrapped)
     }
 }

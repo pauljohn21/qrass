@@ -15,6 +15,7 @@ use crate::env::Env;
 use crate::expr::{self, Expr};
 use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
 use crate::selector::{Piece, PropName, Selector};
+use crate::trace;
 use crate::value::Value;
 
 use crate::SassError;
@@ -165,7 +166,7 @@ impl State {
             Target::Variable(var) => {
                 // `!default` / `!global` describe the binding, not its value, and never reach CSS
                 // (`lexer::without_flags`); a declaration's `!important` keeps its text.
-                let bound = self.value_of(without_flags(value))?;
+                let bound = self.value_of(&var, without_flags(value))?;
                 self.env.bind(&var, bound);
             }
             Target::Property(name) => {
@@ -253,19 +254,34 @@ impl State {
     /// run is unambiguous; a run that does not parse, or whose failure is not fatal, keeps its verbatim
     /// text. `plain` is the enclosing plain-CSS at-rule body, which keeps an unbound `$x` as text.
     fn decl_value(&self, prop: &PropName, value: &[Tok], plain: bool) -> Result<Value, SassError> {
-        Ok(if prop.is_custom() {
-            Value::from_text(render_raw(value))
-        } else {
-            self.evaluated(value, plain)?
-                .unwrap_or_else(|| Value::from_text(render(value)))
-        })
+        if prop.is_custom() {
+            // A custom property's value is raw CSS by definition, so there is no read to trace.
+            return Ok(Value::from_text(render_raw(value)));
+        }
+        // One span per value read: what the source said, what it became (or that it declined), and how
+        // long the read took. This is the question a conformance round always asks about a line that came
+        // out verbatim, and answering it used to mean adding a throwaway probe and rebuilding.
+        let read = trace::ValueRead::begin(prop.as_str(), &self.scope_id(), &render(value));
+        let outcome = self.evaluated(value, plain);
+        read.record(&outcome);
+        Ok(outcome?.unwrap_or_else(|| Value::from_text(render(value))))
     }
 
-    fn value_of(&self, toks: &[Tok]) -> Result<Value, SassError> {
-        // A binding (`$x: …`) is SassScript by definition, never plain-CSS text.
-        Ok(self
-            .evaluated(toks, false)?
-            .unwrap_or_else(|| Value::from_text(render(toks))))
+    /// A binding's value: SassScript by definition, never plain-CSS text. `var` names the target because
+    /// the token run carries only the value, and a diagnostic that says `module: "1px"` is no diagnostic.
+    fn value_of(&self, var: &str, toks: &[Tok]) -> Result<Value, SassError> {
+        let read = trace::ValueRead::begin(var, &self.scope_id(), &render(toks));
+        let outcome = self.evaluated(toks, false);
+        read.record(&outcome);
+        Ok(outcome?.unwrap_or_else(|| Value::from_text(render(toks))))
+    }
+
+    /// The innermost open block, as the text a diagnostic names it by. Root level has no scope, and the
+    /// empty string says so honestly rather than inventing a selector.
+    fn scope_id(&self) -> String {
+        self.scopes
+            .last()
+            .map_or_else(String::new, |scope| scope.selector.to_css())
     }
 
     /// Fold a token run into a typed value. A lone number is **not** an expression yet — only
@@ -284,11 +300,11 @@ impl State {
     /// evaluating the run at all would resolve a reference that does not exist
     /// (`expr::named_argument`; measured as 1,611 cases given an invalid `Undefined variable`).
     fn evaluated(&self, toks: &[Tok], plain: bool) -> Result<Option<Value>, SassError> {
-        let arithmetic = expr::from_tokens(toks).and_then(|expr| match expr {
+        let arithmetic = expr::from_tokens(toks, &self.env).and_then(|expr| match expr {
             Expr::Num(_, _) => None,
             other => Some(other),
         });
-        let Some(expr) = arithmetic.or_else(|| expr::interpolated(toks)) else {
+        let Some(expr) = arithmetic.or_else(|| expr::interpolated(toks, &self.env)) else {
             return Ok(None);
         };
         // A run that **passes named arguments** is evaluated only when it resolved to a call we have a
@@ -350,7 +366,7 @@ impl State {
         let Tok::Interp(inner) = tok else {
             return Ok(token_text(tok));
         };
-        let Some(expr) = expr::interpolated(inner) else {
+        let Some(expr) = expr::interpolated(inner, &self.env) else {
             return Ok(render(inner));
         };
         match expr.eval(&self.env) {

@@ -14,6 +14,17 @@ tracing = "0.1"
 ledger = { path = "../ledger" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+opentelemetry = "0.33.1"
+opentelemetry_sdk = "0.33.1"
+opentelemetry-stdout = { version = "0.33.1", features = ["trace"] }
+tracing-opentelemetry = "0.34.0"
+
+[features]
+# Gates the OpenTelemetry wiring in `tests/tracing_bridge.rs` (and `examples/trace_pipeline.rs`): with it,
+# existing spans are bridged onto `opentelemetry-stdout` and printed as they end. The OTel crates are
+# dev-dependencies, so they never reach the library; a dev-dependency cannot itself be optional, which is
+# why this feature gates the *wiring* rather than stripping the compile.
+trace = []
 
 [lib]
 name = "sasspile"

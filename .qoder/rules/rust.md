@@ -14,12 +14,17 @@ alwaysApply: true
    `Lexer/Structurize/Exec/Render` 在 `crates/sasspile/src/phases.rs`；0′.1/.2/.3/.4/.6/.7 均已合入：真 `Err` 通道已接且
    `UndefinedVariable` 已致命（守卫：头部只认 `#{}`、special 调用参数、plain-CSS at-rule 体）、选择器/属性名是
    `src/selector.rs` 的结构化值（`&` 就是词素，`str::replace` 已删）、四条铁律已成 `sasslint` 机器闸（CI 门已去
-   `#[ignore]`）。P1 也已落三块：具名实参不当引用（`expr::named_argument`）、标识符 `+`/`-` 拼接
-   （`expr::concatenation`：`c+d`→`cd`、`c - d`→`c-d`）、绑定旗标剔除（`lexer::without_flags`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **635/11,533**（5.51%；A/B 记录 = `reports/hrx.db` 里的具名 run）；
+   `#[ignore]`）。P1 已落：具名实参不当引用（`expr::named_argument`）、标识符 `+`/`-` 拼接
+   （`expr::concatenation`）、绑定旗标剔除（`lexer::without_flags`）、**调用脊柱**（`calls.rs`+`builtins.rs` 注册表：
+   `math.div/round/abs/ceil/floor/min/max/unit/is-unitless/percentage/compatible`，含 arity 与类型消息金样）、
+   `Value::Bool` 与 Sass 十位有效数字、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
+   单项出壳 / 嵌套脱一层壳 / 否则原式保留；**同单位化简与 `*` `/` 故意未做**，归 1.4d）。
+   **以上均不得重做/重新发明**。当前基线 hrx **768/11,533**（6.66%，**实质通过 603** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `calc-14a-768`）；
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一步主战场：P1 剩下的 `*`、`/` 与斜杠歧义、1.4 `Calculation`（同时解锁 degenerate/precision/units 多族）、
-   1.5 色彩与 1.7 内置函数；以及 P7 诊断消息——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
+   下一步主战场：**1.4d 有理（复合）单位**（判据已钉死，必须与 `*` `/` 同批，拆开会留死码）→ 1.5 色彩 →
+   1.7 其余分派（含惰性 `if()`，已被实测否定为快收益）；以及 P7 诊断消息——语料里大量 `error` 用例缺的是
+   **消息**，不是错误管道。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 
@@ -33,7 +38,17 @@ alwaysApply: true
 - 推送用 SSH：`git push github main`（remote `github` → `pauljohn21/qrass`）。只提交不推送时，`commit` 后等用户确认。
 
 ## 🔬 调试协议（强制）
-禁止凭直觉猜根因；bug 修复须基于 tracing 证据链：① 疑似路径入口/出口加 span ② `RUST_LOG=trace` 采集 ③ 引用具体 span+字段定位 ④ 修复后清理临时 span。代码查询优先 CodeGraph。
+禁止凭直觉猜根因；bug 修复须基于 tracing 证据链：① 在疑似路径入口/出口加 span ② 采集 ③ 引用具体 span+字段定位
+④ 修复后清理临时 span。**不得再造临时探针文件**：本轮起诊断面已落地（tasks.md 9.0）——
+`HRX_CASE=<key 子串>` 只跑一条用例（与 `HRX_RUN` 互斥：部分测量不得入库），`--features trace` 把现有 span
+桥到 `opentelemetry-stdout` 直接打印（无 collector 无网络），入口是
+`cargo run -p sasspile --features trace --example trace_pipeline`；声明级 `value` span 给
+`module`/`id`/`raw_value`/`resolved`，`calculation read` 与 `call decision` 两条事件给**词素原文与切完的形状**
+——“这条声明为何逐字输出”、“我的判据为何匹配不到”看这两行即可。三条约束：① 阶段 span 必须**住在观察者里**，
+在 `subscribe` 里 `enter()` 的 span 一返回就关闭，`elapsed_ms` 量的就只是接线而不是流线；② `elapsed_ms` 用**带小数毫秒**，
+整数 ms 会把小相报成 0 伪装成“瞬时”；③ `tracing` 宏体内不要写 `Value::Xxx` 路径——宏作用域里 `Value` 是
+`tracing` 自己的 field trait，判定要在宏外算完再传进去。另：`tracing-opentelemetry` 只导 **span** 不导 event，
+给一个工具加 trace 时必须先确认它真的建有 span。代码查询优先 CodeGraph。
 
 ## ⛔ 铁律：以 rxrust 为核心 = 用 Rust 所有权写程序
 rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权的一种良好表达**；顺它写可消掉大批 GC 问题（共享可变、对象图别名、边遍历边改、谁负责释放、空引用/生命周期）。**rxrust 本身就是引擎**，不是给状态机套的壳。
@@ -107,13 +122,31 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
   并区分“指标修正”与“真收益”。
 - **A/B 记录只住 `reports/hrx.db` 的具名 run，且不再经任何中间文件**：需要入库时用
   `HRX_RUN=<增量名> cargo test -p sasspile --test hrx`，harness 直接写库（`HRX_DB=<路径>` 指向另一个库，
-  供强制的空库复算用）；不设 `HRX_RUN` 时只量不写、不留任何产物。事后靠 `ledger runs` / `ledger diff` / `ledger failures <run>` 追溯。
+  供强制的空库复算用）；不设 `HRX_RUN` 时只量不写、不留任何产物。事后靠 `ledger runs` / `ledger diff <a> <b> [簇前缀]` /
+  `ledger failures <run> [key-或-详情子串]` / `ledger passed <run> <簇前缀>` 追溯。
+  **读数一律走 `cargo run -q -p ledger -- …`：既禁止 `sqlite3` 裸查记录库，也禁止在 shell 里用
+  `sed|sort|comm|awk` 对 ledger 的输出重算集合差**（本轮两次违规：先手拼 SQL 反推 PASS 集，后又在
+  `/tmp` 导两个 key 列表用 `sort|comm` 算簇级 A/B —— 后者正是本 crate 要消灭的 `reports/hrx-*.tsv`
+  sprawl 换地方复发。**缺哪个读数就补哪个读数，而不是绕它**）。本轮据此补了两个命令，并把结论做成
+  `pub fn failing/passing/diff_runs` 让测试直接断言（不再 grep 日志）：
+  • `passed <run> <簇前缀>` —— 库**只存失败行**且**不记某 run 的测量范围**（in-scope 的 PASS 只登记 key、
+    不长行），“这簇现在哪些是 PASS”无处可答；用“全部已知 key − 该 run 失败”去反推会把**从没测过的用例
+    报成通过**（实测 `passed head-600-pathkey operators/` 返回 29 条，而那一版 harness 压根没扫 operators），
+    故**簇前缀必填**、覆盖面由调用方按语料自证（`tests/passing_query.rs` 钉住）；
+  • `diff <a> <b> [簇前缀]` —— 验收口径本来就是**按簇 scoped**（每簇自基线只要求不回退），无簇级读数就
+    只能手拆；`Diff{fails_a,fails_b}` 是“簇内根本没用例可比”与“簇内 0 回归”的区分器
+    （`tests/scoped_diff.rs` 钉住）。
+  另：**`sasslint lint <dir>` 曾把 `lint` 当路径扫**（取 `argv[1]`），故文档化的 CLI 闸**永远报
+  `count=0`**，同期 `gate_sasspile_is_clean` 却是红的 —— 永远通过的闸比没闸更坏，已修（吞动词、路径不存在
+  即 exit 2）并由 `crates/sasslint/tests/cli_directory.rs` 钉住。
   MUST NOT 再写回“先导出 TSV 再 `ledger import`”的做法，也不得开第二个库当记录。
   **MUST NOT** 攒快照文件或第二个 sqlite（`crates/ledger` 的存在理由就是取代旧的 `reports/hrx-*.tsv` sprawl；
   本轮曾误把基线存成 `target/baselines/*.tsv`，15 个文件 / 27 MB，已全部入库并删除）。
   为验收新建的空库（`--db=<临时路径>`）只用于复算，**不作为记录留存**；`/tmp` 会被系统清理。
 - **任何“为 0 / 全通过”的统计读数 MUST 先过一条阳性对照**（已知应该为真的用例）。本轮实错：一个
-  `substr` 切片多吞一个引号字符，使“仅差空白/仅差大小写”都报 0，差点得出“无 cheap win”的结论。
+  `substr` 切片多吞一个引号字符，使“仅差空白/仅差大小写”都报 0，差点得出“无 cheap win”的结论。同类第二次：
+  `ledger passed <run> operators/` 对**根本没扫过该簇的** run 报 29 条“通过”（库不记测量范围）。新增读数
+  自己也要带阳性对照与“匹配为空”两条测试，否则它只是另一个会静默失效的量具。
 - **链式量具命令先确认 `pwd`**：shell 会话会复用，cwd 会漂到子模块里（本轮实际发生：漂进 `sass-spec/spec`）。
   在这种目录下用相对路径读写会静默写错地方或读不到文件，而**用相对路径去读语料恰好仍然成立**，
   所以错误不会报错只会被隐藏——路径一律用绝对路径或先 `cd` 到仓根。

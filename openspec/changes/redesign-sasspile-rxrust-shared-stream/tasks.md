@@ -431,18 +431,57 @@
       另：`error/assignment/*` 那几条要求给 `math.$pi` 赋值时报错（保留名不可写）——它需要的是赋值路径
       上的名字表，同一批做。
 
-- [ ] 1.4a **`Calculation` 的第一片（本轮把契约取到了可直接动手的程度，但没开码）**。候选已验证自足：
-      `values/calculation/calc/no_operator`（33 条）里有一组**不需 `*`/`/`、不需有理单位**就能定死的小规则：
-      • `CaLc(1px)` → `1px`（名大小写无关，**单项就塌缩**）；`calc( 1px )` → `1px`（空白归一）；
-      • `calc(calc(1px))` → `1px`（嵌套塌缩）；`calc(calc(1px + 1%))` → `calc(1px + 1%)`
-        （内层不可化简时**只拆一层的壳**，保留内式）。
-      以上四条是 `ledger failures bool-units-746 "values/calculation/calc/no_operator"` 里 got/want 逐项
-      比对得出的原文，不是推定；同簇的 `{min,max,clamp}/…::simplified` 同构，`::preserved` 则要求保留外壳。
-      要动的形状（就这些，不牵扯 1.4d）：`Value` 加一个“原式保留”形态（携带已归一的内部表达式或
-      文本），`expr::from_tokens` 在 `known_call` 旁试 `calculation`（复用 `calls::brackets` 的括号规范化，
-      因为 `calc(1px` 也是一个词素），塌缩规则为“单项→取值；嵌套 calc→拆一层壳；否则 `calc(…)` 保留”。
-      **验收判据**：上述四条转 PASS，且 `calc/operator`(35) 与 `div::unit/*` 不得被顺手“猜”出来；
-      无效错误仍用 `ledger failures <run> "unexpected error"` 数（基线 55，不得上涨）。
+- [x] 1.4a **`Calculation` 的第一片（已合入）**：只做契约里那四条塌缩律，**不**碰 1.4d 的化简。
+      落码：新增 `src/calculation.rs`（462 行）+ `Value::Calculation(name, inner)`（`name` 用**源码大小写**，
+      只有 `lower` 参与判定 —— 1.4c 明令禁止把小写化当输出规则）+ `Expr::Calculation(Value)`（读法需要
+      环境，所以它带**已求值的形**而不是 token 树，`eval` 对它是恒等）；`expr::from_tokens` 新增 `env` 参数
+      并在 `known_call` 之后、`protected` 之前试 `calculation::value`（`protected` 是为 CSS 简写造的，
+      会把 `calc(1% + 1px)` 永远拒之门外）；`calls::brackets`/`top_level_groups` 提为 `pub(crate)` 复用，
+      **不再**造第二套括号规范化。
+      塌缩律（原文全部来自 `ledger failures bool-units-746 "values/calculation/calc/no_operator"` 的
+      got/want 逐项比对，非推定）：单项可塌缩值出壳（`CaLc(1px)`→`1px`、`calc( 1px )`→`1px`、
+      `calc( ( 1 ) )`→`1`、`calc((1px))`→`1px`）；`calc` 套**另一个命名计算**脱一层壳（
+      `calc(calc(1px))`→`1px` 两步、`calc(calc(1px + 1%))`→`calc(1px + 1%)`、
+      `calc(clamp(1%, 2px, 3%))`→`clamp(1%, 2px, 3%)`、`calc(min(1%, 2px))`→`min(1%, 2px)`、
+      `calc((calc(1px + 1%)))`→`calc(1px + 1%)`）；否则保壳（`var()`/未知 callee/串/插值一律不塌）。
+      **塌缩只认 `Number`/`Bool`，`Raw` 永不越壳** —— 这一条边界是由该簇**已经通过**的 5 例反推钉死的
+      （`ledger passed bool-units-746` 给出 `function/css`、`var/bare`、`variable/unquoted_string`、
+      `interpolation/{number,parens}`），不是先写完再找理由。
+      **第四次撞上「分类粒度不能超过词法」**（前三次见 0′.3b/0′.7/1.7a）：声明值里的 `calc(1px)` 到达时是
+      **一个**词素 `Word("calc(1px)")`（两个括号都在里面），块尾的 `}` 才是结束符，所以闭合 `)` 常常
+      **不在** run 里；我按「首个词素以 `(` 结尾」匹配、又按 `calls::cut` 把 `(` 粘到**后**一片，两版都
+      **判定集完全不动**。`tracing` 打词素才看见真相，最终用本模块自己的 `cut_open`：`(` 留在左侧词素、
+      `)` 独立成片、**片内空白保留**（`Word("1px + 1%)")` 里的空格是语料间距律的唯一记录，删了就出
+      `1px+1%`）。另两条实测修正：括号深度必须从**整个 run** 起算，否则 `var(--c)` 的 `)` 被外层 `calc`
+      抢走（`calc(var(--c))`→`calc(--c)`）；`Op('-')` 不是闭括号（`--c` 以它开头）。
+      实测：**746 → 768（实质 581 → 603，空期望蒙对 165 不变）**；空库两侧复算（`before-head` 746、
+      `after-calc-14a` 768）整库与 `values/calculation` 簇内都是 **`regress=0 net=22`**（簇内 fails
+      897 → 875）；入库 run = **`calc-14a-768`**。22 条 = 契约四条 + 同族同律的 18 条（`number/*` 6、
+      `syntax/extra_whitespace/*` 3、`calculation/{min,max,clamp}/preserved` 3、`parens::{number,calculation}` 2、
+      `variable/calculation`、`function/sass/namespace`（`calc(math.round(2.3))`→`2`）、
+      `interpolation/nested`、`operator/precedence::interpolation/calculation/plain`），**逐条都有 fixture 原文**。
+      无效错误 **55 → 53**（少掉的两条 `no_operator::{function/if,variable/namespace}` 现在整体推辞，
+      不再对外观正常的程序报假 `Undefined variable`；它们仍 FAIL，缺的是 `if()` 惰性求值与 `math.$pi`）。
+      **故意没做（契约明令不得猜，留待 1.4d/P1.7）**：`calc(1px + 2px)`→`3px` 的同单位化简
+      （`calc/simplify.hrx` 自己的 README 就把规则限定为 "number + number where both are compatible"）、
+      `calculation/*/simplified`（需要裸名 `min`/`max`/`clamp` 求值）、`*` `/` 与有理单位、
+      `calc/operator` 其余各族。**两条诚实的未达成**：`::number/exponent` 要 `1e2px`→`100px`，卡在
+      `expr::number_lexeme` 不读指数记法（属 1.3，已把逐字输出钉进测试，改对它时那条必须动）；
+      `::variable/number/simple_unit` 要 `calc($a)`→`1px`，卡在 `exec::evaluated` 的「裸数字暂不成表达式」
+      过滤（`Expr::Num` → `None`），那是另一个决定，不在这个切片里顺手改。
+      门：`calculation.rs` 10 例（含 4 条拒绝面：同单位不化简、`1/2` 仍是斜杠 list、`-a-calc(` 不是
+      计算、`calc` 内未绑定变量不致命）；全工作区 **94 passed / 0 failed / 0 ignored**；clippy
+      `-D warnings` 干净；`sasslint` 闸绿且 CLI `count=0`。
+      **本轮顺带补的量具（因为缺读数逼人回退到手搓 shell）**：① `ledger passed <run> <簇前缀>` —— 库里只存
+      失败行、且不记某 run 的测量范围，所以“这簇现在哪些是 PASS”无法回答；实测把从没测过的簇报成通过
+      （`passed head-600-pathkey operators/` 返回 29 条），故**簇前缀必填**并由调用方按语料自证覆盖面；
+      ② `ledger diff <a> <b> [簇前缀]` —— 验收口径本来就是**按簇 scoped**，没有簇级读数就只能
+      `sed|sort|comm` 在 `/tmp` 拼中间文件（正是本 crate 要消灭的 sprawl 复发）；同时把 A/B 结论做成
+      `pub fn diff_runs -> Diff{regress,net,fails_a,fails_b}` 供测试直接断言（`in_scope` 的两个计数是
+      “簇内确实有用例可比”的阳性对照）；③ **`sasslint` CLI 的真缺陷**：它把 `argv[1]` 当路径，所以
+      rust.md 里文档化的 `sasslint lint crates/sasspile/src` 一直在 lint 名为 `lint` 的不存在目录、
+      **永远 `count=0`**（同期闸测试是红的）；现在吞掉动词、路径不存在即 exit 2，并由
+      `crates/sasslint/tests/cli_directory.rs` 钉住“ planted 违规必须非 0 / 干净目录必须 0 / 不存在路径不得算通过”。
 
 ## P2 — 结构化 Selector 模型
 - [ ] 2.1 `Selector`(compound/combinator/伪类)parse/序列化/`&`(`css/selector/**`、`core_functions/selector/**`)
@@ -517,5 +556,38 @@
 - [ ] 8.1 全色彩空间(lab/lch/oklab/oklch/srgb/display-p3/…)adjust/change/construct + **gamut mapping**(`core_functions/color/**`)
 
 ## 收尾(每阶段末与整体)
+
+- [x] 9.0 **本地诊断面（OpenTelemetry + 单用例选择器）（已合入）**：工具性改动，不是语言特征，也不是收尾项——
+      它是让每一轮验收与定位变便宜的基础设施。**起因是实测事实**：1.4a 里我两次写了匹配不到任何东西的 callee 判据
+      （词素粘着括号，见 1.4a 段），两遍“判定集完全不动”都看不出原因，只能临时造探针文件 + 删。
+      **形态**（经三步选择确认：目标=本地诊断 + 补埋点；接入点=测试与两个 CLI 都接；粒度=连词素现场一起接）：
+      • `trace` feature（三个 crate 各一个）：用 `tracing-opentelemetry` 桥接现有 span，导出器是
+        `opentelemetry-stdout`，**无 collector 无网络**；`sasspile` 的 OTel 依赖全在
+        `[dev-dependencies]`（库埋点只用 `tracing` 宏），两个 CLI 因 bin 看不到 dev-deps 而用 optional 依赖。
+        实测：`cargo tree --edges normal` 对三个 crate 均为 **0 条 opentelemetry**；
+      • 新增 `crates/sasspile/src/trace.rs`：`Phase`（相）与 `ValueRead`（一条声明的值读）。
+        **顺手修一个真缺陷**：四个 phase span 原本在 `subscribe` 里 `enter()`，函数一返回就关闭 ——
+        `elapsed_ms` 量的是接线而不是流线（实测整个输入推完的相只有 ~0.3ms）；现在 span **住在观察者里**，
+        随终止关闭（`items`/`elapsed_ms` 在 `record` 里写），并把整数 ms 改成**带小数毫秒**（小相全报 0 会伪装成“瞬时”）；
+      • 裁决现场：`calculation::value` 一条 DEBUG 事件带 `arrived`（到的词素原文）/`cut`（切完的形状）/
+        `decision`（collapsed/preserved/shell dropped/declined）/`resolved`；`calls::known_call` 记
+        `callee`/`args`/`signature`。这两行就是“这条声明为何逐字输出”的答案，不再需要探针；
+      • harness 新增 **`HRX_CASE=<key 子串>`**（全量 11,533 条不是诊断视图，所以必须能只跑一条），并带两条守卫：
+        与 `HRX_RUN` **互斥即 panic**（部分测量入库会让 `run.total` 冒充全量，下次 diff 拿着不可比的数字比），
+        以及**打不中即响**（否则“0 of 0”看着像一次干净的空跑）；失败行另存一份 got/want 事件；
+      • `ledger` 的 main 原本**一个 span 也没有**（OTel 只导 span 不导 event），所以“开了 trace 的空跑”会导出
+        空链路 —— 现每次调用一个根 span（带 `command`/`db`）；`sasslint` 已有 `path` span，直接接上。
+      **实测**：一条 `no_operator::number/integer` 用例导 **6 个 span**，并出
+      `calculation read … arrived=calc(calc(1px)) cut=[Space, Word("calc("), Word("calc("), Word("1px"), Space,
+      Op('+'), Space, Word("1%"), Punct(')'), Punct(')')] decision="preserved" resolved=calc(1px + 1%)`；
+      **埋点不得改行为** —— `ledger diff calc-14a-768 trace-instr-768` 整库与 `values/calculation` 簇内均为
+      **`regress=0 net=0`**（fails 10765→10765 / 875→875），**阳性对照**同一条命令对 1.4a 前基线报
+      `net=22`（证明那个 0 不是坏查询）；门：无 feature 全工作区测试绿，`--features trace` 下
+      `ledger`/`sasslint` 各有一条测试断言“**span 真被导出且原有读数照旧印**”（一个永不导出的 feature 和一个
+      吃掉读数的 bridge 都是静默失效）；clippy `-D warnings` 两种模式均净；`sasslint` 闸绿。
+      **不做的**：不把全量 hrx 当诊断入口（你指出的：“不可能全量 hrx，那太大了”）；不给 `sasspile` 加诊断 CLI
+      （“库只暴露 compile”不变，入口是 `examples/trace_pipeline.rs`）；`opentelemetry-stdout` 逐 span 打印
+      （带 `parent` id，可自行串树），而不是等根 span 关闭才吐整棵树。
+
 - [ ] 9.1 `element-plus` theme-chalk 端到端编译(**经 P1/P3/P4/P5/P7 主干即应达成,不依赖 P6**),无 panic、输出与自基线一致不劣化(`ledger` 归一化)
 - [ ] 9.2 全量 `sass-spec`(排除 `non_conformant`/`libsass-*`/`:todo:`)通过率相对基线单调上升、`regress=0`;`sasslint` 0;clippy `-D warnings` 绿

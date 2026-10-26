@@ -53,6 +53,14 @@ pub enum Value {
     /// Sass's boolean, printed as the bare word `true` / `false` (`math.is-unitless`, `math.compatible`,
     /// and later `@if`'s truthiness). Kept a separate variant so a boolean is never re-parsed out of text.
     Bool(bool),
+    /// A **calculation** whose content this slice cannot simplify: `name` is the normalised (lowercase)
+    /// function and `inner` the text of its argument list, already normalised at parse time
+    /// (`crate::calculation`). The first slice of tasks 1.4 lands the *form* — the expression kept as
+    /// written — so a `calc` that used to travel as one opaque `Raw` is now a value with a name and a
+    /// body. Simplification (`+` between compatible units, then `*`/`/`) arrives with 1.4d's rational
+    /// units, which is why no arithmetic path reads this variant yet: a calculation used as an operand
+    /// declines, exactly as it did before.
+    Calculation(String, String),
 }
 
 impl Value {
@@ -68,6 +76,7 @@ impl Value {
             Value::Raw(text) => text.clone(),
             Value::Number(value, unit) => format_number(*value) + unit,
             Value::Bool(value) => value.to_string(),
+            Value::Calculation(name, inner) => format!("{name}({inner})"),
         }
     }
 

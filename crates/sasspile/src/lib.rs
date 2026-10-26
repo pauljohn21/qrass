@@ -13,6 +13,7 @@ use std::fmt;
 use rxrust::prelude::*;
 
 mod builtins;
+mod calculation;
 mod calls;
 mod env;
 mod exec;
@@ -20,6 +21,7 @@ mod expr;
 mod lexer;
 mod phases;
 mod selector;
+mod trace;
 mod value;
 
 use crate::phases::{Exec, Lexer, Render, Structurize};

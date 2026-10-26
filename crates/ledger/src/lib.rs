@@ -19,9 +19,17 @@
 //!
 //! Usage:
 //!   ledger import <run-name> <file.tsv> [more.tsv...]   (run-name applies to all)
-//!   ledger diff <a> <b>                                  (regressions / net)
+//!   ledger diff <a> <b> [key-prefix]                        (regressions / net, per cluster if given)
 //!   ledger runs                                           (summary table)
 //!   ledger failures <run> [key-or-detail-substring]
+//!   ledger passed   <run> <key-prefix>
+//!
+//! `passed` exists because the storage is asymmetric: only failures are rows, so “which cases of this
+//! cluster PASS right now” has no direct representation. It answers **for one named cluster**: the keys
+//! recorded somewhere under that prefix minus the ones this run fails. The prefix is required, not
+//! cosmetic — the only alternative universe is “every key the ledger has ever seen”, which silently
+//! reports a case as passing when the run never measured it at all (measured: `passed
+//! head-600-pathkey operators/` returns 29 keys, and that harness did not scan `operators` until 0.6).
 
 use rusqlite::params;
 use rusqlite::{Connection, Result as QResult};
@@ -41,8 +49,9 @@ pub fn run(conn: &Connection, argv: &[String]) -> QResult<()> {
         Some("diff") => diff(conn, &argv[1..]),
         Some("runs") => runs(conn),
         Some("failures") => failures(conn, &argv[1..]),
+        Some("passed") => passed(conn, &argv[1..]),
         _ => {
-            info!("usage: ledger import|diff|runs|failures [--db=<path>] ...");
+            info!("usage: ledger import|diff|runs|failures|passed [--db=<path>] ...");
             Ok(())
         }
     }
@@ -245,39 +254,94 @@ fn run_id(conn: &Connection, name: &str) -> QResult<i64> {
     })
 }
 
-/// A/B verdict: regressions (failing in b, passing in a) and net gains.
-fn diff(conn: &Connection, args: &[String]) -> QResult<()> {
-    let (a, b) = match (args.first(), args.get(1)) {
-        (Some(a), Some(b)) => (a.clone(), b.clone()),
-        _ => {
-            info!("usage: ledger diff <a> <b>");
-            return Ok(());
-        }
-    };
-    let (ra, rb) = (run_id(conn, &a)?, run_id(conn, &b)?);
+/// One A/B verdict, as **data** a caller can assert on — the same reason [`failing`] and [`passing`] are
+/// exposed: a verdict that only exists as a `tracing` line has to be grepped, and grepping a log is how
+/// `sort | comm` set algebra in the shell (and a `/tmp` intermediate file to feed it) comes back to life.
+#[derive(Debug)]
+pub struct Diff {
+    /// failing in `b`, passing in `a` — each with its failure detail
+    pub regress: Vec<String>,
+    /// failing in `a`, passing in `b`
+    pub net: Vec<String>,
+    /// the failing-set size of each run **inside the scope**, which is what proves the comparison covered
+    /// anything: a scope that matches no key also reports `regress=0 net=0`, and that is not a pass.
+    pub fails_a: usize,
+    pub fails_b: usize,
+}
+
+/// Compare two runs, optionally restricted to one directory cluster (`prefix` on the case key; empty =
+/// the whole record).
+///
+/// The prefix is not a convenience filter. This change's regress policy is *scoped by cluster*
+/// (`tasks.md`: each cluster keeps its own baseline and a stage is only required not to move the clusters it
+/// owns), so an unscoped diff answers a question the plan never asks.
+pub fn diff_runs(conn: &Connection, a: &str, b: &str, prefix: &str) -> QResult<Diff> {
+    let (ra, rb) = (run_id(conn, a)?, run_id(conn, b)?);
+    let pattern = format!("{prefix}%");
     let list = |sql: &str| -> QResult<Vec<String>> {
         let mut st = conn.prepare(sql)?;
-        let rows = st.query_map(params![ra, rb], |r| r.get::<_, String>(0))?;
-        rows.collect()
+        st.query_map(params![ra, rb, pattern], |r| r.get::<_, String>(0))?
+            .collect()
     };
     let regress = list(
         "SELECT c.key || ' | ' || COALESCE(d.text, '')
          FROM run_fail f JOIN case_key c ON c.id = f.case_id
          LEFT JOIN fail_detail d ON d.id = f.detail_id
          WHERE f.run_id = ?2
+           AND c.key LIKE ?3
            AND NOT EXISTS (SELECT 1 FROM run_fail g WHERE g.run_id = ?1 AND g.case_id = f.case_id)",
     )?;
     let net = list(
         "SELECT c.key
          FROM run_fail f JOIN case_key c ON c.id = f.case_id
          WHERE f.run_id = ?1
+           AND c.key LIKE ?3
            AND NOT EXISTS (SELECT 1 FROM run_fail g WHERE g.run_id = ?2 AND g.case_id = f.case_id)",
     )?;
-    regress
+    let fails = |run: i64| -> QResult<usize> {
+        let mut st = conn.prepare(
+            "SELECT COUNT(*) FROM run_fail f JOIN case_key c ON c.id = f.case_id
+             WHERE f.run_id = ?1 AND c.key LIKE ?2",
+        )?;
+        st.query_row(params![run, pattern], |r| r.get(0))
+    };
+    Ok(Diff {
+        regress,
+        net,
+        fails_a: fails(ra)?,
+        fails_b: fails(rb)?,
+    })
+}
+
+fn diff(conn: &Connection, args: &[String]) -> QResult<()> {
+    let (Some(a), Some(b)) = (args.first(), args.get(1)) else {
+        info!("usage: ledger diff <a> <b> [key-prefix]");
+        return Ok(());
+    };
+    let prefix = args.get(2).cloned().unwrap_or_default();
+    let verdict = diff_runs(conn, a, b, &prefix)?;
+    verdict
+        .regress
         .iter()
         .for_each(|k| info!(target: "ledger", "REGRESS {k}"));
-    net.iter().for_each(|k| info!(target: "ledger", "NET {k}"));
-    info!(a, b, regress = regress.len(), net = net.len(), "AB diff");
+    verdict
+        .net
+        .iter()
+        .for_each(|k| info!(target: "ledger", "NET {k}"));
+    info!(
+        a,
+        b,
+        scope = if prefix.is_empty() {
+            "*"
+        } else {
+            prefix.as_str()
+        },
+        fails_a = verdict.fails_a,
+        fails_b = verdict.fails_b,
+        regress = verdict.regress.len(),
+        net = verdict.net.len(),
+        "AB diff"
+    );
     Ok(())
 }
 
@@ -317,6 +381,43 @@ fn failures(conn: &Connection, args: &[String]) -> QResult<()> {
     rows.iter()
         .for_each(|line| info!(target: "ledger", "{line}"));
     Ok(())
+}
+
+/// List the recorded keys under one cluster prefix that this run does **not** fail — the verdict list a
+/// behaviour change needs *before* it is written, because a case that already passes is exactly what an
+/// over-eager new rule destroys (`values/calculation/calc/no_operator::function/css` today prints
+/// `calc(c())` and the corpus agrees, so a calculation rule that “simplified” that shell away would be a
+/// regression the pass count alone cannot point at).
+///
+/// The prefix is mandatory. A run's *scope* is not recorded anywhere (an in-scope PASS only enters the
+/// key dictionary, it grows no row), so a whole-ledger “passing set” would have to read
+/// “known-but-not-failing-here” as “passed”, and a case a run never measured looks identical to one it
+/// passed. Naming the cluster puts the scope question on the caller, where the corpus can answer it.
+fn passed(conn: &Connection, args: &[String]) -> QResult<()> {
+    let (Some(run), Some(prefix)) = (args.first(), args.get(1)) else {
+        info!("usage: ledger passed <run> <key-prefix>");
+        return Ok(());
+    };
+    passing(conn, run, prefix)?
+        .iter()
+        .for_each(|key| info!(target: "ledger", "{key}"));
+    Ok(())
+}
+
+/// Recorded keys (`case_key` holds every key any run listed, PASS included) under `prefix` that this run
+/// does not fail. Exposed for tests for the same reason [`failing`] is: a measuring query that silently
+/// returns nothing must not be mistaken for “nothing passes”.
+pub fn passing(conn: &Connection, run: &str, prefix: &str) -> rusqlite::Result<Vec<String>> {
+    let rid = run_id(conn, run)?;
+    let pattern = format!("{prefix}%");
+    let mut st = conn.prepare(
+        "SELECT c.key FROM case_key c
+         WHERE c.id != 0 AND c.key LIKE ?2
+           AND NOT EXISTS (SELECT 1 FROM run_fail f WHERE f.run_id = ?1 AND f.case_id = c.id)
+         ORDER BY c.key",
+    )?;
+    st.query_map(params![rid, pattern], |r| r.get::<_, String>(0))?
+        .collect()
 }
 
 /// One run's failures whose key **or** detail contains `needle` (empty = all). The pattern is built here

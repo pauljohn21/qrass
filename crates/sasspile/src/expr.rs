@@ -38,6 +38,11 @@ pub enum Expr {
     },
     /// the parts of an interpolated run, concatenated with **no extra space** at eval
     Concat(Vec<Expr>),
+    /// a `calc( … )` / `min( … )` / `max( … )` / `clamp( … )` read by `crate::calculation` (tasks 1.4a).
+    /// It carries the **finished value** rather than a token tree, because the reading needs the
+    /// environment (a bound `$a` is the difference between `calc(1px)` and `calc(calc(1px))`), which an
+    /// `Expr` node never has; this variant therefore never goes through `eval`'s operand paths.
+    Calculation(Value),
 }
 
 /// One classified lexeme of the arithmetic path.
@@ -130,7 +135,10 @@ pub fn named_argument(toks: &[Tok]) -> bool {
 }
 
 /// Build an `Expr` from a token run, or `None` when the run holds a shape P1 must not read.
-pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
+///
+/// `env` is only for the calculation path ([`crate::calculation`]), the one reading that resolves a
+/// reference while deciding the form of the value it belongs to; every other path stays env-free.
+pub fn from_tokens(toks: &[Tok], env: &Env) -> Option<Expr> {
     // A call is tried **first**, because its arguments live inside the parentheses: `math.percentage(1%)`
     // carries a `%`, which the CSS-shorthand protection below exists to keep unread — yet here the callee has
     // a signature and the run *is* an expression. This stays safe because `known_call` only matches a name
@@ -139,11 +147,20 @@ pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
     if let Some((name, args)) = crate::calls::known_call(toks) {
         return Some(Expr::Call { name, args });
     }
+    // A calculation is tried **before** the protection test, which exists for CSS shorthands
+    // (`font: 12px/1.5`, `grid: 1/2`) and would otherwise refuse `calc(1% + 1px)` forever: inside
+    // `calc( … )` a `/`, `*` or `%` is the calculation's own syntax, not a separator. The rule set is
+    // deliberately the one the corpus states (`tasks.md` 1.4a): collapse a single value, drop one nested
+    // shell, otherwise keep the expression as written. A `…(` lexeme that is not one of those four bare
+    // names falls through untouched, so `-a-calc(` and `url(` keep their old reading.
+    if let Some(value) = crate::calculation::value(toks, env) {
+        return Some(Expr::Calculation(value));
+    }
     if protected(toks) {
         return None;
     }
     if has_dynamic(toks) {
-        interpolation(toks)
+        interpolation(toks, env)
     } else {
         arithmetic(toks).or_else(|| concatenation(toks))
     }
@@ -152,8 +169,8 @@ pub fn from_tokens(toks: &[Tok]) -> Option<Expr> {
 /// One argument's expression. Unlike a declaration value, an argument **is** an expression even when it is
 /// a lone number (`math.div(6, 3)` → `2`), so the "a bare number is not an expression yet" filter that
 /// [`crate::exec::State::evaluated`] applies to whole declaration values does not apply here.
-pub fn argument_expr(toks: &[Tok]) -> Option<Expr> {
-    from_tokens(toks).or_else(|| {
+pub fn argument_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
+    from_tokens(toks, env).or_else(|| {
         // A single lexeme inside an argument is read as a number even when the `protected` rule would
         // refuse the same text in a declaration value — that rule exists for CSS shorthands
         // (`font: 12px/1.5`), and `math.percentage(1%)` is not one: the corpus wants
@@ -173,8 +190,10 @@ pub fn argument_expr(toks: &[Tok]) -> Option<Expr> {
 
 /// The interpolation shape only — what a **selector** may use, because a selector's lexemes
 /// must never be read as numbers (`.2xl` is an identifier, not `0.2xl`).
-pub fn interpolated(toks: &[Tok]) -> Option<Expr> {
-    has_dynamic(toks).then(|| interpolation(toks)).flatten()
+pub fn interpolated(toks: &[Tok], env: &Env) -> Option<Expr> {
+    has_dynamic(toks)
+        .then(|| interpolation(toks, env))
+        .flatten()
 }
 
 /// Classify one token, given its position in the run. Only whitespace is dropped; a lexeme
@@ -366,7 +385,10 @@ fn arithmetic(toks: &[Tok]) -> Option<Expr> {
 
 /// An interpolated run folded into the parts to concatenate: literal text, `$var` reads and
 /// nested `#{ … }` bodies. Built by one `fold` so no imperative loop drives the shape.
-fn interpolation(toks: &[Tok]) -> Option<Expr> {
+///
+/// A nested `#{ … }` body is read through the same path as a declaration value, `env` included, so
+/// `#{calc(1px)}` collapses exactly as a declaration's `calc(1px)` does.
+fn interpolation(toks: &[Tok], env: &Env) -> Option<Expr> {
     let parts = toks
         .iter()
         .fold((Vec::new(), String::new()), |(mut parts, mut lit), tok| {
@@ -383,7 +405,7 @@ fn interpolation(toks: &[Tok]) -> Option<Expr> {
                 Tok::Interp(inner) => {
                     flush(&mut parts, &mut lit);
                     parts.push(
-                        from_tokens(inner).map_or(Expr::Text(canon(&render(inner))), |body| {
+                        from_tokens(inner, env).map_or(Expr::Text(canon(&render(inner))), |body| {
                             Expr::Concat(vec![body])
                         }),
                     );
@@ -427,7 +449,7 @@ impl Expr {
                     // unquoted identifier, a color, a list — so it is carried as text and left to the
                     // builtin's own parameter check, which is what produces the corpus's
                     // `$number: c is not a number.` instead of skipping the call in silence.
-                    let value = match argument_expr(&arg.toks) {
+                    let value = match argument_expr(&arg.toks, env) {
                         Some(expr) => expr.eval(env)?,
                         // An argument that cannot be turned into an expression **yet** — one carrying `/`
                         // or `*`, i.e. a compound unit like `1/1px` or `1px * 1em`, which Sass does treat as
@@ -449,6 +471,9 @@ impl Expr {
                 .map(|part| part.eval(env).map(|value| value.to_css()))
                 .collect::<Result<Vec<String>, SassError>>()
                 .map(|text| Value::Raw(canon(&text.concat()))),
+            // Reading a calculation already resolved it against the environment — that is why the variant
+            // carries a value instead of a token tree — so evaluating it is the identity.
+            Expr::Calculation(value) => Ok(value.clone()),
         }
     }
 }

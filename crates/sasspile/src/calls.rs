@@ -26,7 +26,18 @@ pub struct Argument {
 /// instead of being half-evaluated. Callers must therefore treat `None` as "not a call we know".
 pub fn known_call(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
     let (name, args) = split(&brackets(toks))?;
-    builtins::signature(&name).map(|found| (found.name.to_string(), args))
+    let found = builtins::signature(&name);
+    // The other half of "why did this call stay verbatim?": an unknown callee is a decision, not a bug in
+    // the caller, and the argument count is what distinguishes the two.
+    tracing::debug!(
+        stage = "exec",
+        module = "call",
+        callee = name.as_str(),
+        args = args.len(),
+        signature = found.map_or("<none: kept verbatim>", |_| "<registered>"),
+        "call decision"
+    );
+    found.map(|builtin| (builtin.name.to_string(), args))
 }
 
 /// Re-cut a run so each bracket owns a lexeme: `Word("math.div(6")` → `Word("math.div(")`, `Word("6")`.
@@ -34,7 +45,10 @@ pub fn known_call(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
 /// A callee keeps its opening paren (that is what marks it as one) while a `)` always becomes its own
 /// `Punct`. Text between brackets is copied unchanged, so nothing that renders later can tell this
 /// normalised view apart from the source.
-fn brackets(toks: &[Tok]) -> Vec<Tok> {
+///
+/// Shared with [`crate::calculation`]: a calculation's `calc(1px` arrives glued for the same reason a
+/// builtin's `math.div(6` does, and both need the one bracket normalisation rather than a second.
+pub(crate) fn brackets(toks: &[Tok]) -> Vec<Tok> {
     toks.iter()
         .flat_map(|tok| match tok {
             Tok::Word(word) => cut(word),
@@ -92,7 +106,7 @@ fn split(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
         .iter()
         .map(|tok| (*tok).clone())
         .collect::<Vec<Tok>>();
-    let arguments = group(&inner)
+    let arguments = top_level_groups(&inner)
         .into_iter()
         .filter(|arg| !arg.is_empty())
         .map(argument)
@@ -106,7 +120,10 @@ fn split(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
 }
 
 /// Cut a run's lexemes at every depth-0 comma. Owned slices, no index cursor kept between calls.
-fn group(toks: &[Tok]) -> Vec<Vec<Tok>> {
+///
+/// A calculation's argument list divides on the same commas as a builtin's, so the split lives here once
+/// (`crate::calculation::value` is the second caller).
+pub(crate) fn top_level_groups(toks: &[Tok]) -> Vec<Vec<Tok>> {
     let (groups, current) = toks.iter().fold(
         (Vec::<Vec<Tok>>::new(), Vec::<Tok>::new()),
         |(mut groups, mut current), tok| {

@@ -4,6 +4,16 @@
 //! it produces a stable per-case pass/fail set so `ledger diff <base> <run>` yields
 //! `regress = 0` as features are wired in. Test scaffolding lives in `tests/` (product
 //! code stays in `src/`).
+//!
+//! Two environment knobs shape what a run touches:
+//! * `HRX_RUN=<name>` (+ optional `HRX_DB=<path>`) records the verdict set into the ledger;
+//! * `HRX_CASE=<key substring>` narrows the run to the cases whose ledger key contains it — the way to
+//!   look at **one** case's trace, because 11,533 spans are not a diagnostic view. It is mutually
+//!   exclusive with `HRX_RUN`: a partial measurement written into the record would pose as a comparable
+//!   run total (see the guard below).
+
+#[path = "common/tracing_bridge.rs"]
+mod tracing_bridge;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -148,9 +158,14 @@ fn norm(css: &str) -> String {
 async fn hrx_run() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sass-spec/spec");
     let _span = tracing::info_span!("hrx").entered();
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .try_init();
+    tracing_bridge::init();
+    // The single-case selector, read once. `Option<str>` so the loop below can ask the same question
+    // without a special case: `None` measures everything.
+    let only = std::env::var("HRX_CASE").ok();
+    let selected = |id: &str| {
+        only.as_ref()
+            .is_none_or(|needle| id.contains(needle.as_str()))
+    };
     let mut files = Vec::new();
     SPEC_DIRS
         .iter()
@@ -180,8 +195,13 @@ async fn hrx_run() {
                 skipped += 1;
                 continue;
             }
-            total += 1;
             let id = case_id(&root, file, &key);
+            // A case outside `HRX_CASE` is not measured: it counts toward neither `total` nor the rows,
+            // so a filtered run cannot be mistaken for a full one by anything reading the numbers.
+            if !selected(&id) {
+                continue;
+            }
+            total += 1;
             if !seen.insert(id.clone()) {
                 collision.push(id.clone());
             }
@@ -223,12 +243,34 @@ async fn hrx_run() {
         }
     }
 
+    // Every failure as an event too. The record (`ledger failures <run>`) stays the durable read, but under
+    // `trace` the got/want pair should show up where it happened, next to the spans that produced it —
+    // which is how a case is diagnosed without re-deriving the oracle by hand.
+    rows.iter().for_each(|row| {
+        let (status, rest) = row.split_once('\t').unwrap_or(("?", ""));
+        if status == "FAIL" {
+            let (id, detail) = rest.split_once('\t').unwrap_or((rest, ""));
+            tracing::warn!(stage = "hrx", id, verdict = detail, "case failed");
+        }
+    });
+
     // The record is the ledger database, never a file. `HRX_RUN=<name>` writes this run straight into
     // `reports/hrx.db` (`HRX_DB=<path>` aims it at another database, which is how the mandated fresh-empty
     // A/B re-check is done); without `HRX_RUN` the harness only measures and logs, leaving no artefact.
     // This replaces the old `target/hrx-snapshot.tsv` + `ledger import <file>` hop, which forced every A/B
     // to hold two files — and made me rebuild the “before” side with `git stash`, the maneuver that once
     // collided with `index.lock` and left a stale number in the transcript.
+    //
+    // A filtered run and a recorded run cannot coexist. `run.total` is what makes `ledger diff` mean
+    // "the same population, twice"; storing a 1-case measurement under a run name would hand the next
+    // A/B a number that looks comparable and is not, which is the exact failure mode this project has
+    // been bitten by repeatedly. Diagnose with `HRX_CASE`, record with the full run.
+    assert!(
+        !(only.is_some() && std::env::var("HRX_RUN").is_ok()),
+        "HRX_CASE selects a subset for diagnosis and must not be combined with HRX_RUN, which would \
+         record a partial measurement as a comparable run (run.total would stop meaning the whole \
+         population). Drop HRX_CASE to record, or drop HRX_RUN to trace."
+    );
     let recorded = std::env::var("HRX_RUN").ok().map(|name| {
         let db = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(std::env::var("HRX_DB").unwrap_or_else(|_| "../../reports/hrx.db".into()));
@@ -249,8 +291,16 @@ async fn hrx_run() {
     });
 
     // Sanity: the harness found and ran cases. Individual failures are expected (the
-    // compiler is incomplete); regress tracking is via `ledger diff`, not this assert.
-    assert!(total > 0, "harness found no runnable cases under {root:?}");
+    // compiler is incomplete); regress tracking is via `ledger diff`, not this assert. With `HRX_CASE`
+    // this doubles as the positive control a selector needs: a typo would otherwise report "0 of 0"
+    // and read as an empty, harmless run.
+    assert!(
+        total > 0,
+        "harness found no runnable cases{} under {root:?}",
+        only.as_ref()
+            .map(|needle| format!(" matching HRX_CASE {needle:?}"))
+            .unwrap_or_default()
+    );
     // The guard against the defect above: two cases sharing a key makes `ledger diff` able to hide a
     // regression, so the run is invalid rather than merely noisy.
     assert!(
@@ -263,6 +313,8 @@ async fn hrx_run() {
         stage = "hrx",
         total,
         pass,
+        // What a selector narrowed the population to, so a partial run cannot be read as a whole one.
+        selector = only.as_deref().unwrap_or("<none>"),
         // The number a round must actually move: passes earned against a non-empty expected output.
         pass_substantive = pass - trivial_empty,
         pass_empty_expectation = trivial_empty,
