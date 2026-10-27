@@ -35,8 +35,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1834/11,533**（15.9%，**实质通过 1669** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `exponents-parse`）；无效错误长期基线 53 → **20** → **18**
+   **以上均不得重做/重新发明**。当前基线 hrx **1841/11,533**（16.0%，**实质通过 1676** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `readonly-module`）；无效错误长期基线 53 → **20** → **18**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
@@ -269,6 +269,15 @@ alwaysApply: true
        就会在“每个 span 都要出一个操作数”的计数守卫上失败（语料里**没有**任何一行乘用户变量）。
        新增：`variables::{pi,e,epsilon,min_number}` 4 行 + `no_operator::number/exponent` +
        `tan::{asymptote,negative_asymptote}/radian`（`math.tan(0.5rad * math.$pi)` → `16331239353195370`）。
+     • **内置模块成员只读（run `readonly-module`，net 7，1834→1841，regress=0，无效错误仍 18）**：
+       `exec::declare` 的目标多一型 `Target::ReadOnly`，判据是“模块表真的认这个名字”而不是“命名空间叫
+       math”（所以 `upstream.$a: 0;` 依旧当普通属性，不新增一个没人声明的错）；新致命
+       `ErrorKind::ReadOnlyVariable` 已入 `FATAL`。至此 `variables.hrx` 14 行全绿。
+     • **“指数的打印侧”这个候选已当场推翻**：我上轮说 `color/mix` 要 `2.147483648e14deg` 这种形式，
+       那是从旧 dump 记来的；实地 grep 全语料后：**没有任何一行期望输出要求科学计数法**（命中的 `000e00`、
+       `00e100` 是 unicode-range 与十六进制色值里的字面 e），而 `calc(1e2px)` → `100px` 恰好要求**展开**。
+       mix 剩下的红行是 **`none` 通道值**（`rgb(none none none)`、`color.mix(…, $method: …)`）。
+       不得重启“给输出加指数形式”这条路。
      • **第九次“旧断言前提变了”**：`tests/calculation.rs` 的 `calc(1e2px)` 当时钉的是逐字文本，但它自己的
        注释就写了“修好后这行必须改 100px” —— 这不是假断言而是**到期 TODO**，按注释翻过去即可。判据：这一类
        背后有金样行撑着（与第八次“钉的只是我的选择”不同）。

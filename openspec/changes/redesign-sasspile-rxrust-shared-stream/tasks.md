@@ -1029,6 +1029,21 @@
         判据：背有金样行（第八次那种钉的只是我的选择，无金样）。另：我在 `math_variables.rs` 的 doc 里
         先写了个“`tan(math.$pi / 4)` → `1`”的未核断言，查 fixture 发现真行是
         `math.tan(0.5rad * math.$pi)` → `16331239353195370`，已改并把它钉进测试。
+      **㉜ 内置模块成员只读；并当场推翻“指数打印侧”这个候选**（已实测，run `readonly-module`）：
+      • 实现：`exec::declare` 的 `Target` 多一型 `ReadOnly`，命中条件是 `builtins::module_value(module, name)`
+        真的给值（不拿命名空间文本当判据，因此 `upstream.$a: 0;` 依旧走普通属性那条路）；新增致命
+        `ErrorKind::ReadOnlyVariable`（已入 `FATAL`），消息 `Cannot modify built-in variable.`
+        （`variables.hrx::error/assignment/*` 七行逐个钉进测试）。
+      • **实测**：hrx **1834 → 1841（实质 1669 → 1676，16.0%）**，`ledger diff exponents-parse readonly-module`
+        = **`regress=0 net=7`**（净增正好七行 `error/assignment/*`），无效错误仍 **18**；空库复算
+        （`/tmp/qrass-ab11.db`：ro-verify-before 1834 vs after 1841）同读数；`cargo test --workspace` exit=0
+        （45 块）、clippy exit 0、sasslint `count=0`、openspec valid。`core_functions/math/variables.hrx`
+        至此 14/14 全绿。
+      • **先推翻自己的开刀计划**：上轮我提的“候选 A ＝指数的打印侧（mix 要 `2.147483648e14deg`）”来路不明，
+        它是旧 dump 的记忆而不是当场读的文件。实地 grep 全语料期望输出：**一处也没有**要求科学计数法
+        （`000e00`/`00e100` 那些是 unicode-range 与十六进制色值里的字面 e），`4e2px`/`5e-2px` 那几行属
+        `libsass-closed-issues`（harness 不计）；mix 剩下红行真全是 `none` 通道值。 ⇒ 本刀改做 B，
+        并把“不得重启给输出加指数形式”写进 rust.md。教训：**候选列表也得当场计量，陈旧摘要不是证据**。
       **㉖ P7 第三片：一条调用点两个空间的名字 = 按名字拒绝，而 `hue` 不决定空间**（已实测）：
       • **律**：第一个“能定空间”的组定空间，第一个外来的名字被点名 ——
         `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with
