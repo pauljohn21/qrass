@@ -272,8 +272,16 @@ pub(crate) fn format_number(value: f64) -> String {
     if decimals <= 10 {
         return natural;
     }
-    format!("{value:.10}")
+    let cut = format!("{value:.10}")
         .trim_end_matches('0')
         .trim_end_matches('.')
-        .to_string()
+        .to_string();
+    // A cut that lands on `-0` prints as plain zero: `color.change(red, $lightness: 0.5%)` leaves a channel
+    // of `-1.1e-15` — float dust for zero — and the corpus prints `rgb(1%, 0%, 0%)`, not `-0%`
+    // (`change/hsl.hrx::lightness/fraction`). It is the printing half of the rule `Channel::clamped` applies
+    // to a written `-0` (`rgb/three_args::clamped/red/minus_zero`).
+    match cut.as_str() {
+        "-0" => "0".to_string(),
+        _ => cut,
+    }
 }

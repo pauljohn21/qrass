@@ -70,7 +70,7 @@ fn number(value: &Value) -> Option<f64> {
 /// `hsl/three_args/units::hue/turn`-family rows); a unit that is not an angle converts nothing, so
 /// `hwb(1in, 30%, 40%)` is `hsl(1, …)` (`hwb/three_args/units::hue/non_angle`) rather than an error this
 /// slice has no message for.
-fn angle(value: &Value) -> Option<f64> {
+pub fn angle_of(value: &Value) -> Option<f64> {
     let factor = match value {
         Value::Number(_, unit) => unit
             .single()
@@ -167,6 +167,13 @@ pub struct Color {
     channels: [Channel; 3],
     alpha: f64,
     representation: Representation,
+    /// The hsl axes **as written by the call that produced this colour**, when it came from
+    /// [`Color::with_axes`]. An out-of-gamut colour prints its axes, and they must be the ones the caller
+    /// named: `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/hsl.hrx::lightness/above_range`),
+    /// while deriving them back from the implied bytes gives `hsl(180, -100%, 120%)` because a negative
+    /// chroma rotates the hue. `None` everywhere else, so nothing about a constructed or adjusted colour
+    /// changes.
+    authored: Option<[f64; 3]>,
 }
 
 impl Color {
@@ -188,6 +195,8 @@ impl Color {
         Some(Self {
             channels: [red, green, blue],
             alpha: clamp_alpha(alpha),
+            // Constructed from written channels, so there is no separate authored triple.
+            authored: None,
             // Decided **after** clamping, because a clamped percentage is no longer a percentage
             // ([`Channel::clamped`]): `rgb(100.1% 0 0)` has no percent channel left and so prints
             // `rgb(255, 0, 0)` rather than the all-percent form.
@@ -233,6 +242,7 @@ impl Color {
             _ => None,
         }
         .map(|color| Self {
+            authored: None,
             representation: Representation::Hex,
             ..color
         })
@@ -265,6 +275,7 @@ impl Color {
             f64::from(u16::from(rgba.a)) / 255.0,
         )
         .map(|color| Self {
+            authored: None,
             representation: Representation::Named,
             ..color
         })
@@ -321,7 +332,7 @@ impl Color {
         Some(Self {
             channels: [
                 Channel {
-                    value: angle(hue)?,
+                    value: angle_of(hue)?,
                     percent: false,
                 },
                 Channel {
@@ -334,6 +345,7 @@ impl Color {
                 },
             ],
             alpha: clamp_alpha(alpha),
+            authored: None,
             representation: Representation::Hwb,
         })
     }
@@ -362,7 +374,7 @@ impl Color {
         Some(Self {
             channels: [
                 Channel {
-                    value: angle(hue)?,
+                    value: angle_of(hue)?,
                     percent: false,
                 },
                 Channel {
@@ -375,6 +387,7 @@ impl Color {
                 },
             ],
             alpha: clamp_alpha(alpha),
+            authored: None,
             representation: Representation::Hsl,
         })
     }

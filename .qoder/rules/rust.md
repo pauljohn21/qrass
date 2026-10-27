@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1151/11,533**（10.0%，**实质通过 986** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `change-rgb`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1185/11,533**（10.3%，**实质通过 1020** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `change-axes`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -107,7 +107,13 @@ alwaysApply: true
    完全一样，而语料给两个不同的颜色。新律：**越界的颜色一律打 hsl 形体**（`color.change(black, $blue: 256)` →
    `hsl(240, 100.7874015748%, 50.1960784314%)`），因此 `Color::with_channel` **不夹紧**（夹紧仍只发生在构造子）。
    仍红：`*/none`（要 `none` 值）、`alpha_arg`（要 `$alpha:`，是否夹紧无金样）、`change/hsl` 36 + `change/hwb` 15
-   与现代空间 ~230 行。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
+   与现代空间 ~230 行。**`change` 现在也写 hsl 轴与 `$alpha:`**（net 34，1151→1185）：
+   `Color::with_axes` 是 `change` 自己的入口，**不夹紧**（`color.change(plum, $saturation: 120%)` →
+   `hsl(300, 120%, 74.7058823529%)`），而 `transform_axes`（adjust 族）仍夹紧 —— 两条相反的律都有金样，所以是两个入口而非一个开关。
+   配套三条细则：“越界就打印**写入的那组轴**”（`Color.authored`，先例是 `calc::Content{folded, printed}`；
+   从字节反推会把 `hsl(0,100%,120%)` 弄成 `hsl(180,-100%,120%)`）、**判越界前先取整**（`$lightness: 0.5%`
+   反推出 -1.1e-15 这种“零的浮点余尘”，裸 double 比较会让它“越界”）、`format_number` 截断后要把 `-0`
+   归零（`rgb(1%, -0%, -0%)` → `rgb(1%, 0%, 0%)`）。`change` 簇内仍败 335（73 要消息）。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
    **未解释不当已解决**，不为单行拟合。
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
@@ -169,11 +175,12 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 要习性约束：**汇报里的每个数字必须能在上一条工具输出里逐字找到**（measured / AB diff / `--count` / 退出码）；
 **声称已提交/已推送时，哈希必须来自 `git log` / `git push` 自己的输出**；若只是计划要做，就说“打算”不说“完成”。
 
-**新增一个名字/能力时，先 `grep` 它在 `tests/` 里的旧断言（同样实证三次）**
+**新增一个名字/能力时，先 `grep` 它在 `tests/` 里的旧断言（已实证五次）**
 
 “因为某名字未实现，所以它保持逐字”这类断言，在实现落地时**前提就没了**，不翻就会把测试当失败。
-实证：`tests/channel.rs` 的 hwb 逐字列表、`tests/builtins.rs` 拿 `color.hwb` 当“未注册例子”、
-`tests/named_args.rs` 只要求“文本存活”（这条现在按 `output.css` 断言，更强）。
+实证（已五次）：`tests/channel.rs` 的 hwb 逐字列表、`tests/builtins.rs` 拿 `color.hwb` 当“未注册例子”、
+`tests/named_args.rs` 只要求“文本存活”（现在按 `output.css` 断言，更强）、`tests/color_change.rs` 把已实现的
+`alpha_arg` 列在 decline 清单里、以及本轮我**自己编了两条不存在的 fixture 行**当作“仍红”的证据。
 做法：**开工前先 `grep -rn "<新名字>" crates/sasspile/tests`**，把命中的旧断言一并翻成 fixture 自己的期望，
 而不是等到测试红了才改。另：`cargo test --workspace | grep … | awk` 在**第一个失败的二进制处就停**，
 会报出“0 failed”的假绿；门禁一律用 `--no-fail-fast` 并看 `exit=0`。

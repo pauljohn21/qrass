@@ -64,22 +64,71 @@ async fn an_out_of_gamut_change_prints_hsl() {
     }
 }
 
+/// **The hsl axes the call names** replace the colour's own: `color.change(plum, $saturation: 100%)` →
+/// `#ff7eff` (origin kept, bytes whole), `color.change(red, $lightness: 63%)` → `rgb(100%, 26%, 26%)`
+/// (fractional bytes ⇒ percentages), and an out-of-range axis prints the hsl triple **as written**:
+/// `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/hsl.hrx::lightness/above_range`).
+///
+/// Deriving that triple back from the implied bytes would print `hsl(180, -100%, 120%)` instead — a negative
+/// chroma rotates the hue — which is why a colour built by `change` remembers the axes it was given.
+///
+/// The `units/hue/*` rows also show that `60deg`, `60` and `60in` all mean the same number; those fixtures
+/// carry a deprecation warning the harness does not compare, so matching their output is not deprecation
+/// support.
+#[tokio::test]
+async fn change_writes_the_hsl_axes_too() {
+    for (input, want) in [
+        ("a {b: color.change(plum, $saturation: 100%)}", "#ff7eff"),
+        (
+            "a {b: color.change(red, $lightness: 63%)}",
+            "rgb(100%, 26%, 26%)",
+        ),
+        (
+            "a {b: color.change(red, $lightness: 0.5%)}",
+            "rgb(1%, 0%, 0%)",
+        ),
+        (
+            "a {b: color.change(red, $lightness: 120%)}",
+            "hsl(0, 100%, 120%)",
+        ),
+        ("a {b: color.change(red, $hue: 540)}", "aqua"),
+        ("a {b: color.change(red, $hue: 60deg)}", "yellow"),
+        ("a {b: color.change(red, $hue: 60in)}", "yellow"),
+        (
+            "a {b: color.change(black, $hue: 12, $saturation: 24%, $lightness: 48%)}",
+            "rgb(59.52%, 41.088%, 36.48%)",
+        ),
+        // An alpha named alongside the channels (`change/rgb.hrx::alpha_arg`).
+        (
+            "a {b: color.change(black, $red: 12, $green: 24, $blue: 48, $alpha: 0.3)}",
+            "rgba(12, 24, 48, 0.3)",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
 /// Three rows in this file are **not** claimed, and the reasons are different:
 /// * `red|green|blue/none` (`color.change(black, $red: none)` → `rgb(none 0 0)`) needs a `none` *value*,
 ///   which this compiler does not model — a byte channel cannot express it, so the call keeps its text;
-/// * `alpha_arg` (`color.change(black, $red: 12, $green: 24, $blue: 48, $alpha: 0.3)` →
-///   `rgba(12, 24, 48, 0.3)`) names `$alpha:` too, and whether `change` clamps an out-of-range alpha is a
-///   question its rows have not answered yet, so the body declines rather than assuming `with_alpha`'s law;
+/// * `alpha_arg` names `$alpha:` too, and in-gamut alphas are written above;
 /// * `green/out_of_range` disagrees with the hue derivation: the corpus writes
 ///   `hsl(120, 100%, -9.8039215686%)` for `(0, -50, 0)` while the legacy hsl formula gives hue `300` and
 ///   saturation `-100%` (while `red/out_of_range` and `blue/out_of_range` both agree with the formula).
 #[tokio::test]
 async fn what_change_still_declines() {
     for call in [
+        // `change/rgb.hrx::red/none` — the printed form needs a `none` channel, not a byte.
         "color.change(black, $red: none)",
-        "color.change(black, $red: 12, $green: 24, $blue: 48, $alpha: 0.3)",
-        "color.change(#abcdef, $hue: 180)",
-        "color.change(red, $red: 1, $space: srgb)",
+        // `change/hsl.hrx::hue/none` — same, on a colour the compiler does hold as axes.
+        "color.change(hsl(0deg 100% 50%), $hue: none)",
+        // `change/space.hrx::identical` — a request about spaces this compiler cannot convert; the corpus
+        // itself leaves the colour untouched, and keeping the text is the honest near-neighbour.
+        "color.change(oklch(50% 0.2 0deg), $space: lab)",
     ] {
         assert_eq!(
             css(&format!("a {{b: {call}}}")).await,

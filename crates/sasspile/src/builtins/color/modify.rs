@@ -55,8 +55,8 @@ fn needs_labels(args: Vec<Value>) -> Result<Value, SassError> {
     ))
 }
 
-/// One `color.change` call: read the colour, replace each named `rgb` channel, and let the colour's own
-/// printing law decide the output form.
+/// One `color.change` call: read the colour, replace the channels it names — as bytes, or as hsl axes —
+/// then let the colour's own printing law decide the output form.
 fn changed(given: Vec<Given>) -> Result<Value, SassError> {
     let decline = Err(SassError::new(
         "a colour or channel this slice cannot change",
@@ -65,34 +65,94 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
         Some(colour) => colour,
         None => return decline,
     };
-    // Axes of another space, and any `$space:` at all: `change/hsl.hrx`, `change/hwb.hrx` and the
-    // modern-space files are left red rather than answered from bytes. `$alpha:` is on the same list until
-    // its rows are read — `with_alpha` already clamps, and whether `change` clamps is a fixture question.
-    let beyond = [
-        "hue",
-        "saturation",
-        "lightness",
-        "whiteness",
-        "blackness",
-        "space",
-        "alpha",
-    ]
-    .into_iter()
-    .any(|name| Given::names(&given, name));
-    let named = [("red", 0), ("green", 1), ("blue", 2)]
+    // Whiteness and blackness are a different space's axes and `$space:` asks for a space this compiler has
+    // no conversion for, so both decline (`change/hwb.hrx` and the modern-space `change/*.hrx` files).
+    let beyond = ["whiteness", "blackness", "space"]
+        .into_iter()
+        .any(|name| Given::names(&given, name));
+    let bytes = [("red", 0), ("green", 1), ("blue", 2)]
         .into_iter()
         .filter(|(name, _)| Given::names(&given, name))
         .collect::<Vec<(&str, usize)>>();
-    if beyond || named.is_empty() {
+    let axes = ["hue", "saturation", "lightness"]
+        .into_iter()
+        .filter(|name| Given::names(&given, name))
+        .collect::<Vec<&str>>();
+    // Writing both spaces in one call is not read here: which one applies second decides the result, and
+    // no `change` fixture states the order.
+    if beyond || (bytes.is_empty() && axes.is_empty()) || (!bytes.is_empty() && !axes.is_empty()) {
         return decline;
     }
-    named
-        .into_iter()
-        .try_fold(colour.clone(), |colour, (name, index)| {
-            let value = byte(Given::find(&given, name)?)?;
-            colour.with_channel(index, value)
-        })
-        .map_or(decline, |built| Ok(Value::Color(built)))
+    // A named axis that cannot be read stops the call rather than keeping its current value:
+    // `color.change(hsl(0deg 100% 50%), $hue: none)` wants `hsl(none 100% 50%)`, and answering it with the
+    // unchanged hue would print a colour the call did not ask for.
+    let writes = axes
+        .iter()
+        .map(|name| Some((*name, axis(&given, name)?)))
+        .collect::<Option<Vec<(&str, f64)>>>();
+    let built = match (bytes.is_empty(), writes) {
+        (false, _) => bytes
+            .into_iter()
+            .try_fold(colour.clone(), |colour, (name, index)| {
+                let value = byte(Given::find(&given, name)?)?;
+                colour.with_channel(index, value)
+            }),
+        (true, Some(writes)) => colour.with_axes(|[hue, saturation, lightness]| {
+            [
+                keep(&writes, "hue", hue),
+                keep(&writes, "saturation", saturation),
+                keep(&writes, "lightness", lightness),
+            ]
+        }),
+        (true, None) => return decline,
+    };
+    let Some(built) = built else {
+        return decline;
+    };
+    // `$alpha:` is written only when it is already in range. Every `change` row that names it passes an
+    // in-gamut alpha (`change/hsl.hrx::alpha_arg` uses `0.7`), so what an out-of-range one does — clamp as
+    // `rgb()` does, or report a type error — has no golden, and declining keeps the row red instead of
+    // borrowing a law from a different function.
+    let alpha = match Given::find(&given, "alpha") {
+        Some(value) => match number(value) {
+            Some(alpha) if (0.0..=1.0).contains(&alpha) => Some(alpha),
+            _ => return decline,
+        },
+        None => None,
+    };
+    Ok(Value::Color(match alpha {
+        Some(alpha) => built.with_alpha(alpha),
+        None => built,
+    }))
+}
+
+/// The value to write for one axis, or the colour's current one when the call did not name it.
+fn keep(writes: &[(&str, f64)], name: &str, current: f64) -> f64 {
+    writes
+        .iter()
+        .find(|(written, _)| *written == name)
+        .map_or(current, |(_, value)| *value)
+}
+
+/// A value for one hsl axis, read the way the constructors read it. The hue converts an angle
+/// (`color.change(red, $hue: 60rad)` → `rgb(0%, 70.4220486918%, 100%)`, `change/hsl.hrx::units/hue/angle`)
+/// and folds (`$hue: 540` → `aqua`, `$hue: -60` → `fuchsia`), while saturation and lightness take the
+/// magnitude of **any** unit — `50%`, `50` and `50in` all mean 50 (`…::units/saturation/*`; those rows carry
+/// a deprecation warning the harness does not compare, so their output matching is not deprecation support).
+fn axis(given: &[Given], name: &str) -> Option<f64> {
+    let value = Given::find(given, name)?;
+    if name == "hue" {
+        return crate::color::angle_of(value);
+    }
+    number(value)
+}
+
+/// The magnitude of a numeric argument, whatever its unit.
+fn number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number, _) => Some(*number),
+        _ => None,
+    }
 }
 
 /// An `rgb` channel as the corpus writes one: a unitless number of `0–255`, or a percentage of 255.

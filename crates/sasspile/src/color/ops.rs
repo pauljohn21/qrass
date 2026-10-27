@@ -69,9 +69,73 @@ impl Color {
                     ],
                     alpha: self.alpha,
                     representation: Representation::Hsl,
+                    // A `hwb` colour moved through the axes becomes an ordinary hsl value; there is no
+                    // “as written” triple behind it beyond these axes, which `axes_of` already returns.
+                    authored: None,
                 }
             }
             _ => Self::from_axes(self, axes),
+        }
+    }
+
+    /// The same colour with its **hsl axes written, without clamping** — `color.change`'s law, which is
+    /// *not* the adjust family's: `color.change(plum, $saturation: 120%)` keeps 120 and prints
+    /// `hsl(300, 120%, 74.7058823529%)` (`change/hsl.hrx::saturation/above_range`), while
+    /// `saturate(plum, 100%)` clamps at 100 and prints `#ff7eff` (`saturate.hrx::max`). Two clamping
+    /// behaviours that both come from rows, so they are two entry points rather than one flag a caller has
+    /// to remember to pass.
+    ///
+    /// `None` for a `hwb`-created colour: it stores whiteness and blackness, and no fixture says what
+    /// writing hsl axes into it means, so the call declines instead of inventing a round trip.
+    pub fn with_axes(&self, write: impl FnOnce([f64; 3]) -> [f64; 3]) -> Option<Self> {
+        match self.representation {
+            Representation::Hwb => None,
+            // The axes are the value, so they go straight back in — hue as a plain number of degrees and
+            // the other two as percentages, exactly as [`Color::hsl`] stores them.
+            Representation::Hsl => {
+                let [hue, saturation, lightness] = write(self.axes_of());
+                Some(Self {
+                    channels: [
+                        Channel {
+                            value: hue,
+                            percent: false,
+                        },
+                        Channel {
+                            value: saturation,
+                            percent: true,
+                        },
+                        Channel {
+                            value: lightness,
+                            percent: true,
+                        },
+                    ],
+                    alpha: self.alpha,
+                    representation: Representation::Hsl,
+                    // The channels *are* the axes for an hsl colour, so there is nothing extra to remember:
+                    // an out-of-gamut hsl value prints from `axes_of`, which returns exactly these.
+                    authored: None,
+                })
+            }
+            // An `rgb`-family colour keeps its own representation and gains the bytes the new axes imply;
+            // `to_css` then decides between numbers, percentages, hex, a keyword and — for axes outside the
+            // gamut, which is what makes 120% visible — the hsl form.
+            _ => {
+                let axes = write(self.axes_of());
+                let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
+                Some(Self {
+                    channels: rgb.map(|value| Channel {
+                        value,
+                        percent: false,
+                    }),
+                    alpha: self.alpha,
+                    representation: self.representation,
+                    // The axes the call named, kept for the out-of-gamut print: `with_axes` is the only path
+                    // that writes an hsl triple onto a colour built some other way, and deriving the triple
+                    // back from the implied bytes changes it when they fall outside the gamut
+                    // (`color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)`, `change/hsl.hrx`).
+                    authored: Some(axes),
+                })
+            }
         }
     }
 
@@ -111,6 +175,9 @@ impl Color {
             }),
             alpha: source.alpha,
             representation: source.representation,
+            // The axes are re-derived from these bytes on demand, which is exact while they stay in the
+            // gamut — and `transform_axes` clamps, so they do.
+            authored: None,
         }
     }
 
@@ -154,6 +221,7 @@ impl Color {
             channels: [red?, green?, blue?],
             alpha: (first.alpha + second.alpha) / 2.0,
             representation: first.representation,
+            authored: None,
         })
     }
 }

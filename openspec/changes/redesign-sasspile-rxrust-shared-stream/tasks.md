@@ -826,6 +826,25 @@
       • **差点又编一条**：我先把 `blue/out_of_range` 写成“`$blue: -50` → `hsl(240, 100%, -9.8%)” 当断言，
         查原文才知道它是 `$blue: 256` → `hsl(240, 100.7874015748%, 50.1960784314%)`；列条目时又误以为有
         `mixed/channels` 这一例（grep 后发现根本不存在）。本轮同一类错第三次付学费：**字面量先取原文再写**。
+      **㉒ `change` 也会写 hsl 轴了，代价是引出三条“看似小、实际是律”的东西**（已实测）：
+      • **越界时打“写入的那组轴”，不是从字节反推**：`color.change(red, $lightness: 120%)` 要
+        `hsl(0, 100%, 120%)`，而反推给 `hsl(180, -100%, 120%)`（负 chroma 把色相旋转 180°）。因此
+        `Color` 多一个字段 `authored: Option<[f64; 3]>` —— **先例就是 `calc::Content{folded, printed}`**：
+        一份推导不出的“按写入形式”与字节共存在同一个值里。其余构造路径全为 `None`，行为不变。
+      • **判“越界”必须先取整**：`color.change(red, $lightness: 0.5%)` 反推的蓝通道是 **-1.1e-15**（零的
+        浮点余尘），拿裸 double 比 `0..=255` 会让它“越界”而去打 hsl 形体。同一个错在打印层表现为
+        `rgb(1%, -0%, -0%)` —— 于是 `format_number` 的截断路径也得把 `-0` 归零（与 `rgb(-0, …)` → `0` 同源）。
+        两者都是“取整属于打印”这条律的具体后果，不是新的例外。
+      • **`$alpha:` 在范围内就写**（`change/rgb.hrx::alpha_arg` → `rgba(12, 24, 48, 0.3)`）；语料没给
+        越界 alpha 的行为，所以那种值 decline 而不是借 `with_alpha` 的夹紧律去猜。
+      • **第五次踩“旧断言前提被实现推翻”**：`alpha_arg` 上一轮被我列进“仍 decline”的断言里，实现后它反而变红——已把三条旧 decline 换成真 fixture 行（`$red: none`、`hsl(...) $hue: none`、
+        `change/space.hrx::identical` 的 oklch→lab），删掉我编的两条（`#abcdef $hue: 180`、`$red: 1, $space: srgb` 都不是语料行）。
+      • **闸真的在干活**：我新写的 `self.authored.unwrap_or_else(|| self.axes_of())` 被 `require-err-channel`
+        拦下（`gate_sasspile_is_clean` 变红）。**没改闸、没加 allow**，改 `match` 重写。
+      • **实测**：hrx **1151 → 1185（实质 986 → 1020）**，`ledger diff change-rgb change-axes` =
+        **`regress=0 net=34`**（`change/hsl` 31、`change/rgb` 2、`modules/color/change` 1），无效错误仍 **53**；
+        131 测试 `--no-fail-fast` 下 exit=0、clippy exit 0。`change` 簇内仍败 335（其中 73 要消息），
+        可达未收的主要是 `change/hwb` 15、`change/space` 里的 `$space:` 现代转换、以及各 `*/none` 行。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

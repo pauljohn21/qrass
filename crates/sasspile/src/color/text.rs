@@ -204,12 +204,17 @@ impl Color {
             | Representation::Percent
             | Representation::Hex
             | Representation::Named
-                if self
-                    .channels
-                    .iter()
-                    .any(|channel| !(0.0..=255.0).contains(&channel.byte())) =>
+                if self.out_of_gamut() =>
             {
-                self.hsl_text(self.axes_of())
+                // The triple the caller named, when there is one: deriving it from the bytes rotates the hue
+                // and flips the saturation whenever the implied channels leave the gamut. Written as a
+                // `match` rather than `unwrap_or_else` because the linting gate is right that a fallback in
+                // a value path deserves to be looked at, and here the fallback is a re-derivation, not a
+                // swallowed failure.
+                match self.authored {
+                    Some(axes) => self.hsl_text(axes),
+                    None => self.hsl_text(self.axes_of()),
+                }
             }
             Representation::Hex => {
                 // A colour whose channels are not whole bytes prints percentages, not hex and not
@@ -278,6 +283,21 @@ impl Color {
                 }
             }
         }
+    }
+
+    /// Whether any rounded channel falls outside `0–255`, which sends an `rgb`-family colour to the hsl
+    /// form: `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
+    /// `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/rgb.hrx::red/out_of_range`,
+    /// `change/hsl.hrx::lightness/above_range`).
+    ///
+    /// **Rounded**, because rounding belongs to printing: `color.change(red, $lightness: 0.5%)` implies a
+    /// blue channel of `-1.1e-15` — float dust for zero — and testing the raw double made that row look out
+    /// of gamut and print `hsl(0, 100%, 0.5%)` where the corpus prints `rgb(1%, 0%, 0%)`
+    /// (`…::lightness/fraction`).
+    fn out_of_gamut(&self) -> bool {
+        self.channels
+            .iter()
+            .any(|channel| !(0.0..=255.0).contains(&channel.byte().round()))
     }
 
     /// The `hsl`/`hsla` spelling of three axes — shared with [`Representation::Hwb`], which prints as hsl.
