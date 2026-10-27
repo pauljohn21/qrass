@@ -33,7 +33,24 @@ pub(super) static COLORS: &[&Builtin] = &[
     &SATURATE,
     &DESATURATE,
     &ADJUST_HUE,
+    &COLOR_MIX,
 ];
+
+/// `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)`.
+///
+/// Variadic with names so `$color1:`/`$color2:`/`$weight:` bind (`mix/named.hrx`) while the body judges the
+/// count, and the **weight is read as a percentage whatever its unit** — `mix/units.hrx` prints the same
+/// result for `50`, `50%` and `50px`. Rows whose call carries `$space:`/`$method:` (`mix/predefined.hrx`,
+/// `named::{polar_space,rectangular_space}`, `mixed_spaces`, `hue_interpolation`, `explicit_method`) ask for
+/// colour spaces this compiler has not implemented, and they decline to text rather than mix in sRGB and
+/// claim the row.
+static COLOR_MIX: Builtin = Builtin {
+    name: "color.mix",
+    params: &["color1", "color2"],
+    optional: &["weight"],
+    variadic: true,
+    apply: mixed,
+};
 
 /// The legacy hsl manipulators, each `($color, $amount)`. All are **variadic with two names**, for the two
 /// reasons the corpus gives: the labels have to bind (`darken.hrx::named` is `darken($color: red, $amount:
@@ -430,5 +447,32 @@ fn access(args: &[Value]) -> Access {
         Some(colours) if colours.len() == 1 => Access::Colour(colours[0].clone()),
         Some(colours) => Access::TooMany(colours.len()),
         None => Access::NotAColour,
+    }
+}
+
+/// `color.mix`: two colours and an optional weight, which defaults to 50%.
+fn mixed(args: Vec<Value>) -> Result<Value, SassError> {
+    let built = match args.as_slice() {
+        [one, two] => mix(one, two, 50.0),
+        [one, two, weight] => given_weight(weight).and_then(|weight| mix(one, two, weight)),
+        _ => None,
+    };
+    match built {
+        Some(color) => Ok(Value::Color(color)),
+        None => Err(SassError::new("not a pair this slice can mix")),
+    }
+}
+
+fn mix(one: &Value, two: &Value, weight: f64) -> Option<Color> {
+    Color::mixed(&Color::of(one)?, &Color::of(two)?, weight)
+}
+
+/// A weight is a number **whatever its unit** (`mix/units.hrx`: `50`, `50%` and `50px` all mix evenly), so
+/// no unit is rejected here — only a non-number, which is what the `$method:`/`$space:` keyword rows and
+/// the CSS-overload spellings fall to.
+fn given_weight(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number, _) => Some(*number),
+        _ => None,
     }
 }

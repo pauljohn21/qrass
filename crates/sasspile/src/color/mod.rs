@@ -217,11 +217,20 @@ impl Color {
     /// A colour written as text: hex or keyword. Used where an argument arrives as unquoted text, which
     /// is how a declaration keeps `red` and `#123` — `rgb(...)`/`hsl(...)` written as a call already
     /// evaluated into [`Value::Color`] before it gets here.
+    ///
+    /// Text carrying parentheses is refused: the parser behind [`Self::from_name`] also reads
+    /// `color(display-p3 1 0 0)`, `lab(…)` and `lch(…)`, and answering those with sRGB bytes would be a
+    /// **wrong value** for a colour space this compiler has not implemented. Declining keeps the call as
+    /// written, which is what `core_functions/color/mix/predefined.hrx` and the `channel/*` rows of other
+    /// spaces ask for.
     pub fn of(value: &Value) -> Option<Color> {
         match value {
             Value::Color(color) => Some(color.clone()),
             Value::Raw(text) => {
                 let text = text.trim();
+                if text.contains('(') {
+                    return None;
+                }
                 if text.starts_with('#') {
                     Self::from_hex(text)
                 } else {
@@ -367,6 +376,47 @@ impl Color {
             percent: true,
         });
         self.legacy(channels, true)
+    }
+
+    /// The legacy `mix`: an **alpha-weighted** average in sRGB, whose shape only this formula explains.
+    /// Verified row by row against `core_functions/color/mix/{unweighted,explicit_weight,alpha}.hrx`:
+    /// * `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)` — with equal
+    ///   alphas the weight is a plain 0.5, giving `(145 + 1)/2 = 73` over 255;
+    /// * `color.mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → `rgba(42.7450980392%, …, 0.55)` — `w = 0`,
+    ///   `a = 0.5`, so the first colour carries `0.75`: `145 × 0.75 + 1 × 0.25 = 109`, and alpha is the
+    ///   average; the mirrored row (`0.4`/`0.9`) gives `0.25` → `37` → `14.5098039216%`;
+    /// * `color.mix(#91e16f, transparent)` → `rgba(145, 225, 111, 0.5)` — `a = 1` makes the first colour
+    ///   carry everything, and the result stays whole-byte so it prints numbers;
+    /// * the result keeps the **first** colour's representation, which is what makes that last row print
+    ///   numbers rather than a keyword when the other argument is `transparent`.
+    ///
+    /// A colour held in the hsl space has no `0–255` channels to mix, so the call declines rather than
+    /// inventing a converted answer.
+    pub fn mixed(first: &Color, second: &Color, weight: f64) -> Option<Self> {
+        let span = first.alpha - second.alpha;
+        let tilt = 2.0 * (weight / 100.0).clamp(0.0, 1.0) - 1.0;
+        let ratio = if tilt * span == -1.0 {
+            tilt
+        } else {
+            (tilt + span) / (1.0 + tilt * span)
+        } / 2.0
+            + 0.5;
+        let channel = |colour: &Color, index: usize| match colour.representation {
+            Representation::Hsl => None,
+            _ => Some(colour.channels[index].byte()),
+        };
+        let [red, green, blue] = [0, 1, 2].map(|index| {
+            let value = channel(first, index)? * ratio + channel(second, index)? * (1.0 - ratio);
+            Some(Channel {
+                value,
+                percent: false,
+            })
+        });
+        Some(Self {
+            channels: [red?, green?, blue?],
+            alpha: (first.alpha + second.alpha) / 2.0,
+            representation: first.representation,
+        })
     }
 
     /// A colour from `0–255` byte values, for hex parsing.

@@ -584,6 +584,28 @@
       **一个未定项**（不猜）：`-grey` 别名颜色回写时该打哪种拼法（`grey` 输入会不会被回写成 `gray`）
       语料里没金样，现在靠 NAMES 序决定，已归入待测现象。`complement` 仍然不动（它同时涉及
       `rgba(关键字, α)` 为何走百分比）。
+      **⑪ `-grey` 拼法这个悬案定为“不可测”**：语料里**没有任何输出用 `-grey`**（只有 `b: gray;` 一行），
+      而有 `grey` 输入的行（`hue/grey`、`powerless/*`）输出全是 `true`/`false`——所以“输入 `grey` 且颜色不变
+      时回写哪种拼法”无金样可判；现行为（回写 `gray`，同值的合法 CSS 名）没被任何 fixture 否定。这不是猜测
+      而是“已确认不可测”。
+      **⑫ `color.mix` 已落（legacy sRGB 那部分）**（已实测）：公式是 **alpha 加权**而不是简单均值，两行
+      `rgba` 金样把它钉死：`mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → 首色权重 0.75 ⇒
+      `145×0.75 + 1×0.25 = 109` = `42.7450980392%` ✓；镜像行 `0.4`/`0.9` → 权重 0.25 ⇒ `37` =
+      `14.5098039216%` ✓；alpha 取平均（`0.55` / `0.65`）✓；结果**继承第一个颜色的表示法**，所以
+      `mix(#91e16f, transparent)` 打整字节数值 `rgba(145, 225, 111, 0.5)`、而 `mix(#91e16f, #0144bf)` 打
+      百分比（73/255 非整字节）✓；权重**单位一律当百分数读**（`mix/units.hrx`：`50`、`50%`、`50px` 同果）✓。
+      **实测**：hrx **997 → 1013（实质 832 → 848，通过率 8.8%）**，`ledger diff colour-names mix` =
+      **`regress=0 net=16`**，无效错误仍 **53**；新测 `mix_averages_channels_weighted_by_alpha` 的 11 行期望
+      文本逐字取自 fixture。
+      **顺手堵了一个“错值但仍算红”的黑洞**：`Color::of` 背后的解析器能读 `color(display-p3 1 0 0)`/`lab(…)`/
+      `lch(…)`，要是顺手转成 sRGB 字节，那些行依旧红（pass 读数看不出来），但内容**是错的**——现在
+      `Color::of` 拒绝含括号的文本 ⇒ 逐字，与已定的 decline 律一致（新测
+      `a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`）。
+      **两个没解决也不假装解决了的**：① 带 `$method:`/`$space:` 标签的调用（`mix/named::polar_space`、
+      `explicit_method`、`hue_interpolation`、`mixed_spaces`）仍会被当 legacy 混色——因为**未绑定的标签在进
+      body 之前就被剔掉**，body 无从得知；修它需把“未识别标签”递给 body（属注册表形状变更，另开一步）。
+      ② hsl 源的颜色不参与混色（无 `0–255` 通道），按同一理由 decline。
+      **尺寸警报**：`color/mod.rs` 481、`builtins/color.rs` 478、`tests/color.rs` 432 —— 下一刀开工前先拆。
       **发现的缺陷（已由上面的 ⑨ 修掉；这段留作发现记录）**：一开始把 `saturate` 也注册了，结果
       `saturate::css_overload/with_sass_var`（`saturate($c)` 且 `$c: 1`，期望 `saturate(1)`）由 PASS 变 FAIL，
       `regress=1`。根因：**已注册 builtin 被 body 拒绝时，兜底保留的是未求值的源文本**，变量替换丢了。

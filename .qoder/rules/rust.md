@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **997/11,533**（8.64%，**实质通过 832** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `colour-names`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1013/11,533**（8.79%，**实质通过 848** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `mix`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -61,7 +61,15 @@ alwaysApply: true
    颜色（`Representation::Named`）才在“opaque + 整字节 + 匹配关键字”时回写名字（`lighten(red, 0%)` → `red`、
    `rgb(transparent, 1)` → `black`），而 `rgb(0, 0, 0)` 仍打 `rgb(0, 0, 0)`（六行金样），不匹配则回退到
    hex（`complement(turquoise)` → `#e04050`）。148 个**只有拼法**在 `color/text.rs::NAMES`，值全向
-   `color::parse_color` 要（写错只会退化成 hex，不会打错颜色）。再往后：`mix` → 颜色 `==`；而 `complement` 暂不能动，因为
+   `color::parse_color` 要（写错只会退化成 hex，不会打错颜色）。已落 **`color.mix`**（legacy sRGB）：公式是
+   **alpha 加权**（`mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → 首色权重 0.75 ⇒ `145×0.75+1×0.25=109` =
+   `42.7450980392%`；镜像行权重 0.25 ⇒ `37` = `14.5098039216%`），alpha 取平均，结果**继承第一个颜色的表示法**，
+   权重**单位一律当百分数读**（`50px` 也是 50）。`Color::of` 现在**拒绝含括号的文本**：否则
+   `color(display-p3 …)`/`lab(…)` 会被顺手转成 sRGB —— 那类行仍旧算红（pass 看不出），但内容**是错的**；
+   现在逐字。未解决：带 `$method:`/`$space:` 标签的调用仍会被当 legacy 混色（**未绑定标签在进 body 前就
+   被剔掉**，body 看不到），要修得先让未识别标签递给 body；hsl 源不混色（decline）。`-grey` 拼法回写已定为
+   **不可测**（语料无 `-grey` 输出）。**尺寸警报**：`color/mod.rs` 481、`builtins/color.rs` 478、
+   `tests/color.rs` 432 —— 下一刀开工先拆。再往后：`mix` 完 → 颜色 `==`；而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：

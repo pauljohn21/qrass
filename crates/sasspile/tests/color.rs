@@ -366,3 +366,67 @@ async fn a_keyword_created_colour_prints_its_keyword() {
         );
     }
 }
+
+/// `color.mix`, one row per fixture in `core_functions/color/mix/{unweighted,explicit_weight,alpha,units}.hrx`.
+/// The two `rgba` rows are what pins the **alpha-weighted** formula rather than a plain average: with
+/// `0.8`/`0.3` the first colour carries `0.75` (`145 × 0.75 + 1 × 0.25 = 109` → `42.7450980392%`), and the
+/// mirrored `0.4`/`0.9` row gives `0.25` → `37` → `14.5098039216%`. Alpha itself is the average, and the
+/// result keeps the **first** colour's representation — which is why `mix(#91e16f, transparent)` prints
+/// whole-byte numbers while `mix(#91e16f, #0144bf)` prints percentages (73 of 255 is not a whole byte).
+#[tokio::test]
+async fn mix_averages_channels_weighted_by_alpha() {
+    for (input, want) in [
+        ("a {b: color.mix(#ff00ff, #00ff00)}", "rgb(50%, 50%, 50%)"),
+        ("a {b: color.mix(#123456, #123456)}", "#123456"),
+        (
+            "a {b: color.mix(#91e16f, #0144bf)}",
+            "rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)",
+        ),
+        ("a {b: color.mix(#91e16f, #0144bf, 100%)}", "#91e16f"),
+        ("a {b: color.mix(#91e16f, #0144bf, 0%)}", "#0144bf"),
+        // A weight is read as a percentage whatever unit it carries (`mix/units.hrx`).
+        (
+            "a {b: color.mix(#91e16f, #0144bf, 50px)}",
+            "rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)",
+        ),
+        (
+            "a {b: color.mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))}",
+            "rgba(42.7450980392%, 72.8431372549%, 51.3725490196%, 0.55)",
+        ),
+        (
+            "a {b: color.mix(rgba(#91e16f, 0.4), rgba(#0144bf, 0.9))}",
+            "rgba(14.5098039216%, 42.0588235294%, 67.0588235294%, 0.65)",
+        ),
+        (
+            "a {b: color.mix(#91e16f, transparent)}",
+            "rgba(145, 225, 111, 0.5)",
+        ),
+        (
+            "a {b: color.mix(transparent, #0144bf)}",
+            "rgba(1, 68, 191, 0.5)",
+        ),
+        // Labels bind (`mix/named.hrx`'s rectangular rows are the same numbers with `$weight: 92%`).
+        (
+            "a {b: color.mix($color1: #91e16f, $color2: #0144bf, $weight: 92%)}",
+            "rgb(52.3450980392%, 83.3098039216%, 46.0392156863%)",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// A colour written in a space this compiler has not implemented must not be answered in sRGB. The parser
+/// behind the keyword table would happily read `color(display-p3 1 0 0)`; refusing parenthesised text is
+/// what keeps those rows verbatim instead of a wrong value (`mix/predefined.hrx`).
+#[tokio::test]
+async fn a_colour_in_an_unimplemented_space_is_not_answered_in_srgb() {
+    let input = "a {b: color.mix(color(display-p3 1 0 0), color(display-p3 0 1 0), 20%)}";
+    assert_eq!(
+        css(input).await,
+        "a {\n  b: color.mix(color(display-p3 1 0 0), color(display-p3 0 1 0), 20%);\n}\n"
+    );
+}
