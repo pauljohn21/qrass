@@ -379,6 +379,53 @@ impl Color {
         })
     }
 
+    /// The same colour with one `rgb` channel written, keeping how it was made: `color.change(black,
+    /// $red: 255)` → `red` and `color.change(red, $red: 100)` → `#640000` (`change/rgb.hrx`).
+    ///
+    /// **Nothing is clamped here.** `color.change(black, $red: 500)` keeps 500 and the corpus prints the
+    /// result as `hsl(0, 5000%, 98.0392156863%)` (`…::red/out_of_range`) — an out-of-gamut colour is a value
+    /// Sass represents, not an error, and clamping would turn it into `rgb(255, 0, 0)`, a different colour.
+    /// [`Channel::clamped`] stays where it is: only a *written* `rgb`/`hsl` channel clamps at creation.
+    pub fn with_channel(&self, index: usize, value: f64) -> Option<Self> {
+        let written = Channel {
+            value,
+            percent: false,
+        };
+        (self.writes_bytes() && index < self.channels.len()).then(|| Self {
+            channels: [
+                if index == 0 {
+                    written
+                } else {
+                    self.channels[0]
+                },
+                if index == 1 {
+                    written
+                } else {
+                    self.channels[1]
+                },
+                if index == 2 {
+                    written
+                } else {
+                    self.channels[2]
+                },
+            ],
+            ..self.clone()
+        })
+    }
+
+    /// Whether this colour's channels are `0–255` bytes, which is what makes a channel **writable** by
+    /// `color.change`; an `hsl` or `hwb` colour stores different axes, and writing a byte into them would be
+    /// a different colour (`change/hsl.hrx` and `change/hwb.hrx` are those calls, and they decline).
+    pub fn writes_bytes(&self) -> bool {
+        matches!(
+            self.representation,
+            Representation::Legacy
+                | Representation::Percent
+                | Representation::Hex
+                | Representation::Named
+        )
+    }
+
     /// The same colour under a different alpha, keeping how it was made: `rgb(#123, 0.5)` is the hex
     /// channels with the new alpha, not a different colour (`two_args::opaque_to/partial`).
     pub fn with_alpha(&self, alpha: f64) -> Self {

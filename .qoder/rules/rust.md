@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1133/11,533**（9.8%，**实质通过 968** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `hwb`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1151/11,533**（10.0%，**实质通过 986** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `change-rgb`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -101,7 +101,14 @@ alwaysApply: true
    `70%` 而非 `58.3333333333%` —— 那是错值不是缺能力）；非角单位当普通数用（`hwb(1in,…)` → `hsl(1,…)`）；
    整字节且恰为关键字的 hwb 色**回写关键字**（`color.hwb(0,0%,0%,100%)` → `red`）而 `rgb(0,0,0)` 不会
    —— 这个来源差异语料未解释，故逐 fixture 记录，不推广到 `mix`/`adjust` 结果。`Color::{byte,mixed}`
-   对 `Hsl | Hwb` 仍 decline（无此类金样）。
+   对 `Hsl | Hwb` 仍 decline（无此类金样）。**`color.change` 已收 rgb 通道**（18 行）：body 现在能拿到
+   “这个实参绑到哪个参数”（`Builtin::labelled: Option<LabelledBody>`，**新增字段而非改 `apply` 类型** ——
+   后者要改 29 个 body，本轮已在宽改动上错过两次）；没名字时 `$red: 500` 与 `$green: -50` 在 body 那里
+   完全一样，而语料给两个不同的颜色。新律：**越界的颜色一律打 hsl 形体**（`color.change(black, $blue: 256)` →
+   `hsl(240, 100.7874015748%, 50.1960784314%)`），因此 `Color::with_channel` **不夹紧**（夹紧仍只发生在构造子）。
+   仍红：`*/none`（要 `none` 值）、`alpha_arg`（要 `$alpha:`，是否夹紧无金样）、`change/hsl` 36 + `change/hwb` 15
+   与现代空间 ~230 行。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
+   **未解释不当已解决**，不为单行拟合。
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。

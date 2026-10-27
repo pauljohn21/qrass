@@ -34,6 +34,7 @@ static MATH_DIV: Builtin = Builtin {
     params: &["number1", "number2"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| match args.as_slice() {
         [from, by] => {
             let (
@@ -83,6 +84,7 @@ static MATH_UNIT: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         number_arg("number", &args).map(|(_, unit)| Value::Raw(format!("\"{}\"", unit.to_css())))
     },
@@ -95,6 +97,7 @@ static MATH_IS_UNITLESS: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Bool(unit.is_unitless())),
 };
 
@@ -106,6 +109,7 @@ static MATH_PERCENTAGE: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         let (value, unit) = number_arg("number", &args)?;
         if unit.is_unitless() {
@@ -132,6 +136,7 @@ static MATH_COMPATIBLE: Builtin = Builtin {
     params: &["number1", "number2"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         let (Some(first), Some(second)) = (args.first(), args.get(1)) else {
             return Err(missing("number2".to_string()));
@@ -166,6 +171,7 @@ static MATH_MIN: Builtin = Builtin {
     params: &[],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| extremum(Ordering::Less, args),
 };
 
@@ -174,6 +180,7 @@ static MATH_MAX: Builtin = Builtin {
     params: &[],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| extremum(Ordering::Greater, args),
 };
 
@@ -274,6 +281,7 @@ static MATH_ROUND: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.round(), unit))
     },
@@ -284,6 +292,7 @@ static MATH_ABS: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| number_arg("number", &args).map(|(value, unit)| Value::Number(value.abs(), unit)),
 };
 
@@ -292,6 +301,7 @@ static MATH_CEIL: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.ceil(), unit))
     },
@@ -302,6 +312,7 @@ static MATH_FLOOR: Builtin = Builtin {
     params: &["number"],
     optional: &[],
     variadic: false,
+    labelled: None,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| Value::Number(value.floor(), unit))
     },

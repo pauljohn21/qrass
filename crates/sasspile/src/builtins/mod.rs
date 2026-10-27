@@ -23,6 +23,47 @@ use crate::{ErrorKind, SassError};
 mod color;
 mod math;
 
+/// One argument the spine hands a **label-aware** body: the **parameter it bound to** (`""` for a
+/// positional argument of a signature that declares no names) and the value.
+///
+/// The name is here because a body that modifies a channel has to be told *which* one: `color.change(black,
+/// $red: 500)` and `color.change(black, $green: -50)` pass one number each and print `hsl(0, 5000%,
+/// 98.0392156863%)` versus `hsl(120, 100%, -9.8039215686%)` (`change/rgb.hrx::red|green/out_of_range`).
+/// Dropping the name is what made those two calls indistinguishable at the body.
+#[derive(Debug, Clone)]
+pub struct Given {
+    pub param: &'static str,
+    pub value: Value,
+}
+
+impl Given {
+    /// The values alone, for a body whose reading does not depend on which parameter an argument filled.
+    pub fn values(given: Vec<Self>) -> Vec<Value> {
+        given.into_iter().map(|argument| argument.value).collect()
+    }
+
+    /// The value passed for one parameter, if the call named it.
+    pub fn find<'a>(given: &'a [Self], param: &str) -> Option<&'a Value> {
+        given
+            .iter()
+            .find(|argument| argument.param == param)
+            .map(|argument| &argument.value)
+    }
+
+    /// Whether the call named this parameter at all — a `change` body's question for every channel, since
+    /// only the named ones move.
+    pub fn names(given: &[Self], param: &str) -> bool {
+        given.iter().any(|argument| argument.param == param)
+    }
+}
+
+/// A body that reads its arguments **by parameter** rather than by position.
+///
+/// Named because `Option<fn(Vec<Given>) -> Result<Value, SassError>>` is the kind of type clippy rightly
+/// asks to be factored out, and because the two entry points differ in more than their shape: [`Given`] is
+/// what makes `color.change` able to tell `$red:` from `$hue:`.
+type LabelledBody = fn(Vec<Given>) -> Result<Value, SassError>;
+
 /// A builtin's contract. `params` are the labels a `$label:` argument binds to, in declaration order.
 ///
 /// `variadic` functions (`math.min`/`math.max`) take any number of positional arguments instead:
@@ -40,6 +81,16 @@ pub struct Builtin {
     pub optional: &'static [&'static str],
     pub variadic: bool,
     pub apply: fn(Vec<Value>) -> Result<Value, SassError>,
+    /// A body that must know **which parameter** each argument bound to. `None` for every body written so far,
+    /// which reads its arguments positionally; `color.change` is the first call whose question cannot be
+    /// answered without the label (`$red: 500` and `$green: -50` are one number each and print completely
+    /// different colours), and it sets this instead of `apply`.
+    ///
+    /// The field is optional rather than a change to `apply`'s argument type on purpose: rewriting 29 bodies
+    /// to pass through a newtype to unlock one function is how this session already produced two wrong
+    /// turns, and a purely additive field leaves every existing body — and every existing fixture reading —
+    /// untouched, which `ledger diff` can then prove.
+    pub labelled: Option<LabelledBody>,
 }
 
 /// Every domain's registrations. Searched in order, and names are unique across domains — a duplicate
@@ -123,26 +174,28 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
         ));
     }
     // One slot per name, filled by label first and by position second, so an optional parameter written
-    // out of order (`rgb(1, 2, 3, $alpha: 0.5)`) still binds to the alpha.
+    // out of order (`rgb(1, 2, 3, $alpha: 0.5)`) still binds to the alpha. The parameter's name travels
+    // with it, because a label-aware body asks which channel the call named.
     let slots = builtin
         .params
         .iter()
         .chain(builtin.optional)
         .enumerate()
         .map(|(index, param)| {
-            named
+            let value = named
                 .iter()
                 .find(|(label, _)| label == param)
                 .map(|(_, value)| (*value).clone())
-                .or_else(|| positional.get(index).cloned())
+                .or_else(|| positional.get(index).cloned());
+            (*param, value)
         })
-        .collect::<Vec<Option<Value>>>();
+        .collect::<Vec<(&'static str, Option<Value>)>>();
     // Every declared parameter up to the first absent one is handed to a **fixed** body, so it never sees a
     // hole, and a required parameter left absent is the corpus's own message
     // (`math/div.hrx::error/missing_argument` → `Missing argument $number2.`).
     let taken = slots
         .iter()
-        .position(Option::is_none)
+        .position(|(_, value)| value.is_none())
         .unwrap_or(slots.len());
     if taken < builtin.params.len() && !builtin.variadic {
         return Err(missing(builtin.params[taken].to_string()));
@@ -152,16 +205,25 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     // label bound to anything but the leading slots: `rgb($channels: 0 255 127)`
     // (`rgb/one_arg/no_alpha.hrx::unitless/named`, which wants `rgb(0, 255, 127)`) arrived as no arguments
     // at all. Positional calls are unaffected — with no holes, both rules give the same list.
-    let bound = if builtin.variadic {
-        slots.into_iter().flatten().collect::<Vec<Value>>()
-    } else {
+    let kept = if builtin.variadic {
         slots
-            .into_iter()
-            .take(taken)
-            .flatten()
-            .collect::<Vec<Value>>()
+    } else {
+        slots.into_iter().take(taken).collect()
     };
-    (builtin.apply)(bound)
+    let given = kept
+        .into_iter()
+        .filter_map(|(param, value)| {
+            Some(Given {
+                param,
+                value: value?,
+            })
+        })
+        .collect::<Vec<Given>>();
+    match builtin.labelled {
+        Some(labelled) => labelled(given),
+        // The positional view every existing body reads.
+        None => (builtin.apply)(Given::values(given)),
+    }
 }
 
 /// `Error: Missing argument $number2.` — the first parameter left without a value.

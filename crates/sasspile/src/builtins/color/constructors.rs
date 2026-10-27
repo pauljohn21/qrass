@@ -21,6 +21,7 @@ pub(super) static RGB: Builtin = Builtin {
     params: &["red", "green", "blue"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: channels,
 };
 
@@ -30,6 +31,7 @@ pub(super) static RGBA: Builtin = Builtin {
     params: &["red", "green", "blue"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: channels,
 };
 
@@ -41,6 +43,7 @@ pub(super) static HSL: Builtin = Builtin {
     params: &["hue", "saturation", "lightness"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: hsl_channels,
 };
 
@@ -50,6 +53,7 @@ pub(super) static HSLA: Builtin = Builtin {
     params: &["hue", "saturation", "lightness"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: hsl_channels,
 };
 
@@ -62,6 +66,7 @@ pub(super) static HWB: Builtin = Builtin {
     params: &["hue", "whiteness", "blackness"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: hwb_channels,
 };
 
@@ -71,6 +76,7 @@ pub(super) static COLOR_HWB: Builtin = Builtin {
     params: &["hue", "whiteness", "blackness"],
     optional: &["alpha", "channels"],
     variadic: true,
+    labelled: None,
     apply: hwb_channels,
 };
 

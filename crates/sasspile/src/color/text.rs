@@ -194,6 +194,23 @@ impl Color {
     pub fn to_css(&self) -> String {
         let byte = |value: u32| format!("{value:02x}");
         match self.representation {
+            // **An out-of-gamut colour prints in the hsl form**, whatever space it was created in:
+            // `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
+            // `color.change(black, $green: -50)` → `hsl(120, 100%, -9.8039215686%)`
+            // (`core_functions/color/change/rgb.hrx::{red,green}/out_of_range`). The bytes stay unrounded on
+            // the way in — this is the same law that keeps `grayscale(red)` a percentage row, seen from the
+            // other side: rounding or clamping here would answer a different question than the one asked.
+            Representation::Legacy
+            | Representation::Percent
+            | Representation::Hex
+            | Representation::Named
+                if self
+                    .channels
+                    .iter()
+                    .any(|channel| !(0.0..=255.0).contains(&channel.byte())) =>
+            {
+                self.hsl_text(self.axes_of())
+            }
             Representation::Hex => {
                 // A colour whose channels are not whole bytes prints percentages, not hex and not
                 // numbers: `grayscale(#633736)` → `rgb(30%, 30%, 30%)` while `grayscale(#494949)` →

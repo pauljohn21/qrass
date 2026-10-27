@@ -14,8 +14,10 @@ use crate::color::Color;
 use crate::value::Value;
 
 mod constructors;
+mod modify;
 
 use constructors::{COLOR_HWB, HSL, HSLA, HWB, RGB, RGBA};
+use modify::COLOR_CHANGE;
 
 /// This domain's registrations.
 pub(super) static COLORS: &[&Builtin] = &[
@@ -33,6 +35,7 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_SATURATION,
     &COLOR_LIGHTNESS,
     &COLOR_CHANNEL,
+    &COLOR_CHANGE,
     &GRAYSCALE,
     &COLOR_GRAYSCALE,
     &DARKEN,
@@ -56,6 +59,7 @@ static COLOR_MIX: Builtin = Builtin {
     params: &["color1", "color2"],
     optional: &["weight"],
     variadic: true,
+    labelled: None,
     apply: mixed,
 };
 
@@ -69,6 +73,7 @@ static DARKEN: Builtin = Builtin {
     params: &["color", "amount"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| {
         adjusted(args, |[hue, saturation, lightness], amount| {
             [hue, saturation, lightness - amount]
@@ -82,6 +87,7 @@ static LIGHTEN: Builtin = Builtin {
     params: &["color", "amount"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| {
         adjusted(args, |[hue, saturation, lightness], amount| {
             [hue, saturation, lightness + amount]
@@ -100,6 +106,7 @@ static SATURATE: Builtin = Builtin {
     params: &["color", "amount"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| {
         adjusted(args, |[hue, saturation, lightness], amount| {
             [hue, saturation + amount, lightness]
@@ -113,6 +120,7 @@ static DESATURATE: Builtin = Builtin {
     params: &["color", "amount"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| {
         adjusted(args, |[hue, saturation, lightness], amount| {
             [hue, saturation - amount, lightness]
@@ -126,6 +134,7 @@ static ADJUST_HUE: Builtin = Builtin {
     params: &["color", "amount"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| {
         adjusted(args, |[hue, saturation, lightness], amount| {
             [hue + amount, saturation, lightness]
@@ -144,6 +153,7 @@ static GRAYSCALE: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: grayscale_of,
 };
 
@@ -153,6 +163,7 @@ static COLOR_GRAYSCALE: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: grayscale_of,
 };
 
@@ -169,6 +180,7 @@ static COLOR_RED: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| channel(args, 0),
 };
 
@@ -178,6 +190,7 @@ static COLOR_GREEN: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| channel(args, 1),
 };
 
@@ -187,6 +200,7 @@ static COLOR_BLUE: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: |args| channel(args, 2),
 };
 
@@ -197,6 +211,7 @@ static COLOR_ALPHA: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: alpha_of,
 };
 
@@ -208,6 +223,7 @@ static COLOR_HUE: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: hue_of,
 };
 
@@ -217,6 +233,7 @@ static COLOR_SATURATION: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: saturation_of,
 };
 
@@ -226,6 +243,7 @@ static COLOR_LIGHTNESS: Builtin = Builtin {
     params: &["color"],
     optional: &[],
     variadic: true,
+    labelled: None,
     apply: lightness_of,
 };
 
@@ -245,6 +263,7 @@ static COLOR_CHANNEL: Builtin = Builtin {
     params: &["color", "channel"],
     optional: &["space"],
     variadic: true,
+    labelled: None,
     apply: channel_of,
 };
 

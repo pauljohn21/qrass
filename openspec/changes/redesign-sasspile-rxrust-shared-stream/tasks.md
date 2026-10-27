@@ -802,6 +802,30 @@
         `tests=31 failed=0`（实际有失败），因为 cargo 在**第一个失败的二进制处就停了**，后面的
         `test result` 行根本没输出——“0 failed”只说明看到的那几行没失败。现固定用
         `--no-fail-fast` + `echo exit=$?` 双条件（exit=0 且无 FAILED 行）才算门禁绿。
+      **㉑ body 能看见“这个实参绑到哪个参数”了，并落地 `color.change` 的 rgb 通道**（已实测）：
+      • **为何要改脊柱**：`change/rgb.hrx::red/out_of_range` 与 `…::green/out_of_range` 都是“一个颜色 +
+        一个数”，前者 `hsl(0, 5000%, 98.0392156863%)`、后者 `hsl(120, 100%, -9.8039215686%)` —— 去掉参数名
+        后两者在 body 那里不可区分。⑱（递全部已绑定槽）仍不够，因为**名字**没递下去。
+      • **设计选型（有意选窄的）**：把 `apply` 的参数类型换成 `Vec<Given>` 要改 29 个 body（本轮已在这类
+        宽改动上错过两次），所以改为**纯新增字段** `labelled: Option<LabelledBody>`：现有 body 一行不动，
+        每个 static 多一行 `labelled: None,`；dispatch 仍是一个 `match`，没两个真相源。clippy 的
+        `type_complexity` 要求给函数类型起名 ⇒ `type LabelledBody`（未改闸、未加 `#[allow]`）。
+      • **新打印律（由 change 给出）**：**越界的颜色一律打 hsl 形体**（`color.change(black, $blue: 256)` →
+        `hsl(240, 100.7874015748%, 50.1960784314%)`），不夹也不取整 —— 夹了就成了另一个颜色。因此
+        `Color::with_channel` **不走 `Channel::clamped`**（写入时的夹紧仍只属于 `rgb()`/`hsl()` 构造子）。
+        另加 `Color::writes_bytes()` 把“能按字节写的空间”做成一处判据。
+      • **实测**：hrx **1133 → 1151（实质 968 → 986）**，`ledger diff hwb change-rgb` = **`regress=0 net=18`**
+        （`change/rgb` 17 + `modules/color/change` 1），无效错误仍 **53**；130 测试（`--no-fail-fast` 下
+        exit=0）、clippy exit 0、sasslint exit 0。新增 `builtins/color/modify.rs` 与 `tests/color_change.rs`。
+      • **本刀不收的（保持红，理由各不同）**：`*/none` 三条要 `none` 值；`alpha_arg` 要 `$alpha:`（语料只给
+        in-gamut 的 `0.3`，**是否夹紧无金样**，不拿 `with_alpha` 的律去套）；hsl/hwb 轴与 `$space:` 全
+        decline（那是 `change/hsl` 36 + `change/hwb` 15 + 现代空间 ~230 行，需先有那个空间）。
+      • **一条我无法解释的现象（不当作已解决）**：`green/out_of_range` 要 `hsl(120, 100%, -9.8…%)`，而
+        legacy hsl 公式对 `(0, -50, 0)` 给 hue 300 / 饱和度 -100%（同文件的 `red/`、`blue/out_of_range` 都与
+        公式一致）。**不为单行拟合公式** —— 跟 `complement` 同样当待测现象记录，行继续红。
+      • **差点又编一条**：我先把 `blue/out_of_range` 写成“`$blue: -50` → `hsl(240, 100%, -9.8%)” 当断言，
+        查原文才知道它是 `$blue: 256` → `hsl(240, 100.7874015748%, 50.1960784314%)`；列条目时又误以为有
+        `mixed/channels` 这一例（grep 后发现根本不存在）。本轮同一类错第三次付学费：**字面量先取原文再写**。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
