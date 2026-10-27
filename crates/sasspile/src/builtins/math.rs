@@ -3,6 +3,7 @@
 //! function and duplicating them per domain is how they drift. The trigonometric seven are in
 //! [`trig`], which shares this file's argument readers rather than repeating them.
 
+pub(super) mod exponents;
 pub(super) mod trig;
 
 use crate::builtins::{Builtin, missing};
@@ -30,7 +31,28 @@ pub(super) static MATHS: &[&Builtin] = &[
     &trig::MATH_ACOS,
     &trig::MATH_ATAN,
     &trig::MATH_ATAN2,
+    &exponents::MATH_POW,
+    &exponents::MATH_SQRT,
+    &exponents::MATH_LOG,
 ];
+
+/// The refusal of a parameter that must carry **no unit**: `$number: Expected 1px to have no units.`
+/// (`core_functions/math/{round,atan,asin,sqrt,unitless}.hrx::error/*`, and `$base:` under the same words in
+/// `log.hrx::error/base_has_units`). Read by the trig inverse, `math.sqrt`, `math.log` and `math.pow`, so
+/// the wording lives in one place — plural “units” even for one unit is the corpus's own text
+/// (`math.percentage.hrx::error/unit`).
+pub(super) fn unitless(name: &str, value: f64, unit: Unit) -> Result<f64, SassError> {
+    if unit.is_unitless() {
+        return Ok(value);
+    }
+    Err(SassError::typed(
+        ErrorKind::WrongUnits,
+        format!(
+            "${name}: Expected {} to have no units.",
+            Value::Number(value, unit).to_css()
+        ),
+    ))
+}
 
 /// `math.div(6, 3)` → `2`: numbers only, with the unit law the goldens state — same unit cancels
 /// (`6px / 3px` → `2`), a unitless divisor keeps the numerator's unit (`6px / 3` → `2px`), convertible

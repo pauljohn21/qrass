@@ -56,9 +56,10 @@ async fn an_angle_in_a_number_out() {
 
 /// The three inverse functions require a unitless ratio and answer in degrees: `math.atan(1)` → `45deg`,
 /// `math.asin(-0.5)` → `-30deg`, `math.acos(0.5)` → `60deg`, `math.acos(1)` → `0deg`
-/// (`{asin,acos,atan}.hrx`). A ratio outside the domain is `NaN` — printed `calc(NaN * 1deg)`, which is the
-/// non-finite printing law and not this step's, so those rows (`asin.hrx::greater_than_one`,
-/// `…::one_fuzzy`) stay red rather than being answered with a bare `NaNdeg`.
+/// (`{asin,acos,atan}.hrx`). A ratio outside the domain is `NaN`, and the corpus writes it inside a `calc()`
+/// wrapper with its unit multiplied by one: `math.asin(2)` → `calc(NaN * 1deg)` (`asin.hrx::greater_than_one`),
+/// `math.asin(1.000000000001)` → `calc(NaN * 1deg)` (`…::one_fuzzy`) — that printing form is pinned together
+/// with the infinities in `tests/math_exponents.rs`.
 #[tokio::test]
 async fn a_ratio_in_a_degree_out() {
     for (input, want) in [
@@ -71,6 +72,9 @@ async fn a_ratio_in_a_degree_out() {
         ("a {b: math.acos(0.5)}", "60deg"),
         ("a {b: math.acos(-0.5)}", "120deg"),
         ("a {b: math.acos(1)}", "0deg"),
+        ("a {b: math.asin(2)}", "calc(NaN * 1deg)"),
+        ("a {b: math.asin(-2)}", "calc(NaN * 1deg)"),
+        ("a {b: math.acos(2)}", "calc(NaN * 1deg)"),
     ] {
         assert_eq!(
             css(input).await,

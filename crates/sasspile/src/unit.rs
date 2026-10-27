@@ -233,6 +233,24 @@ impl Unit {
             .map(|unit| format!(" / 1{unit}"))
             .collect::<String>()
     }
+
+    /// The same shape for a magnitude that has **no plain-CSS spelling at all** — `NaN` or an infinity — where
+    /// even a single unit has to carry its own `1`: `calc(NaN * 1deg)`
+    /// (`core_functions/math/asin.hrx::greater_than_one`), `calc(-infinity / 1px)` and
+    /// `calc(infinity * 1px * 1em)` (`values/numbers/units/multiple.hrx`). [`Unit::calc_form`] cannot say
+    /// this: it writes the first numerator unit as `<magnitude>px`, which reads as `NaNdeg`.
+    pub fn calc_product(&self, magnitude: &str) -> String {
+        let (numerator, denominator) = self.names();
+        magnitude.to_string()
+            + &numerator
+                .iter()
+                .map(|unit| format!(" * 1{unit}"))
+                .collect::<String>()
+            + &denominator
+                .iter()
+                .map(|unit| format!(" / 1{unit}"))
+                .collect::<String>()
+    }
 }
 
 /// Cancel the two sides against each other: every name the denominator also holds removes one copy of

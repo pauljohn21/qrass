@@ -63,7 +63,20 @@ impl Value {
     pub fn to_css(&self) -> String {
         match self {
             Value::Raw(text) => text.clone(),
-            Value::Number(value, unit) => format_number(*value) + &unit.to_css(),
+            Value::Number(value, unit) => {
+                // A non-finite number has no plain-CSS spelling, so it is wrapped: `calc(NaN)`,
+                // `calc(infinity)`, `calc(-infinity)`, and a unit rides inside the wrapper multiplied by one
+                // — `math.asin(2)` → `calc(NaN * 1deg)`, `math.pow(0, -2)` → `calc(infinity)`
+                // (`core_functions/math/{asin,atan2}.hrx`, `…/pow/base_positive_zero.hrx::with_exponent/*`),
+                // while a reciprocal unit takes the division form (`calc(-infinity / 1px)`,
+                // `values/numbers/units/multiple.hrx`). Inside a calculation the same shape already comes
+                // from [`Unit::calc_form`], so this is one reading, not a second one.
+                if value.is_finite() {
+                    format_number(*value) + &unit.to_css()
+                } else {
+                    format!("calc({})", unit.calc_product(&format_number(*value)))
+                }
+            }
             Value::Bool(value) => value.to_string(),
             Value::Calculation(name, content) => format!("{name}({})", content.printed),
             Value::Color(color) => color.to_css(),

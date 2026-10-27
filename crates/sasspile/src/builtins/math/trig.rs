@@ -17,7 +17,7 @@
 //! * `math.atan2($y, $x)` needs its two arguments to share a dimension — `math.atan2(1cm, -10mm)` → `135deg`
 //!   converts first (`atan2/arguments.hrx::compatible_units`) — and answers degrees too.
 
-use super::{comparable, number_arg};
+use super::{comparable, number_arg, unitless};
 use crate::ErrorKind;
 use crate::SassError;
 use crate::builtins::Builtin;
@@ -52,16 +52,7 @@ fn radians(args: &[Value]) -> Result<f64, SassError> {
 /// corpus asks (`asin.hrx::error/units` is `$number: Expected 1px to have no units.`).
 fn ratio(args: &[Value]) -> Result<f64, SassError> {
     let (value, unit) = number_arg("number", args)?;
-    if unit.is_unitless() {
-        return Ok(value);
-    }
-    Err(SassError::typed(
-        ErrorKind::WrongUnits,
-        format!(
-            "$number: Expected {} to have no units.",
-            Value::Number(value, unit).to_css()
-        ),
-    ))
+    unitless("number", value, unit)
 }
 
 /// One direct function: the angle in, a plain number out (`math.sin(1deg)` → `0.0174524064` — Sass's ten
