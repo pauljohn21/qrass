@@ -467,7 +467,24 @@
       **顺带纠正了一条早先记错的律**：`format_number` 不是“10 位**有效**数字”而是“**不超 10 位有效则原样，
       否则截到 10 位小数**”——对 `0.7636363636` 两种算法巧合同值所以一直没暴露，颜色换算（12 位有效）才把它
       推出来；同时 `1px+2px` 等行与 `f64::MAX`、`0.000000000000001` 仍在 A/B 里不动（net 读数已证）。
-      **不得跨过去的事**：期望错误那 ~227 条要的是逐参数类型/单位消息（P1.7），不得用“不报错抹平”拿分。
+      **下一批的地形（本轮用新补的 `ledger failures … --count` / 无 ANSI 输出量的，不再靠 grep 手搓）**：
+      通道访问器家族**大多是 P7 消息而不是能力**：`color/{hue,saturation,lightness,red,green,blue}` 各 8–11 条里，
+      `error/non_legacy`、`error/too_few_args`、`error/too_many_args` 占多数（前两条要新消息，
+      后两条其实定长签名已能给，但颜色参数读不懂就整串逐字了）；真正的值行只有几行。大头在
+      `adjust` 402 / `change` 311 / `color()` 169 / `channel` 102 / `mix` 91 / `invert` 50（均为期望值）。
+      **它们的共同瓶颈量出来了：颜色参在语料里几乎都写成颜色名** —— `color.adjust(red, $hue: 150, …)`、
+      `color.change(blue, …)`、`color.channel(pink, "blackness", $space: hwb)`、`color.alpha(rgba(red, 0.42))`、
+      `color.invert(black)` ⇒ **需 CSS 颜色名表**；另外 hwb 与 `hue/saturation/lightness` 需 **rgb↔hsl / rgb↔hwb 换算**。
+      还采到一条表示法律的新证据：`color.invert(black)` → `white`（**值恰等于某个颜色名时要回写名字**）、
+      `color.invert(gray)` → `#7f7f7f`、`color.invert(hsl(30deg 20% 40%))` → `hsl(210, 20%, 60%)`（hsl 入 hsl 出），
+      比我本批实现的 `Representation` 三态更细，需与换算同批做。
+      **一个待你定调的问题（不许我凭记忆填）**：148 个 CSS 颜色名到 RGB 的表在本仓库语料里**没有完整出处**
+      （`values/colors/` 只有 `alpha_hex/` 与 `equality.hrx`，后者只偶尔给出 `purple == hsl(300, 100%, 25.098039215686%)`
+      这类零星对应），而项目铁律是“行为唯一参照 = 本地语料，严禁拿 dart-sass 源码/文档推定”。所以要么
+      （a）把颜色名当 **Web 标准数据**录入、再用语料能交叉验证的零星行做抽检；要么（b）只录入语料已给出
+      对应的名字，其余继续逐字；要么（c）先往语料里补一集全量颜色名用例再开工。本批**没有动那 148 个值**。
+      （顺带：`ledger` 现在把日志的 ANSI 着色关了——它的输出**就是**读数，着色让我的 `sed`/`awk` 切片连续三次
+      表面正常地读到 0；并新增 `--count`，参数拆分已在 `tests/failures_query.rs` 里钉住。）
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

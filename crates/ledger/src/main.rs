@@ -33,6 +33,10 @@ fn main() {
 
 /// The filter the environment asks for, defaulting to `info` so a normal run prints exactly what it
 /// printed before any tracing work.
+///
+/// ANSI styling is off on purpose: this binary's output **is** the reading, and colour codes in it broke
+/// every `sed`/`awk` slice attempted against it (three times in one session, each time producing a
+/// plausible-looking `0` that had to be caught by a positive control).
 fn filter() -> tracing_subscriber::filter::EnvFilter {
     tracing_subscriber::filter::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::filter::EnvFilter::new("info"))
@@ -59,6 +63,7 @@ fn trace_setup() {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_target(false)
+                .with_ansi(false)
                 .with_filter(filter()),
         )
         .try_init();
@@ -69,5 +74,6 @@ fn trace_setup() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter())
         .with_target(false)
+        .with_ansi(false)
         .try_init();
 }

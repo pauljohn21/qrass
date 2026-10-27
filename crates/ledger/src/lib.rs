@@ -21,7 +21,7 @@
 //!   ledger import <run-name> <file.tsv> [more.tsv...]   (run-name applies to all)
 //!   ledger diff <a> <b> [key-prefix]                        (regressions / net, per cluster if given)
 //!   ledger runs                                           (summary table)
-//!   ledger failures <run> [key-or-detail-substring]
+//!   ledger failures <run> [key-or-detail-substring] [--count]
 //!   ledger passed   <run> <key-prefix>
 //!
 //! `passed` exists because the storage is asymmetric: only failures are rows, so “which cases of this
@@ -375,12 +375,37 @@ fn runs(conn: &Connection) -> QResult<()> {
 /// `Undefined variable` became a different wrong answer, so `ledger failures <run> "unexpected error"` has
 /// to be countable straight from the record (the harness no longer keeps a TSV to grep).
 fn failures(conn: &Connection, args: &[String]) -> QResult<()> {
-    let run = args.first().cloned().unwrap_or_default();
-    let needle = args.get(1).cloned().unwrap_or_default();
+    let (run, needle, count) = failure_query(args);
     let rows = failing(conn, &run, &needle)?;
+    // `--count` exists because "how many rows match this needle" is the reading a step is gated on
+    // (`ledger failures <run> "unexpected error"` must equal the recorded baseline), and counting lines
+    // with `grep -c` was misread twice when the log styling got in the way. One number, no pipeline.
+    if count {
+        info!(target: "ledger", "{}", rows.len());
+        return Ok(());
+    }
     rows.iter()
         .for_each(|line| info!(target: "ledger", "{line}"));
     Ok(())
+}
+
+/// What `ledger failures` was asked for: `(run, needle, count-only)`.
+///
+/// `--count` is a flag and never a pattern. Reading it as the needle would not fail — it would answer
+/// “zero failures”, the exact shape of silent wrongness this crate has been burned by twice, so the split
+/// lives here where a test can pin it.
+pub fn failure_query(args: &[String]) -> (String, String, bool) {
+    let count = args.iter().any(|arg| arg == "--count");
+    let given = args
+        .iter()
+        .filter(|arg| arg.as_str() != "--count")
+        .cloned()
+        .collect::<Vec<String>>();
+    (
+        given.first().cloned().unwrap_or_default(),
+        given.get(1).cloned().unwrap_or_default(),
+        count,
+    )
 }
 
 /// List the recorded keys under one cluster prefix that this run does **not** fail — the verdict list a
