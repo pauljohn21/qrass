@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **951/11,533**（8.25%，**实质通过 786** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `color-crate`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **956/11,533**（8.29%，**实质通过 791** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `axes-split`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -49,9 +49,13 @@ alwaysApply: true
    `hsl(…)` 色**，所以本刀不需换算；单位律由金样给出：hue → `359deg`，saturation/lightness → `42%`）。
    **颜色名的最终依赖 = `color`（linebender，活跃）的 `parse_color`**：`color-name` 因不再维护而被剔除
    （未知 bug 风险比它的多 7 个别名更有分量）；`color` 词表缺的 7 个 `-grey` 拼法用“拼法折叠 `grey`→`gray`”
-   补齐，**不录入任何手敲 RGB 值**。下一步：rgb↔hsl / rgb↔hwb **换算**
-   —— 但**先取金样再写公式**（`adjust`/`change`/`channel`/`mix`/`grayscale` 里那群 `red`/`blue`/`pink` 源的行），
-   而不是先写实现再找理由；rgb 色的 hue 现在一律 decline（已钉测试）。之后 `mix` → 颜色 `==`。
+   补齐，**不录入任何手敲 RGB 值**。已落 **rgb↔hsl 换算**（`src/axes.rs`，纯 f64，故意不取整）与
+   **打印律**：通道不是整字节就打百分比（`grayscale(#633736)` → `rgb(30%, 30%, 30%)`），整字节就打
+   数值/hex（`grayscale(#494949)` → `#494949`）——取整属于打印。下一步：先把已可用的换算接上
+   `color.hue/saturation/lightness` 的 **rgb 源**（现仍 decline，已钉测试；金样行属 `channel`/`adjust`/`change`
+   那群 `red`/`blue`/`pink` 源的用例），再推 `mix` → 颜色 `==`；而 `complement` 暂不能动，因为
+   `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
+   还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
    **最小切口是 `core_functions/color/rgb/three_args/*`，不是 `values/colors/**`**（后者几乎全要颜色 `==`
    比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置的 `builtins` **按域拆目录**已做（

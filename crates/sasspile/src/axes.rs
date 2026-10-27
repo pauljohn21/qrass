@@ -1,0 +1,59 @@
+//! The hsl axes arithmetic, kept apart from [`crate::color`] because it is pure `f64` in, `f64` out.
+//!
+//! Two reasons this lives in its own file rather than inside the colour type: the round trip is the only
+//! place a colour leaves its own space, and separating it is what lets the *conversion* be tested against
+//! goldens without the printing rules mixed in — the printing rule (whole bytes print as numbers or hex,
+//! anything between prints as percentages) is a separate law and belongs to [`crate::color`].
+//!
+//! The formulas are CSS Color 4's; the readings below are what the local corpus pins, and every constant
+//! in the doc comments is a fixture row rather than a derivation.
+
+/// `[hue in degrees, saturation in %, lightness in %]` for a colour given as three `0–255` channel values.
+///
+/// * `red` = `(255, 0, 0)` → `[0, 100, 50]` — the row behind `color.grayscale(red)` → `rgb(50%, 50%, 50%)`
+///   (`core_functions/color/grayscale.hrx`: lightness 50 survives, saturation goes to 0).
+/// * `#633736` = `(99, 55, 54)` → lightness `30%` of 255, i.e. 76.5, which is what makes
+///   `color.grayscale(#633736)` print `rgb(30%, 30%, 30%)` (`grayscale.hrx`).
+/// * `purple` = `(128, 0, 128)` → `[300, 100, 25.098039215686]`, the equality
+///   `purple == hsl(300, 100%, 25.098039215686%)` in `values/colors/equality.hrx`.
+/// * a grey (`span == 0`) has hue `0` and saturation `0` — `color.grayscale(#494949)` stays `#494949`.
+pub(crate) fn rgb_to_axes(red: f64, green: f64, blue: f64) -> [f64; 3] {
+    let [red, green, blue] = [red / 255.0, green / 255.0, blue / 255.0];
+    let max = red.max(green).max(blue);
+    let min = red.min(green).min(blue);
+    let lightness = (max + min) / 2.0;
+    let span = max - min;
+    if span == 0.0 {
+        return [0.0, 0.0, lightness * 100.0];
+    }
+    let saturation = span / (1.0 - (2.0 * lightness - 1.0).abs());
+    let hue = match max {
+        v if v == red => ((green - blue) / span).rem_euclid(6.0) * 60.0,
+        v if v == green => ((blue - red) / span + 2.0) * 60.0,
+        _ => ((red - green) / span + 4.0) * 60.0,
+    };
+    [hue, saturation * 100.0, lightness * 100.0]
+}
+
+/// The three `0–255` channel values of `[hue in degrees, saturation in %, lightness in %]`.
+///
+/// Deliberately un-rounded: `(128, 0, 128)` → saturation 0 → `(127.5, 127.5, 127.5)`, and *that* is the
+/// reading `color.grayscale(red)` publishes as `rgb(50%, 50%, 50%)` — rounding here would turn a
+/// percentage row into a number row and silently change the output.
+pub(crate) fn axes_to_rgb(hue: f64, saturation: f64, lightness: f64) -> [f64; 3] {
+    let saturation = saturation / 100.0;
+    let lightness = lightness / 100.0;
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let second = (hue / 60.0).rem_euclid(2.0) - 1.0;
+    let intermediate = chroma * (1.0 - second.abs());
+    let matched = match hue / 60.0 {
+        h if h < 1.0 => [chroma, intermediate, 0.0],
+        h if h < 2.0 => [intermediate, chroma, 0.0],
+        h if h < 3.0 => [0.0, chroma, intermediate],
+        h if h < 4.0 => [0.0, intermediate, chroma],
+        h if h < 5.0 => [intermediate, 0.0, chroma],
+        _ => [chroma, 0.0, intermediate],
+    };
+    let offset = lightness - chroma / 2.0;
+    matched.map(|component| (component + offset) * 255.0)
+}

@@ -12,6 +12,7 @@ use std::fmt;
 
 use rxrust::prelude::*;
 
+mod axes;
 mod brackets;
 mod builtins;
 mod calc;

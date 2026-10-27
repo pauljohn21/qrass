@@ -530,6 +530,21 @@
       分量上会把 0 取成 1（关键字色是 8-bit 精确值，已用 `gray/grey=128`、`pink` 的 blue=203 等抽检证过）。
       **反向写名的下一步做法（不靠记性）**：只需列出 148 个**拼法**（字符串），值全从 `parse_color` 取；
       拼法写错了会被依赖当场报错，所以可以自校。
+      **⑧ rgb↔hsl 换算与“非整数→百分比”打印律已落（以 `grayscale` 为切口）**（已实测）：换算拆成
+      `src/axes.rs`（纯 f64：`rgb_to_axes` / `axes_to_rgb`，故意**不取整**），因为金样 pair 把打印律挑了出来：
+      `color.grayscale(#633736)` → `rgb(30%, 30%, 30%)`（L=76.5 落在字节之间）而 `color.grayscale(#494949)` →
+      `#494949`（落在整字节上）；同理 `darken(rgba(red, 0.2), 100%)` → `rgba(0, 0, 0, 0.2)` 用数值形态。
+      所以取整属于打印、不属于换算。`grayscale` 同时注册为 legacy 名与 `color.grayscale`，并仍用
+      variadic（CSS 也有 `grayscale(…)` filter：`grayscale(50%)` 必须逐字，已钉测试）。
+      **实测**：hrx **951 → 956（实质 786 → 791）**，`ledger diff color-crate grayscale` = **`regress=0 net=5`**
+      （`grayscale::legacy/{alpha,max_saturation,mid_saturation,no_saturation/gray}` + `global/color/grayscale::with_color`），
+      无效错误仍 **53**。拆分后用空库以外的同一库做中性复验：`ledger diff grayscale axes-split` = **net=0**。
+      **本刀没拿也不装拿的**：① 反向写名（`grayscale(white)` → `white`、`complement(red)` → `aqua`）仍未做；
+      ② 同一文件里 `color.grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)` 需要**现代空格语法输入**（→ 与
+      `hwb` 同一个前置）；③ 我自己发明的那行断言被测试当场推翻后已删（无金样就不断言）。
+      ④ 还有一条解释不了的律留着：`complement(turquoise)` → 整字节 `#e04050`，但
+      `complement(rgba(turquoise, 0.7))` → `rgba(87.8431372549%, 25.0980392157%, 31.3725490196%, 0.7)`，
+      不猜原因，先把这条当待测现象记着（它决定 `complement` 能不能动）。
       **⑥ `color.hue` / `color.saturation` / `color.lightness` 已落地，而且本刀根本不需要换算**（已实测）：
       先把三个文件的行全部重读一遍——**每一条“期望值”行用的都是 `hsl(…)` 色**，非 `hsl` 参数只出现在
       `error/*` 行（`color.hue(1)`、`color.hue(lch(0% 0 0deg))`、`color.hue(red, green)`），而那是要消息的 P7。

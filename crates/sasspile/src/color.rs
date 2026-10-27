@@ -273,6 +273,87 @@ impl Color {
         }
     }
 
+    /// The same colour with its hue moved by `degrees` and its saturation set to `saturation`, going
+    /// through the hsl axes (`color.grayscale(red)` → `rgb(50%, 50%, 50%)`: the lightness survives the
+    /// round trip, the saturation does not).
+    ///
+    /// The axes follow CSS Color 4's arithmetic, but the *readings* below are what the corpus pins, and
+    /// they are the reason the conversion exists at all: `color.grayscale(#633736)` → `rgb(30%, 30%, 30%)`
+    /// (L = (99 + 54)/2 = 76.5 of 255), while `color.grayscale(#494949)` → `#494949` — the same operation
+    /// on a colour whose lightness is an exact byte prints hex. That pair is the whole `fractional →
+    /// percentage` law in two lines, and it lives in [`Color::to_css`].
+    pub fn recolour(&self, hue_shift: f64, saturation: Option<f64>) -> Self {
+        match self.representation {
+            Representation::Hsl => {
+                let [hue, current, lightness] = self.channels.map(|channel| channel.value);
+                Self {
+                    channels: [
+                        Channel {
+                            value: (hue + hue_shift).rem_euclid(360.0),
+                            percent: false,
+                        },
+                        Channel {
+                            value: saturation.unwrap_or(current),
+                            percent: true,
+                        },
+                        Channel {
+                            value: lightness,
+                            percent: true,
+                        },
+                    ],
+                    ..self.clone()
+                }
+            }
+            _ => {
+                let [hue, axis_saturation, lightness] = self.axes();
+                let channels = [
+                    hue + hue_shift,
+                    saturation.unwrap_or(axis_saturation),
+                    lightness,
+                ];
+                Self::from_axes(self, channels)
+            }
+        }
+    }
+
+    /// The hsl axes of an `rgb`-space colour, via [`crate::axes`] — the conversion is pure `f64` and is
+    /// tested there on its own, so this only hands it the channel values.
+    fn axes(&self) -> [f64; 3] {
+        let [red, green, blue] = self.channels.map(|channel| channel.byte());
+        crate::axes::rgb_to_axes(red, green, blue)
+    }
+
+    /// Rebuild a colour of the same kind from hsl axes, keeping the channels un-rounded so the printing
+    /// rule can decide between numbers, percentages and hex.
+    fn from_axes(source: &Color, [hue, saturation, lightness]: [f64; 3]) -> Self {
+        let channels = crate::axes::axes_to_rgb(hue, saturation, lightness);
+        Self {
+            channels: channels.map(|value| Channel {
+                value,
+                percent: false,
+            }),
+            alpha: source.alpha,
+            representation: source.representation,
+        }
+    }
+
+    /// Whether any channel is not a whole byte — the trigger for printing percentages instead of numbers
+    /// (`grayscale(red)` → `rgb(50%, 50%, 50%)`, `grayscale(#494949)` → `#494949`).
+    fn fractional(&self) -> bool {
+        self.channels
+            .iter()
+            .any(|channel| channel.byte().fract() != 0.0)
+    }
+
+    /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255.
+    fn percent_form(&self) -> String {
+        let channels = self.channels.map(|channel| Channel {
+            value: channel.percent_form(),
+            percent: true,
+        });
+        self.legacy(channels, true)
+    }
+
     /// A colour from `0–255` byte values, for hex parsing.
     fn rgb(red: f64, green: f64, blue: f64, alpha: f64) -> Option<Self> {
         let plain = |value: f64| Value::Number(value, crate::unit::Unit::unitless());
@@ -339,6 +420,12 @@ impl Color {
         let byte = |value: u32| format!("{value:02x}");
         match self.representation {
             Representation::Hex => {
+                // A colour whose channels are not whole bytes prints percentages, not hex and not
+                // numbers: `grayscale(#633736)` → `rgb(30%, 30%, 30%)` while `grayscale(#494949)` →
+                // `#494949` (`core_functions/color/grayscale.hrx`).
+                if self.fractional() {
+                    return self.percent_form();
+                }
                 // An opaque colour comes back out as hex, but a semi-transparent one takes the legacy
                 // functional form: `rgb(#123, 1)` → `#112233` while `rgb(#123, 0.5)` → `rgba(17, 34, 51,
                 // 0.5)` (`rgb/two_args::opaque_to/{opaque,partial}`) — no eight-digit hex is printed here.
@@ -348,14 +435,13 @@ impl Color {
                 }
                 format!("#{}{}{}", byte(bytes[0]), byte(bytes[1]), byte(bytes[2]))
             }
-            Representation::Legacy => self.legacy(self.channels, false),
-            Representation::Percent => {
-                let channels = self.channels.map(|channel| Channel {
-                    value: channel.percent_form(),
-                    percent: true,
-                });
-                self.legacy(channels, true)
+            Representation::Legacy => {
+                if self.fractional() {
+                    return self.percent_form();
+                }
+                self.legacy(self.channels, false)
             }
+            Representation::Percent => self.percent_form(),
             // Hue is a bare number and the other two always carry a `%`; the name still follows the alpha
             // exactly as the `hsl/four_args/alpha.hrx` rows show (`100%` alpha → `hsl(…)`, `0%` →
             // `hsla(…, 0)`).

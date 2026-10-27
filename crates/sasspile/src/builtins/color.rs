@@ -26,7 +26,32 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_HUE,
     &COLOR_SATURATION,
     &COLOR_LIGHTNESS,
+    &GRAYSCALE,
+    &COLOR_GRAYSCALE,
 ];
+
+/// `grayscale(#633736)` → `rgb(30%, 30%, 30%)`, `grayscale(#494949)` → `#494949`
+/// (`core_functions/color/grayscale.hrx`): the saturation goes to zero and the lightness survives the
+/// hsl round trip — and the two spellings differ only because one round trip lands on a whole byte.
+///
+/// Registered variadic like the accessors, because CSS also defines `grayscale(…)` as a filter function:
+/// `grayscale(10%)` is not a colour call and must print as written.
+static GRAYSCALE: Builtin = Builtin {
+    name: "grayscale",
+    params: &["color"],
+    optional: &[],
+    variadic: true,
+    apply: grayscale_of,
+};
+
+/// `color.grayscale(…)`, the namespaced spelling of the same law.
+static COLOR_GRAYSCALE: Builtin = Builtin {
+    name: "color.grayscale",
+    params: &["color"],
+    optional: &[],
+    variadic: true,
+    apply: grayscale_of,
+};
 
 /// `color.red(…)`, the first channel; likewise green and blue.
 ///
@@ -222,6 +247,23 @@ fn saturation_of(args: Vec<Value>) -> Result<Value, SassError> {
 /// `color.lightness(hsl(0, 100%, 42%))` → `42%` (`lightness.hrx`: the same readings along the L axis).
 fn lightness_of(args: Vec<Value>) -> Result<Value, SassError> {
     accessor(args, Some("%"), Color::lightness)
+}
+
+/// `color.grayscale`: saturation to zero, everything else kept.
+fn grayscale_of(args: Vec<Value>) -> Result<Value, SassError> {
+    transform(args, |color| color.recolour(0.0, Some(0.0)))
+}
+
+/// One colour in, one colour out, with the same argument judgement the accessors make: arguments that all
+/// read as colours are a colour call (so a wrong count is reported), and anything else — `grayscale(10%)`,
+/// the CSS filter — declines and prints as written.
+fn transform(args: Vec<Value>, change: impl Fn(&Color) -> Color) -> Result<Value, SassError> {
+    match access(&args) {
+        Access::Colour(color) => Ok(Value::Color(change(&color))),
+        Access::NotAColour => Err(SassError::new("not a colour this slice can transform")),
+        Access::TooFew => Err(super::missing("color".to_string())),
+        Access::TooMany(passed) => Err(super::too_many(1, passed)),
+    }
 }
 
 /// The shape every accessor shares: read one number out of the colour argument and print it with the unit

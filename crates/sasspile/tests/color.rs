@@ -232,3 +232,43 @@ async fn an_rgb_colour_declines_a_hue_request() {
         );
     }
 }
+
+/// The hsl round trip and the printing rule it exposes, one assertion per fixture row
+/// (`core_functions/color/grayscale.hrx`). The pair `#633736` / `#494949` is the whole law: the same
+/// operation prints `rgb(30%, 30%, 30%)` when the round trip lands between bytes and `#494949` when it
+/// lands on one — so rounding belongs to printing, not to the conversion.
+#[tokio::test]
+async fn grayscale_round_trips_and_prints_by_whole_bytes() {
+    for (input, want) in [
+        ("a {b: color.grayscale(#633736)}", "rgb(30%, 30%, 30%)"),
+        ("a {b: color.grayscale(#494949)}", "#494949"),
+        ("a {b: color.grayscale(red)}", "rgb(50%, 50%, 50%)"),
+        (
+            "a {b: color.grayscale(rgba(#633736, 0.3))}",
+            "rgba(30%, 30%, 30%, 0.3)",
+        ),
+        // `color.grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)` is a real row of the same file and
+        // is **not** claimed here: its input is the modern space-separated spelling, which this compiler
+        // does not parse yet, while its output is the legacy comma form.
+        //
+        // The one hsl-source case that is legacy-shaped (`hsl(120, 10%, 20%)`) has no golden either, so no
+        // output is asserted for it — printing an hsl colour from a converted hsl colour stays unclaimed
+        // until a fixture states it.
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// The CSS overload that motivated the variadic registration: `grayscale(10%)` is a filter function, not a
+/// colour call, so it must survive untouched (`saturate.hrx` states the same for `saturate(50%)`).
+#[tokio::test]
+async fn a_filter_argument_is_not_a_colour_call() {
+    assert_eq!(
+        css("a {b: grayscale(50%)}").await,
+        "a {\n  b: grayscale(50%);\n}\n"
+    );
+}
