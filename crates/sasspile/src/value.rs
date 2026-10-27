@@ -36,6 +36,10 @@ pub enum Value {
     /// bound calculation take part in arithmetic again
     /// (`values/numbers/units/multiple::division/cancels/numerator/once`).
     Calculation(String, Content),
+    /// A colour **created by a function** (`rgb(18, 52, 86)` → itself, `rgb(#123, 1)` → `#112233`). A hex
+    /// written straight into a declaration stays `Raw`, because the corpus keeps its source spelling
+    /// (`values/colors/alpha_hex/initial_letter` prints `#AbCd`, capitals and all) — see [`crate::color`].
+    Color(crate::color::Color),
 }
 
 impl Value {
@@ -52,6 +56,7 @@ impl Value {
             Value::Number(value, unit) => format_number(*value) + &unit.to_css(),
             Value::Bool(value) => value.to_string(),
             Value::Calculation(name, content) => format!("{name}({})", content.printed),
+            Value::Color(color) => color.to_css(),
         }
     }
 
@@ -213,10 +218,8 @@ pub(crate) fn format_number(value: f64) -> String {
         return format!("{}", value as i64);
     }
     let natural = format!("{value}");
-    // Sass prints at most **10 significant digits** — a computed `0.246 × 100` must say `24.6`, not the
-    // f64 tail `24.600000000000001` (`core_functions/math/percentage.hrx::small`). The clamp is applied
-    // only when the natural rendering is actually longer than ten significant digits, so short values and
-    // tiny ones like `0.000000000000001` (one significant digit) keep the text they already have.
+    // A number whose significant digits already fit in ten is printed as it stands: that is what keeps
+    // `0.000000000000001` (one significant digit) and a `f64::MAX` literal intact.
     let significant = natural
         .trim_start_matches(['-', '+'])
         .replace('.', "")
@@ -227,12 +230,20 @@ pub(crate) fn format_number(value: f64) -> String {
     if significant <= 10 {
         return natural;
     }
-    // The exponent is **not** clamped at zero: a value in `(0, 1)` starts its significant digits one
-    // place right of the point, so clamping cost `calc(2 * 3 / 5 * 7 / 11)` a digit — the fixture wants
-    // `0.7636363636` (`operator/precedence::simplified/multiplicative`), and `1 / (2 * 3)` wants
-    // `0.1666666667` (`precedence::simplified/parens/multiplicative`).
-    let exponent = value.abs().log10().floor() as i32;
-    format!("{:.1$}", value, (10 - 1 - exponent).max(0) as usize)
+    // Past that, the cut is **ten digits after the decimal point**, not ten significant ones. A colour's
+    // percentage conversion shows the difference: `rgb(74.7%, 173, 93%)` prints
+    // `rgb(74.7%, 67.8431372549%, 93%)` — twelve significant digits, because `173 × 100 / 255` has fourteen
+    // decimals and ten of them survive (`core_functions/color/rgb/three_args/percents::unitless/green`).
+    // It agrees with the arithmetic rows already pinned here: `2 * 3 / 5 * 7 / 11` → `0.7636363636` and
+    // `1 / (2 * 3)` → `0.1666666667` (`operator/precedence::simplified/*`), and a computed `0.246 × 100`
+    // trims back to `24.6` (`core_functions/math/percentage.hrx::small`).
+    let decimals = natural
+        .split_once('.')
+        .map_or(0, |(_, tail)| tail.chars().count());
+    if decimals <= 10 {
+        return natural;
+    }
+    format!("{value:.10}")
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_string()

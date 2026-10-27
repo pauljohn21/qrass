@@ -1,0 +1,85 @@
+//! The colour law, pinned on `core_functions/color/rgb/**` goldens. Each expectation is that fixture's own
+//! `output.css`, not a derivation: the representation a colour was created in decides how it prints, so
+//! the same channels come out as `rgb(…)`, `rgb(…%…)`, `rgba(…)`, or `#112233`.
+
+use sasspile::compile;
+
+async fn css(input: &str) -> String {
+    compile(input)
+        .await
+        .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
+}
+
+/// `rgb/three_args/unitless`: channels print as written, and out-of-range ones clamp to `0–255`
+/// (`clamped/{red,green,blue}`).
+#[tokio::test]
+async fn unitless_channels_print_and_clamp() {
+    for (input, want) in [
+        ("a {b: rgb(18, 52, 86)}", "rgb(18, 52, 86)"),
+        ("a {b: rgb(190, 173, 237)}", "rgb(190, 173, 237)"),
+        ("a {b: rgb(0, 255, 127)}", "rgb(0, 255, 127)"),
+        ("a {b: rgb(256, 0, 0)}", "rgb(255, 0, 0)"),
+        ("a {b: rgb(0, -1, 0)}", "rgb(0, 0, 0)"),
+        ("a {b: rgb(0, 0, 9999)}", "rgb(0, 0, 255)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// `rgb/three_args/percents`: a percentage anywhere makes the whole colour percentage-form, so a unitless
+/// channel is converted (`173` → `67.8431372549%`) while a written percentage is kept exactly as spelled.
+#[tokio::test]
+async fn one_percentage_channel_makes_all_percentages() {
+    assert_eq!(
+        css("a {b: rgb(7.1%, 20.4%, 33.9%)}").await,
+        "a {\n  b: rgb(7.1%, 20.4%, 33.9%);\n}\n"
+    );
+    assert_eq!(
+        css("a {b: rgb(74.7%, 173, 93%)}").await,
+        "a {\n  b: rgb(74.7%, 67.8431372549%, 93%);\n}\n"
+    );
+}
+
+/// `rgb/two_args::opaque_to/*` and `rgb/four_args/clamped/*`: a colour built from hex prints as hex while
+/// opaque and as `rgba(…)` the moment it is translucent, and an alpha argument selects the four-argument
+/// spelling. A negative zero is `0`, not `-0`.
+#[tokio::test]
+async fn representation_and_alpha_choose_the_spelling() {
+    for (input, want) in [
+        ("a {b: rgb(#123, 1)}", "#112233"),
+        ("a {b: rgb(#123, 0.5)}", "rgba(17, 34, 51, 0.5)"),
+        ("a {b: rgb(256, 0, 0, 0.5)}", "rgba(255, 0, 0, 0.5)"),
+        ("a {b: rgb(0, -0, 0, 0.5)}", "rgba(0, 0, 0, 0.5)"),
+        ("a {b: rgb(0, 0, 9999, 0.5)}", "rgba(0, 0, 255, 0.5)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// What must **not** happen. An argument the colour law cannot read declines the call, and the run keeps
+/// its verbatim text — `three_args::1_of_3` (`var()` is substituted before parsing, so the list can hold
+/// anything) is a golden of exactly that. And a hex written straight into a declaration is not a `Color`
+/// at all: `values/colors/alpha_hex/initial_letter` prints `#AbCd`, capitalisation intact, so normalising
+/// it here would be a regression dressed as a win.
+#[tokio::test]
+async fn unmodellable_arguments_decline_and_hex_is_left_alone() {
+    assert_eq!(
+        css("a {b: rgb(var(--foo), 3, 0.4)}").await,
+        "a {\n  b: rgb(var(--foo), 3, 0.4);\n}\n"
+    );
+    assert_eq!(css("a {b: #AbCd}").await, "a {\n  b: #AbCd;\n}\n");
+    assert_eq!(css("a {b: #98765432}").await, "a {\n  b: #98765432;\n}\n");
+    // Channels are numbers or percentages; `px` is neither, and no error message is invented for it (P7).
+    assert_eq!(
+        css("a {b: rgb(1px, 2px, 3px)}").await,
+        "a {\n  b: rgb(1px, 2px, 3px);\n}\n"
+    );
+}

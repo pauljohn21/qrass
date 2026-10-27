@@ -17,7 +17,8 @@ alwaysApply: true
    `#[ignore]`）。P1 已落：具名实参不当引用（`expr::named_argument`）、标识符 `+`/`-` 拼接
    （`expr::concatenation`）、绑定旗标剔除（`lexer::without_flags`）、**调用脊柱**（`calls.rs`+`builtins.rs` 注册表：
    `math.div/round/abs/ceil/floor/min/max/unit/is-unitless/percentage/compatible`，含 arity 与类型消息金样）、
-   `Value::Bool` 与 Sass 十位有效数字、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
+   `Value::Bool` 与 Sass 数字序列化（**自然表示不超 10 位有效数字则原样，否则截到 10 位小数**——
+   2026-10-27 由颜色金样纠正，原先记的“10 位有效数字”对 `67.8431372549%` 是错的）、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
    单项出壳 / 嵌套脱一层壳 / 否则原式保留）、**1.4d 前半：有理单位**（`src/unit.rs` 的 `Unit{num,den}` 是
    **保序**多重集 + 构造时同名抵消，`Value::Number(f64, Unit)`，`BinOp::{Mul,Div}` 与 `build()` 优先级；
    词法已把 `*` 提成 `Op`，`/` 只在调用参数内由 `expr::release_slashes` 变算子；复合单位不得离开 `calc( )`）与
@@ -32,13 +33,18 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **847/11,533**（7.35%，**实质通过 682** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `binding-content`）；
+   **以上均不得重做/重新发明**。当前基线 hrx **877/11,533**（7.61%，**实质通过 712** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `color-rgb`）；
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一主战场：**1.5 色彩**。地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
+   下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
+   表示法创建的**（unitless 通道→`rgb(18, 52, 86)`、有 `%` 通道→全部转 `%`（`173`→`67.8431372549%`）、
+   hex 造的且 opaque→`#112233`、一旦半透→`rgba(17, 34, 51, 0.5)`），通道入口夹紧；**声明里的裸 hex 仍走 `Raw`**
+   （`#AbCd` 连大小写都要保留）。基线 **877/11,533（实质 712）**，run `color-rgb`（+30，全在
+   `core_functions/color` 内，`regress=0`）。下一步按 1.5 记录里的顺序：`hsl`/`hwb` → `change` → 颜色 `==`。
+   地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
    **最小切口是 `core_functions/color/rgb/three_args/*`，不是 `values/colors/**`**（后者几乎全要颜色 `==`
-   比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置动作是 `builtins` **按域拆目录**
-   （`builtins.rs` 已 436 行，颜色函数一接必越 500 红线）。再往下是 1.7 其余分派 → **P7 诊断消息**：
+   比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置的 `builtins` **按域拆目录**已做（
+   `builtins/mod.rs` + `math.rs` + `color.rs`）。再往下是 1.7 其余分派 → **P7 诊断消息**：
    语料里大量 `error` 用例缺的是**消息**而不是错误管道，现已积到单条级别（例：
    `math/unitless::error/wrong_name` 要 `Undefined function.`，即 1.4d 唯一未复现的候选行）。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace

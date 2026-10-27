@@ -20,6 +20,7 @@
 use crate::value::Value;
 use crate::{ErrorKind, SassError};
 
+mod color;
 mod math;
 
 /// A builtin's contract. `params` are the labels a `$label:` argument binds to, in declaration order.
@@ -38,7 +39,7 @@ pub struct Builtin {
 
 /// Every domain's registrations. Searched in order, and names are unique across domains — a duplicate
 /// would shadow silently, so [`signature`]'s first match is the only rule that matters.
-static BUILTINS: &[&[&Builtin]] = &[math::MATHS];
+static BUILTINS: &[&[&Builtin]] = &[math::MATHS, color::COLORS];
 
 /// The signature for a callee name, if we have one. Unknown names (`color.hwb`, `var`, `map.merge`) are
 /// `None`, so `calls::known_call` leaves the run exactly as it is today.

@@ -17,6 +17,7 @@ mod builtins;
 mod calc;
 mod calculation;
 mod calls;
+mod color;
 mod env;
 mod exec;
 mod expr;

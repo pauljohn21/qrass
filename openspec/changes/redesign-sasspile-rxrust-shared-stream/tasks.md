@@ -436,6 +436,24 @@
       ③ `rgb()`/`rgba()` 三/四参 + `%`/夹紧 + 通道访问（`red()/green()/blue()/alpha()` 与 `color.*`），
          经 `core_functions/color/rgb/**` 验；新增域只需在 `builtins/` 加一个文件 + 注册表加一项。
       ④ 再才考虑 `hsl`/`hwb` 与 `change`（后者最大的单一群体 311 条，但依赖 `math.is_*` 与逐参校验）。
+      **③ 已落地（`rgb`/`rgba`）**：`src/color.rs`（239 行，`Color` + `Representation{Legacy,Percent,Hex}`）+
+      `builtins/color.rs`（80 行）+ `Value::Color`。**关键律（逐条 fixture）：颜色必须记住自己是用什么
+      表示法造的** —— unitless 通道→`rgb(18, 52, 86)`；任一处出现 `%`→整个颜色转 `%`（`173` → `67.8431372549%`）
+      而已写定的 `%` 一字不改（`7.1%` 不能变成 `7.0980392157%`，所以**通道存自己那把尺子**而不是先归一到 0–255）；
+      hex 造的 opaque → `#112233`，但一旦半透就改走 `rgba(17, 34, 51, 0.5)`（`two_args::opaque_to/partial`，
+      比上一版“8 位 hex”的推定更正）；通道入口夹紧（256→255、-1→0、-0→0、NaN→0）。**声明里的裸 hex 不解析**
+      （`#AbCd` 连大小写都得留，`values/colors/alpha_hex/initial_letter`）。
+      **两个已知代价，记录而不掩饰**：`rgb`/`rgba` 先注册为 variadic（三参与四参都要收，定长签名会在第四参报
+      “只允许 3 个”），代价是 `rgb($red: 0, …)`（`three_args/unitless::named`）暂仍逐字；要它得先给注册表
+      加“可选参数”概念。`calc(infinity)` 这类通道位也要先能拆回数才能算（`four_args/clamped` 里四行）。
+      **实测**：hrx **847 → 877（实质 682 → 712）**，`ledger diff builtins-split color-rgb` = **`regress=0 net=30`**，
+      簇内 scoped diff 同数（`core_functions/color` 6,323 → 6,293）；无效错误仍 **53**。分布：
+      `rgb/four_args/clamped` 9、`rgb/two_args` 7、`rgb/four_args/alpha` 5、`rgb/three_args/unitless` 3、
+      `rgb/four_args/in_gamut` 3、`rgb/three_args/percents` 2、`color/rgba` 1。新增 `tests/color.rs` 4 例钉住表示律
+      与“不得发生”的边界（`rgb(var(--foo), 3, 0.4)` 仍逐字、`#AbCd` 不变形、`rgb(1px,…)` 不造错误消息）。
+      **顺带纠正了一条早先记错的律**：`format_number` 不是“10 位**有效**数字”而是“**不超 10 位有效则原样，
+      否则截到 10 位小数**”——对 `0.7636363636` 两种算法巧合同值所以一直没暴露，颜色换算（12 位有效）才把它
+      推出来；同时 `1px+2px` 等行与 `f64::MAX`、`0.000000000000001` 仍在 A/B 里不动（net 读数已证）。
       **不得跨过去的事**：期望错误那 ~227 条要的是逐参数类型/单位消息（P1.7），不得用“不报错抹平”拿分。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
