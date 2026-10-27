@@ -285,19 +285,38 @@ impl Color {
         }
     }
 
-    /// Whether any rounded channel falls outside `0–255`, which sends an `rgb`-family colour to the hsl
-    /// form: `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
+    /// Whether the colour sits outside the gamut, which sends an `rgb`-family colour to the hsl form:
+    /// `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
     /// `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/rgb.hrx::red/out_of_range`,
     /// `change/hsl.hrx::lightness/above_range`).
     ///
-    /// **Rounded**, because rounding belongs to printing: `color.change(red, $lightness: 0.5%)` implies a
-    /// blue channel of `-1.1e-15` — float dust for zero — and testing the raw double made that row look out
-    /// of gamut and print `hsl(0, 100%, 0.5%)` where the corpus prints `rgb(1%, 0%, 0%)`
-    /// (`…::lightness/fraction`).
+    /// A colour whose axes a call **wrote** is measured on those axes, because that is what the call named:
+    /// `color.adjust(plum, $saturation: 53%)` adds up to 100.2868217054% and prints hsl
+    /// (`adjust/hsl.hrx::saturation/max_remaining`) even though the byte it implies, 255.19, still rounds
+    /// back inside `0–255`. The hue takes no part — it is folded into `0–360` when it is read, and no
+    /// fixture treats an angle as a gamut.
+    ///
+    /// Float dust is bounded by the last digit anything here can print (half of the tenth decimal place,
+    /// the tolerance [`Channel::whole`] uses), not by half a byte: `color.change(red, $lightness: 0.5%)`
+    /// implies a blue of `-1.1e-15` and the corpus prints `rgb(1%, 0%, 0%)` (`…::lightness/fraction`), while
+    /// rounding before comparing would also have swallowed the 255.19 above.
+    ///
+    /// The low end is **asymmetric** between the two axes, both stated by rows: a saturation below zero is
+    /// still a colour that prints its bytes (`color.change(plum, $saturation: -20%)` →
+    /// `rgb(69.6470588235%, 79.7647058824%, 69.6470588235%)`, `change/hsl.hrx::saturation/below_range`),
+    /// while a lightness below zero is not (`color.change(red, $lightness: -20%)` → `hsl(0, 100%, -20%)`,
+    /// `…::lightness/below_range`).
     fn out_of_gamut(&self) -> bool {
-        self.channels
-            .iter()
-            .any(|channel| !(0.0..=255.0).contains(&channel.byte().round()))
+        const DUST: f64 = 5e-11;
+        match self.authored {
+            Some([_, saturation, lightness]) => {
+                saturation > 100.0 + DUST || lightness < -DUST || lightness > 100.0 + DUST
+            }
+            None => self
+                .channels
+                .iter()
+                .any(|channel| !(0.0..=255.0).contains(&channel.byte().round())),
+        }
     }
 
     /// The `hsl`/`hsla` spelling of three axes — shared with [`Representation::Hwb`], which prints as hsl.

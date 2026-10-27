@@ -55,9 +55,68 @@ fn needs_labels(args: Vec<Value>) -> Result<Value, SassError> {
     ))
 }
 
-/// One `color.change` call: read the colour, replace the channels it names — as bytes, or as hsl axes —
-/// then let the colour's own printing law decide the output form.
+/// `color.adjust(black, $red: 255)` → `red` and `color.adjust(#abcdef, $red: 200)` → `#ffcdef`
+/// (`core_functions/color/adjust/rgb.hrx::{red/max,red/above_max}`): the same routing as [`COLOR_CHANGE`],
+/// with each named channel **moved** by its argument instead of set to it. Bytes cannot pass the ends —
+/// where `color.change` keeps an out-of-range channel and prints hsl, `adjust` clamps to `0–255`.
+///
+/// The axes follow *different* laws per space, each of them stated by rows:
+/// * hwb adds first and normalises an overflowing pair afterwards: `$whiteness: 100%` on `#cc6666` →
+///   `rgb(87.5%, 87.5%, 87.5%)` (`adjust/hwb.hrx::whiteness/max`), and `$whiteness: -100%` leaves
+///   `hsl(0, 700%, 10%)` — out of gamut, printed from the written axes (`…::whiteness/min`);
+/// * hsl does **not** take the legacy clamp: `color.adjust(plum, $saturation: 53%)` keeps 100.2868217054%
+///   and prints hsl (`adjust/hsl.hrx::saturation/max_remaining`), while the legacy `saturate(plum, 53%)`
+///   clamps at 100 and prints `#ff7eff` (`saturate.hrx::two_args/max_remaining`) — so
+///   [`Color::transform_axes`] remains the legacy entry and is not used here. Only the saturation's **lower**
+///   bound clamps (`…::saturation/{min,min_remaining}` want the grey a zero saturation gives), while
+///   `$lightness: -100%` stays negative and prints `hsl(0, 100%, -50%)` (`…::lightness/min`);
+/// * a call that names no channel is a no-op, and `$alpha:` alone still moves the alpha — clamped to `0–1`
+///   (`adjust/no_channels.hrx::{positional,named}` and its `alpha/*` group, where `rgba(red, 0.5)` plus `1`
+///   prints `red` again). No `change` row states either, so `change` keeps declining there.
+pub(super) static COLOR_ADJUST: Builtin = Builtin {
+    name: "color.adjust",
+    params: &["color"],
+    optional: &[
+        "red",
+        "green",
+        "blue",
+        "alpha",
+        "hue",
+        "saturation",
+        "lightness",
+        "whiteness",
+        "blackness",
+        "space",
+    ],
+    variadic: true,
+    apply: needs_labels,
+    labelled: Some(adjusted),
+};
+
+/// Whether a call **replaces** a channel (`color.change`) or **moves** it by an offset (`color.adjust`).
+///
+/// One type rather than a `bool` parameter, and one routing function rather than two copies of it: the two
+/// differ only in the arithmetic on the value and in where clamping applies, and a law written down twice is
+/// how `fractional()` and the gamut test each came to disagree with the corpus this week.
+#[derive(Clone, Copy, PartialEq)]
+enum Writing {
+    Set,
+    Shift,
+}
+
+/// One `color.change` call.
 fn changed(given: Vec<Given>) -> Result<Value, SassError> {
+    route(given, Writing::Set)
+}
+
+/// One `color.adjust` call.
+fn adjusted(given: Vec<Given>) -> Result<Value, SassError> {
+    route(given, Writing::Shift)
+}
+
+/// One `color.change`/`color.adjust` call: read the colour, apply the channels it names — as bytes, as hsl
+/// axes, or as hwb axes — then let the colour's own printing law decide the output form.
+fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
     let decline = Err(SassError::new(
         "a colour or channel this slice cannot change",
     ));
@@ -87,7 +146,7 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
     // with axes, would need an order no fixture states, and those decline.
     let named = bytes.len() + hsl.len() + hwb.len() + usize::from(hue);
     if beyond
-        || named == 0
+        || (named == 0 && writing == Writing::Set)
         || (!hsl.is_empty() && !hwb.is_empty())
         || (!bytes.is_empty() && named > bytes.len())
     {
@@ -105,11 +164,22 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
         Some(reads) => reads,
         None => return decline,
     };
-    let built = if !bytes.is_empty() {
+    let built = if named == 0 {
+        // `adjust` with nothing named but `$alpha:`: the colour itself carries through, unread and unrounded
+        // (`adjust/no_channels.hrx::positional` is `color.adjust(red)` → `red`).
+        Some(colour.clone())
+    } else if !bytes.is_empty() {
         bytes
             .into_iter()
             .try_fold(colour.clone(), |colour, (name, index)| {
-                let value = byte(Given::find(&given, name)?)?;
+                let written = byte(Given::find(&given, name)?)?;
+                // `adjust` moves the channel and cannot pass the ends: `color.adjust(#abcdef, $red: 200)`
+                // is `#ffcdef`, the byte clamped to 255 (`adjust/rgb.hrx::red/above_max`). `change` keeps
+                // the value it was given and lets the out-of-gamut rule print hsl instead.
+                let value = match writing {
+                    Writing::Set => written,
+                    Writing::Shift => (colour.byte(index)? + written).clamp(0.0, 255.0),
+                };
                 colour.with_channel(index, value)
             })
     } else if !hwb.is_empty() {
@@ -117,11 +187,40 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
             Some(axes) => axes,
             None => return decline,
         };
+        // No clamp here for either writing: the pair is normalised by its sum afterwards, which is what
+        // `color.adjust(#cc6666, $whiteness: 100%)` → `rgb(87.5%, …)` shows (`adjust/hwb.hrx::whiteness/max`).
+        //
+        // A channel the call did **not** name keeps its current value — which reads differently per writing:
+        // `change` needs the value itself (nothing is written), `adjust` needs no offset. Feeding the
+        // current value through the same `keep(..)` path here doubled it (`#993333` with `$blackness: 40%`
+        // came out `#555555` instead of `#333333`, `…::blackness/high`), because the shift then added what
+        // was already there.
+        let applied = |index: usize, name: &str| match writing {
+            Writing::Set => keep(&reads, name, current[index]),
+            Writing::Shift => current[index] + step(&reads, name),
+        };
         colour.with_hwb(
-            keep(&reads, "hue", current[0]),
-            keep(&reads, "whiteness", current[1]),
-            keep(&reads, "blackness", current[2]),
+            applied(0, "hue"),
+            applied(1, "whiteness"),
+            applied(2, "blackness"),
         )
+    } else if writing == Writing::Shift {
+        // The legacy clamp does not belong here: `adjust/hsl.hrx::saturation/max_remaining` keeps the
+        // 100.2868217054% that `color.adjust(plum, $saturation: 53%)` adds up to and prints it as hsl, while
+        // `saturate.hrx::two_args/max_remaining` gives `#ff7eff` for the same move — two entries, because
+        // two opposite laws are attested ([`Color::transform_axes`] is the legacy one).
+        //
+        // Asymmetric bounds, both from rows: a saturation pushed below zero becomes the grey a zero is
+        // (`…::saturation/{min,min_remaining}` → `rgb(74.7058823529%, …)`), a lightness pushed below zero
+        // stays negative and prints hsl (`…::lightness/min` → `hsl(0, 100%, -50%)`). The hue wraps, which
+        // is the one bound both entries share (`…::hue/arg_above_max` reads 540 as 180).
+        colour.with_axes(|[hue, saturation, lightness]| {
+            [
+                (hue + step(&reads, "hue")).rem_euclid(360.0),
+                (saturation + step(&reads, "saturation")).max(0.0),
+                lightness + step(&reads, "lightness"),
+            ]
+        })
     } else {
         colour.with_axes(|[hue, saturation, lightness]| {
             [
@@ -140,15 +239,32 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
     // borrowing a law from a different function.
     let alpha = match Given::find(&given, "alpha") {
         Some(value) => match number(value) {
-            Some(alpha) if (0.0..=1.0).contains(&alpha) => Some(alpha),
+            // `adjust` moves the alpha and `clamp_alpha` keeps it in `0–1`, which is what
+            // `color.adjust(black, $red: 12, $green: 24, $blue: 48, $alpha: -0.3)` → `rgba(12, 24, 48, 0.7)`
+            // shows (`adjust/rgb.hrx::alpha_arg`); `change` accepts only an in-range value, since no `change`
+            // row states what clamping would mean there.
+            Some(alpha) => match writing {
+                Writing::Set if (0.0..=1.0).contains(&alpha) => Some(alpha),
+                Writing::Shift => Some(alpha),
+                Writing::Set => return decline,
+            },
             _ => return decline,
         },
         None => None,
     };
-    Ok(Value::Color(match alpha {
-        Some(alpha) => built.with_alpha(alpha),
-        None => built,
+    Ok(Value::Color(match (alpha, writing) {
+        (Some(alpha), Writing::Set) => built.with_alpha(alpha),
+        (Some(alpha), Writing::Shift) => built.with_alpha(built.alpha() + alpha),
+        (None, _) => built,
     }))
+}
+
+/// The offset a call named for one axis, or zero when it did not — `adjust` adds these, `change` never does.
+fn step(reads: &[(&str, f64)], name: &str) -> f64 {
+    reads
+        .iter()
+        .find(|(read, _)| *read == name)
+        .map_or(0.0, |(_, value)| *value)
 }
 
 /// The value to write for one axis, or the colour's current one when the call did not name it.
