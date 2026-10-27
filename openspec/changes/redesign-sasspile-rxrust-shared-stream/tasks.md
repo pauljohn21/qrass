@@ -711,8 +711,28 @@
         去掉，只留注释说明缺口（行仍红）。
       • **仍不做也不装成做了的两条**：① `$channels:` 绑定（脊柱只把参数递到**第一个缺位**为止，
         所带标签的列表递到 body 时为空）——要修得改绑定语义，属脊柱的下一刀；② 现代形的 ` / alpha`
-        （语料把它当 **斜杠列表**：`rgb/list.slash.hrx` 用 `list.slash(0 255 127, 0)` 得到同一个颜色），
+        （语料把它当 **斜杠列表**：`rgb/one_arg/alpha.hrx::slash_list` 用 `list.slash(0 255 127, 0)` 得到同一个颜色），
         需先有 slash 列表值；`rgb/one_arg/alpha` 那 18 条与 `hsl/one_arg/alpha` 12 条因此仍红。
+      **⑰ 现代形 ` / alpha` 已落（斜杠列表），上一刀留的缺口收了一半**（已实测）：
+      • **模型不是猜的**：同一文件里 `rgb/one_arg/alpha.hrx::slash_list` 写的是 `rgb(list.slash(0 255 127, 0))`，
+        与 `in_gamut/transparent` 的 `rgb(0 255 127 / 0)` **期望同一个输出** —— 语料自己声明了：alpha 是
+        **斜杠列表的第二元**，不是“最后一个通道被除”。因此新增 `Expr::Slash` → `Value::Slash`（第二个
+        列表形，仍只在实参内产生），而 `127/0.3` 这种“粘在分量里的 `/`”仍走算术（`release_slashes` 负责），
+        否则 `127 / 0.3` 会被误读成除法。
+      • 拿到的律（均逐行来自两个 alpha 文件）：百分比 alpha 照样换算（`rgb(18 52 86 / 50%)` → `0.5`）；
+        alpha=1 退回三参写法而 0 不退（`rgb(190 173 237 / 1)` → `rgb(…)`，`rgb(0 255 127 / 0)` → `rgba(…, 0)`）；
+        alpha 夹紧但轴不变（`hsl(0 100% 50% / 1.1)` → 三参、`/ -0.1` → `hsla(…, 0)`，而
+        `hsl(0 100% 9999% / 0.5)` 保留 `9999%`）。
+      • **实测**：hrx **1046 → 1060（实质 881 → 895）**，`ledger diff space-args slash-alpha` =
+        **`regress=0 net=14`**（rgb in_gamut 5 条 + hsl 7 条 + `rgba`/`hsla` 各 1），无效错误仍 **53**；
+        120 测试 / 0 失败、clippy exit 0、sasslint exit 0。
+      • **我自己又犯了一次“把输入编出来”**：`in_gamut/parenthesized` 我凭例子名猜成
+        `rgb((0 255 127) / (0.3))` 并钉进断言 ⇒ 直接挂。原文其实是 `rgb(0 255 127 / 0.3)`（行名里的
+        “额外括号”不在这行上）。同时我把注释里的 `list.slash(18 52 86, 0.5)` 写成了不存在的行——三处
+        引用已逐条改回原文。**教训：注释/断言里的每个字面量都必须从语料复制，不能“按格式造”。**
+      • **本刀仍不收的三类（保持红）**：`in_gamut/named`（要 `$channels:` 绑定）、`slash_list`（要注册
+        `list.slash`）、`missing/{slash,slash_list}`（要 `none` 值；注意语料对 `rgb` 全逐字、对 `hsl` 却
+        半重格式化为 `hsl(180deg 60% 50% / none)`，两者不是同一条规则）。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

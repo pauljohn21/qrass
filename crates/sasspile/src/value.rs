@@ -45,6 +45,11 @@ pub enum Value {
     /// file's `$channels:` row shows a label binds this whole value). Components are owned values so a
     /// consumer reads them structurally instead of re-splitting text.
     Space(Vec<Value>),
+    /// A **slash-separated list**, the value form of `Expr::Slash`: CSS Color 4's `rgb(18 52 86 / 0.5)` is
+    /// the same call as `rgb(list.slash(0 255 127, 0))` for `rgb(0 255 127 / 0)` — the corpus pairs those two
+    /// rows in `rgb/one_arg/alpha.hrx::{slash_list,in_gamut/transparent}` with one and the same output — so
+    /// the alpha is a slash list's second element, not a division of the last channel.
+    Slash(Vec<Value>),
 }
 
 impl Value {
@@ -69,6 +74,13 @@ impl Value {
                 .map(Value::to_css)
                 .collect::<Vec<String>>()
                 .join(" "),
+            // One space either side of the slash, which is how the corpus prints an unconsumed slash list
+            // (`values/lists/*`; `rgb(0 255 127 / none)` stays exactly that).
+            Value::Slash(items) => items
+                .iter()
+                .map(Value::to_css)
+                .collect::<Vec<String>>()
+                .join(" / "),
         }
     }
 
@@ -77,7 +89,12 @@ impl Value {
     /// `values/numbers/units/multiple::multiple_denominators` — so such a result never becomes a
     /// declaration value; see [`crate::exec::State::evaluated`].
     pub fn is_plain(&self) -> bool {
-        !matches!(self, Value::Number(_, unit) if !unit.is_plain())
+        match self {
+            Value::Number(_, unit) => unit.is_plain(),
+            // A list is only printable outside a calculation if every element is.
+            Value::Space(items) | Value::Slash(items) => items.iter().all(Value::is_plain),
+            _ => true,
+        }
     }
 
     /// `a + b` in Sass: convert `b` into `a`'s unit, adopting a unitless side's counterpart.

@@ -118,3 +118,45 @@ async fn an_unreadable_component_keeps_the_run_verbatim() {
         );
     }
 }
+
+/// The modern **alpha-after-a-slash** spelling, one assertion per row of
+/// `rgb/one_arg/alpha.hrx` and `hsl/one_arg/alpha.hrx`. The corpus states what the structure is: its
+/// `slash_list` row writes `rgb(list.slash(0 255 127, 0))` and expects the same colour as
+/// `rgb(0 255 127 / 0)` (`in_gamut/transparent`), so the alpha is a slash list's **second element**, not a
+/// division of the last channel — which is also why a component like `127/0.3` (a `/` glued inside it) stays
+/// arithmetic.
+///
+/// Rows still NOT claimed here, because they need abilities this compiler lacks:
+/// * `in_gamut/named` (`rgb($channels: 0 255 127 / 0.3)`) — the `$channels:` binding gap noted above;
+/// * `slash_list` — `list.slash(…)` is not registered yet;
+/// * `missing/slash` and `missing/slash_list` — `none` as an alpha, where the corpus keeps the run as text
+///   for `rgb` but half-reformats it (`hsl(180deg 60% 50% / none)`) for `hsl`.
+#[tokio::test]
+async fn modern_alpha_follows_a_slash() {
+    for (input, want) in [
+        ("a {b: rgb(18 52 86 / 0.5)}", "rgba(18, 52, 86, 0.5)"),
+        // A percentage alpha converts, same law as the comma form's fourth argument.
+        ("a {b: rgb(18 52 86 / 50%)}", "rgba(18, 52, 86, 0.5)"),
+        // An alpha of one returns the three-argument spelling; zero does not.
+        ("a {b: rgb(190 173 237 / 1)}", "rgb(190, 173, 237)"),
+        ("a {b: rgb(0 255 127 / 0)}", "rgba(0, 255, 127, 0)"),
+        ("a {b: rgb(0 255 127 / 0.3)}", "rgba(0, 255, 127, 0.3)"),
+        ("a {b: hsl(180 60% 50% / 0.5)}", "hsla(180, 60%, 50%, 0.5)"),
+        ("a {b: hsl(180 60% 50% / 1)}", "hsl(180, 60%, 50%)"),
+        ("a {b: hsl(180 60% 50% / 0)}", "hsla(180, 60%, 50%, 0)"),
+        // The alpha clamps, the axes keep their own laws (negative saturation to 0, lightness untouched).
+        ("a {b: hsl(0 100% 50% / 1.1)}", "hsl(0, 100%, 50%)"),
+        ("a {b: hsl(0 100% 50% / -0.1)}", "hsla(0, 100%, 50%, 0)"),
+        ("a {b: hsl(0 -0.1% 50% / 0.5)}", "hsla(0, 0%, 50%, 0.5)"),
+        (
+            "a {b: hsl(0 100% 9999% / 0.5)}",
+            "hsla(0, 100%, 9999%, 0.5)",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}

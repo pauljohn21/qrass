@@ -82,6 +82,19 @@ fn channels(args: Vec<Value>) -> Result<Value, SassError> {
             [red, green, blue] => Color::new(red, green, blue, 1.0),
             _ => None,
         },
+        // `rgb(18 52 86 / 0.5)` → `rgba(18, 52, 86, 0.5)` (`rgb/one_arg/alpha.hrx::in_gamut/partial`): the
+        // slash list's second element is the alpha, read under the same law as the comma form's fourth
+        // argument — so a percentage alpha converts (`…::in_gamut/percent` gives `50%` → `0.5`) and an
+        // alpha of one returns the three-argument spelling (`…::in_gamut/opaque`).
+        [Value::Slash(list)] => match list.as_slice() {
+            [Value::Space(parts), given] => match parts.as_slice() {
+                [red, green, blue] => {
+                    alpha(given).and_then(|alpha| Color::new(red, green, blue, alpha))
+                }
+                _ => None,
+            },
+            _ => None,
+        },
         [source] => Color::of(source),
         [source, given] => match (Color::of(source), alpha(given)) {
             (Some(color), Some(alpha)) => Some(color.with_alpha(alpha)),
@@ -107,6 +120,19 @@ fn hsl_channels(args: Vec<Value>) -> Result<Value, SassError> {
         // the arguments, not re-read them.
         [Value::Space(parts)] => match parts.as_slice() {
             [hue, saturation, lightness] => Color::hsl(hue, saturation, lightness, 1.0),
+            _ => None,
+        },
+        // The alpha-after-a-slash spelling, same law as `rgb`: `hsl(0 100% 50% / 1.1)` clamps the alpha to
+        // one and so prints the three-argument form, while `/ -0.1` clamps to `0` and keeps `hsla(…)`
+        // (`hsl/one_arg/alpha.hrx::clamped/alpha/{above,below}`). Axes keep their own rules unchanged
+        // (`…::clamped/saturation` gives `0%`, `…::clamped/lightness` keeps `9999%`).
+        [Value::Slash(list)] => match list.as_slice() {
+            [Value::Space(parts), given] => match parts.as_slice() {
+                [hue, saturation, lightness] => {
+                    alpha(given).and_then(|alpha| Color::hsl(hue, saturation, lightness, alpha))
+                }
+                _ => None,
+            },
             _ => None,
         },
         _ => None,

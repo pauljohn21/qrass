@@ -53,6 +53,11 @@ pub enum Expr {
     /// row in the same file proves it is one argument, since a label binds exactly one).
     /// Unlike [`Expr::Concat`] the separators are **kept**, because that is how a space list prints.
     Space(Vec<Expr>),
+    /// A **slash-separated list**: CSS Color 4 writes `rgb(0 255 127 / 0)` and the corpus states the same call
+    /// as `rgb(list.slash(0 255 127, 0))` — `rgb/one_arg/alpha.hrx::{in_gamut/transparent,slash_list}` expect
+    /// one and the same colour — so the alpha is not an operator applied to the last channel but the second
+    /// element of a two-element slash list whose first element is a space list.
+    Slash(Vec<Expr>),
     /// a `calc( … )` / `min( … )` / `max( … )` / `clamp( … )` read by `crate::calculation` (tasks 1.4a).
     /// It carries the **finished value** rather than a token tree, because the reading needs the
     /// environment (a bound `$a` is the difference between `calc(1px)` and `calc(calc(1px))`), which an
@@ -242,37 +247,79 @@ pub fn argument_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
     })
 }
 
-/// One **space-separated argument**, cut at top-level whitespace only: the components are token runs, never
-/// pieces of a string, which is the difference between reading `18 52 86` as three numbers and `split(' ')`
-/// ing text that happens to contain spaces. Every component must read as an operand or the whole run is
-/// unreadable — and that is what keeps the corpus's `missing/*` rows honest: `rgb(none 52 66)` prints as
-/// written (`none` is not a value this compiler models yet), it does not become a colour with a hole in it.
+/// One **space- and/or slash-separated argument**, cut at lexeme boundaries only: the components are token
+/// runs, never pieces of a string, which is the difference between reading `18 52 86` as three numbers and
+/// `split(' ')`-ing text that happens to contain spaces. Every component must read as an operand or the whole
+/// run is unreadable — and that is what keeps the corpus's `missing/*` rows honest: `rgb(none 52 66)` prints
+/// as written (`none` is not a value this compiler models yet), it does not become a colour with a hole in it.
 ///
-/// A run holding a separator of its own (`0 255 127 / 0.3`, whose `/` was released into `Tok::Op`) is refused
-/// here too, because the alpha-after-a-slash spelling is a second law with its own fixtures; guessing it in
-/// the same cut would turn `rgb(0 255 127 / 0.3)` into a division.
+/// A `/` counts as the **list separator** only when it is a component of its own (`0 255 127 / 0.3`, spaces
+/// on both sides). A `/` glued inside a component (`127/0.3`) belongs to the arithmetic that
+/// [`release_slashes`] exists to expose, and `+`/`-`/`*` anywhere means this is not a list either — guessing
+/// otherwise would turn `rgb(0 255 127 / 0.3)` into a division of `86` by `0.3`.
 pub(crate) fn space_run(toks: &[Tok], env: &Env) -> Option<Expr> {
     let parts = crate::calls::cut_at(toks, |tok| matches!(tok, Tok::Space(_)))
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<Vec<Tok>>>();
-    // A component carrying an operator of its own (`/ 0.3`, `2 * 3`) is not a space-separated list of
-    // values, it is an operation or the alpha separator — neither is read here.
-    let plain = parts.iter().all(|part| {
-        !part.iter().any(|tok| {
-            matches!(
-                tok,
-                Tok::Op('/') | Tok::Op('*') | Tok::Op('+') | Tok::Op('-')
-            )
+    let operator = |tok: &Tok| {
+        matches!(
+            tok,
+            Tok::Op('/') | Tok::Op('*') | Tok::Op('+') | Tok::Op('-')
+        )
+    };
+    // The separator is a component **of its own** — `/` with layout either side. Anything else carrying an
+    // operator (`127/0.3`, `2 * 3`) is arithmetic, not a list, so the whole run is refused here and stays
+    // text.
+    let separator = |part: &[Tok]| part.len() == 1 && matches!(part[0], Tok::Op('/'));
+    let edge = |part: &Vec<Tok>| separator(part);
+    if parts.first().is_some_and(edge) || parts.last().is_some_and(edge) {
+        return None;
+    }
+    if parts
+        .iter()
+        .any(|part| !separator(part) && part.iter().any(operator))
+    {
+        return None;
+    }
+    // Collect the run into groups. Written as a fold over the parts, not a mutable index walk: the depth of
+    // the structure is data carried by the accumulator.
+    let groups = parts
+        .iter()
+        .fold(Vec::<Vec<&Vec<Tok>>>::new(), |mut groups, part| {
+            if separator(part) {
+                groups.push(Vec::new());
+            } else if let Some(last) = groups.last_mut() {
+                last.push(part);
+            } else {
+                groups.push(vec![part]);
+            }
+            groups
+        });
+    if groups.len() > 2 {
+        return None;
+    }
+    let read = groups
+        .iter()
+        .map(|group| {
+            let values = group
+                .iter()
+                .map(|part| operand_expr(part, env))
+                .collect::<Option<Vec<Expr>>>()?;
+            match values.len() {
+                1 => values.into_iter().next(),
+                0 => None,
+                _ => Some(Expr::Space(values)),
+            }
         })
-    });
-    let read = plain.then(|| {
-        parts
-            .iter()
-            .map(|part| operand_expr(part, env))
-            .collect::<Option<Vec<Expr>>>()
-    })??;
-    (read.len() > 1).then_some(Expr::Space(read))
+        .collect::<Option<Vec<Expr>>>()?;
+    match read.len() {
+        2 => Some(Expr::Slash(read)),
+        // A single group only means something when it holds more than one component; a lone lexeme is the
+        // caller's business, not this reading's.
+        1 if matches!(read.as_slice(), [Expr::Space(..)]) => read.into_iter().next(),
+        _ => None,
+    }
 }
 
 /// A call argument's lexemes with every `/` released as its own operator: `Word("1/1px")` becomes
@@ -419,6 +466,11 @@ impl Expr {
                 .map(|part| part.eval(env))
                 .collect::<Result<Vec<Value>, SassError>>()
                 .map(Value::Space),
+            Expr::Slash(parts) => parts
+                .iter()
+                .map(|part| part.eval(env))
+                .collect::<Result<Vec<Value>, SassError>>()
+                .map(Value::Slash),
             // Reading a calculation already resolved it against the environment — that is why the variant
             // carries a value instead of a token tree — so evaluating it is the identity.
             Expr::Calculation(value) => Ok(value.clone()),
