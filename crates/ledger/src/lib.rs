@@ -370,14 +370,19 @@ fn runs(conn: &Connection) -> QResult<()> {
     })
 }
 
-/// List one run's failures. The optional pattern matches the **case key or the failure detail**, because
-/// the second is what the `FAIL → FAIL` blind spot needs: a pass count cannot see that an invented
-/// `Undefined variable` became a different wrong answer, so `ledger failures <run> "unexpected error"` has
-/// to be countable straight from the record (the harness no longer keeps a TSV to grep).
+/// List one run's failures. Each pattern matches the **case key or the failure detail**, and **all** of
+/// them must match the same row — so a cluster can be bucketed by *expected outcome* without a shell
+/// pipeline: `ledger failures <run> core_functions/color/hwb "expected error"` is "how many of hwb's
+/// failures want a diagnostic", the split that decides whether a slice is a capability or a message.
+///
+/// One needle still needs the detail side, because that is the `FAIL → FAIL` blind spot: a pass count cannot
+/// see that an invented `Undefined variable` became a different wrong answer, so
+/// `ledger failures <run> "unexpected error"` has to be countable straight from the record (the harness no
+/// longer keeps a TSV to grep).
 fn failures(conn: &Connection, args: &[String]) -> QResult<()> {
-    let (run, needle, count) = failure_query(args);
-    let rows = failing(conn, &run, &needle)?;
-    // `--count` exists because "how many rows match this needle" is the reading a step is gated on
+    let (run, needles, count) = failure_query(args);
+    let rows = failing_any(conn, &run, &needles)?;
+    // `--count` exists because "how many rows match these needles" is the reading a step is gated on
     // (`ledger failures <run> "unexpected error"` must equal the recorded baseline), and counting lines
     // with `grep -c` was misread twice when the log styling got in the way. One number, no pipeline.
     if count {
@@ -389,12 +394,13 @@ fn failures(conn: &Connection, args: &[String]) -> QResult<()> {
     Ok(())
 }
 
-/// What `ledger failures` was asked for: `(run, needle, count-only)`.
+/// What `ledger failures` was asked for: `(run, needles, count-only)`. Two or more needles are combined with
+/// AND; an empty list means "every failure of this run".
 ///
 /// `--count` is a flag and never a pattern. Reading it as the needle would not fail — it would answer
 /// “zero failures”, the exact shape of silent wrongness this crate has been burned by twice, so the split
 /// lives here where a test can pin it.
-pub fn failure_query(args: &[String]) -> (String, String, bool) {
+pub fn failure_query(args: &[String]) -> (String, Vec<String>, bool) {
     let count = args.iter().any(|arg| arg == "--count");
     let given = args
         .iter()
@@ -403,7 +409,7 @@ pub fn failure_query(args: &[String]) -> (String, String, bool) {
         .collect::<Vec<String>>();
     (
         given.first().cloned().unwrap_or_default(),
-        given.get(1).cloned().unwrap_or_default(),
+        given.iter().skip(1).cloned().collect::<Vec<String>>(),
         count,
     )
 }
@@ -452,14 +458,36 @@ pub fn passing(conn: &Connection, run: &str, prefix: &str) -> rusqlite::Result<V
 /// measurement: `failing(<baseline>, "unexpected error")` = 55, the number the snapshot had given.
 /// Exposed as a function so a test can assert rows instead of parsing log output.
 pub fn failing(conn: &Connection, run: &str, needle: &str) -> rusqlite::Result<Vec<String>> {
+    failing_any(conn, run, &[needle.to_string()])
+}
+
+/// The same rows filtered by **every** needle given, matched against `"key | detail"` as one haystack.
+///
+/// The first needle goes into SQL (so the query stays index-driven for the common single-pattern case); the
+/// rest are applied here. Matching lowercases both sides because SQL `LIKE` is case-insensitive for ASCII —
+/// a second needle that behaved differently from the first would make `failures <run> A B` depend on the
+/// order of its arguments, which is how a reading silently changes meaning.
+pub fn failing_any(
+    conn: &Connection,
+    run: &str,
+    needles: &[String],
+) -> rusqlite::Result<Vec<String>> {
     let rid = run_id(conn, run)?;
-    let pattern = format!("%{needle}%");
+    let first = needles.first().cloned().unwrap_or_default();
+    let pattern = format!("%{first}%");
     let mut st = conn.prepare(
         "SELECT c.key || ' | ' || COALESCE(d.text, '')
          FROM run_fail f JOIN case_key c ON c.id = f.case_id
          LEFT JOIN fail_detail d ON d.id = f.detail_id
          WHERE f.run_id = ?1 AND (c.key LIKE ?2 OR COALESCE(d.text, '') LIKE ?3)",
     )?;
-    st.query_map(params![rid, pattern, pattern], |r| r.get::<_, String>(0))?
-        .collect()
+    let rows = st
+        .query_map(params![rid, pattern, pattern], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(needles.iter().skip(1).fold(rows, |kept, needle| {
+        let needle = needle.to_lowercase();
+        kept.into_iter()
+            .filter(|row| row.to_lowercase().contains(&needle))
+            .collect()
+    }))
 }

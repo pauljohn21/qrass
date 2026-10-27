@@ -67,22 +67,100 @@ fn count_flag_is_a_flag_and_never_a_pattern() {
 
     assert_eq!(
         ledger::failure_query(&args(&["run", "unexpected error", "--count"])),
-        ("run".to_string(), "unexpected error".to_string(), true),
+        (
+            "run".to_string(),
+            vec!["unexpected error".to_string()],
+            true
+        ),
     );
     // The same query without the flag lists rows instead of counting them.
     assert_eq!(
         ledger::failure_query(&args(&["run", "unexpected error"])),
-        ("run".to_string(), "unexpected error".to_string(), false),
+        (
+            "run".to_string(),
+            vec!["unexpected error".to_string()],
+            false
+        ),
     );
-    // A run with no pattern at all: empty needle, and `--count` still must not become one.
+    // A run with no pattern at all: no needles, and `--count` still must not become one.
     assert_eq!(
         ledger::failure_query(&args(&["run", "--count"])),
-        ("run".to_string(), String::new(), true),
+        ("run".to_string(), vec![], true),
     );
-    // The positive control for the above: a needle that really is absent yields nothing, so “empty” here
-    // means the query was understood, not that the flag silently matched nothing.
+    // The positive control for the above: a needle that really is absent is still carried as a needle, so
+    // “empty” above means the query was understood, not that the flag silently matched nothing.
     assert_eq!(
         ledger::failure_query(&args(&["run", "no/such/cluster"])),
-        ("run".to_string(), "no/such/cluster".to_string(), false),
+        (
+            "run".to_string(),
+            vec!["no/such/cluster".to_string()],
+            false
+        ),
     );
+    // Two needles are two needles, in order — the shape the terrain readings need.
+    assert_eq!(
+        ledger::failure_query(&args(&[
+            "run",
+            "core_functions/color/hwb",
+            "expected error",
+            "--count"
+        ])),
+        (
+            "run".to_string(),
+            vec![
+                "core_functions/color/hwb".to_string(),
+                "expected error".to_string()
+            ],
+            true
+        ),
+    );
+}
+
+/// Why multiple needles must be ANDed by the tool rather than concatenated by hand: joining `"cluster"
+/// "expected error"` into one needle asks SQL for a substring no row contains, so it answers **zero** — and a
+/// zero that looks like a measurement is how a whole cluster got written off as “all of these want a
+/// diagnostic” or “none of these do” in the same session.
+#[test]
+fn every_narrower_needle_keeps_only_rows_matching_both() {
+    let db = scratch_db("and");
+    let rows = vec![
+        "FAIL\tcore_functions/color/hwb::three_args\tgot \"a\" want \"b\"".to_string(),
+        "FAIL\tcore_functions/color/hwb::error/units\texpected error \"Error: $whiteness\""
+            .to_string(),
+        "FAIL\tcore_functions/color/mix::alpha\texpected error \"Error: 2 arguments\"".to_string(),
+        "PASS\tsorted/case::a".to_string(),
+    ];
+    record("r", &db, &rows).expect("record");
+    let conn = Connection::open(&db).expect("open");
+    let hit = |needles: &[&str]| -> Vec<String> {
+        let owned = needles
+            .iter()
+            .map(|n| (*n).to_string())
+            .collect::<Vec<String>>();
+        ledger::failing_any(&conn, "r", &owned).expect("query")
+    };
+
+    // The cluster alone: both hwb failures, and nothing from another cluster.
+    assert_eq!(hit(&["core_functions/color/hwb"]).len(), 2);
+    // The outcome class alone crosses clusters.
+    assert_eq!(hit(&["expected error"]).len(), 2);
+    // Anded: exactly the hwb rows that want a diagnostic — the reading a slice is chosen with.
+    let both = hit(&["core_functions/color/hwb", "expected error"]);
+    assert_eq!(both.len(), 1, "got {both:?}");
+    assert!(
+        both[0].starts_with("core_functions/color/hwb::error/units"),
+        "got {both:?}"
+    );
+    // The failure mode this pins: one needle holding both words matches nothing, and looks like an answer.
+    assert_eq!(
+        hit(&["core_functions/color/hwb expected error"]).len(),
+        0,
+        "a concatenated needle must not be the way this is queried"
+    );
+    // A second needle is order-insensitive in effect: the same single row survives either way.
+    assert_eq!(
+        hit(&["expected error", "core_functions/color/hwb"]).len(),
+        both.len()
+    );
+    std::fs::remove_dir_all(db.parent().unwrap()).ok();
 }
