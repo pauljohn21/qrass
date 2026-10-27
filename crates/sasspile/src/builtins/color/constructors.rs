@@ -62,9 +62,10 @@ fn alpha(value: &Value) -> Option<f64> {
     }
 }
 
-/// One `rgb`/`rgba` call: three channels with an optional alpha, or a colour with an optional alpha. A
-/// colour argument is text a declaration would have kept verbatim (hex **or** a CSS keyword —
-/// `rgba(red, 0.42)` must read `red`, `alpha.hrx::color/middle`) or a colour already built (`Color::of`).
+/// One `rgb`/`rgba` call: three channels with an optional alpha, a colour with an optional alpha, or CSS
+/// Color 4's **one-argument space-separated** spelling. A colour argument is text a declaration would have
+/// kept verbatim (hex **or** a CSS keyword — `rgba(red, 0.42)` must read `red`, `alpha.hrx::color/middle`) or
+/// a colour already built (`Color::of`).
 fn channels(args: Vec<Value>) -> Result<Value, SassError> {
     let built = match args.as_slice() {
         // Channel kinds and their units are the colour's own law (`Color::new` refuses anything but a
@@ -73,6 +74,14 @@ fn channels(args: Vec<Value>) -> Result<Value, SassError> {
         [red, green, blue, given] => {
             alpha(given).and_then(|alpha| Color::new(red, green, blue, alpha))
         }
+        // `rgb(18 52 86)` → `rgb(18, 52, 86)` (`rgb/one_arg/no_alpha.hrx::unitless/numbers`), and a label
+        // binds the whole list (`…::unitless/named` is `rgb($channels: 0 255 127)`). Exactly three
+        // components: the modern spelling takes its alpha after a `/`, which is a separate law with its own
+        // fixtures (`rgb/one_arg/alpha.hrx`) and is not guessed here.
+        [Value::Space(parts)] => match parts.as_slice() {
+            [red, green, blue] => Color::new(red, green, blue, 1.0),
+            _ => None,
+        },
         [source] => Color::of(source),
         [source, given] => match (Color::of(source), alpha(given)) {
             (Some(color), Some(alpha)) => Some(color.with_alpha(alpha)),
@@ -90,6 +99,16 @@ fn hsl_channels(args: Vec<Value>) -> Result<Value, SassError> {
         [hue, saturation, lightness, given] => {
             alpha(given).and_then(|alpha| Color::hsl(hue, saturation, lightness, alpha))
         }
+        // `hsl(0 100% 50%)` → `hsl(0, 100%, 50%)` (`hsl/one_arg/no_alpha.hrx::in_gamut/red`): the modern
+        // spelling's axes follow the same laws as the comma form — the hue folds to degrees
+        // (`…::units/hue/deg` is `hsl(0deg 100% 50%)`), saturation and lightness gain their `%`
+        // (`…::units/saturation/unitless` → `hsl(0, 50%, 50%)`), and neither is clamped
+        // (`…::out_of_gamut/saturation/above` keeps `500%`) — which is why this arm only has to re-shape
+        // the arguments, not re-read them.
+        [Value::Space(parts)] => match parts.as_slice() {
+            [hue, saturation, lightness] => Color::hsl(hue, saturation, lightness, 1.0),
+            _ => None,
+        },
         _ => None,
     };
     finished(built)

@@ -9,6 +9,7 @@
 //!   therefore **normalises the paren boundaries first** ( [`brackets`] ), which is a local view of the
 //!   lexemes: nothing upstream changes, and `url(http://x)`/`-a-calc(` keep their existing behaviour.
 
+use crate::brackets::trim_layout;
 use crate::builtins;
 use crate::lexer::Tok;
 
@@ -91,23 +92,34 @@ fn cut(word: &str) -> Vec<Tok> {
 /// number. Depth is counted over lexemes, not recursed into a tree: a `…(` lexeme opens one level, a
 /// `Punct(')')` closes it, and only a depth-0 `,` separates arguments.
 fn split(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
-    let run: Vec<&Tok> = toks
-        .iter()
-        .filter(|tok| !matches!(tok, Tok::Space(_) | Tok::Silent(_)))
-        .collect();
-    let (Tok::Word(callee), rest) = run.split_first()? else {
-        return None;
+    // The callee is found on the **head** of the run, not by filtering the whole run: layout inside the
+    // parentheses is the argument's own data. Dropping it here (as this function did) made
+    // `rgb(18 52 86)` arrive as `[Word("18"), Word("52"), Word("86")]` with no separators at all, so CSS
+    // Color 4's one-argument spelling was unreadable at any granularity below the lexeme — and the lexemes
+    // were already gone. Edges still go (`rgb( 1 )` is one argument `1`), interior spacing stays.
+    let meaningful = |range: &[Tok]| {
+        range
+            .iter()
+            .position(|tok| !matches!(tok, Tok::Space(_) | Tok::Silent(_)))
+            .zip(
+                range
+                    .iter()
+                    .rposition(|tok| !matches!(tok, Tok::Space(_) | Tok::Silent(_))),
+            )
+    };
+    let (head, tail) = meaningful(toks)?;
+    let callee = match &toks[head] {
+        Tok::Word(word) => word.clone(),
+        _ => return None,
     };
     let name = callee.strip_suffix('(').filter(|name| !name.is_empty())?;
-    if !matches!(rest.last(), Some(Tok::Punct(')'))) {
+    if !matches!(&toks[tail], Tok::Punct(')')) {
         return None;
     }
-    let inner = rest[..rest.len() - 1]
-        .iter()
-        .map(|tok| (*tok).clone())
-        .collect::<Vec<Tok>>();
-    let arguments = top_level_groups(&inner)
+    let inner = &toks[(head + 1)..tail];
+    let arguments = top_level_groups(inner)
         .into_iter()
+        .map(|arg| trim_layout(&arg))
         .filter(|arg| !arg.is_empty())
         .map(argument)
         .collect::<Vec<Argument>>();
@@ -124,14 +136,21 @@ fn split(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {
 /// A calculation's argument list divides on the same commas as a builtin's, so the split lives here once
 /// (`crate::calculation::value` is the second caller).
 pub(crate) fn top_level_groups(toks: &[Tok]) -> Vec<Vec<Tok>> {
+    cut_at(toks, |tok| matches!(tok, Tok::Punct(',')))
+}
+
+/// The same cut at any separator: the groups of lexemes between top-level `is_separator` tokens. Depth is
+/// counted as data over the group being built, so a separator inside `var(--a, b)` or `calc(1 / 2)` never
+/// cuts. `cut_at(.., |tok| matches!(tok, Tok::Space(_)))` is how a space-separated argument
+/// (`rgb(18 52 86)`) becomes three token runs — see [`crate::expr::space_run`].
+pub(crate) fn cut_at(toks: &[Tok], is_separator: impl Fn(&Tok) -> bool) -> Vec<Vec<Tok>> {
     let (groups, current) = toks.iter().fold(
         (Vec::<Vec<Tok>>::new(), Vec::<Tok>::new()),
         |(mut groups, mut current), tok| {
-            match tok {
-                Tok::Punct(',') if depth_of(&current) == 0 => {
-                    groups.push(std::mem::take(&mut current));
-                }
-                other => current.push(other.clone()),
+            if is_separator(tok) && depth_of(&current) == 0 {
+                groups.push(std::mem::take(&mut current));
+            } else {
+                current.push(tok.clone());
             }
             (groups, current)
         },

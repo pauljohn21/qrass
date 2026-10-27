@@ -40,6 +40,11 @@ pub enum Value {
     /// written straight into a declaration stays `Raw`, because the corpus keeps its source spelling
     /// (`values/colors/alpha_hex/initial_letter` prints `#AbCd`, capitals and all) — see [`crate::color`].
     Color(crate::color::Color),
+    /// A **space-separated list**, the value form of `Expr::Space`: `rgb(18 52 86)` is one argument holding
+    /// three numbers, not three arguments (`core_functions/color/rgb/one_arg/no_alpha.hrx`, and the same
+    /// file's `$channels:` row shows a label binds this whole value). Components are owned values so a
+    /// consumer reads them structurally instead of re-splitting text.
+    Space(Vec<Value>),
 }
 
 impl Value {
@@ -57,6 +62,13 @@ impl Value {
             Value::Bool(value) => value.to_string(),
             Value::Calculation(name, content) => format!("{name}({})", content.printed),
             Value::Color(color) => color.to_css(),
+            // Components keep their own spelling, separated by one space each — `rgb(18 52 86)` read as a
+            // list prints back as a list when nothing consumes it.
+            Value::Space(items) => items
+                .iter()
+                .map(Value::to_css)
+                .collect::<Vec<String>>()
+                .join(" "),
         }
     }
 

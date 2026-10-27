@@ -83,16 +83,29 @@ impl Channel {
 
     /// Clamped into its own scale: percentages to `0–100`, plain numbers to `0–255`. A negative zero
     /// becomes zero, which is what `four_args/clamped::red/minus_zero` shows (`rgb(-0, …)` → `0`).
+    ///
+    /// A **clamped percentage loses its percentage spelling** and comes back as the byte it clamped to —
+    /// `rgb(100.1% 0 0)` → `rgb(255, 0, 0)` and `rgb(0 -0.1% 0)` → `rgb(0, 0, 0)`, while `rgb(0% 100% 50%)`
+    /// keeps every `%` it was given (`rgb/one_arg/no_alpha.hrx::{percents/clamped/*,percents/boundaries}`).
+    /// Only the modern one-argument rows state this law; no legacy comma fixture has an out-of-range
+    /// percentage, which is why it was not visible earlier. A channel at exactly its ceiling is not clamped,
+    /// so `100%` above stays `100%`.
     fn clamped(self) -> Self {
         let ceiling = if self.percent { 100.0 } else { 255.0 };
-        let value = if self.value.is_nan() || self.value < 0.0 {
+        let bound = if self.value.is_nan() || self.value < 0.0 {
             0.0
         } else {
             self.value.min(ceiling)
-        };
-        Channel {
-            value: value + 0.0,
-            ..self
+        } + 0.0;
+        match (self.percent, bound == self.value) {
+            (true, false) => Channel {
+                value: bound * 255.0 / 100.0,
+                percent: false,
+            },
+            _ => Channel {
+                value: bound,
+                ..self
+            },
         }
     }
 }
@@ -138,10 +151,14 @@ impl Color {
             }),
             _ => None,
         };
-        let [red, green, blue] = [channel(red)?, channel(green)?, channel(blue)?];
+        let [red, green, blue] =
+            [channel(red)?, channel(green)?, channel(blue)?].map(Channel::clamped);
         Some(Self {
-            channels: [red.clamped(), green.clamped(), blue.clamped()],
+            channels: [red, green, blue],
             alpha: clamp_alpha(alpha),
+            // Decided **after** clamping, because a clamped percentage is no longer a percentage
+            // ([`Channel::clamped`]): `rgb(100.1% 0 0)` has no percent channel left and so prints
+            // `rgb(255, 0, 0)` rather than the all-percent form.
             representation: match (red.percent, green.percent, blue.percent) {
                 (false, false, false) => Representation::Legacy,
                 _ => Representation::Percent,
@@ -315,8 +332,13 @@ impl Color {
     ///   `hsl(197.7467707849, 100%, 50%)` and `0deg` prints as `0`
     ///   (`hsl/three_args/units.hrx`);
     /// * saturation and lightness **always** carry a `%` (`hsl(0, 50, 50%)` → `hsl(0, 50%, 50%)`), and
-    ///   unlike an `rgb` channel they are **not clamped**: `hsl(0, 500%, 50%)` stays
-    ///   (`hsl/three_args/bounds.hrx`);
+    ///   neither is clamped at its upper end: `hsl(0, 500%, 50%)` and `hsl(0, 100%, 500%)` stay
+    ///   (`hsl/three_args/out_of_gamut.hrx`, `hsl/one_arg/no_alpha.hrx::{out_of_gamut/saturation/above,
+    ///   clamped/lightness/above}`);
+    /// * a **negative saturation** however goes to `0` — `hsl(0 -100% 50%)` is `hsl(0, 0%, 50%)`
+    ///   (`hsl/one_arg/no_alpha.hrx::clamped/saturation/below`) — while a negative lightness is left alone
+    ///   (`…::clamped/lightness/below` keeps `-100%`). No legacy comma value row exercises either, so the
+    ///   asymmetry is stated only by the one-argument spelling;
     /// * the alpha is clamped to `0–1` and a `1` alpha returns the three-argument spelling
     ///   (`hsl/four_args/alpha.hrx`).
     pub fn hsl(hue: &Value, saturation: &Value, lightness: &Value, alpha: f64) -> Option<Self> {
@@ -342,7 +364,7 @@ impl Color {
                     percent: false,
                 },
                 Channel {
-                    value: number(saturation)?,
+                    value: number(saturation)?.max(0.0),
                     percent: true,
                 },
                 Channel {

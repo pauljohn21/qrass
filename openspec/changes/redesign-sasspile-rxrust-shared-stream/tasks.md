@@ -682,6 +682,37 @@
       ② `modules/color/*.hrx` 这类**单例文件**（section 直接叫 `input.scss`，无 `<name>/` 前缀）的 key 尾部为空
       （`…hue::`），合法且不撞名，但 `warning` 段（这批行期望一条 `color.hue() is deprecated` 弃用警告）
       **harness 不比对** —— 这 3 行是“输出对、警告缺”，不得当成 deprecation 已实现。
+      **⑯ 现代一参色语法已落，但真正的收获是挖出一个词法层根因**（已实测）：
+      • **根因**：`calls::split` 为了识别被调者而把**整个 run 的 Space 全滤掉**，导致 `rgb(18 52 86)` 到 body 时
+        是 `[Word("18"), Word("52"), Word("86")]`——**分隔符在词素层已消失**，所以在下游无论怎么切都是猜。
+        这是“分类粒度不能超过词法”的**第四次实证**（前三次：厂商前缀、`&`、带引号串）。修法：只在**头部**
+        找被调者，括号内的布局原样保留（边沿仍去：`rgb( 1 )` 是一个实参 `1`）。
+        **blast radius 是整个调用脊柱**（所有已注册 builtin 的实参现在都带内部空格），而实测
+        `regress=0` —— 说明“去掉括号内空格”从来一直在掩埋信息而不是在保护什么。
+      • 新增的第一个列表形：`Expr::Space(Vec<Expr>)` → `Value::Space(Vec<Value>)`（只在**实参**内产生，
+        声明值路径不变）；`expr::space_run` 按词素切，**任一分量读不出就整个不读**（所以 `rgb(none 52 66)`
+        逐字，不会变成“缺一个通道的颜色”）；含 `Op('/' '*' '+' '-')` 的分量一律不当空格列表（否则
+        `rgb(0 255 127 / 0.3)` 会被当成除法）。
+      • **两条新律（均来自现代行，legacy 逗号行里没有等价判据）**：① 被**夹紧的百分比失去 `%` 拼法**，
+        打它夹到的字节（`rgb(100.1% 0 0)` → `rgb(255, 0, 0)`，而 `rgb(0% 100% 50%)` 保留每个 `%`）——
+        表示法改为在**夹紧之后**才决定；此律同时拾了 3 条 legacy 行（`three_args/percents::clamped/*`）。
+        ② hsl 轴**不对称**：负饱和夹到 0（`hsl(0 -100% 50%)` → `hsl(0, 0%, 50%)`），而上界与亮度都不夹
+        （`500%` 保留、亮度 `-100%` 保留）。
+      • **实测**：hrx **1016 → 1046（实质 851 → 881）**，`ledger diff color-ops-split space-args` =
+        **`regress=0 net=30`**（rgb/one_arg/no_alpha 13、hsl/one_arg/no_alpha 10、legacy clamp 3、
+        `rgba::one_arg/no_alpha`、`hsla::one_arg/no_alpha`、`grayscale::legacy/powerless/same`），无效错误仍 **53**；
+        119 测试 / 0 失败（新增 `tests/color_args.rs`）、clippy exit 0、sasslint exit 0。
+      • **量具补面**：`ledger failures` 现在支持**多个 needle（AND）**。起因是我把 `"<簇> expected error"`
+        当一条 needle 查，SQL 找不到的子串永远为空 ⇒ 所有簇都报“要错误 0”，差点让我把 145 条 hwb 失败
+        全归成“缺能力”（实为 37 条缺消息）。新读数的失效方式已钉在 `tests/failures_query.rs`。
+      • **我自己差点造错的一条**：`rgb($channels: 0 255 127)` 我先按“未识别标签→逐字”钉进断言，
+        而 fixture 要的是 `rgb(0, 255, 127)`。中途 `grep` 没看到失败行就以为它绿了——实际
+        `total=1 pass=0`。教训：**没打印失败不等于通过**，必须看 measured 行。该 case 已从断言里
+        去掉，只留注释说明缺口（行仍红）。
+      • **仍不做也不装成做了的两条**：① `$channels:` 绑定（脊柱只把参数递到**第一个缺位**为止，
+        所带标签的列表递到 body 时为空）——要修得改绑定语义，属脊柱的下一刀；② 现代形的 ` / alpha`
+        （语料把它当 **斜杠列表**：`rgb/list.slash.hrx` 用 `list.slash(0 255 127, 0)` 得到同一个颜色），
+        需先有 slash 列表值；`rgb/one_arg/alpha` 那 18 条与 `hsl/one_arg/alpha` 12 条因此仍红。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

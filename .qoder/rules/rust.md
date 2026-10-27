@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1016/11,533**（8.81%，**实质通过 851** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `color-ops-split`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1046/11,533**（9.1%，**实质通过 881** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `space-args`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -76,7 +76,13 @@ alwaysApply: true
    `exec::evaluated` 看到它就**不重渲染**、直接留原文（`color.mix(…, $method: oklab)` 不再被 legacy 错答）；
    “带不带标签”只有 registry 能定 —— 在词元层用 `named_argument` 猜会把 `saturate($c)` 弄红（实测 regress=1）。
    剩余未解决：hsl 源不混色（decline）。`-grey` 拼法回写已定为
-   **不可测**（语料无 `-grey` 输出）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
+   **不可测**（语料无 `-grey` 输出）。**现代一参色语法已落**（`rgb(18 52 86)`/`hsl(0 100% 50%)` → legacy 逗号形
+   输出，不需新数学）：新值形 `Value::Space` 只在**实参**内产生，**任一分量读不出就整个逐字**（所以
+   `rgb(none 52 66)` 不会变成“缺一个通道的颜色”），含 `Op('/' '*' '+' '-')` 的分量不当空格列表。两条新律：
+   **被夹紧的百分比失去 `%` 拼法**（`rgb(100.1% 0 0)` → `rgb(255, 0, 0)`，而恰好 `100%` 不动就保留 `%`），
+   且表示法在**夹紧之后**才决定；hsl 轴**不对称**（负饱和→ 0，上界与亮度都不夹）。**仍红的两条**：
+   `$channels:` 绑定（脊柱只递到第一个缺位，带标签的列表递到 body 为空）与现代形 ` / alpha`（需先有
+   **斜杠列表**值；`rgb/one_arg/alpha` 18 条 + `hsl/one_arg/alpha` 12 条）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
    （net=0 已验）；`color/mod.rs` 的轴算术已拆到 `color/ops.rs`（`ledger diff rgb-to-hsl-axes color-ops-split` =
    net=0 regress=0，`mod.rs` 降到 359 行）。**下一个要量的**：`color.channel(…)`（`channel/hsl.hrx` 给了
    `color.channel(hsl(10 40% 60%), "hue")` → `10deg`与`hsl(540 …)` → `180deg`，但要先会解析现代空格语法），
@@ -147,7 +153,10 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
   `expr::named_argument`、`exec::head_pieces`（只认 `#{}`）、`lexer::without_flags`。
 - **分类粒度不能超过词法**：要判“是不是厂商前缀 CSS 调用”、“这里 `&` 是不是父选择器”、“串里的 `$`
   是不是引用”，必须先在 `lexer.rs` 里把该构造**做成一个词素**（`-a-calc(`、`&`、带引号串）；否则
-  任何字符串启发式都是错的（已三次实测推翻）。同理：行注释结尾的换行要是 `Space`而不是 `Word(" ")`，
+  任何字符串启发式都是错的（已三次实测推翻）。同理：**“去掉括号内空格”也是同类粒度陷阱**——
+  `calls::split` 曾经为了找被调者而把整个 run 的 `Space` 滤掉，使 `rgb(18 52 86)` 到 body 时只剩
+  `[Word, Word, Word]`，现代一参色语法在下游**根本无法**识别（第四次实证）。正确做法：只在**头部**
+  找被调者，括号内布局原样保留（只去边沿：`trim_layout`）。同理：行注释结尾的换行要是 `Space`而不是 `Word(" ")`，
   否则“首个非空白词素是不是 `Var`”这类词素级判定会静默失效。
 - **拿字符串凑值**：先拼串再 `split_once` 拆、对串二次 char 扫描 → 结构化 `Vec<Tok>→Expr→eval(owned Env)→to_css`，只在无歧义时求值；选择器/属性名要是**结构化值**（`&` 组合不是 `str::replace`）。
 - **GC/共享可变**：`&mut self` 被闭包共享、手写 `HashMap` 当单例总线、env 键 `$`/去`$` 混用 → owned 累加子、一到多才 `Subject`、键约定统一。
