@@ -82,8 +82,29 @@ fn operator(toks: &[Tok], index: usize) -> Option<BinOp> {
     }
 }
 
-/// A whole lexeme as `value + unit`: digits (with optional fraction) followed by an
-/// identifier-shaped unit. `52)` or `1px)` are not numbers — a unit is alphanumeric, so a
+/// How much of `tail` is an exponent — `e15`, `E-3`, `e+2`. Zero when there are no digits after the (maybe
+/// signed) `e`, which is what keeps `1e` and `1e-` a number with the **unit** `e`: only the
+/// exponent-with-digits form has a golden (`values/calculation/calc/no_operator::number/exponent`).
+fn exponent_len(tail: &str) -> usize {
+    let marker = match tail.chars().next() {
+        Some(c @ ('e' | 'E')) => c.len_utf8(),
+        _ => return 0,
+    };
+    let rest = &tail[marker..];
+    let signed = usize::from(matches!(rest.chars().next(), Some('+') | Some('-')));
+    let digits = rest[signed..]
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map_or(rest.len() - signed, |(i, _)| i);
+    if digits > 0 {
+        marker + signed + digits
+    } else {
+        0
+    }
+}
+
+/// A whole lexeme as `value + unit`: digits (with an optional fraction and an optional exponent) followed by
+/// an identifier-shaped unit. `52)` or `1px)` are not numbers — a unit is alphanumeric, so a
 /// CSS call like `rgb(18 none 66)` bails to verbatim text instead of losing its paren.
 pub(crate) fn number_lexeme(word: &str) -> Option<(f64, &str)> {
     // A leading sign belongs to the number: the lexer defers a boundary `-` until it sees the next
@@ -102,6 +123,11 @@ pub(crate) fn number_lexeme(word: &str) -> Option<(f64, &str)> {
     if digits == 0 {
         return None;
     }
+    // An **exponent** belongs to the number, not to the unit: `calc(1e2px)` → `100px`
+    // (`values/calculation/calc/no_operator::number/exponent`) and `math.$pi * 1e15` is a product of two
+    // numbers (`core_functions/math/variables.hrx::pi`). Reading `1e15` as "1 with the unit `e15`" is what
+    // left those rows unfolded — the unit `e15` exists nowhere, it was just where the digit scan stopped.
+    let digits = digits + exponent_len(&digits_area[digits..]);
     let (numeric, unit) = digits_area.split_at(digits);
     // `%` is a unit character for Sass; it stays out of every other reading of a run because `protected`
     // still refuses to evaluate a run that carries one outside a known call

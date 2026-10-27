@@ -35,8 +35,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1827/11,533**（15.8%，**实质通过 1662** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `module-constants`）；无效错误从长期基线 **53 降到 20**
+   **以上均不得重做/重新发明**。当前基线 hrx **1834/11,533**（15.9%，**实质通过 1669** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `exponents-parse`）；无效错误长期基线 53 → **20** → **18**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
@@ -258,6 +258,20 @@ alwaysApply: true
        （未知名字如 `upstream.$a` 必须逐字，不能报 `Undefined variable.` —— 那就是那 33 行的死因）。
        仍未做：`math.$pi * 1e15` 类乘法要的是**指数字面量** `1e15` 被当数读（下一刀）；
        `math.$pi: 0;` → `Cannot modify built-in variable.`（赋值目标还不认带命名空间的名字）。
+     • **指数字面量 + “常量参与的乘法”（run `exponents-parse`，net 7，1827→1834，无效错误 20 → 18，
+       regress=0，空库复算同读数）**：两半缺一不可。
+       ① `operations::number_lexeme` 的数字扫描在 `e`/`E` 处不能停 —— 以前 `1e15` 被读成“数 1 + 单位
+       `e15`”（`e15` 这个单位根本不存在，只是扫描断点）；`exponent_len` 只在 `e` 后真有（可带号的）数字时
+       纳入，所以 `1e`/`1e-` 仍是单位 `e`（无金样，不外推）。金样：`calc(1e2px)` → `100px`。
+       ② `expr::from_tokens` 的 `has_dynamic` 支以前**直接**走插值，于是含模块常量的乘法只会把常量印在
+       字面 `* 1e15` 旁边；现在先试 `arithmetic`、失败再回落插值 —— 回落不会放宽任何东西，因为
+       `operand_expr` 只认 `Word` 数、已注册调用、计算、`Tok::MemberVar`，普通 `$x`/`#{}` 没有操作数臂
+       就会在“每个 span 都要出一个操作数”的计数守卫上失败（语料里**没有**任何一行乘用户变量）。
+       新增：`variables::{pi,e,epsilon,min_number}` 4 行 + `no_operator::number/exponent` +
+       `tan::{asymptote,negative_asymptote}/radian`（`math.tan(0.5rad * math.$pi)` → `16331239353195370`）。
+     • **第九次“旧断言前提变了”**：`tests/calculation.rs` 的 `calc(1e2px)` 当时钉的是逐字文本，但它自己的
+       注释就写了“修好后这行必须改 100px” —— 这不是假断言而是**到期 TODO**，按注释翻过去即可。判据：这一类
+       背后有金样行撑着（与第八次“钉的只是我的选择”不同）。
      • **第八次“旧断言前提被实现推翻”**：`tests/builtins.rs` 拿 `math.max(1px, 2q)`/`math.compatible(1px, 2q)`
        当“表外单位 decline”的例子，`q` 一进共享表这两条就红了 —— 它们钉的本来是我的选择而不是语料行，
        现换成真正无证的 `rem`/`ch`，并把 `q` 的现在行为（`2q`/`true`）一并钉住（无任一 2q 的 fixture 行，

@@ -6,11 +6,8 @@
 //! `math.$pi` would all look alike to `expr`, and re-scanning the rendered text there is the mistake this
 //! project has measured four times.
 //!
-//! Still open, in the corpus's own words:
-//! * the multiplication rows (`math.$pi * 1e15` → `3141592653589793`, `variables.hrx::pi`) wait on
-//!   **exponent literals** — we leave `… * 1e15` unfolded, so the constant prints alone;
-//! * `math.$pi: 0;` → `Error: Cannot modify built-in variable.` (`…::error/assignment/*`): an assignment
-//!   whose target is namespaced is not read as an assignment at all yet.
+//! Still open: `math.$pi: 0;` → `Error: Cannot modify built-in variable.`
+//! (`…::error/assignment/*`) — an assignment whose target is namespaced is not read as an assignment yet.
 
 use sasspile::compile;
 
@@ -30,6 +27,36 @@ async fn the_safe_integer_constants_print_whole() {
     for (input, want) in [
         ("a {b: math.$max-safe-integer}", "9007199254740991"),
         ("a {b: math.$min-safe-integer}", "-9007199254740991"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// A constant multiplied by an **exponent literal** is arithmetic, not interpolation:
+/// `math.$pi * 1e15` → `3141592653589793`, `math.$e * 1e15` → `2718281828459045`,
+/// `math.$epsilon * 1e31` → `2220446049250313`,
+/// `math.$min-number * 1e300 * 1e39` → `4940656458412465` (`variables.hrx::{pi,e,epsilon,min_number}`).
+/// Two laws meet in these rows: `1e15` is a number rather than "1 with the unit `e15`"
+/// (`operations::number_lexeme`), and a run holding a module constant reaches
+/// [`crate::operations::arithmetic`] before the interpolation branch — which is also what lets
+/// `math.tan(0.5rad * math.$pi)` → `16331239353195370` fold its operand
+/// (`core_functions/math/tan.hrx::{asymptote,negative_asymptote}/radian`).
+/// `calc(1e2px)` → `100px` is the same lexeme rule seen from `calc`
+/// (`values/calculation/calc/no_operator::number/exponent`).
+#[tokio::test]
+async fn a_constant_times_an_exponent_literal_folds() {
+    for (input, want) in [
+        ("a {b: math.$pi * 1e15}", "3141592653589793"),
+        ("a {b: math.$e * 1e15}", "2718281828459045"),
+        ("a {b: math.$epsilon * 1e31}", "2220446049250313"),
+        ("a {b: math.$min-number * 1e300 * 1e39}", "4940656458412465"),
+        ("a {b: calc(1e2px)}", "100px"),
+        ("a {b: math.tan(0.5rad * math.$pi)}", "16331239353195370"),
+        ("a {b: math.tan(-0.5rad * math.$pi)}", "-16331239353195370"),
     ] {
         assert_eq!(
             css(input).await,

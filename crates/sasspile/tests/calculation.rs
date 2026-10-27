@@ -47,16 +47,15 @@ async fn redundant_parentheses_peel_to_the_value() {
 }
 
 /// The number forms of `::number/*`: a leading sign is part of the literal (`+1px` → `1px`,
-/// `-1px` → `-1px`), and `.2px` prints in Sass's form (`0.2px`).
-///
-/// `1e2px` is pinned at its **verbatim** form on purpose: exponential notation is a gap in
-/// `expr::number_lexeme` (it reads `1e2px` as the number `1` with unit `e2px`), which belongs to the
-/// number-literal work of 1.3, not to this slice. When that is fixed, this line must move to `100px`.
+/// `-1px` → `-1px`), `.2px` prints in Sass's form (`0.2px`), and **exponential notation is a number**:
+/// `calc(1e2px)` → `100px` (`values/calculation/calc/no_operator::number/exponent`). This line used to pin
+/// the verbatim text while `number_lexeme` read `1e2px` as "1 with unit `e2px`"; the comment said it must
+/// move to `100px` once that was fixed, and the exponent tail is now part of the lexeme.
 #[tokio::test]
 async fn numbers_print_in_sass_form_after_collapsing() {
     assert_eq!(value("a {b: calc(+1px)}").await, "1px");
     assert_eq!(value("a {b: calc(-1px)}").await, "-1px");
-    assert_eq!(value("a {b: calc(1e2px)}").await, "1e2px");
+    assert_eq!(value("a {b: calc(1e2px)}").await, "100px");
     assert_eq!(value("a {b: calc(.2px)}").await, "0.2px");
     assert_eq!(value("a {b: calc(1.2px)}").await, "1.2px");
 }

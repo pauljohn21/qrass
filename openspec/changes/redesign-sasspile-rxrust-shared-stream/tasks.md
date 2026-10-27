@@ -1005,6 +1005,30 @@
       • 自己写测试时又犯过一次老习惯：先在测试里手抄了 `f64::MAX` 的 309 位数字，发现风险后删掉改由 hrx
         守（手抄长数字串就是本会话第七次错的形状）；另外本轮又一次把 `python3 -` 空壳带进命令（未执行，
         但规则禁它，已记）。
+      **㉛ 指数字面量是数，常量参与的乘法先试算术**（已实测，run `exponents-parse`）：
+      • 量具先纠正一次：我拿 `grep --include=input.scss` 去数“语料里有多少指数行”，得 0 ——
+        hrx 是单文件归档，磁盘上根本没有 `input.scss`。改在 `.hrx` 内容上量：**15 个文件 / ≈ 24 行**，
+        最大簇 `core_functions/color/mix`（6）要的是**打印**侧（`2.147483648e14deg`），解析侧只有
+        `variables.hrx` 4 行 + `no_operator::number/exponent`（`calc(1e2px)` → `100px`）—— 两半不是一个东西。
+      • **解析**：`operations::number_lexeme` 以前在 `e` 处停下，把 `1e15` 当成“数 1 + 单位 `e15`”（该单位
+        不存在，只是扫描断点）。新增 `exponent_len`：`e`/`E` 后**真有**（可带号的）数字才纳入，所以 `1e`、
+        `1e-` 仍按单位 `e` 读 —— 无金样不外推。全项目只有这一个数字解析点（`expr.rs` 两处与 `calc.rs` 都调它）。
+      • **路由**：`expr::from_tokens` 的 `has_dynamic` 支以前直接走插值，含模块常量的乘法以永远折不开
+        （输出 `3.1415926536 * 1e15`）。现在先 `arithmetic`、`None` 再回落插值；安不安全由 `operand_expr`
+        的窄读法定：它只认 `Word` 数、已注册调用、计算、以及新的 `Tok::MemberVar` 臂，而普通 `$x`/`#{}`
+        没有臂 → “每个 span 都要出一个操作数”的计数守卫失败 → 照旧走插值（语料里没有任何一行乘用户变量，
+        所以不给 `Tok::Var` 加臂）。
+      • **实测**：hrx **1827 → 1834（实质 1662 → 1669）**，`ledger diff module-constants exponents-parse` =
+        **`regress=0 net=7`**（`variables::{pi,e,epsilon,min_number}` + `no_operator::number/exponent` +
+        `tan::{asymptote,negative_asymptote}/radian`），**无效错误 20 → 18**；空库复算
+        （`/tmp/qrass-ab10.db`：exp-verify-before 1827 vs after 1834）同读数；`cargo test --workspace` exit=0
+        （45 块）、clippy exit 0、sasslint `count=0`。`variables.hrx` 14 工作完 7 行，余下正好是 7 行
+        `error/assignment/*`（要 `Cannot modify built-in variable.`）。
+      • **第九次“旧断言前提变了”**，但与第八次形状不同：`tests/calculation.rs` 钉 `calc(1e2px)` 逐字的
+        同时，它自己的注释就写了“修好后这行必须改 100px”——那是**到期 TODO**而非错钉，按注释翻过去；
+        判据：背有金样行（第八次那种钉的只是我的选择，无金样）。另：我在 `math_variables.rs` 的 doc 里
+        先写了个“`tan(math.$pi / 4)` → `1`”的未核断言，查 fixture 发现真行是
+        `math.tan(0.5rad * math.$pi)` → `16331239353195370`，已改并把它钉进测试。
       **㉖ P7 第三片：一条调用点两个空间的名字 = 按名字拒绝，而 `hue` 不决定空间**（已实测）：
       • **律**：第一个“能定空间”的组定空间，第一个外来的名字被点名 ——
         `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with

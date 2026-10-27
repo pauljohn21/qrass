@@ -192,7 +192,13 @@ pub fn from_tokens(toks: &[Tok], env: &Env) -> Option<Expr> {
         return None;
     }
     if has_dynamic(toks) {
-        interpolation(toks, env)
+        // Arithmetic is tried first even here, because a product of module constants is arithmetic, not
+        // interpolation: `math.$pi * 1e15` → `3141592653589793` (`core_functions/math/variables.hrx::pi`),
+        // while the interpolation branch printed the constant beside a literal `* 1e15`.
+        // This stays narrow through [`operand_expr`]: a run whose dynamic part is a `$var` or a `#{…}` has no
+        // operand reading, so `arithmetic` declines on the count guard and the run takes the same path as
+        // before — no golden multiplies a user variable, and this does not invent one.
+        arithmetic(toks, env).or_else(|| interpolation(toks, env))
     } else {
         arithmetic(toks, env).or_else(|| concatenation(toks))
     }
@@ -201,8 +207,9 @@ pub fn from_tokens(toks: &[Tok], env: &Env) -> Option<Expr> {
 /// One **operand** of an operation: a registered call, a calculation, or a number lexeme.
 ///
 /// This is deliberately narrower than [`from_tokens`]: the operands of a split run are read here once, so
-/// no run ever re-enters its own split, and a variable or interpolation operand is not this path's business
-/// (`from_tokens` sends those to the interpolation branch before arithmetic runs). Widening it to calls and
+/// no run ever re-enters its own split, and a **user** variable or interpolation operand is not this path's
+/// business — [`crate::operations::arithmetic`] drops the whole run when a span has no reading here, which is
+/// how such runs fall back to the interpolation branch in [`from_tokens`]. Widening it to calls and
 /// calculations is what makes `math.div(6, 3px) * 1px` an operation at all
 /// (`core_functions/math/div.hrx::unit/denominator` → `2`), where before the call lexeme marked the run
 /// unreadable and the whole declaration stayed verbatim text.
@@ -221,6 +228,14 @@ pub(crate) fn operand_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
         [Tok::Word(word)] => {
             number_lexeme(word).map(|(value, unit)| Expr::Num(value, Unit::named(unit)))
         }
+        // A built-in module constant is an operand of arithmetic: `math.$pi * 1e15` → `3141592653589793`
+        // (`core_functions/math/variables.hrx::pi`) — without this arm the product declined and the run
+        // printed the constant beside a literal `* 1e15`. A plain `$x` is **not** added: no golden in the
+        // corpus multiplies a user variable, so its pairing law is not this function's to invent.
+        [Tok::MemberVar(module, name)] => match crate::builtins::module_value(module, name) {
+            Some(Value::Number(value, unit)) => Some(Expr::Num(value, unit)),
+            _ => None,
+        },
         _ => None,
     }
 }
