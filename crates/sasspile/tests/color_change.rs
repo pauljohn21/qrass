@@ -70,7 +70,12 @@ async fn an_out_of_gamut_change_prints_hsl() {
 /// `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/hsl.hrx::lightness/above_range`).
 ///
 /// Deriving that triple back from the implied bytes would print `hsl(180, -100%, 120%)` instead — a negative
-/// chroma rotates the hue — which is why a colour built by `change` remembers the axes it was given.
+/// chroma rotates the hue — which is why a colour built by `change` remembers the axes it was given. The
+/// gamut is judged on **those axes**, and their low ends are asymmetric, both by rows: a saturation below
+/// zero is still a colour that prints its bytes (`color.change(plum, $saturation: -20%)` →
+/// `rgb(69.6470588235%, 79.7647058824%, 69.6470588235%)`, `…::saturation/below_range`), while a lightness
+/// below zero is not (`color.change(red, $lightness: -20%)` → `hsl(0, 100%, -20%)`,
+/// `…::lightness/below_range`).
 ///
 /// The `units/hue/*` rows also show that `60deg`, `60` and `60in` all mean the same number; those fixtures
 /// carry a deprecation warning the harness does not compare, so matching their output is not deprecation
@@ -90,6 +95,18 @@ async fn change_writes_the_hsl_axes_too() {
         (
             "a {b: color.change(red, $lightness: 120%)}",
             "hsl(0, 100%, 120%)",
+        ),
+        (
+            "a {b: color.change(plum, $saturation: 120%)}",
+            "hsl(300, 120%, 74.7058823529%)",
+        ),
+        (
+            "a {b: color.change(plum, $saturation: -20%)}",
+            "rgb(69.6470588235%, 79.7647058824%, 69.6470588235%)",
+        ),
+        (
+            "a {b: color.change(red, $lightness: -20%)}",
+            "hsl(0, 100%, -20%)",
         ),
         ("a {b: color.change(red, $hue: 540)}", "aqua"),
         ("a {b: color.change(red, $hue: 60deg)}", "yellow"),

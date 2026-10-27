@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1197/11,533**（10.4%，**实质通过 1032** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `change-hwb`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1302/11,533**（11.3%，**实质通过 1137** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `adjust-legacy`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -109,10 +109,14 @@ alwaysApply: true
    仍红：`*/none`（要 `none` 值）、`alpha_arg`（要 `$alpha:`，是否夹紧无金样）、`change/hsl` 36 + `change/hwb` 15
    与现代空间 ~230 行。**`change` 现在也写 hsl 轴与 `$alpha:`**（net 34，1151→1185）：
    `Color::with_axes` 是 `change` 自己的入口，**不夹紧**（`color.change(plum, $saturation: 120%)` →
-   `hsl(300, 120%, 74.7058823529%)`），而 `transform_axes`（adjust 族）仍夹紧 —— 两条相反的律都有金样，所以是两个入口而非一个开关。
-   配套三条细则：“越界就打印**写入的那组轴**”（`Color.authored`，先例是 `calc::Content{folded, printed}`；
-   从字节反推会把 `hsl(0,100%,120%)` 弄成 `hsl(180,-100%,120%)`）、**判越界前先取整**（`$lightness: 0.5%`
-   反推出 -1.1e-15 这种“零的浮点余尘”，裸 double 比较会让它“越界”）、`format_number` 截断后要把 `-0`
+   `hsl(300, 120%, 74.7058823529%)`），而 `transform_axes`（**legacy** `saturate`/`darken`/`grayscale` 那族）仍夹紧 ——
+   两条相反的律都有金样，所以是两个入口而非一个开关（`color.adjust` 后来也不走 `transform_axes`，见下）。
+   配套四条细则：“越界就打印**写入的那组轴**”（`Color.authored`，先例是 `calc::Content{folded, printed}`；
+   从字节反推会把 `hsl(0,100%,120%)` 弄成 `hsl(180,-100%,120%)`）、**判越界按写入的轴、容差用
+   `Channel::whole` 同源那个 5e-11**（`$lightness: 0.5%` 反推出 -1.1e-15 这种“零的浮点余尘”，裸 double 比较会让它
+   “越界”；而“先 `round()` 再比”太粗，会把 `color.adjust(plum, $saturation: 53%)` 的 255.19 字节当成在色域内，
+   语料却要 `hsl(300, 100.2868217054%, 74.7058823529%)`）、**两轴下界不对称**（负 saturation 仍在色域内打字节
+   `change/hsl::saturation/below_range`，负 lightness 不在 → `hsl(0, 100%, -20%)`）、`format_number` 截断后要把 `-0`
    归零（`rgb(1%, -0%, -0%)` → `rgb(1%, 0%, 0%)`）。**`change` 还能写 whiteness/blackness（net 12，1185→1197）**：
    **写与读不对称** —— `color.channel` 跨空间**读**必须给 `$space:`，而 `color.change(#cc6666, $whiteness: 80%)`
    不给标签就能写（`change/hwb.hrx`，名字本身就定了空间）；新入口 `Color::{with_hwb, hwb_of}`，且
@@ -123,6 +127,19 @@ alwaysApply: true
    “取整属于打印”。`change/hwb::alpha_input`/`alpha_arg` 与 `rgb(#123, 0.5)` 三者对不上任何一条统一规则
    （带 alpha 要百分比、不带要 hex、后者要数字），**仍留红不拟合**。`change` 簇内仍败 335（73 要消息）。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
    **未解释不当已解决**，不为单行拟合。
+   **`color.adjust` 已落（run `adjust-legacy`，net 105，1197→1302；regress=0，空库复算同读数）**：它与 `change`
+   共用 `builtins/color/modify.rs::route`，只差一个 `Writing::{Set,Shift}`（**一个路由 + 一个枚举，不是两份代码** ——
+   同一条律写两遍就是本轮 `fractional()`/色域判定漂移的成因）。边界**逐条来自金样、不是一条统一律**：
+   字节夹紧 `0–255`（`adjust/rgb.hrx::red/above_max` 是 `$red: 200` 而非 500）；hsl 轴**不接 legacy 夹紧**
+   （`adjust/hsl.hrx::saturation/max_remaining` 保留 100.2868217054% 打 hsl，而同一移动的
+   `saturate.hrx::two_args/max_remaining` 打 `#ff7eff` ⇒ `adjust` 也走 `with_axes`，`transform_axes` 只留给 legacy 族），
+   但 **saturation 下界仍夹 0**（`saturation/{min,min_remaining,arg_below_min}` 要那个灰），lightness 两头都不夹；
+   hwb **先加再按和归一**（`hwb.hrx::whiteness/max` → `rgb(87.5%,…)`）；**没点任何通道是 no-op**、
+   只给 `$alpha:` 仍移动 alpha 且夹 `0–1`（`no_channels.hrx::{positional,named}` 与 `alpha/*`；`change` 无此行故仍
+   decline）；`units.hrx::alpha/*` 说明 alpha 取任意单位的量值。金样单测 = `tests/color_adjust.rs`（六条律各自成测试，
+   并把 `saturate` 的相反律钉在同一条里）。`adjust` 簇仍败 **376**：`hsl/rgb/units/no_channels` 四组已归零，
+   `adjust/error/**` 75（要消息，与按目录计数有重叠）、`global.hrx` 2（要 `adjust-color()` 别名）、
+   `hwb::{alpha_input,alpha_arg}` 2（与 `change` 同因留红），其余在现代空间 `.hrx` 里（属 P8）。
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
@@ -189,6 +206,11 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 实证（已五次）：`tests/channel.rs` 的 hwb 逐字列表、`tests/builtins.rs` 拿 `color.hwb` 当“未注册例子”、
 `tests/named_args.rs` 只要求“文本存活”（现在按 `output.css` 断言，更强）、`tests/color_change.rs` 把已实现的
 `alpha_arg` 列在 decline 清单里、以及本轮我**自己编了两条不存在的 fixture 行**当作“仍红”的证据。
+**注释里的金样同样是编造的高发地**（第六次，本轮）：`color.adjust` 首版的 doc 写了 `color.adjust(#abcdef, $red: 500)`
+→ `#ffcdef`（fixture 是 `$red: 200`）与“hsl 轴夹在 0–100”（那是 **legacy `saturate`** 的律；8 条 `adjust/hsl` 行一直反对，
+而其中 `saturation/max_remaining` 当时就是红的 —— 注释把失败行为说成了规范）。
+做法（写进注释前）：**把某行写进注释/文档前先 `sed -n '/^<===> <case>\/input/,/====/p' sass-spec/spec/.../<file>.hrx` 逐条复核输入与输出**，
+不得凭“同族函数应当一致”去推断。
 做法：**开工前先 `grep -rn "<新名字>" crates/sasspile/tests`**，把命中的旧断言一并翻成 fixture 自己的期望，
 而不是等到测试红了才改。另：`cargo test --workspace | grep … | awk` 在**第一个失败的二进制处就停**，
 会报出“0 failed”的假绿；门禁一律用 `--no-fail-fast` 并看 `exit=0`。

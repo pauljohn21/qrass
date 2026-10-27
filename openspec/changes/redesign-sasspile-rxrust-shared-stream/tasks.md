@@ -867,6 +867,40 @@
         **`regress=0 net=34`**（`change/hsl` 31、`change/rgb` 2、`modules/color/change` 1），无效错误仍 **53**；
         131 测试 `--no-fail-fast` 下 exit=0、clippy exit 0。`change` 簇内仍败 335（其中 73 要消息），
         可达未收的主要是 `change/hwb` 15、`change/space` 里的 `$space:` 现代转换、以及各 `*/none` 行。
+      **㉓ `color.adjust` 已落（与 `change` 只差一个 `Writing`），但本刀真正的产物是两条被金样推翻的推定**（已实测）：
+      • **一个路由 + 一个枚举，不是两份代码**：`builtins/color/modify.rs::route(given, writing)` 同时服务
+        `change`（`Set`）与 `adjust`（`Shift`）——同一条律写两遍就是本轮 `fractional()`/色域判定漂移的成因。
+      • **边界逐条来自 fixture，不是一条统一律**：字节夹 `0–255`（`adjust/rgb.hrx::red/above_max` 是 `$red: 200`）；
+        hsl 轴**不接 legacy 夹紧** —— `adjust/hsl.hrx::saturation/max_remaining` 要
+        `hsl(300, 100.2868217054%, 74.7058823529%)`，而同一移动的 `saturate.hrx::two_args/max_remaining` 要
+        `#ff7eff` ⇒ `adjust` 也走 `with_axes`，`transform_axes` 只留给 legacy 那族（**纠正 ㉒a 里
+        “`transform_axes`（adjust 族）仍夹紧”的措词**）；但 **saturation 下界仍夹 0**
+        （`saturation/{min,min_remaining,arg_below_min}` 要那个灰），lightness 两头都不夹；hwb **先加再按和归一**
+        （`hwb.hrx::whiteness/max` → `rgb(87.5%,…)`）；**没点任何通道是 no-op**，只给 `$alpha:` 仍移动 alpha 且夹
+        `0–1`（`no_channels.hrx::{positional,named}` 及其 `alpha/*`）；`units.hrx::alpha/*` 取任意单位的量值。
+        `change` 没有这类行，故那两处仍 decline —— 不把“同族应当一致”当成金样。
+      • **推翻的推定 2（第六次事故，这次在注释里）**：首版 doc 写了 `color.adjust(#abcdef, $red: 500)` →
+        `#ffcdef`（fixture 是 `$red: 200`），又把“saturation/lightness 夹在 0–100”说成 `adjust` 的律 —— 那是
+        legacy `saturate` 的律，8 条 `adjust/hsl` 行一直反对，且其中 `saturation/max_remaining` 当时就是红的：
+        **注释把失败行为说成了规范**。自此：写进注释/文档前先
+        `sed -n '/^<===> <case>\/input/,/====/p' <file>.hrx` 逐条复核输入与输出。
+      • **色域判据随之改**（`color/text.rs::out_of_gamut`）：写过轴的色按**那组轴**判，容差用 ㉒b 导出的 5e-11，
+        不再 `round()`——“255.19 取整后算在域内”正是 `max_remaining` 被挡的原因。**两轴下界不对称**：
+        负 saturation 仍在域内、打字节（`change/hsl::saturation/below_range` → `rgb(69.6470588235%, …)`），
+        负 lightness 不在（`…::lightness/below_range` → `hsl(0, 100%, -20%)`）。㉒a 的“判越界必须先取整”至此
+        收窄为“余尘容差”；`authored == None` 那一半（构造子/`with_channel`）仍按字节取整判，行为不变。
+      • **实测**：hrx **1197 → 1302（实质 1032 → 1137，空期望仍 165）**，`ledger diff change-hwb adjust-legacy` =
+        **`regress=0 net=105`**（`core_functions/color/adjust` 簇内 104：hsl 32 / rgb 31 / hwb 17 / units 13 /
+        no_channels 11，另有 `modules/color/adjust` 1），无效错误仍 **53**；空库复算（同一临时库 verify-before 1197 vs
+        verify-after-2 1302）逐字重现；`cargo test --workspace --no-fail-fast` exit=0（39 个 test result 块，
+        无 FAILED）、clippy exit 0、sasslint CLI `count=0`。新测 `tests/color_adjust.rs` 六条律各成一测试（把
+        `saturate` 的相反律钉在同一条里），`tests/color_change.rs` 补 `saturation/{120,-20}` 与 `lightness:-20`。
+      • **`adjust` 簇仍败 376**（`ledger failures adjust-legacy "core_functions/color/adjust" --count`）：
+        `hsl`/`rgb`/`units`/`no_channels` 四组已归零；`adjust/error/**` 75 行要消息属 P7（该 75 与下面按目录的
+        计数有重叠 —— `adjust/lab/error/…` 两边都命中）；`hwb::{alpha_input,alpha_arg}` 2 行与 ㉒b 那对未解释
+        现象同源；`global.hrx` 2 行要 `adjust-color()` 这个 legacy 别名；其余在现代空间
+        （`{lab,lch,oklab,oklch,srgb,srgb_linear,display_p3,display_p3_linear,rec2020,prophoto_rgb,a98_rgb,
+        xyz_d50,xyz_d65,space}.hrx`，逐目录计数用同一命令换个前缀）—— 继续留红，不拟合。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
