@@ -126,7 +126,7 @@ async fn unmodellable_arguments_decline_and_hex_is_left_alone() {
 }
 
 /// The `color.*` accessors, and with them the audit that option (a) promised: the keyword table comes from
-/// the `color-name` crate's data, so every expectation here is a name the **corpus itself** pins.
+/// the `color` crate's keyword table, so every expectation here is a name the **corpus itself** pins.
 /// `gray` is fixed twice over — `equality.hrx` states `gray == hsl(none 0% 50.196078431373%)` (128/255) and
 /// `color.invert(gray)` → `#7f7f7f` (128 inverted is 127); `springgreen` is what
 /// `rgb/three_args/unitless::springgreen` writes for `rgb(0, 255, 127)`; `purple` and `pink` come from
@@ -148,12 +148,21 @@ async fn accessors_read_channels_and_the_keyword_table_matches_the_corpus() {
         ("a {b: color.red(black)}", "0"),
         ("a {b: color.red(white)}", "255"),
         ("a {b: color.red(gray)}", "128"),
+        // The CSS `-grey` spellings are the same entry, and the corpus does use them (`invert(grey)`,
+        // `color.adjust(grey, …)`), so the alias has to resolve to the same bytes.
+        ("a {b: color.red(grey)}", "128"),
         ("a {b: color.green(springgreen)}", "255"),
         ("a {b: color.blue(springgreen)}", "127"),
         ("a {b: color.red(purple)}", "128"),
         ("a {b: color.blue(pink)}", "203"),
         // A hex argument arrives as text and is read from there, not from a parsed declaration value.
         ("a {b: color.red(#123)}", "17"),
+        // `transparent` is a keyword the dependency knows and the old hand-list did not carry: the two
+        // alphas below are `rgb/two_args::transparent_to/{partial,transparent}`. The third row of that
+        // group, `rgb(transparent, 1)` → `black`, is **not** covered here — printing a colour as its name
+        // is the reverse-lookup law, still open.
+        ("a {b: rgb(transparent, 0.5)}", "rgba(0, 0, 0, 0.5)"),
+        ("a {b: rgb(transparent, 0)}", "rgba(0, 0, 0, 0)"),
     ] {
         assert_eq!(
             css(input).await,
@@ -172,4 +181,54 @@ async fn an_hsl_colour_declines_an_rgb_channel() {
         css("a {b: color.red(hsl(0, 100%, 50%))}").await,
         "a {\n  b: color.red(hsl(0, 100%, 50%));\n}\n"
     );
+}
+
+/// `color.hue` / `color.saturation` / `color.lightness`, one output per fixture row and one input per row
+/// actually read out of `core_functions/color/{hue,saturation,lightness}.hrx` — including the axis units,
+/// which no reasoning would supply: a hue prints `359deg`, saturation and lightness print `42%`.
+///
+/// Every value row in these three files feeds an `hsl(…)` colour, so this slice needs **no** rgb→hsl
+/// conversion; the non-`hsl` arguments in them (`1`, `lch(0% 0 0deg)`, `red, green`) are `error/*` rows
+/// wanting messages this project has not built (P7).
+#[tokio::test]
+async fn hue_saturation_lightness_read_the_hsl_axes() {
+    for (input, want) in [
+        ("a {b: color.hue(hsl(359, 50%, 50%))}", "359deg"),
+        // The fold happened at creation (`hsl/three_args/units.hrx`), the accessor only reads it back.
+        ("a {b: color.hue(hsl(540, 50%, 50%))}", "180deg"),
+        ("a {b: color.hue(hsl(0, 50%, 50%))}", "0deg"),
+        ("a {b: color.hue(hsl(123, 50%, 50%))}", "123deg"),
+        ("a {b: color.hue($color: hsl(234, 50%, 50%))}", "234deg"),
+        ("a {b: color.saturation(hsl(0, 100%, 50%))}", "100%"),
+        ("a {b: color.saturation(hsl(0, 50%, 50%))}", "50%"),
+        ("a {b: color.saturation($color: hsl(0, 42%, 50%))}", "42%"),
+        ("a {b: color.lightness(hsl(0, 100%, 100%))}", "100%"),
+        ("a {b: color.lightness(hsl(0, 100%, 0%))}", "0%"),
+        ("a {b: color.lightness(hsl(0, 100%, 50%))}", "50%"),
+        ("a {b: color.lightness($color: hsl(0, 100%, 42%))}", "42%"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// The other direction of the same honesty: an `rgb` colour asked for a hue has no hsl axis stored, and
+/// inventing one without a golden to check the rounding against would be a wrong answer scored as a pass.
+/// The call declines, so the text stands — until the conversion lands with its own fixtures.
+#[tokio::test]
+async fn an_rgb_colour_declines_a_hue_request() {
+    for call in [
+        "color.hue(#f00)",
+        "color.saturation(red)",
+        "color.lightness(#ff0000)",
+    ] {
+        assert_eq!(
+            css(&format!("a {{b: {call}}}")).await,
+            format!("a {{\n  b: {call};\n}}\n"),
+            "an unconvertible request must not be answered: {call}"
+        );
+    }
 }

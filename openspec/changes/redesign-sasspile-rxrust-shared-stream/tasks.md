@@ -509,6 +509,39 @@
       **但下一刀 rgb↔hsl / rgb↔hwb 换算应该用 `color`**（`Hsl`/`Hwb`/`Lab`/`Oklch`/`parse_color` 是它的主业）；
       代价记录在案：它用 f32，而金样要 12 位有效数字（`67.8431372549%`），所以量化/舍入必须以 fixture 为准。
       （本次误加的依赖已干净移除：`Cargo.lock` 里无 `color` 条目，只余 `color-name`。）
+      **补充（应你追问“为何不用 `color`”而验的硬数据；下面的 ⑦ 推翻了本段的结论，但数据仍有效）**：
+      `color` 不止常量表缺别名，
+      它的**解析器词表 `x11_colors.rs` 也只有 142 条且 `grey` 系列 0 命中** ⇒ `parse_color("grey")` 失败，
+      而 `color.red(gray)` 在语料里是有金样的（`equality.hrx` + `invert(gray)` → `#7f7f7f`，本轮已钉测试）。
+      另有一条量化代价：`to_rgba8` 文档自述在 `0.0019607842` 这个分量上会把应映射为 `0` 的值取成 `1`。
+      所以“不换”不是偏好而是覆盖面 —— **本段结论已被 ⑦ 推翻**：你的维护性理由更重，而 7 个别名本来
+      可以用拼法折叠补上，不构成保留不维护依赖的理由。`color` 同时也是下一刀 **换算**
+      （`Hsl`/`Hwb`/`Lab`/`Oklch`）的正确依赖。
+      **⑦ 名字表最终换成了 `color`（按你的理由：不维护 = 未知 bug 风险，这比覆盖面一条更有分量）**。
+      换法不是“拿 142 条顶 148 条”：`color` 的词表恰好是 **148 − 7 个别名 + `transparent` = 142**，而那 7 个
+      `-grey` 拼法在规范里就是 `-gray` 的同一条目 ⇒ 只需一条拼法折叠（`grey` → `gray`），**不录入任何手敲的
+      RGB 值**，所有字节仍由依赖给出。语料确实用到它们（`invert(grey)`、`color.adjust(grey, …)`、
+      `powerless(grey)` 共 5 个文件），所以这条不是凑数。
+      **实测**：hrx **949 → 951（实质 784 → 786）**，`ledger diff color-axes color-crate` = **`regress=0 net=2`**，
+      无效错误仍 **53**。多的 2 行是 `rgb/two_args::transparent_to/{partial,transparent}`（`transparent` 在旧表里
+      根本不存在）；单例复核过了才敢写（`HRX_CASE=transparent_to`），同组的 `transparent_to/opaque` 期望
+      **`black`** —— “值恰等于颜色名时要反向写名”那条律仍未做，不计入本刀。实现上两个坑：`parse_color` 返回
+      `DynamicColor`（需 `to_alpha_color::<Srgb>()` 才能 `to_rgba8`），而 `to_rgba8` 自述在 `0.0019607842` 这个
+      分量上会把 0 取成 1（关键字色是 8-bit 精确值，已用 `gray/grey=128`、`pink` 的 blue=203 等抽检证过）。
+      **反向写名的下一步做法（不靠记性）**：只需列出 148 个**拼法**（字符串），值全从 `parse_color` 取；
+      拼法写错了会被依赖当场报错，所以可以自校。
+      **⑥ `color.hue` / `color.saturation` / `color.lightness` 已落地，而且本刀根本不需要换算**（已实测）：
+      先把三个文件的行全部重读一遍——**每一条“期望值”行用的都是 `hsl(…)` 色**，非 `hsl` 参数只出现在
+      `error/*` 行（`color.hue(1)`、`color.hue(lch(0% 0 0deg))`、`color.hue(red, green)`），而那是要消息的 P7。
+      所以访问器只读已存在 hsl 里的轴，不新造换算。`hue.hrx` 给的单位律（推导不出来的那部分）：
+      hue 打 **`359deg`/`180deg`/`0deg`/`123deg`/`0.5deg`**，saturation/lightness 打 **`100%`/`0%`/`50%`/`0.5%`/`42%`**；
+      `hsl(540, …)` → `180deg` 靠的是创建时已经做过的 mod-360 折叠，访问器不再重算。
+      公共形状收干到一个 `accessor(args, unit, read)`（单位由轴决定，不在各 body 里重复 arity 分支）。
+      **实测**：hrx **932 → 949（实质 767 → 784）**，`ledger diff color-names color-axes` =
+      **`regress=0 net=17`**（hue 7 / saturation 5 / lightness 5），无效错误仍 **53**。
+      **仍不做也不装成做了**：rgb 来路的色被问 hue（`color.hue(#f00)`）一律 decline 逐字，已钉成测试——
+      rgb→hsl 换算在没有金样可用校舍入之前不写；下一步先取换算的金样（`adjust`/`change`/`channel`/`mix`/`grayscale`
+      里那群 `red`/`blue`/`pink` 源的行）再动手，而不是先写公式再找理由。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

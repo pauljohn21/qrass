@@ -23,6 +23,9 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_GREEN,
     &COLOR_BLUE,
     &COLOR_ALPHA,
+    &COLOR_HUE,
+    &COLOR_SATURATION,
+    &COLOR_LIGHTNESS,
 ];
 
 /// `color.red(…)`, the first channel; likewise green and blue.
@@ -67,6 +70,35 @@ static COLOR_ALPHA: Builtin = Builtin {
     optional: &[],
     variadic: true,
     apply: alpha_of,
+};
+
+/// `color.hue(hsl(359, 50%, 50%))` → `359deg`; `hsl(540, …)` → `180deg` — the fold already happened when
+/// the colour was built, so the accessor reads it back (`core_functions/color/hue.hrx`). Same variadic
+/// shape as the channel accessors, for the same reason.
+static COLOR_HUE: Builtin = Builtin {
+    name: "color.hue",
+    params: &["color"],
+    optional: &[],
+    variadic: true,
+    apply: hue_of,
+};
+
+/// `color.saturation(hsl(0, 100%, 42%))` → `100%` (`core_functions/color/saturation.hrx`).
+static COLOR_SATURATION: Builtin = Builtin {
+    name: "color.saturation",
+    params: &["color"],
+    optional: &[],
+    variadic: true,
+    apply: saturation_of,
+};
+
+/// `color.lightness(hsl(0, 100%, 42%))` → `42%` (`core_functions/color/lightness.hrx::named`).
+static COLOR_LIGHTNESS: Builtin = Builtin {
+    name: "color.lightness",
+    params: &["color"],
+    optional: &[],
+    variadic: true,
+    apply: lightness_of,
 };
 
 /// `rgb(18, 52, 86)` → `rgb(18, 52, 86)`, `rgb(256, 0, 0, 0.5)` → `rgba(255, 0, 0, 0.5)`, and
@@ -167,29 +199,56 @@ fn finished(built: Option<Color>) -> Result<Value, SassError> {
 
 /// One channel of a colour argument, as a unitless number.
 fn channel(args: Vec<Value>, index: usize) -> Result<Value, SassError> {
+    accessor(args, None, |color| color.byte(index))
+}
+
+/// `color.alpha`: the colour's own alpha, which every representation carries.
+fn alpha_of(args: Vec<Value>) -> Result<Value, SassError> {
+    accessor(args, None, |color| Some(color.alpha()))
+}
+
+/// `color.hue(hsl(359, 50%, 50%))` → `359deg` (`hue.hrx`: `359deg`, `180deg`, `0deg`, `123deg`,
+/// `0.5deg`, `234deg` — the last two through `$color:` and the `above_max`/`negative` rows, which are
+/// folded at creation because `Color::hsl` wraps the hue into `0–360`).
+fn hue_of(args: Vec<Value>) -> Result<Value, SassError> {
+    accessor(args, Some("deg"), Color::hue)
+}
+
+/// `color.saturation(hsl(0, 100%, 42%))` → `100%` (`saturation.hrx`: `100%`, `0%`, `50%`, `0.5%`, `42%`).
+fn saturation_of(args: Vec<Value>) -> Result<Value, SassError> {
+    accessor(args, Some("%"), Color::saturation)
+}
+
+/// `color.lightness(hsl(0, 100%, 42%))` → `42%` (`lightness.hrx`: the same readings along the L axis).
+fn lightness_of(args: Vec<Value>) -> Result<Value, SassError> {
+    accessor(args, Some("%"), Color::lightness)
+}
+
+/// The shape every accessor shares: read one number out of the colour argument and print it with the unit
+/// the fixtures give that axis — `red.hrx` a bare `255`, `hue.hrx` a `359deg`, `saturation.hrx` a `42%`.
+///
+/// An axis the colour does not carry (an `rgb` colour asked for a `hue`, which needs the rgb→hsl conversion
+/// that still has no golden) declines through the same non-fatal error, so the run keeps its text rather
+/// than printing a number read off the wrong axes.
+fn accessor(
+    args: Vec<Value>,
+    unit: Option<&str>,
+    read: impl Fn(&Color) -> Option<f64>,
+) -> Result<Value, SassError> {
     let read = match access(&args) {
-        Access::Colour(color) => color.byte(index),
-        // A colour held in another space (an `hsl` value) has no `0–255` channel to hand out, so it
-        // declines rather than reporting a number read off the wrong axes.
+        Access::Colour(color) => read(&color),
         Access::NotAColour => None,
         Access::TooFew => return Err(super::missing("color".to_string())),
         Access::TooMany(passed) => return Err(super::too_many(1, passed)),
     };
     match read {
-        Some(number) => Ok(Value::Number(number, crate::unit::Unit::unitless())),
-        None => Err(SassError::new(
-            "not a colour whose channels this slice can read",
+        Some(number) => Ok(Value::Number(
+            number,
+            unit.map_or_else(crate::unit::Unit::unitless, crate::unit::Unit::named),
         )),
-    }
-}
-
-/// `color.alpha`: the colour's own alpha, which every representation carries.
-fn alpha_of(args: Vec<Value>) -> Result<Value, SassError> {
-    match access(&args) {
-        Access::Colour(color) => Ok(Value::Number(color.alpha(), crate::unit::Unit::unitless())),
-        Access::NotAColour => Err(SassError::new("not a colour this slice can read")),
-        Access::TooFew => Err(super::missing("color".to_string())),
-        Access::TooMany(passed) => Err(super::too_many(1, passed)),
+        None => Err(SassError::new(
+            "not a colour whose axis this slice can read",
+        )),
     }
 }
 

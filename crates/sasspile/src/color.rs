@@ -177,20 +177,29 @@ impl Color {
 
     /// A colour named in CSS (`color.alpha(red)` → `1`, `core_functions/color/alpha.hrx::color/named`).
     ///
-    /// The keyword table comes from the `color-name` crate's data rather than from my recollection, and
-    /// only its **name → RGB** mapping is used — no parsing or printing behaviour is taken from it. That
-    /// matters here because the local corpus carries no complete name→RGB source: `values/colors/` holds
-    /// `alpha_hex/` and `equality.hrx` (which states a handful, e.g. `purple == hsl(300, 100%,
-    /// 25.098039215686%)`), and a dependency is auditable where memory is not.
+    /// The keywords resolve through the `color` crate (linebender; actively maintained, targets CSS Color
+    /// 4) rather than a hand-typed table, because the local corpus has no complete name→RGB source —
+    /// `values/colors/` holds `alpha_hex/` and `equality.hrx` only (which states a handful, e.g.
+    /// `purple == hsl(300, 100%, 25.098039215686%)`), and an audited dependency beats my recollection.
+    /// **Only the keyword→colour mapping is taken**; how a colour prints stays this project's own law
+    /// (`Representation`, `to_css`).
+    ///
+    /// The one thing the dependency's table lacks is CSS's **`-grey` spellings** — its keyword list is
+    /// `148 − 7 aliases + transparent = 142` — and the corpus does use them (`invert(grey)` and
+    /// `color.adjust(grey, …)` are real rows). Those need no RGB data at all: CSS defines each `-grey`
+    /// form as another spelling of the same entry, so the alias is folded here and the value still comes
+    /// from the dependency.
     pub fn from_name(name: &str) -> Option<Self> {
-        let (_, [red, green, blue]) = color_name::css::COLORS_DATA
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))?;
+        let keyword = name.trim().to_lowercase().replace("grey", "gray");
+        let rgba = color::parse_color(&keyword)
+            .ok()?
+            .to_alpha_color::<color::Srgb>()
+            .to_rgba8();
         Self::rgb(
-            f64::from(u16::from(*red)),
-            f64::from(u16::from(*green)),
-            f64::from(u16::from(*blue)),
-            1.0,
+            f64::from(u16::from(rgba.r)),
+            f64::from(u16::from(rgba.g)),
+            f64::from(u16::from(rgba.b)),
+            f64::from(u16::from(rgba.a)) / 255.0,
         )
         .map(|color| Self {
             representation: Representation::Hex,
@@ -232,6 +241,36 @@ impl Color {
     /// The colour's own alpha: `color.alpha(rgba(red, 0.42))` → `0.42` (`alpha.hrx::color/middle`).
     pub fn alpha(&self) -> f64 {
         self.alpha
+    }
+
+    /// The hue in degrees, for `color.hue` (`hue.hrx`: `359deg`, and `hsl(540, 50%, 50%)` → `180deg`
+    /// because the hue was already folded into `0–360` at creation).
+    pub fn hue(&self) -> Option<f64> {
+        self.hsl_channel(0)
+    }
+
+    /// The saturation, for `color.saturation` (`saturation.hrx`: `100%`, `0%`, `50%`, `0.5%`, `42%`).
+    pub fn saturation(&self) -> Option<f64> {
+        self.hsl_channel(1)
+    }
+
+    /// The lightness, for `color.lightness` (`lightness.hrx`: the same five readings in the L axis).
+    pub fn lightness(&self) -> Option<f64> {
+        self.hsl_channel(2)
+    }
+
+    /// One axis of a colour **held in the hsl space**, or nothing.
+    ///
+    /// An `rgb`/hex/keyword-sourced colour is not read here: every value row of
+    /// `core_functions/color/{hue,saturation,lightness}.hrx` feeds an `hsl(…)` colour (the non-`hsl`
+    /// arguments in those files are `error/*` rows, which want messages this project has not built), so
+    /// the rgb→hsl conversion has no golden to be written against yet. Declining keeps a converted guess
+    /// out of the pass count; the conversion is `adjust`/`change`/`channel`'s prerequisite and its own step.
+    fn hsl_channel(&self, index: usize) -> Option<f64> {
+        match self.representation {
+            Representation::Hsl => self.channels.get(index).map(|channel| channel.value),
+            _ => None,
+        }
     }
 
     /// A colour from `0–255` byte values, for hex parsing.

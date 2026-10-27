@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **932/11,533**（8.08%，**实质通过 767** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `color-names`）；无效错误仍 **53**（本批一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **951/11,533**（8.25%，**实质通过 786** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `color-crate`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -44,9 +44,14 @@ alwaysApply: true
    在 `core_functions/color` 内且每批 `regress=0`。注册表已加 **optional 参数**，且“带名字的 variadic”能绑
    标签（`rgb($red: 0, …)`、`hsl($hue: 0, …)` 已绿；“必需参数缺失”只约束定长签名——但 arity 错误仍在进 body
    之前，所以带 CSS 重载的名字一律用 variadic，否则 filter 写法会被误报致命）。已落 `color.red/green/blue/alpha`
-   访问器，颜色名走 `color-name` 依赖的 `COLORS_DATA`（**只用数据**，解析与打印不从它来；已拿 6 个语料自陈的
-   名字做抽检）。下一步：rgb↔hsl / rgb↔hwb **换算**（解锁 `hue/saturation/lightness`、`hwb` 的现代空格语法，
-   以及 `adjust` 402 / `change` 311 那两大群）→ `mix` → 颜色 `==`。
+   访问器，颜色名最初取自一个名字表依赖（**现已换成 `color`，见下**；**只用数据**，解析与打印不从它来；
+   已拿 6 个语料自陈的名字做抽检）；`color.hue/saturation/lightness` 也已落（**全 17 条金样行用的都是
+   `hsl(…)` 色**，所以本刀不需换算；单位律由金样给出：hue → `359deg`，saturation/lightness → `42%`）。
+   **颜色名的最终依赖 = `color`（linebender，活跃）的 `parse_color`**：`color-name` 因不再维护而被剔除
+   （未知 bug 风险比它的多 7 个别名更有分量）；`color` 词表缺的 7 个 `-grey` 拼法用“拼法折叠 `grey`→`gray`”
+   补齐，**不录入任何手敲 RGB 值**。下一步：rgb↔hsl / rgb↔hwb **换算**
+   —— 但**先取金样再写公式**（`adjust`/`change`/`channel`/`mix`/`grayscale` 里那群 `red`/`blue`/`pink` 源的行），
+   而不是先写实现再找理由；rgb 色的 hue 现在一律 decline（已钉测试）。之后 `mix` → 颜色 `==`。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
    **最小切口是 `core_functions/color/rgb/three_args/*`，不是 `values/colors/**`**（后者几乎全要颜色 `==`
    比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置的 `builtins` **按域拆目录**已做（

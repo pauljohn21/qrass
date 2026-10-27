@@ -10,10 +10,11 @@ description = "A clean-room SCSS->CSS compiler whose control flow IS a lazy rxru
 rxrust = { version = "=1.0.0-rc.6", features = ["scheduler"] }
 tracing = "0.1"
 # The CSS named-colour keywords, as data. Their RGB values are Web-standard content, and the local corpus
-# carries no complete name→RGB table (`values/colors/` holds only `alpha_hex/` and `equality.hrx`); a
-# dependency is auditable in a way my recollection is not. Used for name lookup only — no printing and no
-# parsing behaviour comes from it, and `tests/color.rs` spot-checks the names the fixtures do state.
-color-name = "1.2.0"
+# carries no complete name→RGB table (`values/colors/` holds only `alpha_hex/` and `equality.hrx`), so a
+# dependency is auditable in a way my recollection is not. Linebender's actively maintained colour library
+# is also where the coming rgb↔hsl / rgb↔hwb conversions will come from. Only its keyword→colour mapping
+# is used — no printing behaviour — and `tests/color.rs` spot-checks the names the fixtures state.
+color = "0.3"
 
 [dev-dependencies]
 ledger = { path = "../ledger" }
