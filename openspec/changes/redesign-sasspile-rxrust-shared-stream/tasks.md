@@ -963,6 +963,28 @@
       • **仍未做**：`*/none`（缺通道值，要 `none` 这个值本身）、`Color space rgb doesn't have a channel with
         this name.`（`incompatible_channel` + `mixed_formats`）、`$space:`/现代空间、`Undefined function.`、
         `Unknown color space "c".`。
+      **㉖ P7 第三片：一条调用点两个空间的名字 = 按名字拒绝，而 `hue` 不决定空间**（已实测）：
+      • **律**：第一个“能定空间”的组定空间，第一个外来的名字被点名 ——
+        `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with
+        this name.`；`color.scale(red, $saturation: 1%, $blackness: 1%)` → 同一句式但报 `hsl`
+        （`{change,adjust,scale}/error/mixed_formats.hrx` 各 7 行，内容完全对称）。这直接替掉 ㉑/㉓ 里
+        “混两个空间就 decline”的两条守卫 —— 同一形状，但现在说的是语料的拒绝而不是我的沉默。
+      • **自己的错（又一次靠量具发现）**：第一版用“名字表里第一个命中”选空间，而 **`hue` 同时属于 hsl 与
+        hwb**（`change/hsl.hrx::hue/*` 写 hsl，`change/hwb.hrx::all` 与 whiteness/blackness 同写），于是
+        `color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)` 被当成“hsl 空间里出现了
+        whiteness”拒掉 —— **5 条已通过的行变回归、无效错误 53 → 62**。修法是把表改成
+        “空间名 / 能定空间的名字 / 它拥有的名字”三元组，共享名不参与选空间（已把这个错写进
+        `SPACE_CHANNELS` 的注释，并把那两行 `change/hwb.hrx::{all,named}` 钉成断言）。
+      • **实测**：hrx **1434 → 1455（实质 1269 → 1290）**，`ledger diff colour-diagnostics mixed-channel` =
+        **`regress=0 net=21`**（正好 7×3），无效错误仍 **53**；空库复算（`/tmp/qrass-ab4.db`：
+        mixed-verify-before 1434 vs mixed-verify-after 1455）逐字重现；`cargo test --workspace
+        --no-fail-fast` exit=0（41 块）、clippy `-D warnings` exit 0、sasslint CLI `count=0`。新测
+        `tests/color_diagnostics.rs` 加两条：十行拒绝消息 + 两行“hue 共享所以不拒”。
+      • **下一个真阻塞（说清不做）**：`$chroma:` 这类**谁都不有的名字**也该报同一句话
+        （`adjust/error/{args,incompatible_channel}.hrx::unknown/legacy_space`），但未绑定的标签在 registry 就被
+        剔掉了，而 `Given.param: &'static str` 装不下源码里的任意标签 —— 要递就得把 `param` 改成
+        `String`/带所有权的类型（影响 body 签名与所有比较处），属单独的形状变更，不自作主张做。现代色的同名
+        拒绝也仍未做（读不出那个色就不知道它在哪个空间）。`builtins/color/mod.rs` 474 行、`modify.rs` 462 行。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

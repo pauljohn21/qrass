@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1434/11,533**（12.4%，**实质通过 1269** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `colour-diagnostics`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1455/11,533**（12.6%，**实质通过 1290** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `mixed-channel`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -183,8 +183,21 @@ alwaysApply: true
      又在注释里写了不存在的 case 名 `scale/error/type.hrx::alpha_none`（真名就是 `none`）——第七次同类错。
      75 行分布：三个 `error/type` 共 35、scale 的 `error/units/*` 14、change+adjust 的 `units/hwb` 8、
      `error/args` 7、`bounds` 2、`polar` 1，外加 8 条 legacy 访问器/`saturate` 的 `too_few_args`。
-     金样单测 = `tests/color_diagnostics.rs`（九条消息）。而 `change`/`adjust`/`scale` 的 `*/none`（缺通道值）、
-     `Color space rgb doesn't have a channel with this name.`（`incompatible_channel`+`mixed_formats`）与 `space.hrx` 仍未做。
+     金样单测 = `tests/color_diagnostics.rs`（九条消息）。**接着的 P7 第二片：两个空间的名字写在一条调用里
+     要按名字拒绝。**（run `mixed-channel`，net 21，1434→1455；regress=0，空库复算同读数，无效错误仍 53）：
+     第一个“能定空间”的组说空间，第一个外来的名字被点名 ——
+     `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with this name.`、
+     `color.scale(red, $saturation: 1%, $blackness: 1%)` → `…$blackness: Color space hsl …`
+     （`{change,adjust,scale}/error/mixed_formats.hrx` 各 7 行）。这取代了原来的“混空间就 decline”两条守卫。
+     **`hue` 不决定空间（它同时属于 hsl 与 hwb）**：第一版拿“任意匹配名”选空间，把
+     `color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)` 这类正常 hwb 写入拒成了
+     `$whiteness: Color space hsl doesn't have a channel…` —— **5 条已通过的行变成回归、无效错误 53→62**
+     （再一次：这类“FAIL→FAIL / 期望输出变成错”只有 regress + `--count` 看得见）。现在表法是
+     “空间名 / 能定空间的名字 / 它拥有的名字”三元组，共享的 `hue` 不在“能定空间”列里。
+     仍未做：`$chroma:` 这类**谁都不有的名字**（需把未绑定标签递进 body，而
+     `Given.param: &'static str` 装不下源码里的任意标签 —— 这是个真阻塞项，不是没写），
+     以及现代色（`color(srgb …)`）的名字拒绝（读不出那个色就不知道它在哪个空间）。
+     `builtins/color/mod.rs` 已到 474 行、`modify.rs` 462 行 —— 两者再扩都得先拆。
    而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
