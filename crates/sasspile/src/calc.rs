@@ -314,6 +314,14 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
             Ok(other) => atom(other.to_css()),
             Err(_) => atom(format!("${name}")),
         },
+        // A namespaced reference is a built-in module constant or nothing: no fixture puts one inside a
+        // calculation, so an unknown `upstream.$a` keeps its own text exactly as an unbound `$name` above
+        // does, instead of becoming a guess about a file this compiler never reads.
+        Tok::MemberVar(module, name) => match crate::builtins::module_value(module, name) {
+            Some(Value::Number(value, unit)) => Some(number(value, &unit)),
+            Some(other) => atom(other.to_css()),
+            None => atom(format!("{module}.${name}")),
+        },
         Tok::Interp(inner) => match expr::interpolated(inner, env).map(|built| built.eval(env)) {
             Some(Ok(value)) => atom(value.to_css()),
             _ => None,

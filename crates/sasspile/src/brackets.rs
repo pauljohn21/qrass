@@ -233,7 +233,7 @@ pub(crate) struct Shell {
 pub(crate) fn resolved(toks: &[Tok], env: &Env) -> String {
     let dynamic = meaningful(toks)
         .into_iter()
-        .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)));
+        .any(|tok| matches!(tok, Tok::Var(_) | Tok::MemberVar(..) | Tok::Interp(_)));
     let kept = dynamic
         .then(|| expr::interpolated(toks, env))
         .flatten()

@@ -23,6 +23,13 @@ pub enum Tok {
     Punct(char),
     /// a `$name` reference (name excludes the leading `$`)
     Var(String),
+    /// a **namespaced** reference `module.$name` — `math.$pi`, `math.$max-safe-integer`.
+    /// Made one lexeme here, at the character that starts the `$`, because nothing downstream can re-join
+    /// it: with `Word("math.")` and `Var("pi")` apart, no consumer can tell `math.$pi` (a built-in module
+    /// constant) from `math . $pi` (a product) or `5.$pi`, and re-scanning the rendered text in `expr` is
+    /// the classification-granularity mistake this project has measured four times (`-a-calc(`,
+    /// `calls::split` dropping spaces, `named_argument` guessing labels).
+    MemberVar(String, String),
     /// the inner tokens of a `#{ … }` interpolation
     Interp(Vec<Tok>),
     /// a `// …` silent comment **including its slashes**, carried as data so each consumer
@@ -65,6 +72,9 @@ pub struct LexAcc {
     buf: String,
     hash: bool,
     var: Option<String>,
+    /// the module prefix cut off the pending word by [`LexAcc::take_module_prefix`], waiting for the `$name`
+    /// that completes a [`Tok::MemberVar`]
+    member: Option<String>,
     interp: Vec<Vec<Tok>>,
     slash: bool,
     block: bool,
@@ -103,6 +113,20 @@ impl LexAcc {
             let word = std::mem::take(&mut self.buf);
             self.push(Tok::Word(word), emit);
         }
+    }
+
+    /// When the pending word ends in `.` and holds something before it, that tail is a **module prefix**:
+    /// cut it off so the `$name` that follows can be lexed as one [`Tok::MemberVar`]. Whatever precedes the
+    /// dot is returned whole (`a.math` from `a.math.$pi`), so a name outside the module table still renders
+    /// back as the source spelled it.
+    fn take_module_prefix(&mut self) -> Option<String> {
+        let head = self.buf.strip_suffix('.')?;
+        if head.is_empty() {
+            return None;
+        }
+        let prefix = head.to_string();
+        self.buf.clear();
+        Some(prefix)
     }
 
     /// Push the `// …` text collected so far as one [`Tok::Silent`] and restart the run.
@@ -195,7 +219,10 @@ impl LexAcc {
             }
             let name = std::mem::take(self.var.as_mut().unwrap());
             self.var = None;
-            self.push(Tok::Var(name), emit);
+            match self.member.take() {
+                Some(namespace) => self.push(Tok::MemberVar(namespace, name), emit),
+                None => self.push(Tok::Var(name), emit),
+            }
         }
         // A pending `-` resolves against this character: an identifier char continues the lexeme
         // (vendor prefix, or an in-ident hyphen), anything else makes the `-` a standalone
@@ -223,6 +250,8 @@ impl LexAcc {
                 self.hash = true;
             }
             '$' => {
+                let prefix = self.take_module_prefix();
+                self.member = prefix;
                 self.flush_word(emit);
                 self.var = Some(String::new());
             }
@@ -322,6 +351,9 @@ fn text_of(toks: &[Tok], keep_silent: bool) -> String {
             Tok::Op(c) => c.to_string(),
             Tok::Punct(c) => c.to_string(),
             Tok::Var(n) => format!("${n}"),
+            // Whole, as written: the prefix was taken out of the pending word, so this is the only place it
+            // survives — a declined run has to print `math.$pi` back exactly.
+            Tok::MemberVar(module, n) => format!("{module}.${n}"),
             Tok::Interp(inner) => text_of(inner, keep_silent),
             Tok::Silent(c) if keep_silent => c.clone(),
             Tok::Silent(_) => String::new(),

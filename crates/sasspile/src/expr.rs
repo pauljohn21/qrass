@@ -39,6 +39,8 @@ pub enum Expr {
     Text(String),
     /// `$name` — the lookup key never carries the `$` (see [`Env`])
     Var(String),
+    /// `math.$pi` — a built-in module's constant, arriving as one lexeme from [`Tok::MemberVar`].
+    MemberVar(String, String),
     /// a call into a builtin whose signature we have (`1.7a`); each argument keeps its `$label:` so
     /// binding can be by name rather than by position
     Call {
@@ -132,7 +134,7 @@ pub fn special_call(toks: &[Tok]) -> bool {
 
 fn has_dynamic(toks: &[Tok]) -> bool {
     toks.iter()
-        .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)))
+        .any(|tok| matches!(tok, Tok::Var(_) | Tok::MemberVar(..) | Tok::Interp(_)))
 }
 
 /// Whether a run **passes named arguments** — `f(1, $w: 30%)`, `color.hwb($hue: 180, …)`. There the `$w`
@@ -377,6 +379,10 @@ fn interpolation(toks: &[Tok], env: &Env) -> Option<Expr> {
                     flush(&mut parts, &mut lit);
                     parts.push(Expr::Var(name.clone()));
                 }
+                Tok::MemberVar(module, name) => {
+                    flush(&mut parts, &mut lit);
+                    parts.push(Expr::MemberVar(module.clone(), name.clone()));
+                }
                 Tok::Interp(inner) => {
                     flush(&mut parts, &mut lit);
                     parts.push(
@@ -429,6 +435,12 @@ impl Expr {
             Expr::Num(value, unit) => Ok(Value::Number(*value, unit.clone())),
             Expr::Text(text) => Ok(Value::Raw(text.clone())),
             Expr::Var(name) => env.get(name),
+            // A built-in module constant resolves without consulting the environment; anything else named
+            // through a dot belongs to a file-loaded module this compiler has not got (`upstream.$a`,
+            // `utils.$empty-map` — P5), and guessing there would invent an `Undefined variable` the corpus
+            // does not state, so the run keeps its text instead.
+            Expr::MemberVar(module, name) => crate::builtins::module_value(module, name)
+                .ok_or_else(|| SassError::new("no built-in module member under that name")),
             Expr::Call { name, args } => args
                 .iter()
                 .map(|arg| {

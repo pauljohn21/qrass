@@ -17,6 +17,7 @@
 //! domains, so adding one adds a line here and a file there — nothing is reordered and no name changes:
 //! the only external surface is [`signature`] and [`evaluate`], used by `calls`, `brackets` and `expr`.
 
+use crate::unit::Unit;
 use crate::value::Value;
 use crate::{ErrorKind, SassError};
 
@@ -121,6 +122,17 @@ pub fn signature(name: &str) -> Option<&'static Builtin> {
         .flat_map(|domain| domain.iter())
         .copied()
         .find(|builtin| builtin.name == name)
+}
+
+/// A **built-in module's constant**, addressed `module.$name` — `math.$pi`, `math.$epsilon`
+/// (`core_functions/math/variables.hrx`). Only namespaces that own a built-in member answer: `utils.$empty-map`
+/// and `upstream.$a` name modules loaded from a file, which is P5's business, and resolving one here would be
+/// a guess about a file this compiler never reads. The caller declines on `None` and keeps the source text.
+pub fn module_value(module: &str, name: &str) -> Option<Value> {
+    (module == "math")
+        .then(|| math::constant(name))
+        .flatten()
+        .map(|value| Value::Number(value, Unit::unitless()))
 }
 
 /// Bind given arguments to the signature, then apply. Positional arguments fill parameters in order; a

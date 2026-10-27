@@ -41,6 +41,28 @@ pub(super) static MATHS: &[&Builtin] = &[
     &combining::MATH_HYPOT,
 ];
 
+/// The `math` module's own constants, addressed `math.$pi` (`core_functions/math/variables.hrx`). Each value
+/// is quoted from the row that prints it, because a remembered digit string is exactly what this project has
+/// been burned by:
+/// * `math.$pi * 1e15` → `3141592653589793`, `math.$e * 1e15` → `2718281828459045`,
+///   `math.$epsilon * 1e31` → `2220446049250313` — the three `f64` constants themselves;
+/// * `math.$max-safe-integer` → `9007199254740991`, `math.$min-safe-integer` → its negative;
+/// * `math.$max-number` → the 309 digits of the largest finite double, and
+///   `math.$min-number * 1e300 * 1e39` → `4940656458412465`, which makes `$min-number` the **smallest
+///   denormal** (`f64::from_bits(1)` = 4.9406564584124654e-324), not `MIN_POSITIVE`.
+pub(super) fn constant(name: &str) -> Option<f64> {
+    Some(match name {
+        "pi" => std::f64::consts::PI,
+        "e" => std::f64::consts::E,
+        "epsilon" => f64::EPSILON,
+        "max-safe-integer" => 9_007_199_254_740_991.0,
+        "min-safe-integer" => -9_007_199_254_740_991.0,
+        "max-number" => f64::MAX,
+        "min-number" => f64::from_bits(1),
+        _ => return None,
+    })
+}
+
 /// The refusal of a parameter that must carry **no unit**: `$number: Expected 1px to have no units.`
 /// (`core_functions/math/{round,atan,asin,sqrt,unitless}.hrx::error/*`, and `$base:` under the same words in
 /// `log.hrx::error/base_has_units`). Read by the trig inverse, `math.sqrt`, `math.log` and `math.pow`, so
