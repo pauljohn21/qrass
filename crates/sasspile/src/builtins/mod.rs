@@ -149,7 +149,7 @@ pub(super) fn missing(param: String) -> SassError {
 /// `Error: Only 2 arguments allowed, but 3 were passed.` Both counts decline the English plural
 /// independently, as the corpus shows (`Only 1 argument allowed, but 2 were passed.` and
 /// `Only 0 arguments allowed, but 1 was passed.`).
-fn too_many(allowed: usize, passed: usize) -> SassError {
+pub(super) fn too_many(allowed: usize, passed: usize) -> SassError {
     SassError::typed(
         ErrorKind::TooManyArguments,
         format!(

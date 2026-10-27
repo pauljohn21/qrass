@@ -124,3 +124,52 @@ async fn unmodellable_arguments_decline_and_hex_is_left_alone() {
         "a {\n  b: rgb(1px, 2px, 3px);\n}\n"
     );
 }
+
+/// The `color.*` accessors, and with them the audit that option (a) promised: the keyword table comes from
+/// the `color-name` crate's data, so every expectation here is a name the **corpus itself** pins.
+/// `gray` is fixed twice over — `equality.hrx` states `gray == hsl(none 0% 50.196078431373%)` (128/255) and
+/// `color.invert(gray)` → `#7f7f7f` (128 inverted is 127); `springgreen` is what
+/// `rgb/three_args/unitless::springgreen` writes for `rgb(0, 255, 127)`; `purple` and `pink` come from
+/// `equality.hrx` and `channel/hwb::foreign/whiteness` (`75.2941176471%` is `192/255`).
+#[tokio::test]
+async fn accessors_read_channels_and_the_keyword_table_matches_the_corpus() {
+    for (input, want) in [
+        // The fixture rows themselves (`core_functions/color/red.hrx::{max,min,middle,named}`).
+        ("a {b: color.red(rgb(255, 0, 0))}", "255"),
+        ("a {b: color.red(rgb(0, 0, 0))}", "0"),
+        ("a {b: color.red(rgb(123, 0, 0))}", "123"),
+        ("a {b: color.red($color: rgb(234, 0, 0))}", "234"),
+        // `color.alpha` (`alpha.hrx::color/{max,middle,min,named}`).
+        ("a {b: color.alpha(red)}", "1"),
+        ("a {b: color.alpha(rgba(red, 0.42))}", "0.42"),
+        ("a {b: color.alpha(rgba(red, 0))}", "0"),
+        ("a {b: color.alpha($color: rgba(red, 0.73))}", "0.73"),
+        // Keyword parsing, cross-checked against the corpus values above.
+        ("a {b: color.red(black)}", "0"),
+        ("a {b: color.red(white)}", "255"),
+        ("a {b: color.red(gray)}", "128"),
+        ("a {b: color.green(springgreen)}", "255"),
+        ("a {b: color.blue(springgreen)}", "127"),
+        ("a {b: color.red(purple)}", "128"),
+        ("a {b: color.blue(pink)}", "203"),
+        // A hex argument arrives as text and is read from there, not from a parsed declaration value.
+        ("a {b: color.red(#123)}", "17"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// The honest edge: a colour held in the **hsl** space has no `0–255` channels to hand out, and converting
+/// is a separate change (its own fixture rows). Reporting a number computed off the wrong axes would be a
+/// wrong answer scored as a pass, so the call declines and the text stands.
+#[tokio::test]
+async fn an_hsl_colour_declines_an_rgb_channel() {
+    assert_eq!(
+        css("a {b: color.red(hsl(0, 100%, 50%))}").await,
+        "a {\n  b: color.red(hsl(0, 100%, 50%));\n}\n"
+    );
+}

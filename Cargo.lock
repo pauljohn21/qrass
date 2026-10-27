@@ -73,6 +73,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-name"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2980f82525cf4a0eb43a7dcc1396bbea824897a98ef4948bd150310469acb432"
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -507,6 +513,7 @@ dependencies = [
 name = "sasspile"
 version = "0.1.0"
 dependencies = [
+ "color-name",
  "ledger",
  "opentelemetry",
  "opentelemetry-stdout",

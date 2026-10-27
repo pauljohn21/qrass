@@ -485,6 +485,30 @@
       对应的名字，其余继续逐字；要么（c）先往语料里补一集全量颜色名用例再开工。本批**没有动那 148 个值**。
       （顺带：`ledger` 现在把日志的 ANSI 着色关了——它的输出**就是**读数，着色让我的 `sed`/`awk` 切片连续三次
       表面正常地读到 0；并新增 `--count`，参数拆分已在 `tests/failures_query.rs` 里钉住。）
+      **⑤ 颜色名（按定的方案 (a)）+ 通道访问器已落地**：`color-name = "1.2"` 只取它的
+      `COLORS_DATA: [(&str,[u8;3]); 148]` 名字→RGB **数据**（解析与打印一律不从它来）——用依赖而不是我的记性。
+      `Color::from_name`/`of` 只把**函数参数**里的名字与 hex 读成颜色；**声明里的裸 hex/颜色名仍不解析**
+      （`#AbCd` 要连大小写一并保留）。新增 `color.red/green/blue/alpha`（variadic + 一个名字，`$color:` 能绑）。
+      **实测**：hrx **912 → 932（实质 747 → 767）**，`ledger diff color-hsl color-names` = **`regress=0 net=20`**
+      （四个家族各 4 条值行 + `modules/color/*` 里同形的 4 条）。
+      **抽检做了**（方案 (a) 要的就是这一步）：`black/white/gray/springgreen/purple/pink` 均与语料自己的陈述对得上
+      （`gray == hsl(none 0% 50.196078431373%)` 与 `invert(gray)` → `#7f7f7f` 互相校出 128；
+      `channel/hwb::foreign/whiteness` 的 `75.2941176471%` 就是 `192/255`），已写成 `tests/color.rs` 的断言。
+      **被量具拦住的错**：先给访问器配定长签名时，`color.alpha(c=d, e=f, g=h)`（Microsoft filter 重载，该逐字）
+      在进 body 之前就被 arity 报成致命错 ⇒ **无效错误 53 → 55**；`--count` 当场把它顶出来。改成 variadic，
+      并用“实参能否全读成颜色”区分 filter 重载与真误用，53 回到原位。
+      **没拿到的不写成拿到了**：每家族余下 4 条都是要**消息**的（`error/non_legacy` 要 “…is only supported for
+      legacy colors. Please use color.channel() instead.”、`error/type` 要 `$color: 1 is not a color.`、
+      `too_few_args`/`too_many_args` 要固定 arity 文案而 variadic 会先报 `At least one argument must be passed.`）
+      ⇒ 归 P7。hsl 来路的 `color.red(hsl(0, 100%, 50%))` 也不报编出来的数：没有 rgb↔hsl 换算就 decline，已钉成测试。
+      **选库核过（不凭印象）**：与 `color`（linebender、0.3.3、MSRV 1.82、MIT/Apache、活跃）对比后，**名字表不换**：
+      `color::palette::css` 只有 **142** 个常量且**七个 `-grey` 别名全缺**
+      （`darkgrey darkslategrey dimgrey grey lightgrey lightslategrey slategrey`），并且没有按名字查找的 API
+      （只有 SCREAMING_SNAKE 常量）——要接就得手写 142 臂 match，反而把“不靠记性录入”这个目的破坏掉。
+      `color-name` 是 148 个 `[u8;3]` 字节精确、零依赖，1.2.0 发布于 2025-09-12（并不旧）。
+      **但下一刀 rgb↔hsl / rgb↔hwb 换算应该用 `color`**（`Hsl`/`Hwb`/`Lab`/`Oklch`/`parse_color` 是它的主业）；
+      代价记录在案：它用 f32，而金样要 12 位有效数字（`67.8431372549%`），所以量化/舍入必须以 fixture 为准。
+      （本次误加的依赖已干净移除：`Cargo.lock` 里无 `color` 条目，只余 `color-name`。）
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

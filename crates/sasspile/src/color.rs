@@ -175,6 +175,65 @@ impl Color {
         })
     }
 
+    /// A colour named in CSS (`color.alpha(red)` → `1`, `core_functions/color/alpha.hrx::color/named`).
+    ///
+    /// The keyword table comes from the `color-name` crate's data rather than from my recollection, and
+    /// only its **name → RGB** mapping is used — no parsing or printing behaviour is taken from it. That
+    /// matters here because the local corpus carries no complete name→RGB source: `values/colors/` holds
+    /// `alpha_hex/` and `equality.hrx` (which states a handful, e.g. `purple == hsl(300, 100%,
+    /// 25.098039215686%)`), and a dependency is auditable where memory is not.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let (_, [red, green, blue]) = color_name::css::COLORS_DATA
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))?;
+        Self::rgb(
+            f64::from(u16::from(*red)),
+            f64::from(u16::from(*green)),
+            f64::from(u16::from(*blue)),
+            1.0,
+        )
+        .map(|color| Self {
+            representation: Representation::Hex,
+            ..color
+        })
+    }
+
+    /// A colour written as text: hex or keyword. Used where an argument arrives as unquoted text, which
+    /// is how a declaration keeps `red` and `#123` — `rgb(...)`/`hsl(...)` written as a call already
+    /// evaluated into [`Value::Color`] before it gets here.
+    pub fn of(value: &Value) -> Option<Color> {
+        match value {
+            Value::Color(color) => Some(color.clone()),
+            Value::Raw(text) => {
+                let text = text.trim();
+                if text.starts_with('#') {
+                    Self::from_hex(text)
+                } else {
+                    Self::from_name(text)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// One `0–255` channel, for the accessors. A colour held in **another space** returns `None` rather
+    /// than a wrong number: reading `color.red(hsl(0, 100%, 50%))` needs the rgb↔hsl conversion, which is
+    /// its own change (the fixtures for it are `color/red.hrx` rows beyond the four pinned today).
+    pub fn byte(&self, index: usize) -> Option<f64> {
+        match self.representation {
+            Representation::Legacy | Representation::Percent | Representation::Hex => self
+                .channels
+                .get(index)
+                .map(|channel| channel.byte().round()),
+            Representation::Hsl => None,
+        }
+    }
+
+    /// The colour's own alpha: `color.alpha(rgba(red, 0.42))` → `0.42` (`alpha.hrx::color/middle`).
+    pub fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
     /// A colour from `0–255` byte values, for hex parsing.
     fn rgb(red: f64, green: f64, blue: f64, alpha: f64) -> Option<Self> {
         let plain = |value: f64| Value::Number(value, crate::unit::Unit::unitless());

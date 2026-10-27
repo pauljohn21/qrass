@@ -33,16 +33,20 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **912/11,533**（7.90%，**实质通过 747** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `color-hsl`）；
+   **以上均不得重做/重新发明**。当前基线 hrx **932/11,533**（8.08%，**实质通过 767** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `color-names`）；无效错误仍 **53**（本批一度因定长 arity 把
+   Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
    表示法创建的**（unitless 通道→`rgb(18, 52, 86)`、有 `%` 通道→全部转 `%`（`173`→`67.8431372549%`）、
    hex 造的且 opaque→`#112233`、一旦半透→`rgba(17, 34, 51, 0.5)`），通道入口夹紧；**声明里的裸 hex 仍走 `Raw`**
-   （`#AbCd` 连大小写都要保留）。基线 **912/11,533（实质 747）**，run `color-hsl`（rgb 那批 +30、hsl 那批 +35，全在
-   `core_functions/color` 内，两批都 `regress=0`）。注册表已加 **optional 参数**，且“带名字的 variadic”能绑
-   标签（`rgb(: 0, …)`、`hsl(: 0, …)` 已绿；“必需参数缺失”只约束定长签名）。下一步：`hwb` 要先会拆
-   “空格 + / alpha”的现代语法 → `change`（311 条）→ 颜色 `==`。
+   （`#AbCd` 连大小写都要保留）。 rgb 那批 +30、hsl 那批 +35、颜色名+访问器那批 +20，全部
+   在 `core_functions/color` 内且每批 `regress=0`。注册表已加 **optional 参数**，且“带名字的 variadic”能绑
+   标签（`rgb($red: 0, …)`、`hsl($hue: 0, …)` 已绿；“必需参数缺失”只约束定长签名——但 arity 错误仍在进 body
+   之前，所以带 CSS 重载的名字一律用 variadic，否则 filter 写法会被误报致命）。已落 `color.red/green/blue/alpha`
+   访问器，颜色名走 `color-name` 依赖的 `COLORS_DATA`（**只用数据**，解析与打印不从它来；已拿 6 个语料自陈的
+   名字做抽检）。下一步：rgb↔hsl / rgb↔hwb **换算**（解锁 `hue/saturation/lightness`、`hwb` 的现代空格语法，
+   以及 `adjust` 402 / `change` 311 那两大群）→ `mix` → 颜色 `==`。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
    **最小切口是 `core_functions/color/rgb/three_args/*`，不是 `values/colors/**`**（后者几乎全要颜色 `==`
    比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置的 `builtins` **按域拆目录**已做（
