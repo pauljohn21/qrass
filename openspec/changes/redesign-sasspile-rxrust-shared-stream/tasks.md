@@ -901,6 +901,33 @@
         现象同源；`global.hrx` 2 行要 `adjust-color()` 这个 legacy 别名；其余在现代空间
         （`{lab,lch,oklab,oklch,srgb,srgb_linear,display_p3,display_p3_linear,rec2020,prophoto_rgb,a98_rgb,
         xyz_d50,xyz_d65,space}.hrx`，逐目录计数用同一命令换个前缀）—— 继续留红，不拟合。
+      **㉔ `color.scale` 已落（同一个 `route` 的第三个 `Writing`），它的错不在公式而在金额的读法**（已实测）：
+      • **律**：通道**朝符号指的那头移动“剩余距离的份额”** —— `sienna` 的 red 160 加 12% 就是
+        `160 + (255−160)×0.12`，`lightcoral` 的 240 减 33% 就是 `240 − 240×0.33 = 160.8`
+        （`scale/rgb.hrx::{all,red/low}`）。目标是边界本身，所以**永远走不出色域**：`100%` 恰好落在边界上
+        —— 这解释了为何 `scale/rgb.hrx` 没有 `above_max` 行而 `adjust/rgb.hrx` 有。hwb 仍“先缩放再按和归一”
+        （`scale/hwb.hrx::whiteness/max` → `rgb(83.3333333333%,…)`），alpha 的界是 `0–1`
+        （`scale/no_space.hrx::alpha/{high,low}` → `0.57` / `0.192`）。
+      • **本刀的真错（不是公式错，是读法错）**：第一版用 `byte()` 读金额 —— `100%` 被当“百分比形式的通道值”
+        弄成 **255**，于是 `scale_toward(0, 255, 0, 255)` 把 `color.scale(black, $red: 100%)` 送到
+        `hsl(0, -463.6363636364%, 127.5%)`，16 条 `scale/rgb` 全红。金额取**量值**（`number()`，与轴同一读法）
+        后一次全收。区别已写进注释并钉在 `tests/color_scale.rs`（关键字结果 `red/max` 与小数结果
+        `red/high` 各钉一次）。
+      • **`$hue:` 没行 ⇒ decline**：全语料的 `scale/*.hrx` 不点它，角度也没有可缩放的界；拿 `adjust` 的
+        wrap 当依凭就是“同族应当一致”那类推断。已钉成测试，连 `$space:`、现代 `color(srgb …)` 文本、
+        `rgb(none none none)` 三类逐字一起（那三行本身仍红，因为语料期望的是颜色而不是文本）。
+      • **形状**：三函数×三空间如果继续搭 if 链会变成四层；改成先 `let space = match (named == 0,
+        !bytes.is_empty(), !hwb.is_empty())`（上面的守卫已排除“同时点两个空间”），再 `match (space, writing)`，
+        新增 `enum Space{Nothing,Bytes,Hwb,Axes}`。金额读法（`byte()` vs `number()`）也只在 bytes 臂里按
+        `writing` 分一次。
+      • **实测**：hrx **1302 → 1359（实质 1137 → 1194，空期望仍 165）**，`ledger diff adjust-legacy scale-legacy` =
+        **`regress=0 net=57`**（簇内 55：rgb 19 / hsl 14 / hwb 14 / no_space 7 / scale::global 1，另有
+        `modules/color/scale` 1 与 `core_functions/global/color/scale` 1），无效错误仍 **53**；空库复算
+        （`/tmp/qrass-ab2.db` 里 scale-verify-before 1302 vs scale-verify-after 1359）逐字重现；
+        `cargo test --workspace --no-fail-fast` exit=0（40 个 test result 块）、clippy `-D warnings` exit 0、
+        sasslint CLI `count=0`。`scale` 簇仍败 **369**：`scale/error/**` 125（要消息，P7）+ 现代空间与
+        `$space:`（`space` 13、`out_of_gamut` 4、`no_channels` 3、`global::non_legacy` 1）。`modify.rs` 已到
+        439 行，下一次动它先把三个 `Writing` 拆成子文件。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
