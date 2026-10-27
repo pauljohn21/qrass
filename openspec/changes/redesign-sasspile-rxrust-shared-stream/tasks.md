@@ -288,7 +288,8 @@
       的调用求值），序列化才有依据；**禁止用小写化的补丁“先赢 20 条”**，它会把后两族写错。
       另外 `directives/function/name::error/special/*` 要 `Invalid function name.`（声明 `element()` 等
       保留名非法，且大小写不敏感），它属 P7 诊断，不在本条。
-- [~] 1.4d **有理（复合）单位：`Unit { num, den }` 取代单位字符串（前半已合入，calc 内化简待做）**
+- [x] 1.4d **有理（复合）单位：`Unit { num, den }` 取代单位字符串**（三段已全部合入：单位代数 → calc 内容
+      平展归约 → 调用/已绑定计算作为算术操作数；本 change 内原候选集逐条复查后已绿，详见下）
       **三条语料纠正了本项原本钉死的判据**（都不靠推定，逐条有 fixture）：
       1. **不是“构造时按名字排序”**：`math.unit(1px * 1em * 1rad)` 要 `"px*em*rad"`、
          `math.unit(1px * 1em / 1rad / 1s)` 要 `"px*em/(rad*s)"` —— 都是**输入顺序**，排序会变 `em*px*rad` 而全错。
@@ -344,11 +345,32 @@
       `Ok(value) if !value.is_plain() => Ok(None)` —— `math.div(6in, 3s)` 单独作声明值仍逐字保留（金样从不单独
       出现：`math.div(6in, 3s)` 只以 `* 1s` 形式存在于 `div.hrx::unit/incompatible`；写下拒绝消息的
       `issue_783.hrx` 是注释行且不入基线，所以不造错误消息，那属 P7）。`calculation::collapsible` 已改调该律。
-      **仍剩（已实测条数）**：`calc/operator/units/{denominators,multiplication}` 2 条与
+      **当时剩下、本段已吃下的（已实测条数）**：`calc/operator/units/{denominators,multiplication}` 2 条与
       `values/numbers/units/multiple::division/cancels/*` 7 条 —— 它们需要**已绑定的计算能拆回项参与运算**
-      （`calc($number / (1 / 1ms))` → `calc(1px * 1rad / 1Hz)`），而 `Value::Calculation` 目前存的是**文本**；
-      下一刀得把它的第二个字段换成 `calc::Pieces`/摘要项（并重新处理“出壳”判据）。
-      `operations.rs` 287 行、`expr.rs` 366 行、`calc.rs` 400 行、`brackets.rs` 207 行、`calculation.rs` 442 行。
+      （`calc($number / (1 / 1ms))` → `calc(1px * 1rad / 1Hz)`），而当时 `Value::Calculation` 只存**文本**。
+      **第三段（已绑定计算参与运算 + 上下文精化）实测**：hrx **827 → 847（实质 662 → 682）**，
+      `ledger diff operands-823 binding-content` = **`regress=0 net=20`**，无效错误仍 **53**。内容：
+      • `Value::Calculation` 的第二字段从一段文本换成 `calc::Content{folded: Option<(f64, Unit)>, printed,
+        precedence}`（直接存 `Option<Value>` 会跟 `Value` 构成无间接的循环类型 → 只存幅值+单位，反而更准），
+        于是 `calc($number * 1s)`、`math.div(calc(2px * 3px), 4px)` 能把已折叠的值当操作数用；
+        `number_arg`/`math.div` 经由 `Value::number()` 取它，而“参数缺失”与“不是数”仍是两条消息（我先写成了
+        一条，被 `…/round.hrx::error/*` 的断言拦下）。
+      • `expr::protected` 精化成上下文判据：**括号内的 `/ * %` 不是 CSS 分隔符**（深度当作 fold 携带的数据），
+        所以 `calc(1/2px + 1/4px) * 1px` → `0.75`（`calc/operator/units::denominators`），而 `font: 12px/1.5`、
+        `grid: 1/2`、`a {b: 1/2}` 这些不含括号的形状仍逐字保留。
+      • 新增一条从金样读出的律：**乘法也抵消可换算对并把因子带进幅值** —— `calc(1px*1rad/1ms/1Hz) * 1s` →
+        `calc(1000px * 1rad / 1Hz)`（`multiple::multiplication/cancels/compatible`）；与除法共用 `Value::cross`，
+        不在两个调用点各写一遍。
+      • net 分布：`values/numbers/units/multiple` 13（`division/*` 与 `multiplication/*` 两族 `cancels/*` 全绿）、
+        `calc/operator/units` 2、`math/{round,floor,ceil,abs}` 各 1（参数现在是已折叠的计算）。
+      **1.4d 原候选集逐条复查结果**：`math/unit::*` 0、`div::unit/*` 0、`comparable::unit/to_inverse` 0、
+      `calc/operator/units::*` 0、`numbers/units/multiple` 只剩 1 条：`math/unitless::error/wrong_name` 要
+      `Undefined function.`（`math.unitless(1)` 这个旧名字应当报错）——那是 **P7 的消息**，不属单位代数。
+      **尺寸分界随之重切**：`calculation.rs` 因新法涨到 503 行（越 500 红线），按职责拆——
+      **壳定位与词素规范化**（`Shell`/`find`/`close_index`/`open_at`/`cut_open`/`text`/`resolved`/
+      `without_leading_sign`/`meaningful`/`CALCULATION_NAMES`/`is_calc`）归 `brackets.rs`（它本就是管括号的），
+      `calculation.rs` 只留塌缩律；拆后 A/B 证 **net=0 regress=0**（run `split-brackets`，847 不变）。
+      现为 `operations.rs` 287 / `expr.rs` 386 / `calc.rs` 439 / `brackets.rs` 421 / `calculation.rs` 280 行。
       词法输出律（全来自 `core_functions/math/unit.hrx`，不推定）：
       • `math.unit(1px)` → `"px"`；`math.unit(1)` → `""`；
       • `1px * 1em * 1rad` → `"px*em*rad"`（分子用 `*` 连接）；

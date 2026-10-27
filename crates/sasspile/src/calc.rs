@@ -50,23 +50,47 @@ use crate::value::Value;
 pub enum Reading {
     Declined,
     Value(Value),
-    Expression(String),
+    Expression(Content),
 }
 
-/// One term of a chain: the value it folded to (when every step was computable), the text it prints, and
-/// the precedence that lets its parent decide about parentheses. `3` is a single operand.
-#[derive(Clone)]
-struct Term {
-    value: Option<Value>,
-    printed: String,
-    precedence: u8,
+/// One content of a chain: the value it folded to (when every step was computable), the text it prints,
+/// and the precedence that lets its parent decide about parentheses. `3` is a single operand.
+///
+/// This is also what a `Value::Calculation` stores, so a **bound calculation can be split back into
+/// arithmetic**: `calc($number / 1px)` over `$number: calc(1px * 1rad / 1ms / 1Hz)` cancels to
+/// `calc(1rad / 1ms / 1Hz)` (`values/numbers/units/multiple::division/cancels/numerator/once`) — which the
+/// normalised text alone could not express.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Content {
+    /// the magnitude and unit the chain folded to, when every step computed — kept as data rather than as a
+    /// `Value` so a calculation's content cannot point back into the value it belongs to
+    pub(crate) folded: Option<(f64, Unit)>,
+    pub(crate) printed: String,
+    pub(crate) precedence: u8,
+}
+
+/// A standalone value as content: its CSS text, and its number when it is one.
+fn content_of(value: &Value) -> Content {
+    Content {
+        folded: match value {
+            Value::Number(value, unit) => Some((*value, unit.clone())),
+            _ => None,
+        },
+        printed: value.to_css(),
+        precedence: 3,
+    }
 }
 
 /// One step of the reduced chain: an operand, or the operator that joins the next one.
 #[derive(Clone)]
 enum Slot {
-    Operand(Term),
+    Operand(Content),
     Join(BinOp),
+}
+
+/// A `calc( … )` shell (case-insensitively): the only name whose body splices into the parent.
+pub(crate) fn is_calc_name(callee: &str) -> bool {
+    callee.eq_ignore_ascii_case("calc")
 }
 
 /// Read one calculation argument.
@@ -84,7 +108,7 @@ pub fn read(toks: &[Tok], env: &Env) -> Reading {
             Value::Number(number, unit) if unit.is_plain() => {
                 Reading::Value(Value::Number(number, unit))
             }
-            value => Reading::Expression(value.to_css()),
+            value => Reading::Expression(content_of(&value)),
         };
     }
     let merged = merge_calls(&flat);
@@ -99,13 +123,13 @@ pub fn read(toks: &[Tok], env: &Env) -> Reading {
     // Deepest first, so a group is one summary before its parent reads it. Owners are bracket indices,
     // and a child's bracket always sits after its parent's, so a level-ordered fold is enough.
     let done = (0..=deepest).rev().collect::<Vec<u32>>().into_iter().fold(
-        Vec::<(usize, Term)>::new(),
+        Vec::<(usize, Content)>::new(),
         |mut reduced, level| {
             let finished = runs
                 .iter()
                 .filter(|run| run.level == level)
                 .filter_map(|run| reduce(run, &reduced, env).map(|term| (run.owner, term)))
-                .collect::<Vec<(usize, Term)>>();
+                .collect::<Vec<(usize, Content)>>();
             reduced.extend(finished);
             reduced
         },
@@ -119,19 +143,19 @@ pub fn read(toks: &[Tok], env: &Env) -> Reading {
 /// A folded **plain** number leaves the shell (`calc(1px * 2)` → `2px`, `operator/times::simplified`);
 /// anything else, including a compound unit (`1 / 1px / 1rad`), prints inside it
 /// (`values/numbers/units/multiple::multiple_denominators`).
-fn finishing(term: &Term) -> Reading {
-    match &term.value {
-        Some(Value::Number(value, unit)) if unit.is_plain() => {
+fn finishing(content: &Content) -> Reading {
+    match &content.folded {
+        Some((value, unit)) if unit.is_plain() => {
             Reading::Value(Value::Number(*value, unit.clone()))
         }
-        _ => Reading::Expression(term.printed.clone()),
+        _ => Reading::Expression(content.clone()),
     }
 }
 
 /// Reduce one run: split at the additive operators (the loosest level), fold each piece at its `*`/`/`
 /// operators (the tighter one), then join the pieces left to right. Two folds, so precedence needs no
 /// recursion; `1 - 2 - 3` comes out `(1 - 2) - 3` because joining walks in document order.
-fn reduce(run: &Run, done: &[(usize, Term)], env: &Env) -> Option<Term> {
+fn reduce(run: &Run, done: &[(usize, Content)], env: &Env) -> Option<Content> {
     let entries = run.entries.as_slice();
     let slots = entries
         .iter()
@@ -161,9 +185,9 @@ fn reduce(run: &Run, done: &[(usize, Term)], env: &Env) -> Option<Term> {
     pieces
         .into_iter()
         .map(|(op, piece)| chain(piece).map(|term| (op, term)))
-        .collect::<Option<Vec<(Option<BinOp>, Term)>>>()?
+        .collect::<Option<Vec<(Option<BinOp>, Content)>>>()?
         .into_iter()
-        .fold(None::<Term>, |left, (op, right)| match (left, op) {
+        .fold(None::<Content>, |left, (op, right)| match (left, op) {
             (None, _) => Some(right),
             (Some(left), Some(op)) => Some(join(left, op, right)),
             // Two pieces with no operator between them are a list, not a sum: the run declines.
@@ -173,7 +197,7 @@ fn reduce(run: &Run, done: &[(usize, Term)], env: &Env) -> Option<Term> {
 
 /// Fold one multiplicative piece: operands and joining operators must alternate, exactly as in
 /// [`crate::operations`], and the strict alternation test is what rejects a run this cannot model.
-fn chain(piece: Vec<Slot>) -> Option<Term> {
+fn chain(piece: Vec<Slot>) -> Option<Content> {
     let operands = piece
         .iter()
         .step_by(2)
@@ -181,7 +205,7 @@ fn chain(piece: Vec<Slot>) -> Option<Term> {
             Slot::Operand(term) => Some(term.clone()),
             Slot::Join(_) => None,
         })
-        .collect::<Option<Vec<Term>>>()?;
+        .collect::<Option<Vec<Content>>>()?;
     let joins = piece
         .iter()
         .skip(1)
@@ -209,7 +233,7 @@ fn slot(
     entry: &Entry,
     index: usize,
     entries: &[Entry],
-    done: &[(usize, Term)],
+    done: &[(usize, Content)],
     env: &Env,
 ) -> Option<Slot> {
     if let Some(op) = operator(&entry.tok) {
@@ -225,7 +249,7 @@ fn slot(
 
 /// An operand: a group, resolved by the position of the bracket that opened it (which `partition` left in
 /// the parent run as the placeholder), or a single lexeme.
-fn operand(entry: &Entry, done: &[(usize, Term)], env: &Env) -> Option<Term> {
+fn operand(entry: &Entry, done: &[(usize, Content)], env: &Env) -> Option<Content> {
     if is_layout(&entry.tok) {
         return None;
     }
@@ -240,10 +264,10 @@ fn operand(entry: &Entry, done: &[(usize, Term)], env: &Env) -> Option<Term> {
 
 /// A group around a single operand keeps its own parentheses; a group around a chain has them re-derived
 /// by precedence (`operator/var::directly_parenthesized` vs `var::indirectly_parenthesized`).
-fn parenthesised(term: &Term) -> Term {
+fn parenthesised(term: &Content) -> Content {
     match term.precedence {
-        3 => Term {
-            value: term.value.clone(),
+        3 => Content {
+            folded: term.folded.clone(),
             printed: format!("({})", term.printed),
             precedence: 3,
         },
@@ -254,10 +278,10 @@ fn parenthesised(term: &Term) -> Term {
 /// A single lexeme as a term. An interpolation is a **value** (`calc(#{1px + 2px})` → `calc(3px)`,
 /// `no_operator::interpolation/number`); a body that does not evaluate declines rather than becoming text,
 /// because swallowing that error into a string is what let a fatal `Undefined variable` disappear.
-fn leaf(tok: &Tok, env: &Env) -> Option<Term> {
+fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
     let atom = |printed: String| {
-        Some(Term {
-            value: None,
+        Some(Content {
+            folded: None,
             printed,
             precedence: 3,
         })
@@ -265,19 +289,29 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Term> {
     match tok {
         Tok::Word(word) => Some(match crate::operations::number_lexeme(word) {
             Some((value, unit)) => number(value, &Unit::named(unit)),
-            None => Term {
-                value: None,
+            None => Content {
+                folded: None,
                 printed: (*word).clone(),
                 precedence: 3,
             },
         }),
+        // A bound name resolves through the environment. A bound **calculation** enters as the content it
+        // already is — folded value, printed form and precedence — which is what lets
+        // `calc($number / 1px)` cancel against the bound product
+        // (`values/numbers/units/multiple::division/cancels/numerator/once`). A calculation carrying its own
+        // name (`min( … )`) keeps that name, because only `calc` splices its body into a parent.
         Tok::Var(name) => match env.get(name) {
             Ok(Value::Number(value, unit)) => Some(number(value, &unit)),
-            Ok(other) => Some(Term {
-                value: None,
-                printed: other.to_css(),
-                precedence: 3,
+            Ok(Value::Calculation(callee, content)) => Some(if is_calc_name(&callee) {
+                content.clone()
+            } else {
+                Content {
+                    folded: content.folded.clone(),
+                    printed: format!("{callee}({})", content.printed),
+                    precedence: 3,
+                }
             }),
+            Ok(other) => atom(other.to_css()),
             Err(_) => atom(format!("${name}")),
         },
         Tok::Interp(inner) => match expr::interpolated(inner, env).map(|built| built.eval(env)) {
@@ -288,9 +322,9 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Term> {
     }
 }
 
-fn number(value: f64, unit: &Unit) -> Term {
-    Term {
-        value: Some(Value::Number(value, unit.clone())),
+fn number(value: f64, unit: &Unit) -> Content {
+    Content {
+        folded: Some((value, unit.clone())),
         printed: unit.calc_form(value),
         precedence: 3,
     }
@@ -298,7 +332,7 @@ fn number(value: f64, unit: &Unit) -> Term {
 
 /// Join two terms: fold the value when both sides are numbers and the unit law agrees, and write the text
 /// once, here, with the parentheses this position calls for.
-fn join(left: Term, op: BinOp, right: Term) -> Term {
+fn join(left: Content, op: BinOp, right: Content) -> Content {
     let level = if matches!(op, BinOp::Add | BinOp::Sub) {
         1
     } else {
@@ -311,13 +345,13 @@ fn join(left: Term, op: BinOp, right: Term) -> Term {
         wrap(&right, op, Side::Right)
     );
     match op.fold(&left, &right) {
-        Some(Value::Number(value, unit)) => Term {
-            value: Some(Value::Number(value, unit.clone())),
+        Some((value, unit)) => Content {
+            folded: Some((value, unit.clone())),
             printed: unit.calc_form(value),
             precedence: level,
         },
-        folded => Term {
-            value: folded,
+        folded => Content {
+            folded,
             printed,
             precedence: level,
         },
@@ -332,7 +366,7 @@ enum Side {
 }
 
 /// A child is parenthesised exactly where dropping the group would change the value.
-fn wrap(child: &Term, parent: BinOp, side: Side) -> String {
+fn wrap(child: &Content, parent: BinOp, side: Side) -> String {
     let up = match parent {
         BinOp::Add | BinOp::Sub => 1,
         BinOp::Mul | BinOp::Div => 2,
@@ -354,17 +388,22 @@ fn wrap(child: &Term, parent: BinOp, side: Side) -> String {
 impl BinOp {
     /// The value-level law, reused rather than restated. `None` means this step is not computable, which
     /// is what keeps the operation in the printed text.
-    fn fold(self, left: &Term, right: &Term) -> Option<Value> {
-        let (Some(left), Some(right)) = (&left.value, &right.value) else {
+    fn fold(self, left: &Content, right: &Content) -> Option<(f64, Unit)> {
+        let (Some((a, au)), Some((b, bu))) = (&left.folded, &right.folded) else {
             return None;
         };
+        let (left, right) = (Value::Number(*a, au.clone()), Value::Number(*b, bu.clone()));
         match self {
-            BinOp::Add => left.plus(right),
-            BinOp::Sub => left.minus(right),
-            BinOp::Mul => left.times(right),
-            BinOp::Div => left.divided_by(right),
+            BinOp::Add => left.plus(&right),
+            BinOp::Sub => left.minus(&right),
+            BinOp::Mul => left.times(&right),
+            BinOp::Div => left.divided_by(&right),
         }
         .ok()
+        .and_then(|value| match value {
+            Value::Number(value, unit) => Some((value, unit)),
+            _ => None,
+        })
     }
 }
 

@@ -8,7 +8,9 @@
 //! `var(--c)` into `var(`, `--c`, `)` left no chain readable around it), and a **group bracket is not a call**
 //! (treating `var(` as an opener ate its closer and turned `calc((1 + var(--c)))` into an unreadable run).
 
-use crate::lexer::Tok;
+use crate::env::Env;
+use crate::expr;
+use crate::lexer::{Tok, render};
 
 /// The owner of the outermost run; no group can collide with it, because group owners are lexeme indices.
 pub(crate) const ROOT: usize = usize::MAX;
@@ -204,4 +206,216 @@ pub(crate) fn trim_layout(run: &[Tok]) -> Vec<Tok> {
         (Some(from), Some(to)) => run[from..=to].to_vec(),
         _ => Vec::new(),
     }
+}
+
+/// The names whose call is a calculation, matched on the **bare** name case-insensitively. A vendor
+/// prefix means it is not one: `-a-calc(` is a single lexeme and
+/// `css/functions/special/prefixed/lowercase::calc/script_like` keeps `-a-calc($c)` as text, so the
+/// prefix-stripping `expr::special_call` does must not be reused here.
+const CALCULATION_NAMES: [&str; 4] = ["calc", "min", "max", "clamp"];
+
+/// A calculation call. `name` is the callee **as written** and `lower` its case-folded form, which is
+/// the only thing the law reads: 1.4c forbids turning case normalisation into an output rule, so a
+/// preserved calculation prints the name exactly as the source spelled it.
+#[derive(Clone)]
+pub(crate) struct Shell {
+    pub(crate) name: String,
+    pub(crate) lower: String,
+    pub(crate) inner: Vec<Tok>,
+}
+
+/// The text of an argument this module cannot read as a value: references **resolved**, because a `calc`
+/// argument is still parsed as SassScript (`::variable/number/simple_unit`, and the 0′.3b-2 lesson that
+/// special-call arguments resolve variables while `+`/`-` stay non-arithmetic). A run with nothing dynamic
+/// in it, and one whose reference is unbound, both fall back to [`text`] — an unbound `$x` inside
+/// `calc( … )` keeps its own text and never becomes a fatal error
+/// (`::variable/not_parsed_as_interpolation/*`).
+pub(crate) fn resolved(toks: &[Tok], env: &Env) -> String {
+    let dynamic = meaningful(toks)
+        .into_iter()
+        .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)));
+    let kept = dynamic
+        .then(|| expr::interpolated(toks, env))
+        .flatten()
+        .and_then(|built| match built.eval(env) {
+            Ok(value) => Some(value.to_css()),
+            // The failure here means "this argument is not readable yet", not "the program is wrong":
+            // an unbound reference inside `calc( … )` is defined passthrough, so it stops as a decline
+            // and the caller keeps the lexeme text. Which failures terminate stays in `exec::evaluated`.
+            Err(_) => None,
+        });
+    match kept {
+        Some(css) => css,
+        None => text(toks),
+    }
+}
+
+/// A run as a calculation call, if it is one whole: a lexeme that ends at a `(` whose text is a
+/// calculation name, and an argument list closing at the `)` that returns the bracket balance to zero.
+/// Depth is counted over the **whole** run, so a nested call keeps its own closer — counting only from
+/// the callee handed `var`'s `)` to `calc` and turned `calc(var(--c))` into `calc(--c)`.
+///
+/// Nothing but layout may sit on either side: a leading `1px + ` is an operation this slice does not
+/// read, and a trailing lexeme means the run is not one call.
+pub(crate) fn find(toks: &[Tok]) -> Option<Shell> {
+    let cut = open_at(toks);
+    let callee = cut.iter().enumerate().find_map(|(offset, tok)| match tok {
+        Tok::Word(word) => word
+            .strip_suffix('(')
+            .filter(|name| name_exists(name))
+            .map(|name| (offset, name.to_string(), name.to_lowercase())),
+        _ => None,
+    })?;
+    let closing = close_index(&cut[callee.0..])?;
+    let position = callee.0 + closing;
+    let layout = |run: &[Tok]| {
+        run.iter()
+            .all(|tok| matches!(tok, Tok::Space(_) | Tok::Silent(_)))
+    };
+    layout(&cut[..callee.0])
+        .then(|| Shell {
+            name: callee.1,
+            lower: callee.2,
+            inner: cut[callee.0 + 1..position].to_vec(),
+        })
+        .filter(|_| layout(&cut[position + 1..]))
+}
+
+/// The offset of the `Punct(')')` that closes the call starting at the front of this run, or `None` when
+/// it never closes. A `…(` lexeme opens one level, a word that both opens and closes (`url(x)`) nets
+/// zero, and only a position after the callee can close it.
+pub(crate) fn close_index(run: &[Tok]) -> Option<usize> {
+    run.iter()
+        .enumerate()
+        .skip(1)
+        .scan(delta(run.first()), |depth, (offset, lexeme)| {
+            *depth += delta(Some(lexeme));
+            Some((*depth, offset))
+        })
+        .find(|(depth, _)| *depth <= 0)
+        .map(|(_, offset)| offset)
+}
+
+/// How much one lexeme moves the bracket depth. A word contributes its own balance, which is why
+/// `Word("calc(")` opens one level and a self-closing `Word("url(x)")` nets to zero.
+fn delta(lexeme: Option<&Tok>) -> i32 {
+    match lexeme {
+        Some(Tok::Word(word)) => {
+            word.matches('(').count() as i32 - word.matches(')').count() as i32
+        }
+        Some(Tok::Punct('(')) => 1,
+        Some(Tok::Punct(')')) => -1,
+        _ => 0,
+    }
+}
+
+/// Re-cut a run so every bracket owns its place; non-word lexemes are carried unchanged.
+pub(crate) fn open_at(toks: &[Tok]) -> Vec<Tok> {
+    toks.iter()
+        .flat_map(|tok| match tok {
+            Tok::Word(word) => cut_open(word),
+            other => vec![other.clone()],
+        })
+        .collect()
+}
+
+/// One word cut at each `(` and each `)` — the three shapes the traces show:
+/// * `Word("calc(1px)")` → `calc(`, `1px`, `)` — an ordinary declaration value, one lexeme holding both
+///   brackets. The `(` stays glued to the text **before** it, because ending at `(` is what marks a
+///   callee (gluing it to the piece after produced `Word("calc")`, nothing matched, and every case stayed
+///   verbatim);
+/// * `Word("calc(1px")` → `calc(`, `1px` — a run whose closing `)` is outside it;
+/// * `Word("calc( ( 1 ) )")` → `calc(`, `(`, `1`, `)`, `)` — a paren with layout around it is released as
+///   a bare `Punct('(')`, since that whitespace is layout and the group is not a callee.
+///
+/// Text between brackets keeps its inner spaces: Sass's spacing law is what makes `1px + 1%` an
+/// operation, and dropping them turned every calculation's content into `1px+1%`.
+fn cut_open(word: &str) -> Vec<Tok> {
+    let (pieces, tail) = word.chars().fold(
+        (Vec::<Tok>::new(), String::new()),
+        |(mut pieces, text), c| match c {
+            '(' => {
+                let callee = !text.is_empty() && text.trim() == text;
+                if callee {
+                    pieces.push(Tok::Word(format!("{text}(")));
+                } else {
+                    let body = text.trim();
+                    pieces.extend((!body.is_empty()).then(|| Tok::Word(body.to_string())));
+                    pieces.push(Tok::Punct('('));
+                }
+                (pieces, String::new())
+            }
+            ')' => {
+                let body = text.trim();
+                pieces.extend((!body.is_empty()).then(|| Tok::Word(body.to_string())));
+                pieces.push(Tok::Punct(')'));
+                (pieces, String::new())
+            }
+            other => {
+                let mut text = text;
+                text.push(other);
+                (pieces, text)
+            }
+        },
+    );
+    let body = tail.trim();
+    pieces
+        .into_iter()
+        .chain((!body.is_empty()).then(|| Tok::Word(body.to_string())))
+        .collect()
+}
+
+/// The normalised text of an argument list: whitespace runs folded, and only the spaces a calculation
+/// never prints are removed — one **after** `(`, one **before** `)` or `,`
+/// (`calc( ( 1 ) )` → `(1)`, `min( 1% , 2px )` → `min(1%, 2px)`, and `1px + (2px)` keeps its space).
+///
+/// Structure is already decided by the lexeme pass; this normalises whitespace only. The spaces inside a
+/// glued word (`Word("1px + 1%")`) are the sole record of the spacing the corpus expects, so dropping
+/// them would be the bug rather than the shortcut.
+pub(crate) fn text(toks: &[Tok]) -> String {
+    render(toks)
+        .chars()
+        .fold((String::new(), false), |(mut out, pending), c| {
+            if c == ' ' {
+                let had_content = !out.is_empty();
+                return (out, had_content);
+            }
+            let suppress = matches!(c, ')' | ',') || out.ends_with('(');
+            if pending && !suppress {
+                out.push(' ');
+            }
+            out.push(c);
+            (out, false)
+        })
+        .0
+}
+
+/// The group's lexemes with a **leading sign merged into the number it is glued to**: `Op('+')` then
+/// `Word("1px")` (no layout between them) becomes `Word("+1px")`, the shape `number_lexeme` already
+/// reads. A sign separated by whitespace, or any second operator, is left exactly as it was so the
+/// operation stays unreadable — 1.4d's question, not this slice's.
+pub(crate) fn without_leading_sign(content: &[Tok]) -> Vec<Tok> {
+    match content {
+        [Tok::Op(sign), Tok::Word(number), rest @ ..] if matches!(sign, '+' | '-') => {
+            let mut merged = vec![Tok::Word(format!("{sign}{number}"))];
+            merged.extend(rest.iter().cloned());
+            merged
+        }
+        _ => content.to_vec(),
+    }
+}
+
+/// Every lexeme that is not layout — the view structure is read off.
+pub(crate) fn meaningful(toks: &[Tok]) -> Vec<&Tok> {
+    toks.iter().filter(|tok| !is_layout(tok)).collect()
+}
+
+fn name_exists(name: &str) -> bool {
+    CALCULATION_NAMES
+        .iter()
+        .any(|call| name.eq_ignore_ascii_case(call))
+}
+
+pub(crate) fn is_calc(name: &str) -> bool {
+    name == "calc"
 }

@@ -39,22 +39,26 @@ static MATH_DIV: Builtin = Builtin {
     params: &["number1", "number2"],
     variadic: false,
     apply: |args| match args.as_slice() {
-        [Value::Number(from, from_unit), Value::Number(by, by_unit)] => {
+        [from, by] => {
+            let (
+                Some(Value::Number(from_value, from_unit)),
+                Some(Value::Number(by_value, by_unit)),
+            ) = (from.number(), by.number())
+            else {
+                return Err(SassError::new("not a number"));
+            };
+            // A calculation argument is a number when its content folded: `math.div(calc(2px * 3px), 4px)`
+            // is `1.5px` (`values/calculation/calc/operator/units::multiplication`).
+            let (left, right) = (
+                Value::Number(from_value, from_unit.clone()),
+                Value::Number(by_value, by_unit.clone()),
+            );
             if from_unit == by_unit {
-                Ok(Value::Number(from / by, Unit::unitless()))
+                Ok(Value::Number(from_value / by_value, Unit::unitless()))
             } else if by_unit.is_unitless() {
-                Ok(Value::Number(from / by, from_unit.clone()))
-            } else if let (Some(from_base), Some(by_base)) = (
-                from_unit.single().and_then(to_base),
-                by_unit.single().and_then(to_base),
-            ) {
-                Ok(Value::Number(
-                    from * from_base / (by * by_base),
-                    Unit::unitless(),
-                ))
+                Ok(Value::Number(from_value / by_value, from_unit.clone()))
             } else {
-                Value::Number(*from, from_unit.clone())
-                    .divided_by(&Value::Number(*by, by_unit.clone()))
+                left.divided_by(&right)
             }
         }
         _ => Err(SassError::new("not a number")),
@@ -319,15 +323,21 @@ static MATH_FLOOR: Builtin = Builtin {
 /// produces a value (`div.hrx::non_numeric/numerator`), so its body declines instead of failing — the
 /// difference lives in the body, because that is where the corpus differs.
 fn number_arg(param: &str, bound: &[Value]) -> Result<(f64, Unit), SassError> {
-    match bound.first() {
-        Some(Value::Number(value, unit)) => Ok((*value, unit.clone())),
-        Some(other) => Err(SassError::typed(
-            ErrorKind::NotANumber,
-            format!("${param}: {} is not a number.", other.to_css()),
-        )),
-        None => Err(SassError::typed(
+    // The two failures are different messages, so they stay two branches: an absent argument is
+    // `Missing argument $number.` (`core_functions/math/round.hrx::error/no_args`), a present one that is
+    // not a number is `$number: c is not a number.` (`…::error/type`). A calculation whose content folded
+    // counts as the number it reached (`Value::number`).
+    let Some(bound) = bound.first() else {
+        return Err(SassError::typed(
             ErrorKind::MissingArgument,
             format!("Missing argument ${param}."),
+        ));
+    };
+    match bound.number() {
+        Some(Value::Number(value, unit)) => Ok((value, unit)),
+        _ => Err(SassError::typed(
+            ErrorKind::NotANumber,
+            format!("${param}: {} is not a number.", bound.to_css()),
         )),
     }
 }

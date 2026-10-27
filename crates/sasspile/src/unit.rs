@@ -125,6 +125,35 @@ impl Unit {
         (&self.numerator, &self.denominator)
     }
 
+    /// Cancel a **convertible pair across the fraction** and carry its factor into the magnitude: `px` on
+    /// top with `in` below is not two surviving names but `96` divided out, because the corpus cancels
+    /// `calc(96px * 1rad / 1ms / 1Hz) / 1in` down to `calc(1rad / 1ms / 1Hz)`
+    /// (`values/numbers/units/multiple::division/cancels/compatible`). Names of the same family pair off
+    /// first-to-first in the order written; what cannot be matched stays.
+    pub fn cancel_convertible(&self, value: f64) -> (f64, Unit) {
+        let mut denominator = self.denominator.clone();
+        let mut magnitude = value;
+        let mut numerator = self.numerator.clone();
+        // Each numerator name pairs off with the first denominator of the same family that is not already
+        // the same unit (`Unit::from_parts` cancels identical names before this runs); the pair leaves the
+        // fraction and `top / bottom` in base factors enters the magnitude.
+        numerator.retain(|top| {
+            let (family, top_factor) = measure(top);
+            let pair = denominator
+                .iter()
+                .position(|below| measure(below).0 == family && measure(below).1 != top_factor);
+            match pair {
+                Some(index) => {
+                    magnitude *= top_factor / measure(&denominator[index]).1;
+                    denominator.remove(index);
+                    false
+                }
+                None => true,
+            }
+        });
+        (magnitude, Unit::from_parts(numerator, denominator))
+    }
+
     /// A unit as its two sides, already cancelled. The cancellation is a multiset intersection: each name
     /// that appears on both sides disappears once from each, and the survivors keep their order.
     pub fn from_parts(numerator: Names, denominator: Names) -> Self {

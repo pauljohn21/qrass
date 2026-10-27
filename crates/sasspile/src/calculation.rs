@@ -1,61 +1,34 @@
-//! Calculation — the first slice of tasks 1.4: `calc( … )` and the calculation functions
-//! (`min`/`max`/`clamp`) become an owned **value** carrying its inner expression as text normalised at
-//! parse time, instead of the whole source run staying one opaque `Value::Raw`.
+//! The **shell law** of a calculation: what leaves a `calc( … )`, what drops one wrapper, and what stays
+//! inside it. Locating the shell and normalising its lexemes is [`crate::brackets`]'s job; this module is
+//! only the law, so it reads as decisions and not as bracket bookkeeping.
 //!
-//! Scope is exactly what `tasks.md` 1.4a states, and nothing wider. Each rule is quoted from
-//! `sass-spec/values/calculation/calc/no_operator.hrx` (with `calc/parens.hrx` for the parenthesised
-//! shapes), read through `ledger failures bool-units-746 "values/calculation/calc/no_operator"`:
-//! • a single collapsible value leaves its shells — `calc(1px)` → `1px` (`::number/integer`),
-//!   `CaLc(1px)` → `1px` (`::case_insensitive`), `calc( 1px )` → `1px` (`::extra_whitespace`),
-//!   `calc( 1 )` and `calc( ( 1 ) )` → `1` (`syntax/extra_whitespace/*`), `calc((1px))` → `1px`
-//!   (`calc/parens::number`);
-//! • a nested calculation drops **one** shell, and dropping it can expose the next collapse —
-//!   `calc(calc(1px))` → `1px` (`::calculation/calc/simplified`, two levels),
-//!   `calc(calc(1px + 1%))` → `calc(1px + 1%)` (`::calculation/calc/preserved`),
-//!   `calc(clamp(1%, 2px, 3%))` → `clamp(1%, 2px, 3%)` (`::calculation/clamp/preserved`),
-//!   `calc(min(1%, 2px))` → `min(1%, 2px)` (`::calculation/min/preserved`),
-//!   `calc((calc(1px + 1%)))` → `calc(1px + 1%)` (`calc/parens::calculation`);
-//! • anything else keeps its outer shell — `calc(var(--c))`, `calc((var(--c)))`, `calc(((var(--c))))`,
-//!   `calc(c())`, `calc(foobar)` from a bound `$a`, `calc(#{1px + 2px})`, `calc((#{1px + 2px}))`,
-//!   `calc((d))` (`::var/bare`, `::function/css`, `::variable/unquoted_string`,
-//!   `::interpolation/{number,parens}`, `calc/parens::{var/direct,double_preserved,identifier}` — several
-//!   of these **already pass**, so they are this rule's safety net).
+//! Each rule is quoted from a fixture, never inferred:
+//! * a single collapsible value leaves its shells — `calc(1px)` → `1px` (`no_operator::number/integer`),
+//!   `CaLc(1px)` → `1px` (`…::case_insensitive`), `calc( 1px )` → `1px` (`…::extra_whitespace`),
+//!   `calc((1px))` → `1px` (`calc/parens::number`);
+//! * a nested calculation drops **one** shell, and that can expose the next collapse —
+//!   `calc(calc(1px))` → `1px` (`…::calculation/calc/simplified`), `calc(clamp(1%, 2px, 3%))` →
+//!   `clamp(1%, 2px, 3%)` (`…::calculation/clamp/preserved`), `calc(min(1%, 2px))` → `min(1%, 2px)`;
+//! * anything else keeps its outer shell — `calc(var(--c))`, `calc(c())`, `calc(foobar)`,
+//!   `calc((d))` (`calc/parens::{var/direct,double_preserved,identifier}`); several of these passed before
+//!   the first calculation rule existed, so they are this law's safety net;
+//! * the content itself is reduced by [`crate::calc`] — flattening, not a tree: same-unit folds
+//!   (`operator/plus::simplified`), `*` and `/` (`operator/times::simplified`), rational units
+//!   (`values/numbers/units/multiple`), and a bound calculation rejoining arithmetic
+//!   (`…::division/cancels/numerator/once`);
+//! * `min`/`max`/`clamp` are **not** evaluated as shells here: bare-name `min(1%, 2px)` keeping its text is
+//!   the 1.4c law (`no_operator::function/css`), and `calculation/min::simplified` wants the *registered*
+//!   builtin instead (`::calculation/min/preserved` against `::min/simplified`).
 //!
-//! Deliberately **not** here, because 1.4a forbids guessing them and later tasks own them: same-unit
-//! simplification (`calc(1px + 2px)` → `3px` stays red — that is `calc/simplify.hrx`, whose own README
-//! states only "number + number where both are compatible" simplifies, and which 1.4d lands together
-//! with `*`/`/`), compound (rational) units, and **evaluating** `min`/`max`/`clamp`
-//! (`::calculation/min/simplified` wants `1px`, which needs bare-name builtins ⇒ a later batch).
-//!
-//! ## The lexeme shape this reads (measured, not assumed)
-//!
-//! `(` and `)` are not structural in the lexer, so they ride inside `Word` and a whole declaration value
-//! can arrive as ONE lexeme — `Word("calc(1px)")`, `Word("calc(1px")` (the block's `}` ended the call),
-//! `Word("calc(1px + 1%)")`. Three attempts failed on that fact: matching the *first* lexeme for a
-//! trailing `(`, gluing the `(` onto the piece *after* it, and filtering layout before the spacing rule
-//! ran. [`cut_open`] is the normalisation that survived the traces; structure is then read off lexemes.
+//! What 1.4a deliberately left out is now in: simplification and rational units landed with 1.4d.
 
-use crate::calc;
+use crate::brackets::{Shell, find, is_calc, meaningful, open_at, resolved, without_leading_sign};
+use crate::calc::{self, Content};
 use crate::calls;
 use crate::env::Env;
-use crate::expr;
 use crate::lexer::{Tok, render};
+use crate::unit::Unit;
 use crate::value::Value;
-
-/// The names whose call is a calculation, matched on the **bare** name case-insensitively. A vendor
-/// prefix means it is not one: `-a-calc(` is a single lexeme and
-/// `css/functions/special/prefixed/lowercase::calc/script_like` keeps `-a-calc($c)` as text, so the
-/// prefix-stripping `expr::special_call` does must not be reused here.
-const CALCULATION_NAMES: [&str; 4] = ["calc", "min", "max", "clamp"];
-
-/// A calculation call. `name` is the callee **as written** and `lower` its case-folded form, which is
-/// the only thing the law reads: 1.4c forbids turning case normalisation into an output rule, so a
-/// preserved calculation prints the name exactly as the source spelled it.
-struct Shell {
-    name: String,
-    lower: String,
-    inner: Vec<Tok>,
-}
 
 /// What one argument came down to. The shapes stay separate because the corpus treats them differently:
 /// only a number/boolean leaves a shell, and an inner calculation's **body** is the one text that
@@ -64,12 +37,15 @@ struct Shell {
 enum Outcome {
     Collapsed(Value),
     /// an inner calculation's body without its wrapper: the enclosing shell's name takes it over
-    Nested(String),
+    Nested(Content),
     /// a calculation that already carries its own name — content to the enclosing shell, whose wrapper
     /// drops in favour of it
     Named(String),
     /// readable content that is not a calculation
     Kept(String),
+    /// a chain `crate::calc` folded as far as it could: its content keeps the **value** it reached, so a
+    /// bound calculation can be divided or multiplied again (`multiplication::cancels/*`)
+    Folded(Content),
     /// nothing this slice reads; the caller keeps the run's own text
     Opaque,
 }
@@ -116,17 +92,64 @@ fn to_value(shell: &Shell, parts: &[Outcome], env: &Env) -> Option<Value> {
         // guess" case. One unreadable argument makes the whole run decline, which leaves the text exactly
         // as the source wrote it — no name or spacing is rewritten outside a `calc` (1.4c).
         let readable = parts.iter().all(|part| !matches!(part, Outcome::Opaque));
-        return readable.then(|| Value::Calculation(shell.name.clone(), rendered(parts)));
+        return readable.then(|| {
+            Value::Calculation(
+                shell.name.clone(),
+                Content {
+                    folded: folded(parts),
+                    printed: rendered(parts),
+                    precedence: 3,
+                },
+            )
+        });
     }
     match parts {
         [Outcome::Collapsed(value)] => Some(value.clone()),
-        [Outcome::Nested(inner)] => Some(Value::Calculation(shell.name.clone(), inner.clone())),
+        // One folded chain inside `calc( … )` keeps the shell *and* its value: `calc(2px * 3px)` prints
+        // `calc(6px * 1px)` but is still the number `6px*px` for whoever divides it
+        // (`calc/operator/units::multiplication`).
+        [Outcome::Folded(content)] => Some(Value::Calculation(shell.name.clone(), content.clone())),
+        [Outcome::Nested(inner)] => Some(Value::Calculation(
+            shell.name.clone(),
+            Content {
+                folded: inner.folded.clone(),
+                printed: inner.printed.clone(),
+                precedence: inner.precedence,
+            },
+        )),
         // An inner calculation printed with its own name: that name survives, this wrapper goes.
         [Outcome::Named(text)] => Some(Value::Raw(text.clone())),
-        [Outcome::Kept(text)] => Some(Value::Calculation(shell.name.clone(), text.clone())),
+        [Outcome::Kept(text)] => Some(Value::Calculation(
+            shell.name.clone(),
+            Content {
+                folded: None,
+                printed: text.clone(),
+                precedence: 3,
+            },
+        )),
         [Outcome::Opaque] => decline_to_text(shell, env),
-        many => Some(Value::Calculation(shell.name.clone(), rendered(many))),
+        many => Some(Value::Calculation(
+            shell.name.clone(),
+            Content {
+                folded: folded(many),
+                printed: rendered(many),
+                precedence: 3,
+            },
+        )),
     }
+}
+
+/// The value an argument list reached, when one part carried it: a compound product or quotient stays
+/// printable as text and usable as a number at the same time.
+fn folded(parts: &[Outcome]) -> Option<(f64, Unit)> {
+    parts.iter().find_map(|part| match part {
+        Outcome::Folded(content) | Outcome::Nested(content) => content.folded.clone(),
+        Outcome::Collapsed(value) => match value.number() {
+            Some(Value::Number(number, unit)) => Some((number, unit)),
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 /// The argument list this slice cannot read as a value: its normalised text survives, and if that text is
@@ -136,12 +159,16 @@ fn to_value(shell: &Shell, parts: &[Outcome], env: &Env) -> Option<Value> {
 fn decline_to_text(shell: &Shell, env: &Env) -> Option<Value> {
     match find(&shell.inner) {
         Some(inner) => to_value(&inner, &arguments(&inner, env), env).map(|value| match value {
-            Value::Calculation(name, body) => Value::Raw(format!("{name}({body})")),
+            Value::Calculation(name, body) => Value::Raw(format!("{name}({})", body.printed)),
             other => other,
         }),
         None if is_calc(&shell.lower) => Some(Value::Calculation(
             shell.name.clone(),
-            resolved(&shell.inner, env),
+            Content {
+                folded: None,
+                printed: resolved(&shell.inner, env),
+                precedence: 3,
+            },
         )),
         None => None,
     }
@@ -153,143 +180,6 @@ fn decline_to_text(shell: &Shell, env: &Env) -> Option<Value> {
 /// one whose reference is unbound, both fall back to the normalised lexeme text — an unbound `$x` inside
 /// `calc( … )` keeps its own text and never becomes a fatal error
 /// (`::variable/not_parsed_as_interpolation/*`).
-fn resolved(toks: &[Tok], env: &Env) -> String {
-    let dynamic = meaningful(toks)
-        .into_iter()
-        .any(|tok| matches!(tok, Tok::Var(_) | Tok::Interp(_)));
-    let kept = dynamic
-        .then(|| expr::interpolated(toks, env))
-        .flatten()
-        .and_then(|built| match built.eval(env) {
-            Ok(value) => Some(value.to_css()),
-            // The failure here means "this argument is not readable yet", not "the program is wrong":
-            // an unbound reference inside `calc( … )` is defined passthrough, so it stops as a decline
-            // and the caller keeps the lexeme text. Which failures terminate stays in `exec::evaluated`.
-            Err(_) => None,
-        });
-    match kept {
-        Some(css) => css,
-        None => text(toks),
-    }
-}
-
-/// A run as a calculation call, if it is one whole: a lexeme that ends at a `(` whose text is a
-/// calculation name, and an argument list closing at the `)` that returns the bracket balance to zero.
-/// Depth is counted over the **whole** run, so a nested call keeps its own closer — counting only from
-/// the callee handed `var`'s `)` to `calc` and turned `calc(var(--c))` into `calc(--c)`.
-///
-/// Nothing but layout may sit on either side: a leading `1px + ` is an operation this slice does not
-/// read, and a trailing lexeme means the run is not one call.
-fn find(toks: &[Tok]) -> Option<Shell> {
-    let cut = open_at(toks);
-    let callee = cut.iter().enumerate().find_map(|(offset, tok)| match tok {
-        Tok::Word(word) => word
-            .strip_suffix('(')
-            .filter(|name| name_exists(name))
-            .map(|name| (offset, name.to_string(), name.to_lowercase())),
-        _ => None,
-    })?;
-    let closing = close_index(&cut[callee.0..])?;
-    let position = callee.0 + closing;
-    let layout = |run: &[Tok]| {
-        run.iter()
-            .all(|tok| matches!(tok, Tok::Space(_) | Tok::Silent(_)))
-    };
-    layout(&cut[..callee.0])
-        .then(|| Shell {
-            name: callee.1,
-            lower: callee.2,
-            inner: cut[callee.0 + 1..position].to_vec(),
-        })
-        .filter(|_| layout(&cut[position + 1..]))
-}
-
-/// The offset of the `Punct(')')` that closes the call starting at the front of this run, or `None` when
-/// it never closes. A `…(` lexeme opens one level, a word that both opens and closes (`url(x)`) nets
-/// zero, and only a position after the callee can close it.
-fn close_index(run: &[Tok]) -> Option<usize> {
-    run.iter()
-        .enumerate()
-        .skip(1)
-        .scan(delta(run.first()), |depth, (offset, lexeme)| {
-            *depth += delta(Some(lexeme));
-            Some((*depth, offset))
-        })
-        .find(|(depth, _)| *depth <= 0)
-        .map(|(_, offset)| offset)
-}
-
-/// How much one lexeme moves the bracket depth. A word contributes its own balance, which is why
-/// `Word("calc(")` opens one level and a self-closing `Word("url(x)")` nets to zero.
-fn delta(lexeme: Option<&Tok>) -> i32 {
-    match lexeme {
-        Some(Tok::Word(word)) => {
-            word.matches('(').count() as i32 - word.matches(')').count() as i32
-        }
-        Some(Tok::Punct('(')) => 1,
-        Some(Tok::Punct(')')) => -1,
-        _ => 0,
-    }
-}
-
-/// Re-cut a run so every bracket owns its place; non-word lexemes are carried unchanged.
-fn open_at(toks: &[Tok]) -> Vec<Tok> {
-    toks.iter()
-        .flat_map(|tok| match tok {
-            Tok::Word(word) => cut_open(word),
-            other => vec![other.clone()],
-        })
-        .collect()
-}
-
-/// One word cut at each `(` and each `)` — the three shapes the traces show:
-/// * `Word("calc(1px)")` → `calc(`, `1px`, `)` — an ordinary declaration value, one lexeme holding both
-///   brackets. The `(` stays glued to the text **before** it, because ending at `(` is what marks a
-///   callee (gluing it to the piece after produced `Word("calc")`, nothing matched, and every case stayed
-///   verbatim);
-/// * `Word("calc(1px")` → `calc(`, `1px` — a run whose closing `)` is outside it;
-/// * `Word("calc( ( 1 ) )")` → `calc(`, `(`, `1`, `)`, `)` — a paren with layout around it is released as
-///   a bare `Punct('(')`, since that whitespace is layout and the group is not a callee.
-///
-/// Text between brackets keeps its inner spaces: Sass's spacing law is what makes `1px + 1%` an
-/// operation, and dropping them turned every calculation's content into `1px+1%`.
-fn cut_open(word: &str) -> Vec<Tok> {
-    let (pieces, tail) = word.chars().fold(
-        (Vec::<Tok>::new(), String::new()),
-        |(mut pieces, text), c| match c {
-            '(' => {
-                let callee = !text.is_empty() && text.trim() == text;
-                if callee {
-                    pieces.push(Tok::Word(format!("{text}(")));
-                } else {
-                    let body = text.trim();
-                    pieces.extend((!body.is_empty()).then(|| Tok::Word(body.to_string())));
-                    pieces.push(Tok::Punct('('));
-                }
-                (pieces, String::new())
-            }
-            ')' => {
-                let body = text.trim();
-                pieces.extend((!body.is_empty()).then(|| Tok::Word(body.to_string())));
-                pieces.push(Tok::Punct(')'));
-                (pieces, String::new())
-            }
-            other => {
-                let mut text = text;
-                text.push(other);
-                (pieces, text)
-            }
-        },
-    );
-    let body = tail.trim();
-    pieces
-        .into_iter()
-        .chain((!body.is_empty()).then(|| Tok::Word(body.to_string())))
-        .collect()
-}
-
-/// The argument list of a shell, group by group. The split runs on the bracket-cut view (a `,` must be
-/// outside the glued lexeme to count as a separator).
 fn arguments(shell: &Shell, env: &Env) -> Vec<Outcome> {
     calls::top_level_groups(&shell.inner)
         .into_iter()
@@ -312,8 +202,12 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
             Some(value @ (Value::Number(..) | Value::Bool(..))) => Outcome::Collapsed(value),
             // Only a `calc` hands its body over (that is the dropped shell); a `clamp` keeps its own
             // name, which is what `::calculation/clamp/preserved` prints as `clamp(1%, 2px, 3%)`.
-            Some(Value::Calculation(name, inner)) if is_calc(&name) => Outcome::Nested(inner),
-            Some(Value::Calculation(name, inner)) => Outcome::Named(format!("{name}({inner})")),
+            Some(Value::Calculation(name, inner)) if is_calc(&name) => {
+                Outcome::Nested(inner.clone())
+            }
+            Some(Value::Calculation(name, inner)) => {
+                Outcome::Named(format!("{name}({})", inner.printed))
+            }
             Some(value) => Outcome::Kept(value.to_css()),
             None => Outcome::Opaque,
         };
@@ -355,47 +249,8 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
         // Everything else prints inside the shell — a chain that stopped at an incompatible step, a
         // compound unit (`1 / 1px / 1rad`), or a resolved interpolation (`calc(#{1px + 2px})` → `3px`).
         calc::Reading::Value(value) => Outcome::Kept(value.to_css()),
-        calc::Reading::Expression(text) => Outcome::Kept(text),
-    }
-}
-
-/// An argument's text, in the form the corpus states it: whitespace runs folded, and only the spaces a
-/// calculation never prints are removed — one **after** `(`, one **before** `)` or `,`
-/// (`calc( ( 1 ) )` → `(1)`, `min( 1% , 2px )` → `min(1%, 2px)`, and `1px + (2px)` keeps its space).
-///
-/// Structure is already decided by the lexeme pass; this normalises whitespace only. The spaces inside a
-/// glued word (`Word("1px + 1%")`) are the sole record of the spacing the corpus expects, so dropping
-/// them would be the bug rather than the shortcut.
-fn text(toks: &[Tok]) -> String {
-    render(toks)
-        .chars()
-        .fold((String::new(), false), |(mut out, pending), c| {
-            if c == ' ' {
-                let had_content = !out.is_empty();
-                return (out, had_content);
-            }
-            let suppress = matches!(c, ')' | ',') || out.ends_with('(');
-            if pending && !suppress {
-                out.push(' ');
-            }
-            out.push(c);
-            (out, false)
-        })
-        .0
-}
-
-/// The group's lexemes with a **leading sign merged into the number it is glued to**: `Op('+')` then
-/// `Word("1px")` (no layout between them) becomes `Word("+1px")`, the shape `number_lexeme` already
-/// reads. A sign separated by whitespace, or any second operator, is left exactly as it was so the
-/// operation stays unreadable — 1.4d's question, not this slice's.
-fn without_leading_sign(content: &[Tok]) -> Vec<Tok> {
-    match content {
-        [Tok::Op(sign), Tok::Word(number), rest @ ..] if matches!(sign, '+' | '-') => {
-            let mut merged = vec![Tok::Word(format!("{sign}{number}"))];
-            merged.extend(rest.iter().cloned());
-            merged
-        }
-        _ => content.to_vec(),
+        // A chain that did not collapse out of the shell still keeps the number it reached.
+        calc::Reading::Expression(content) => Outcome::Folded(content),
     }
 }
 
@@ -413,30 +268,10 @@ fn rendered(parts: &[Outcome]) -> String {
         .iter()
         .map(|part| match part {
             Outcome::Collapsed(value) => value.to_css(),
-            Outcome::Nested(inner) | Outcome::Named(inner) | Outcome::Kept(inner) => inner.clone(),
+            Outcome::Nested(inner) | Outcome::Folded(inner) => inner.printed.clone(),
+            Outcome::Named(inner) | Outcome::Kept(inner) => inner.clone(),
             Outcome::Opaque => String::new(),
         })
         .collect::<Vec<String>>()
         .join(", ")
-}
-
-/// Every lexeme that is not layout — the view structure is read off.
-fn meaningful(toks: &[Tok]) -> Vec<&Tok> {
-    toks.iter().filter(|tok| !is_layout(tok)).collect()
-}
-
-fn is_layout(tok: &Tok) -> bool {
-    matches!(tok, Tok::Space(_) | Tok::Silent(_))
-}
-
-/// Which names are calculations whose shell the corpus keeps. `var` is deliberately absent: a `var( … )`
-/// is an operand this compiler does not model, not a calculation it can rebuild.
-fn name_exists(name: &str) -> bool {
-    CALCULATION_NAMES
-        .iter()
-        .any(|call| name.eq_ignore_ascii_case(call))
-}
-
-fn is_calc(name: &str) -> bool {
-    name == "calc"
 }

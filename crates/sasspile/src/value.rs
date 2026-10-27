@@ -16,6 +16,7 @@
 //! observable only through the sole `compile` exit, never by leaking a `pub` for tests.
 
 use crate::SassError;
+use crate::calc::Content;
 use crate::unit::{Unit, measure};
 
 /// An owned declaration value flowing forward through the pipeline.
@@ -29,14 +30,12 @@ pub enum Value {
     /// Sass's boolean, printed as the bare word `true` / `false` (`math.is-unitless`, `math.compatible`,
     /// and later `@if`'s truthiness). Kept a separate variant so a boolean is never re-parsed out of text.
     Bool(bool),
-    /// A **calculation** whose content this slice cannot simplify: `name` is the normalised (lowercase)
-    /// function and `inner` the text of its argument list, already normalised at parse time
-    /// (`crate::calculation`). The first slice of tasks 1.4 lands the *form* — the expression kept as
-    /// written — so a `calc` that used to travel as one opaque `Raw` is now a value with a name and a
-    /// body. Simplification (`+` between compatible units, then `*`/`/`) arrives with 1.4d's rational
-    /// units, which is why no arithmetic path reads this variant yet: a calculation used as an operand
-    /// declines, exactly as it did before.
-    Calculation(String, String),
+    /// A **calculation** whose content stays as the reduced form it was read into: `name` is the callee as
+    /// written and `content` the summary from [`crate::calc`] — its printed text, its folded value when
+    /// every step computed, and its precedence. Storing the summary rather than a string is what lets a
+    /// bound calculation take part in arithmetic again
+    /// (`values/numbers/units/multiple::division/cancels/numerator/once`).
+    Calculation(String, Content),
 }
 
 impl Value {
@@ -52,7 +51,7 @@ impl Value {
             Value::Raw(text) => text.clone(),
             Value::Number(value, unit) => format_number(*value) + &unit.to_css(),
             Value::Bool(value) => value.to_string(),
-            Value::Calculation(name, inner) => format!("{name}({inner})"),
+            Value::Calculation(name, content) => format!("{name}({})", content.printed),
         }
     }
 
@@ -74,10 +73,28 @@ impl Value {
         self.combine(rhs, |left, right| left - right)
     }
 
+    /// The number this value carries when it **is** one — including a calculation whose content folded all
+    /// the way down: `math.div(calc(2px * 3px), 4px)` is `1.5px`
+    /// (`values/calculation/calc/operator/units::multiplication`), so the folded value has to be reachable
+    /// through the shell instead of only through its text.
+    pub fn number(&self) -> Option<Value> {
+        match self {
+            Value::Number(..) => Some(self.clone()),
+            Value::Calculation(_, content) => content
+                .folded
+                .clone()
+                .map(|(value, unit)| Value::Number(value, unit)),
+            _ => None,
+        }
+    }
+
     /// `a * b`: the magnitudes multiply and the units combine, so `px * em` is `px*em` while
-    /// `px/em * em` is `px` — the cancellation is structural, in [`Unit::times`].
+    /// `px/em * em` is `px` — the cancellation is structural, in [`Unit::times`]. A convertible pair across
+    /// the fraction cancels here too and carries its factor along: `calc(1px * 1rad / 1ms / 1Hz) * 1s` is
+    /// `calc(1000px * 1rad / 1Hz)`, not `1px * 1rad * 1s / 1ms / 1Hz`
+    /// (`values/numbers/units/multiple::multiplication/cancels/compatible`).
     pub fn times(&self, rhs: &Value) -> Result<Value, SassError> {
-        self.operate(rhs, |left, right| left * right, Unit::times)
+        self.cross(rhs, |left, right| left * right, Unit::times)
     }
 
     /// `a / b`: the magnitudes divide and the divisor's units flip sides, so `6 / 3px` is `2/px`.
@@ -86,7 +103,27 @@ impl Value {
     /// `format_number` already spells it the way Sass does (`math.div(1, 0)` → `infinity`,
     /// `values/calculation/calc/constant::infinity`), so no panic and no invented `NaN`.
     pub fn divided_by(&self, rhs: &Value) -> Result<Value, SassError> {
-        self.operate(rhs, |left, right| left / right, Unit::over)
+        self.cross(rhs, |left, right| left / right, Unit::over)
+    }
+
+    /// `*` and `/` share this: build the raw result, then cancel every **convertible pair across the
+    /// fraction** and fold its factor into the magnitude — `96px / 1in` is `1`
+    /// (`values/numbers/units/multiple::division/cancels/compatible`) and `1s / 1ms` is `1000`
+    /// (`…::multiplication/cancels/compatible`). Both operators need it, so it lives in one place rather
+    /// than being remembered per call site.
+    fn cross(
+        &self,
+        rhs: &Value,
+        magnitude: impl Fn(f64, f64) -> f64,
+        units: impl Fn(&Unit, &Unit) -> Unit,
+    ) -> Result<Value, SassError> {
+        match self.operate(rhs, magnitude, units)? {
+            Value::Number(value, unit) => {
+                let (scaled, reduced) = unit.cancel_convertible(value);
+                Ok(Value::Number(scaled, reduced))
+            }
+            other => Ok(other),
+        }
     }
 
     /// The shape `*` and `/` share: both sides must be numbers, the magnitudes go through one operation
@@ -98,11 +135,16 @@ impl Value {
         magnitude: impl Fn(f64, f64) -> f64,
         units: impl Fn(&Unit, &Unit) -> Unit,
     ) -> Result<Value, SassError> {
-        let (Value::Number(left, left_unit), Value::Number(right, right_unit)) = (self, rhs) else {
+        let (Some(left), Some(right)) = (self.number(), rhs.number()) else {
+            return Err(SassError::new("Undefined operation."));
+        };
+        let (Value::Number(left_value, left_unit), Value::Number(right_value, right_unit)) =
+            (&left, &right)
+        else {
             return Err(SassError::new("Undefined operation."));
         };
         Ok(Value::Number(
-            magnitude(*left, *right),
+            magnitude(*left_value, *right_value),
             units(left_unit, right_unit),
         ))
     }

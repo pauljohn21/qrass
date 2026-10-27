@@ -54,15 +54,32 @@ pub enum Expr {
     Calculation(Value),
 }
 
-/// One classified lexeme of the arithmetic path.
-/// A value that may not be arithmetic at all: a slash, star or percent anywhere in a lexeme
-/// is a CSS separator (or a percentage unit) until the value algebra covers them.
+/// A value that may not be arithmetic at all: a slash, star or percent anywhere in a lexeme is a CSS
+/// separator (or a percentage unit) until the value algebra covers them.
+///
+/// **Inside brackets is not the same context.** A `/` that sits inside a `calc( … )` belongs to that
+/// calculation, which is why `calc(1/2px + 1/4px) * 1px` must be readable as a multiplication of a
+/// calculation by a number (`values/calculation/calc/operator/units::denominators` → `0.75`). The depth is
+/// counted as data over the run, so `font: 12px/1.5`, `grid: 1/2` and a bare `a {b: 1/2}` — none of which
+/// holds a bracket — keep being protected exactly as before.
 fn protected(toks: &[Tok]) -> bool {
-    toks.iter().any(|tok| match tok {
-        Tok::Word(w) => w.contains(['/', '*', '%']),
-        Tok::Interp(inner) => protected(inner),
-        _ => false,
-    })
+    let seeded = (false, 0i32);
+    let (found, _) = toks.iter().fold(seeded, |(found, depth), tok| {
+        let net = match tok {
+            Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
+            Tok::Punct('(') => 1,
+            Tok::Punct(')') => -1,
+            _ => 0,
+        };
+        let outside = depth == 0 && net == 0;
+        let separator = match tok {
+            Tok::Word(word) => word.contains(['/', '*', '%']),
+            Tok::Interp(inner) => protected(inner),
+            _ => false,
+        };
+        (found || (outside && separator), (depth + net).max(0))
+    });
+    found
 }
 
 /// Sass's **special** calls, matched on the base name after a vendor prefix: their arguments are
