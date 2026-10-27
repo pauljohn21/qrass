@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1060/11,533**（9.2%，**实质通过 895** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `slash-alpha`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1064/11,533**（9.2%，**实质通过 899** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `channels-binding`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -83,9 +83,13 @@ alwaysApply: true
    且表示法在**夹紧之后**才决定；hsl 轴**不对称**（负饱和→ 0，上界与亮度都不夹）。现代形的 ` / alpha` 也已落：
    语料用 `rgb(list.slash(0 255 127, 0))` 与 `rgb(0 255 127 / 0)` **期望同一输出**自己声明了模型 ⇒ alpha 是
    **斜杠列表（`Value::Slash`）的第二元**，不是除法；只有“独占一个分量的 `/`”算分隔符，粘在分量里的
-   `127/0.3` 仍走算术。**仍缺**：`$channels:` 绑定（脊柱只递到第一个缺位，带标签的列表到 body 为空）、
-   `list.slash` 未注册、`none` 值（注意语料对 `rgb(0 255 127 / none)` 全逐字，对 `hsl` 却半重格式化为
-   `hsl(180deg 60% 50% / none)` —— 两者不是同一条规则）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
+   `127/0.3` 仍走算术。**仍缺**：`list.slash` 未注册、`none` 值（注意语料对 `rgb(0 255 127 / none)` 全逐字，对 `hsl` 却半重格式化为
+   `hsl(180deg 60% 50% / none)` —— 两者不是同一条规则）。
+   **绑定规则按签名种类分叉**（同一规则套两类签名会静默丢标签）：**定长**签名拿“第一个缺位之前”的槽
+   （第一个缺位的必需参数就是语料的 `Missing argument $x.`）；**variadic** 签名拿**全部已绑定的槽**按声明顺序
+   递（实参个数由 body 自己判）——否则 `rgb($channels: 0 255 127)` 的 `channels` 落在第 5 槽而 body 拿到空列表
+   （实测就是靠这条收到 4 行）。`channels` 是真参数名：语料自己的错消息就用 `$channels:` 前缀
+   （`rgb/error/one_arg.hrx`）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
    （net=0 已验）；`color/mod.rs` 的轴算术已拆到 `color/ops.rs`（`ledger diff rgb-to-hsl-axes color-ops-split` =
    net=0 regress=0，`mod.rs` 降到 359 行）。**下一个要量的**：`color.channel(…)`（`channel/hsl.hrx` 给了
    `color.channel(hsl(10 40% 60%), "hue")` → `10deg`与`hsl(540 …)` → `180deg`，但要先会解析现代空格语法），

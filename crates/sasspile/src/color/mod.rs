@@ -291,6 +291,63 @@ impl Color {
         self.alpha
     }
 
+    /// One channel, named the way `color.channel` names it, read in a space.
+    ///
+    /// `space` is the call's `$space:` as written (`hsl`, `rgb`, `srgb`); `None` means **the colour's own
+    /// space**, which is all the corpus pins without a label: `color.channel(#abcdef, "red")` → `171` and
+    /// `color.channel(hsl(10 40% 60%), "hue")` → `10deg` (`channel/rgb.hrx::local/*`,
+    /// `channel/hsl.hrx::local/*`). A cross-space read is answered only when the label says so
+    /// (`channel/hsl.hrx::foreign/hue` is `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`);
+    /// converting on the colour's behalf without one would invent a rule no fixture states.
+    ///
+    /// Units come from the corpus too: an `rgb`/`srgb` channel is a bare number (`171`, and
+    /// `color.channel(pink, "green", $space: srgb)` → `0.7529411765` — the byte over 255), the hue carries
+    /// `deg`, saturation and lightness carry `%`.
+    pub fn channel(&self, name: &str, space: Option<&str>) -> Option<Value> {
+        let number = |value: f64| Value::Number(value, crate::unit::Unit::unitless());
+        let rgb_space = matches!(
+            self.representation,
+            Representation::Legacy
+                | Representation::Percent
+                | Representation::Hex
+                | Representation::Named
+        );
+        match name {
+            "red" | "green" | "blue" => {
+                let index = match name {
+                    "red" => 0,
+                    "green" => 1,
+                    _ => 2,
+                };
+                match space {
+                    Some("srgb") => Some(number(self.byte(index)? / 255.0)),
+                    Some("rgb") => Some(number(self.byte(index)?)),
+                    None if rgb_space => Some(number(self.byte(index)?)),
+                    _ => None,
+                }
+            }
+            "hue" | "saturation" | "lightness" => {
+                let axis = match name {
+                    "hue" => 0,
+                    "saturation" => 1,
+                    _ => 2,
+                };
+                let unit = if axis == 0 { "deg" } else { "%" };
+                let asked_own_space = space.is_none() && self.representation == Representation::Hsl;
+                match space == Some("hsl") || asked_own_space {
+                    true => Some(Value::Number(
+                        self.hsl_channel(axis)?,
+                        crate::unit::Unit::named(unit),
+                    )),
+                    false => None,
+                }
+            }
+            // `whiteness`/`blackness` and every other space (`hwb`, `lab`, `lch`, `oklab`, `oklch`, the
+            // device spaces) need conversions this compiler has not implemented.
+            _ => None,
+        }
+    }
+
     /// The hue in degrees: `359deg` from `hsl(359, 50%, 50%)`, `180deg` from `hsl(540, …)` because the hue
     /// was folded into `0–360` at creation (`color/hue.hrx`), and `210deg` from `#abcdef` — read off the
     /// `rgb` channels through [`Self::axes_of`] (`modules/color/hue.hrx`).

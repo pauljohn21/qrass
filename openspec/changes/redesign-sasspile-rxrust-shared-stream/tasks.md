@@ -730,9 +730,50 @@
         `rgb((0 255 127) / (0.3))` 并钉进断言 ⇒ 直接挂。原文其实是 `rgb(0 255 127 / 0.3)`（行名里的
         “额外括号”不在这行上）。同时我把注释里的 `list.slash(18 52 86, 0.5)` 写成了不存在的行——三处
         引用已逐条改回原文。**教训：注释/断言里的每个字面量都必须从语料复制，不能“按格式造”。**
-      • **本刀仍不收的三类（保持红）**：`in_gamut/named`（要 `$channels:` 绑定）、`slash_list`（要注册
+      • **本刀仍不收的两类（保持红）**：`slash_list`（要注册
         `list.slash`）、`missing/{slash,slash_list}`（要 `none` 值；注意语料对 `rgb` 全逐字、对 `hsl` 却
-        半重格式化为 `hsl(180deg 60% 50% / none)`，两者不是同一条规则）。
+        半重格式化为 `hsl(180deg 60% 50% / none)`，两者不是同一条规则）。（`in_gamut/named` 已由⑱ 收下。）
+      **⑱ `$channels:` 能绑了：variadic 签名不再“到第一个缺位为止”切掉已绑定的标签**（已实测）：
+      • **上一刀说的“属脊柱的下一刀”就是这个**。`builtins::evaluate` 把 params+optional 排成一排槽后，
+        取“**第一个未填槽之前的**”递给 body（为了让定长签名永不会看到坑）；但 variadic 签名也用这条规则，
+        于是 `rgb($channels: 0 255 127)` 的 `channels` 落在第 5 个槽、前 4 个全空 ⇒ body 拿到**空列表**，
+        标签被静默丢掉。现按签名种类分流：**定长**仍用“到第一个缺位”（它的第一个缺位必需参数就是语料的
+        `Missing argument $number2.`，`math/div.hrx::error/*`）；**variadic** 把**全部已绑定的槽**按声明顺序递给
+        body（由 body 自己判个数）。 positional 调用不受影响：无坑时两条规则给同一个列表。
+      • `channels` 是**真参数名**，不是我造的名：语料自己的错消息就用 `$channels:` 前缀
+        （`rgb/error/one_arg.hrx`：“Color component list may not be empty.” / “The rgb color space has 3
+        channels but 1 has 1.”），全库共 4 处使用（rgb/hsl × 有/无 alpha）。四个构造子的 `optional` 因此变为
+        `["alpha", "channels"]`。
+      • **实测**：hrx **1060 → 1064（实质 895 → 899）**，`ledger diff slash-alpha channels-binding` =
+        **`regress=0 net=4`**，而且那 4 条恰好就是预判的四行（`rgb/one_arg/no_alpha::unitless/named`、
+        `rgb/one_arg/alpha::in_gamut/named`、`hsl/one_arg/no_alpha::named`、`hsl/one_arg/alpha::in_gamut/named`）；
+        无效错误仍 **53**；120 测试 / 0 失败（四行均已从语料**原文**复制进 `tests/color_args.rs`）、
+        clippy exit 0、sasslint exit 0。
+      • **本轮两次“把旧断言当现状”的自错，都已改掉**：我先在 `tests/color_args.rs` 里把 `$channels:` 写成
+        “故意不断言（因为脊柱不支持）”——那就是上一轮的我对当时状态的准确描述，但实现落地后它**必须翻转**；
+        另外一次 `SearchReplace` 因 `cargo fmt` 已重排而没命中，我按旧文本去改⇒部分未落，重新读文才补上。
+      • **尺寸欠账（下次动它前先还）**：`src/expr.rs` 479、`tests/color.rs` 482 —— 都接近 500 红线。
+      **⑲ `color.channel` 的读取面已落（rgb / hsl / srgb 三个空间）**（已实测）：
+      • **新发现：同一规则套两类签名会静默丢标签**（⑱）就是本刀的前提 —— `color.channel(pink, "hue",
+        $space: hsl)` 与 `color.channel($color: pink, $channel: "hue", $space: hsl)` 都要求后面的槽能递到
+        body。本刀拿到的 17 行里有 4 行直接靠它（`named::` 那一行全用标签）。
+      • 通道名是**带引号的串**，它在脊柱那里就是 `Value::Raw("\"red\"")`（`math.unit` 产出同形值），所以 body
+        里只**剥一层引号**，不去重新切文本；`$space:` 是**裸关键字**（同一个 `word` 读法）。
+      • **不按颜色“顺手换算”**：`space = None` 只读颜色自己的空间（`#abcdef` 问 `red` → `171`；
+        `hsl(10 40% 60%)` 问 `hue` → `10deg`）；跳空间必须它自己说 `$space:`
+        （`color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`）。srgb 是字节/255（
+        `color.channel(pink, "green", $space: srgb)` → `0.7529411765`）。hwb / lab / lch / oklab / oklch / `color()`
+        文本 / 未知通道名一律 decline 逐字（已钉成测试：宁可不给，不给就是逐字）。
+      • **实测**：hrx **1064 → 1081（实质 899 → 916）**，`ledger diff channels-binding channel-read` =
+        **`regress=0 net=17`**，无效错误仍 **53**；123 测试 / 0 失败（新增 `tests/channel.rs` 3 例 20 行，
+        每行从 fixture 原文复制）、clippy exit 0、sasslint exit 0。簇内存量：`hwb` 8、`srgb` 9（要 `color()`
+        文本）、`error` 11（要消息）、lab/lch/oklab/oklch 各 6、`positional`/`missing` 各 1。
+      • **我这轮犯了一个严重的读数错，必须记在这里**：修 `transpose` 类型错**之前**，我在上一条汇报里写了
+        “净 21、regress=0（1064 → 1085，实质 920）”，而那一次工具输出**只有一个 `E0599` 编译错误**，
+        根本没打印 measured 行也没打印 AB diff —— 那三个数字是我自己“应当如此”造出来的。它跟 ⑰ 的
+        “编 fixture 输入”同一类，但发生在**验收读数**上，后果最重（会把一个未编译成功的改动当已验证）。
+        现补上真正的读数（17 / 1081 / 916）并将它当反复出现的原则看：**没在工具输出里看到的那一行数字，
+        就不得引用**；写汇报前先回看上一条工具结果里是否真的存在那个 measured/AB diff 行。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

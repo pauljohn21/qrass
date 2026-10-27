@@ -30,6 +30,7 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_HUE,
     &COLOR_SATURATION,
     &COLOR_LIGHTNESS,
+    &COLOR_CHANNEL,
     &GRAYSCALE,
     &COLOR_GRAYSCALE,
     &DARKEN,
@@ -229,6 +230,62 @@ static COLOR_LIGHTNESS: Builtin = Builtin {
 /// One channel of a colour argument, as a unitless number.
 fn channel(args: Vec<Value>, index: usize) -> Result<Value, SassError> {
     accessor(args, None, |color| color.byte(index))
+}
+
+/// `color.channel(#abcdef, "red")` → `171`, `color.channel(hsl(10 40% 60%), "hue")` → `10deg`, and
+/// `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`
+/// (`core_functions/color/channel/{rgb,hsl}.hrx::local/*` and `…::foreign/*`). Declared **variadic with
+/// names** like every other colour call here: the arity message is not built yet (P7), and a call this
+/// slice cannot read — `color.channel(color(srgb 0.2 0.5 0.8), "red")`, `hwb(…)`, `oklch(…)`, an unknown
+/// channel name — must decline to text instead of answering with a number from the wrong axes.
+static COLOR_CHANNEL: Builtin = Builtin {
+    name: "color.channel",
+    params: &["color", "channel"],
+    optional: &["space"],
+    variadic: true,
+    apply: channel_of,
+};
+
+/// One `color.channel` call: a colour, a **quoted channel name**, and an optional `$space:` written as a bare
+/// keyword. The name arrives as text with its quotes — the same shape `math.unit` produces
+/// (`Value::Raw("\"px\"")`) — so it is unquoted structurally here rather than re-parsed out of a run.
+fn channel_of(args: Vec<Value>) -> Result<Value, SassError> {
+    let read = match args.as_slice() {
+        [colour, name] => read_channel(colour, name, None),
+        [colour, name, space] => read_channel(colour, name, Some(space)),
+        _ => None,
+    };
+    match read {
+        Some(value) => Ok(value),
+        None => Err(SassError::new(
+            "not a channel this slice can read in that space",
+        )),
+    }
+}
+
+fn read_channel(colour: &Value, name: &Value, space: Option<&Value>) -> Option<Value> {
+    let colour = Color::of(colour)?;
+    let name = word(name)?;
+    // An unreadable `$space:` label is refused rather than ignored: defaulting to the colour's own space
+    // would answer `color.channel(pink, "hue", $space: hwb)` with the hsl hue.
+    let space = match space {
+        Some(given) => Some(word(given)?),
+        None => None,
+    };
+    colour.channel(&name, space.as_deref())
+}
+
+/// A keyword or quoted string as the word it spells.
+fn word(value: &Value) -> Option<String> {
+    let Value::Raw(text) = value else {
+        return None;
+    };
+    let text = text.trim();
+    let quoted = text
+        .strip_prefix('\"')
+        .and_then(|rest| rest.strip_suffix('\"'))
+        .unwrap_or(text);
+    (!quoted.is_empty()).then(|| quoted.to_string())
 }
 
 /// `color.alpha`: the colour's own alpha, which every representation carries.
