@@ -35,8 +35,10 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1824/11,533**（15.8%，**实质通过 1659** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `ordering`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1827/11,533**（15.8%，**实质通过 1662** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `module-constants`）；无效错误从长期基线 **53 降到 20**
+   （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
+   本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -247,6 +249,15 @@ alwaysApply: true
      • `clamp` 的取平方向由三行 `preserves_units/{number,max,min}` 定：向内用 `<`（等于上界时给上界），
        向外用 `<=`（等于下界时给下界），且返回**原写形式**（`0.75turn` 不被改写成 deg）；
        `clamp(1, 2, 0)` → `1` 说明折叠是“先贴上界再托下界”，独立两比较会给 `0`。
+     • **`module.$name` 是一个词素（run `module-constants`，net 3，1824→1827，无效错误 53 → 20）**：
+       `lexer.rs` 新增 `Tok::MemberVar(namespace, name)`，在 `$` 开始的那一字符处把尾巴是 `.` 的待定词切成
+       模块前缀（`take_module_prefix`）—— 不能在 `expr` 里拆字符串：“`math.$pi` / `math . $pi` / `5.$pi`”
+       在 `Word`+`Var` 分开时根本不可区分（第五次词法粒度实证）。配套：`Expr::MemberVar`、
+       `builtins::module_value("math", name)`（`math.rs::constant` 的七个值逐个抄自 `variables.hrx` 的行，
+       包括 `$min-number` 是**最小 denormal** 而非 MIN_POSITIVE）、`render` 里回写 `{module}.${name}`
+       （未知名字如 `upstream.$a` 必须逐字，不能报 `Undefined variable.` —— 那就是那 33 行的死因）。
+       仍未做：`math.$pi * 1e15` 类乘法要的是**指数字面量** `1e15` 被当数读（下一刀）；
+       `math.$pi: 0;` → `Cannot modify built-in variable.`（赋值目标还不认带命名空间的名字）。
      • **第八次“旧断言前提被实现推翻”**：`tests/builtins.rs` 拿 `math.max(1px, 2q)`/`math.compatible(1px, 2q)`
        当“表外单位 decline”的例子，`q` 一进共享表这两条就红了 —— 它们钉的本来是我的选择而不是语料行，
        现换成真正无证的 `rem`/`ch`，并把 `q` 的现在行为（`2q`/`true`）一并钉住（无任一 2q 的 fixture 行，
@@ -370,7 +381,8 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - “同名两结果完全相同”得到的 `regress=0` 不证明任何事； 行为变更 MUST 列出**哪几条用例**变了及其规范依据。
   “FAIL 变成另一种 FAIL”在 pass 读数上看不见 ⇒ MUST 另数无效错误：`ledger failures <run> "unexpected error"`
   （它同时匹配 key 与失败详情；这个查询曾因 `LIKE` 绑定 + 吞错而永远返回 0，现由
-  `crates/ledger/tests/failures_query.rs` 钉住，当前基线读数 55）。
+  `crates/ledger/tests/failures_query.rs` 钉住。长期基线曾是 **53**，2026-10-28 把 `module.$name` 做成词素后
+  降到 **20**（那 33 行本来就是把内置模块常量当未绑定变量报错，不是新能力失效）——引用它之前先跑一次读数，别拿旧数）。
 - **通过率必须同时报“实质通过”**：`tests/hrx.rs` 会输出 `pass_substantive`（期望 CSS 非空而通过）与
   `pass_empty_expectation`（期望输出为空，“啥也不输出”也能对）。当前 746 PASS = **581 实质 + 165 空期望**。
   实证：`directives/{if,for,while}` 簇的 39 条“PASS”**全部**是空期望 ⇒ `@if`/`@each`/`@for` 其实一行也没实现，

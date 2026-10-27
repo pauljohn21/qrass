@@ -985,6 +985,26 @@
         `cargo test --workspace --no-fail-fast` exit=0（44 块）、clippy `-D warnings` exit 0、sasslint
         `count=0`。金样单测 = 新 `tests/math_ordering.rs`（三个测试，逐条引 fixture；我原本写的
         `math.hypot(3, 4)` → `5` 在语料里不存在，已先 grep 发现再删）。
+      **㉚ `module.$name` 做成一个词素：`math.$pi` 不再被当未绑定变量**（已实测，run `module-constants`）：
+      • **为什么先动 lexer**：`Word("math.") + Var("pi")` 分开时，`math.$pi`（内置模块常量）、
+        `math . $pi`（乘法）、`5.$pi` 在 `expr` 里长得一模一样 —— 在下游拆字符串就是第五次“分类粒度
+        不能超过词法”。现在 `'$'` 那一支调 `take_module_prefix`：待定词以 `.` 结尾且有前文时，整个前缀
+        进 `Tok::MemberVar(module, name)`，`render` 原样写回 `{module}.${name}`（decline 时逐字）。
+      • **读数**：hrx **1824 → 1827（实质 1659 → 1662）**，`ledger diff ordering module-constants` =
+        **`regress=0 net=3`**；真正的大动静是**无效错误 53 → 20**（33 行不再死在 `Undefined variable.`），
+        空库复算（`/tmp/qrass-ab9.db`：const-verify-before 1824/53 vs after 1827/20）两侧一致；
+        `cargo test --workspace --no-fail-fast` exit=0（45 块）、clippy exit 0、sasslint `count=0`。
+      • **七个常量逐个抄行**（`math.rs::constant`）：`$pi`/`$e`/`$epsilon` 就是 `f64` 同名常量（行里乘
+        `1e15`/`1e31` 回推），`$max-safe-integer` = 2^53−1 与其负对，`$max-number` = `f64::MAX`，
+        而 `$min-number * 1e300 * 1e39` → `4940656458412465` 定下它是**最小 denormal**
+        （`f64::from_bits(1)`），不是 `MIN_POSITIVE`。表只认 `"math"` 这个命名空间：`upstream.$a`、
+        `utils.$empty-map` 属文件加载模块（P5），猜不得。
+      • **两件没做（金样在、能力不在）**：`math.$pi * 1e15` 四行要的是**指数字面量** `1e15` 被当数读
+        （现在输出 `3.1415926536 * 1e15`）—— 已量定作为下一刀；`variables.hrx::error/assignment/*` 七行要
+        `Cannot modify built-in variable.`，现在那行输出空（赋值目标还不认带命名空间的名字）。
+      • 自己写测试时又犯过一次老习惯：先在测试里手抄了 `f64::MAX` 的 309 位数字，发现风险后删掉改由 hrx
+        守（手抄长数字串就是本会话第七次错的形状）；另外本轮又一次把 `python3 -` 空壳带进命令（未执行，
+        但规则禁它，已记）。
       **㉖ P7 第三片：一条调用点两个空间的名字 = 按名字拒绝，而 `hue` 不决定空间**（已实测）：
       • **律**：第一个“能定空间”的组定空间，第一个外来的名字被点名 ——
         `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with
