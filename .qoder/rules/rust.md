@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1455/11,533**（12.6%，**实质通过 1290** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `mixed-channel`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1585/11,533**（13.7%，**实质通过 1420** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `trig`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -198,6 +198,27 @@ alwaysApply: true
      `Given.param: &'static str` 装不下源码里的任意标签 —— 这是个真阻塞项，不是没写），
      以及现代色（`color(srgb …)`）的名字拒绝（读不出那个色就不知道它在哪个空间）。
      `builtins/color/mod.rs` 已到 474 行、`modify.rs` 462 行 —— 两者再扩都得先拆。
+     **`math` 的三角族已注册（run `trig`，net 130，1455→1585；regress=0，空库复算同读数，无效错误仍 53）**：
+     选它先量过地形 —— “函数根本没注册”在 `core_functions/math` 就占 266 条要输出的行（而候选“把未绑定标签
+     递进 body”只有 5 行可达，所以没动那个形状）。新文件 `builtins/math/trig.rs`（与父文件同名的子目录布局，
+     `mod trig;` 在 `builtins/math.rs`）共用父级的 `number_arg`/`comparable`：
+     • **直接三角函数**（`sin`/`cos`/`tan`）：无单位参 **就是弧度**（`math.cos(1)` == `math.cos(1rad)`，
+       `cos.hrx::{unitless,rad}`），角单位换算（`1grad` = 0.9°），其他单位致命拒绝
+       `Expected 1px to have an angle unit (deg, grad, rad, turn).`（`cos.hrx::error/unit`）；结果无单位。
+     • **反三角**（`asin`/`acos`/`atan`）要无单位比值（`$number: Expected 1px to have no units.`，
+       `asin.hrx::error/units`），**答度数**；`atan2($y,$x)` 先统一维度再取比值，答度数，
+       它的两个不可比消息措辞不同（`$x: … and $y: … have incompatible units.` vs
+       `… (one has units and the other doesn't).`）——**$x 总在前**。
+     • **符号律（本轮新量出来的）**：**携带的** `-0.0` 保留符号（`math.sin(-0.0)` → `-0`、
+       `math.atan(-0.0)` → `-0deg`、`atan2(-0.0, 0)` → `-0deg`），而**落在**零上的运算丢掉符号
+       （`math.round(-0.2)` → `0`；`angle_of` 的 mod-360 折叠与 `clamp_alpha` 也是）——所以上一条“判越界
+       前先取整”写的“`format_number` 把 `-0` 归零”已收窄为：**打印层保留精确的 `-0`，由四舍/折叠/夹紧自己丢**
+       （`f64::rem_euclid` 会保留 `-0.0`，这一点必须在折叠处显式归正）。
+     • **三行没做也不装成做了**（金样在，律不在本刀）：`sin/tan(-0.000000000001)` → `0` 要“足够接近整数就印
+       整数”的精度律（`values/numbers/precision/**` 共 108 行要输出，下一个就取它）；`atan2(1cm, -10mm)` →
+       `135deg` 要长度因子精确而非语料那 10 位小数读数；`atan2(1px, 1deg)` 要 `deg` 进维度表
+       （`dimension()` 故意只收已实证的长度/时间/em）。已钉的 `tests/math_trig.rs` 只断言能过的行，
+       这三行在文档里写明留红。
    而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。

@@ -985,6 +985,30 @@
         剔掉了，而 `Given.param: &'static str` 装不下源码里的任意标签 —— 要递就得把 `param` 改成
         `String`/带所有权的类型（影响 body 签名与所有比较处），属单独的形状变更，不自作主张做。现代色的同名
         拒绝也仍未做（读不出那个色就不知道它在哪个空间）。`builtins/color/mod.rs` 474 行、`modify.rs` 462 行。
+      **㉗ `math` 三角族已注册（sin/cos/tan/asin/acos/atan/atan2）——选刀先量地形，不比分数**（已实测）：
+      • **为何不是上一轮说的候选 1**：“把未绑定标签递进 body”只能多收 5 行（剩下 6 行在现代色上），
+        而“函数根本没注册”在 `core_functions/math` 就占 266 条要输出的行 —— 先把这两个数读了再动手。
+      • **形状**：新文件 `builtins/math/trig.rs`（`builtins/math.rs` + 同名目录的布局，`mod trig;` 在父文件），
+        子模块能看见父级的 `number_arg`/`comparable`，所以没有第二套参数读法。`MATHS` 多 7 项。
+      • **律（逐条有行）**：无单位的 `sin`/`cos`/`tan` 参 **就是弧度**（`cos(1)` == `cos(1rad)`，
+        `cos.hrx::{unitless,rad}`），角单位换算（`1grad` = 0.9°），其他单位 →
+        `Expected 1px to have an angle unit (deg, grad, rad, turn).`（`cos.hrx::error/unit`）；反三角要无单位
+        比值（`asin.hrx::error/units`）且**答度数**；`atan2` 先统一维度（`atan2(1cm,-10mm)` 与
+        `atan2(1,-1)` 同形），它的两条不可比消息措辞不同且 `$x` 总在前。
+      • **符号律（本刀真正的新知识）**：**携带的** `-0.0` 保留符号（`sin.hrx::negative_zero` → `-0`、
+        `atan.hrx::negative_zero` → `-0deg`、`atan2/y_zero.hrx` → `-0deg`），**落在**零上的运算丢符号
+        （`round.hrx::up/to_zero` → `0`、`hsl/four_args/in_gamut.hrx::negative_zero/hue` → `0`、
+        `rgb/four_args/clamped.hrx::alpha/negative_zero` → `0`）。因此上一轮写的“`format_number` 把 `-0`
+        归零”错了层级：打印层保留精确 `-0`，`math.round`/`clamp_alpha`/`angle_of` 各自归正
+        （`f64::rem_euclid` 会保留 `-0.0`）。改完打印层后 `ledger diff` 拓出 **5 条回归**，就是这个发现。
+      • **实测**：hrx **1455 → 1585（实质 1290 → 1420）**，`ledger diff mixed-channel trig` = **`regress=0 net=130`**
+        （atan2 各文件 66、tan 12、sin 12、atan 12、asin 11、cos 10、acos 7），无效错误仍 **53**；
+        空库复算（`/tmp/qrass-ab5.db`：trig-verify-before 1455 vs trig-verify-after 1585）逐字重现；
+        `cargo test --workspace --no-fail-fast` exit=0（42 块）、clippy `-D warnings` exit 0、sasslint `count=0`。
+        新测 `tests/math_trig.rs`（五个测试，只断言能过的行）。
+      • **三行金样在、律不在本刀**（已写进测试文档并仍红）：`sin/tan(-1e-12)` → `0` 要“足够接近整数就印整数”
+        的精度律（`values/numbers/precision/**` 共 108 行要输出 —— 下一刀就取它）；`atan2(1cm,-10mm)` → `135deg`
+        要长度因子精确（我们现在落在 `135.0000000003`）；`atan2(1px,1deg)` 要 `deg` 进 `dimension()`。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
