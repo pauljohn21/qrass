@@ -1,8 +1,11 @@
 //! The `math` domain (`core_functions/math/**`). Bodies only: the contract, the registry entry and the
 //! arity diagnostics live in [`crate::builtins`], because the corpus states those identically for every
-//! function and duplicating them per domain is how they drift. The trigonometric seven are in
-//! [`trig`], which shares this file's argument readers rather than repeating them.
+//! function and duplicating them per domain is how they drift. The bodies that need a second file are
+//! [`trig`] (the seven trigonometric functions), [`exponents`] (`pow`/`sqrt`/`log`) and [`combining`]
+//! (`clamp`/`hypot`); each is a child of this module, so all three read the argument helpers below rather
+//! than carrying their own.
 
+pub(super) mod combining;
 pub(super) mod exponents;
 pub(super) mod trig;
 
@@ -34,6 +37,8 @@ pub(super) static MATHS: &[&Builtin] = &[
     &exponents::MATH_POW,
     &exponents::MATH_SQRT,
     &exponents::MATH_LOG,
+    &combining::MATH_CLAMP,
+    &combining::MATH_HYPOT,
 ];
 
 /// The refusal of a parameter that must carry **no unit**: `$number: Expected 1px to have no units.`
@@ -94,18 +99,13 @@ static MATH_DIV: Builtin = Builtin {
     },
 };
 
-/// Convertible lengths, in px, with the factors the oracle states (`libsass/units/conversion/size.hrx`).
-/// An unlisted unit declines rather than being converted by a remembered number.
+/// The factor that puts one unit on its family's base, read from the single table in [`crate::unit`] —
+/// `math.div`, the colour hues, `math.compatible` and `math.hypot` all go through it. A local copy of these
+/// numbers used to live here as ten-decimal literals; `hypot.hrx::units` (`5q * 40` among centimetres and
+/// inches → `11.6189500386cm`) needs `q` and the exact quarter-millimetre relation, which is what a second
+/// table cannot give.
 fn to_base(unit: &str) -> Option<f64> {
-    match unit {
-        "px" => Some(1.0),
-        "in" => Some(96.0),
-        "cm" => Some(37.7952755906),
-        "mm" => Some(3.7795275591),
-        "pc" => Some(16.0),
-        "pt" => Some(1.3333333333),
-        _ => None,
-    }
+    crate::unit::conversion(unit).map(|(_, factor)| factor)
 }
 
 /// `math.unit(1px)` → `"px"`, `math.unit(1)` → `""`, and the compound forms the corpus states
@@ -252,19 +252,55 @@ fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
         .map(|(number, unit)| Value::Number(number, unit))
 }
 
-/// The two magnitudes to compare, in a common scale: equal units (or either side unitless) compare as
-/// written, known convertible lengths are scaled to px, and known different dimensions are the corpus's
-/// `1px and 2s have incompatible units.` — anything else declines.
-fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError> {
-    if a.1 == b.1 || a.1.is_unitless() || b.1.is_unitless() {
-        return Ok((a.0, b.0));
+/// The two magnitudes to compare, in a common scale, or why they cannot be compared at all. One reading for
+/// every function that orders numbers, so the law cannot drift between `min`/`max`, `math.compatible`,
+/// `math.clamp` and `math.hypot`.
+enum Comparison {
+    /// Comparable as written, with both magnitudes in the scale the caller already has.
+    Ordered(f64, f64),
+    /// Exactly one side is unitless — `min`/`max` compare them anyway (`max.hrx::unit/mixed` gives `2px` for
+    /// `math.max(2px, 1)`), while `clamp`/`hypot` refuse: `… have incompatible units
+    /// (one has units and the other doesn't).` (`clamp.hrx::error/some_unitless/*`).
+    PartlyUnitless,
+    /// Two **known** different families: `1px and 2s have incompatible units.`
+    /// (`max.hrx::error/incompatible_units`).
+    Clash,
+    /// A family outside [`crate::unit::conversion`]: nothing evidences `1px` against `1c`, so the caller
+    /// declines instead of inventing a clash.
+    Unproven,
+}
+
+fn compare(a: &(f64, Unit), b: &(f64, Unit)) -> Comparison {
+    if a.1 == b.1 || (a.1.is_unitless() && b.1.is_unitless()) {
+        return Comparison::Ordered(a.0, b.0);
     }
-    match (
-        a.1.single().and_then(to_base),
-        b.1.single().and_then(to_base),
-    ) {
-        (Some(from_a), Some(from_b)) => Ok((a.0 * from_a, b.0 * from_b)),
-        _ if dimension(&a.1).is_some() && dimension(&b.1).is_some() => Err(SassError::typed(
+    if a.1.is_unitless() != b.1.is_unitless() {
+        return Comparison::PartlyUnitless;
+    }
+    match (dimension(&a.1), dimension(&b.1)) {
+        (Some(left), Some(right)) if left == right => match (
+            a.1.single().and_then(to_base),
+            b.1.single().and_then(to_base),
+        ) {
+            (Some(from_a), Some(from_b)) => Comparison::Ordered(a.0 * from_a, b.0 * from_b),
+            // A compound unit of one family (`1px*em / 1em`-shapes) has no single factor to scale by.
+            _ => Comparison::Unproven,
+        },
+        (Some(_), Some(_)) => Comparison::Clash,
+        _ => Comparison::Unproven,
+    }
+}
+
+/// The two magnitudes to compare, in a common scale: equal units (or either side unitless) compare as
+/// written, known convertible units of one family are scaled, and known different families are the corpus's
+/// `1px and 2s have incompatible units.` — anything else declines. `min`/`max` read this; `clamp`/`hypot`
+/// read [`compare_named`], which keeps both parameter names in the message.
+fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError> {
+    match compare(a, b) {
+        Comparison::Ordered(left, right) => Ok((left, right)),
+        // A unitless neighbour is comparable as written here, which is what `math.max(2px, 1)` → `2px` needs.
+        Comparison::PartlyUnitless => Ok((a.0, b.0)),
+        Comparison::Clash => Err(SassError::typed(
             ErrorKind::IncompatibleUnits,
             format!(
                 "{} and {} have incompatible units.",
@@ -272,23 +308,50 @@ fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError>
                 Value::Number(b.0, b.1.clone()).to_css()
             ),
         )),
-        // At least one unit is outside the proven table: decline rather than claim incompatibility.
-        _ => Err(SassError::new("unit comparison not modelled yet")),
+        Comparison::Unproven => Err(SassError::new("unit comparison not modelled yet")),
+    }
+}
+
+/// [`compare`] with both parameter names in the refusal, as `clamp.hrx::error/*` and `hypot.hrx::error/*`
+/// state them — the left one first (`$number: 1px and $min: 1deg have incompatible units.`,
+/// `$max: 2px and $min: 0 have incompatible units (one has units and the other doesn't).`).
+pub(super) fn compare_named(
+    left: (&str, &(f64, Unit)),
+    right: (&str, &(f64, Unit)),
+) -> Result<(f64, f64), SassError> {
+    let (left_name, (left_value, left_unit)) = left;
+    let (right_name, (right_value, right_unit)) = right;
+    let named = |clause: &str| {
+        SassError::typed(
+            ErrorKind::IncompatibleUnits,
+            format!(
+                "${left_name}: {} and ${right_name}: {} have incompatible units{clause}.",
+                Value::Number(*left_value, left_unit.clone()).to_css(),
+                Value::Number(*right_value, right_unit.clone()).to_css()
+            ),
+        )
+    };
+    match compare(
+        &(*left_value, left_unit.clone()),
+        &(*right_value, right_unit.clone()),
+    ) {
+        Comparison::Ordered(scaled_left, scaled_right) => Ok((scaled_left, scaled_right)),
+        Comparison::PartlyUnitless => Err(named(" (one has units and the other doesn't)")),
+        Comparison::Clash => Err(named("")),
+        Comparison::Unproven => Err(SassError::new("unit comparison not modelled yet")),
     }
 }
 
 /// The dimension signature of a unit: the group each name belongs to, on both sides of the fraction, in
-/// the order written — only for the groups the corpus evidences (the lengths that carry a px factor and
-/// time, from `max.hrx::error/incompatible_units`, plus `em` as its own group because
-/// `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false`). `ex`/`ch`/`rem`/`deg`…
-/// are deliberately absent: no fixture contrasts them, so a unit outside the table makes the whole
-/// signature unproven and every function that would judge it declines.
-fn dimension(unit: &Unit) -> Option<(Vec<&'static str>, Vec<&'static str>)> {
+/// the order written. Every group comes from the one shared table ([`crate::unit::conversion`]); `em` is
+/// named here because `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false` and
+/// `em` has no conversion factor to carry — no other relative unit has such a row, so none is added here.
+/// `px` vs `c`, `q`, `rem` etc. leave the signature unproven and every function that would judge one
+/// declines.
+pub(super) fn dimension(unit: &Unit) -> Option<(Vec<&'static str>, Vec<&'static str>)> {
     let group = |name: &str| match name {
-        "px" | "in" | "cm" | "mm" | "pc" | "pt" => Some("length"),
-        "s" | "ms" => Some("time"),
         "em" => Some("em"),
-        _ => None,
+        _ => crate::unit::conversion(name).map(|(family, _)| family),
     };
     let (numerator, denominator) = unit.names();
     Some((

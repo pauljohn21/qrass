@@ -55,6 +55,22 @@ pub const UNITS: &[(&str, (&str, f64))] = &[
     ("dppx", ("resolution", 96.0)),
 ];
 
+/// The table's entry for a unit — `(family, factor to the family base)` — or `None` when the unit is not in
+/// it. `em`/`rem`/`vh`/`ch`… are absent: each stands for its own context-relative family, so
+/// `math.compatible(1px, 2em)` is `false` (`core_functions/math/comparable.hrx::unit/to_different`) while
+/// `1em` vs `2em` compares as written. Comparison helpers ask this first so an unlisted unit declines instead
+/// of claiming a clash (`math.max.hrx` evidences `px` vs `s`; nothing evidences `px` vs `c`).
+///
+/// This is the only table of convertible units in the project, and `math.div`, `math.compatible`, the colour
+/// hues and `math.hypot` all read it through here — `math.rs` carried its own list of length literals until
+/// `hypot.hrx::units` needed `q` and the exact quarter-millimetre relation.
+pub fn conversion(unit: &str) -> Option<(&'static str, f64)> {
+    UNITS
+        .iter()
+        .find(|(name, _)| *name == unit)
+        .map(|(_, entry)| *entry)
+}
+
 /// `(family, factor to the family base)`; an unknown or relative unit is its own family, so it can only
 /// ever combine with an identical unit. The family borrows its name from whichever side supplied it — the
 /// table's `'static` name or the caller's own — so no lifetime is pinned here.

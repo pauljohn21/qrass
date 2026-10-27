@@ -145,15 +145,20 @@ async fn variadic_extremes_compare_units_and_keep_the_original() {
     }
 }
 
-/// Two more guards on the same code path, both about **not guessing**:
-/// a unit outside the proven factor table is not evidence of a clash (`max.hrx` only contrasts `px` with
-/// `s`), and a variadic call with a `$label:` has no parameter to bind to, so it keeps its text.
+/// Two more guards on the same code path, both about **not guessing**: a unit outside the shared conversion
+/// table is not evidence of a clash (`max.hrx` only contrasts `px` with `s`), and a variadic call with a
+/// `$label:` has no parameter to bind to, so it keeps its text.
+///
+/// The unlisted example used to be `2q`; `hypot.hrx::units` put `q` in the table (it converts against `cm`
+/// and `in` there), so it now compares as the absolute length it is — and `rem`/`ch` stand in for what the
+/// corpus has not evidenced, since no fixture converts either.
 #[tokio::test]
 async fn unknown_units_and_labels_on_a_variadic_decline() {
     assert_eq!(
-        css("a {b: math.max(1px, 2q)}").await,
-        "a {\n  b: math.max(1px, 2q);\n}\n"
+        css("a {b: math.max(1px, 2rem)}").await,
+        "a {\n  b: math.max(1px, 2rem);\n}\n"
     );
+    assert_eq!(css("a {b: math.max(1px, 2q)}").await, "a {\n  b: 2q;\n}\n");
     assert_eq!(
         css("a {b: math.max($number1: 1, 2)}").await,
         "a {\n  b: math.max($number1: 1, 2);\n}\n"
@@ -162,7 +167,9 @@ async fn unknown_units_and_labels_on_a_variadic_decline() {
 
 /// The boolean-returning family, which needed `Value::Bool` (and the corpus’s own spelling of a name:
 /// the file is `unitless.hrx`, the function is `math.is-unitless`). `math.compatible` answers only for
-/// units whose dimension is evidenced — an unknown pair declines to verbatim rather than guessing `false`.
+/// units whose dimension is evidenced — `px` against `em` is `false` (`comparable.hrx::unit/to_different`),
+/// `px` against `q` is `true` now that `hypot.hrx::units` converts `q`, and a unit no fixture converts
+/// (`ch`) declines to verbatim rather than guessing.
 #[tokio::test]
 async fn booleans_and_unit_strings() {
     assert_eq!(
@@ -181,7 +188,11 @@ async fn booleans_and_unit_strings() {
     );
     assert_eq!(
         css("a {b: math.compatible(1px, 2q)}").await,
-        "a {\n  b: math.compatible(1px, 2q);\n}\n"
+        "a {\n  b: true;\n}\n"
+    );
+    assert_eq!(
+        css("a {b: math.compatible(1px, 2ch)}").await,
+        "a {\n  b: math.compatible(1px, 2ch);\n}\n"
     );
 }
 
