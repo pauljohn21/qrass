@@ -121,6 +121,62 @@ fn is_none(value: &Value) -> bool {
     matches!(value, Value::Raw(text) if text == "none")
 }
 
+/// The channel names each space answers: its name, the names that **decide** it, and the names it owns.
+///
+/// `rgb` owns only its three bytes: `color.change(red, $red: 1, $hue: 1)` is refused as
+/// `$hue: Color space rgb doesn't have a channel with this name.` (`change/error/mixed_formats.hrx::red_and_hue`),
+/// so the hue is **not** a channel of the byte space even though `change/hsl.hrx::all` writes it among the
+/// axes — a name belongs to a space, not to the call.
+///
+/// The hue decides nothing, because `hsl` and `hwb` both own it (`change/hsl.hrx::hue/*` writes it as hsl,
+/// `change/hwb.hrx::all` writes it alongside whiteness and blackness). Letting a shared name pick the space
+/// was my first attempt here, and it refused `color.change(#993333, $hue: …, $whiteness: …)` as
+/// `$whiteness: Color space hsl doesn't have a channel with this name.` — five passing rows turned into
+/// unexpected errors.
+const SPACE_CHANNELS: [(&str, &[&str], &[&str]); 3] = [
+    ("rgb", &["red", "green", "blue"], &["red", "green", "blue"]),
+    (
+        "hsl",
+        &["saturation", "lightness"],
+        &["hue", "saturation", "lightness"],
+    ),
+    (
+        "hwb",
+        &["whiteness", "blackness"],
+        &["hue", "whiteness", "blackness"],
+    ),
+];
+
+/// The corpus's refusal when one call names channels of **two spaces**: the group that decides says which
+/// space the call is writing, and the first name from another space is refused by name
+/// (`{change,adjust,scale}/error/mixed_formats.hrx` — 21 rows, each naming one pair).
+///
+/// Not covered by this rule, and left declining: a name no space owns at all
+/// (`color.adjust(red, $chroma: 50%)` — `…/incompatible_channel.hrx::legacy_space`) and a name foreign to a
+/// **modern** colour (`color.adjust(color(srgb 0.2 0.5 0.7), $whiteness: 50%)` →
+/// `Color space srgb doesn't have a channel with this name.`, `…::legacy_channel`), because that colour
+/// cannot be read here at all — reporting its space would mean claiming one.
+///
+/// `$alpha:` never appears here: it is not a channel, and every family writes it alongside any space
+/// (`scale/no_space.hrx::alpha/*`). Which of two foreign names is reported first follows the signature order,
+/// because no row names three groups at once.
+pub(super) fn mixed_channel(named: &[&str]) -> Option<SassError> {
+    let (space, _, own) = SPACE_CHANNELS
+        .into_iter()
+        .find(|(_, decides, _)| named.iter().any(|name| decides.contains(name)))?;
+    let foreign = named
+        .iter()
+        .find(|name| !own.contains(name))
+        .copied()
+        .unwrap_or_default();
+    (!foreign.is_empty()).then(|| {
+        SassError::typed(
+            ErrorKind::Channel,
+            format!("${foreign}: Color space {space} doesn't have a channel with this name."),
+        )
+    })
+}
+
 /// `${parameter}: Expected ${value} to have unit "%".`, with the value rendered in CSS form so `1` and `1px`
 /// read as the corpus writes them (`scale/error/units/rgb.hrx`, `…/hsl.hrx`, `…/hwb.hrx`).
 fn expected_percent(name: &str, value: &Value) -> SassError {

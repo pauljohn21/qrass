@@ -277,6 +277,22 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
             "$hue: Channel isn't scalable.",
         ));
     }
+    // The channel names the call wrote, in signature order — which is the order the refusal below reports in.
+    let channels = bytes
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(hue.then_some("hue"))
+        .chain(hsl.iter().copied())
+        .chain(hwb.iter().copied())
+        .collect::<Vec<&str>>();
+    // Two spaces in one call is refused **by name**, not kept as text: the first group says which space the
+    // call is writing and the first foreign name is reported against it —
+    // `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with this
+    // name.`, `color.scale(red, $saturation: 1%, $blackness: 1%)` → `Error: $blackness: Color space hsl …`
+    // (`{change,adjust,scale}/error/mixed_formats.hrx`).
+    if let Some(foreign) = amount::mixed_channel(&channels) {
+        return Err(foreign);
+    }
     // `$alpha:` is read **before** the "nothing else named" refusal below, because the corpus reports a bad
     // alpha even for a call that names nothing else: `color.change(red, $alpha: c)` →
     // `Error: $alpha: c is not a number or unquoted "none".` (`change/error/type.hrx::alpha`, and
@@ -297,14 +313,10 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
     }
     // Which space the call is writing: bytes, the hsl axes, or the hwb ones. `$hue:` belongs to both axis
     // spaces (`change/hsl.hrx::hue/*` writes it as hsl, `change/hwb.hrx::all` alongside whiteness and
-    // blackness), so it never decides on its own — but naming hsl *and* hwb axes together, or bytes together
-    // with axes, would need an order no fixture states, and those decline.
+    // blackness), so it never decides on its own — and a call that names two spaces at once has already been
+    // refused by name above, so at most one group is set here.
     let named = bytes.len() + hsl.len() + hwb.len() + usize::from(hue);
-    if beyond
-        || (named == 0 && writing == Writing::Set)
-        || (!hsl.is_empty() && !hwb.is_empty())
-        || (!bytes.is_empty() && named > bytes.len())
-    {
+    if beyond || (named == 0 && writing == Writing::Set) {
         return decline;
     }
     // A named channel that cannot be read stops the call — with the corpus's message when the argument is

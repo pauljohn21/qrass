@@ -14,6 +14,12 @@
 
 use sasspile::compile;
 
+async fn css(input: &str) -> String {
+    compile(input)
+        .await
+        .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
+}
+
 /// The message a call is expected to fail with — the harness compares the same first line of the corpus's
 /// `error` section (`tests/hrx.rs::oracle_header`). A call that **compiles** is the failure here.
 async fn failure(input: &str) -> String {
@@ -203,6 +209,83 @@ async fn a_missing_argument_is_named_by_the_function_that_lacks_it() {
         "Missing argument $amount.",
         "saturate's colour is optional, its amount is not"
     );
+}
+
+/// A call naming channels of **two spaces** is refused by name, reported against the space the deciding
+/// group belongs to: `color.scale(red, $red: 1%, $saturation: 1%)` →
+/// `Error: $saturation: Color space rgb doesn't have a channel with this name.`, and
+/// `color.change(red, $saturation: 1%, $blackness: 1%)` → `Error: $blackness: Color space hsl …`
+/// (`{change,adjust,scale}/error/mixed_formats.hrx`; all three families have the same seven rows).
+#[tokio::test]
+async fn naming_channels_of_two_spaces_is_refused_by_name() {
+    for (input, want) in [
+        (
+            "a {b: color.scale(red, $red: 1%, $saturation: 1%)}",
+            "$saturation: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $green: 1%, $saturation: 1%)}",
+            "$saturation: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $blue: 1%, $lightness: 1%)}",
+            "$lightness: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $red: 1%, $blackness: 1%)}",
+            "$blackness: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $green: 1%, $whiteness: 1%)}",
+            "$whiteness: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $saturation: 1%, $blackness: 1%)}",
+            "$blackness: Color space hsl doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.scale(red, $lightness: 1%, $whiteness: 1%)}",
+            "$whiteness: Color space hsl doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.change(red, $red: 1, $hue: 1)}",
+            "$hue: Color space rgb doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.change(red, $saturation: 1%, $blackness: 1%)}",
+            "$blackness: Color space hsl doesn't have a channel with this name.",
+        ),
+        (
+            "a {b: color.adjust(red, $green: 1, $saturation: 1%)}",
+            "$saturation: Color space rgb doesn't have a channel with this name.",
+        ),
+    ] {
+        assert_eq!(failure(input).await, want, "for input {input}");
+    }
+}
+
+/// The hue is owned by **both** axis spaces, so it decides nothing: naming it alongside whiteness and
+/// blackness is an ordinary hwb write, not a refusal — `color.change(blue, $hue: 150, $whiteness: 20%,
+/// $blackness: 40%)` → `#339966` and the same call with the colour labelled (`change/hwb.hrx::{all,named}`,
+/// both among the rows this law must not break).
+#[tokio::test]
+async fn the_hue_belongs_to_both_axis_spaces_and_decides_neither() {
+    for (input, want) in [
+        (
+            "a {b: color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)}",
+            "#339966",
+        ),
+        (
+            "a {b: color.change($color: blue, $hue: 150, $whiteness: 20%, $blackness: 40%)}",
+            "#339966",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
 }
 
 /// `$space:` must be a string: `color.scale(red, $space: 1)` → `Error: $space: 1 is not a string.`
