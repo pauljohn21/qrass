@@ -82,20 +82,23 @@ async fn a_ratio_in_a_degree_out() {
 
 /// A carried negative zero keeps its sign through a transcendental: `math.sin(-0.0)` → `-0`,
 /// `math.tan(-0.0)` → `-0`, `math.atan(-0.0)` → `-0deg`, `math.asin(-0.0)` → `-0deg`
-/// (each file's `negative_zero` row).
-///
-/// Not asserted here, because the law it needs is not this step's: `math.sin(-0.000000000001)` → `0` and
-/// `math.tan(-0.000000000001)` → `0` (`{sin,tan}.hrx::negative_zero_fuzzy`) ask a number **very near an
-/// integer** to print as that integer, which is the precision family (`values/numbers/precision/**`), while
-/// `math.atan(-0.000000000001)` → `-0.0000000001deg` (`atan.hrx::negative_zero`) shows the same argument is
-/// not a zero at all once converted to degrees. Both rows stay red until that law lands.
+/// (each file's `negative_zero` row). A value that only *cuts* to zero loses it: `math.sin(-0.000000000001)`
+/// → `0` and `math.tan(-0.000000000001)` → `0` (`{sin,tan}.hrx::negative_zero_fuzzy`), because the tenth
+/// decimal place is where Sass cuts (`values/numbers/precision.hrx::very_small/*` states the boundary for
+/// arithmetic: `math.pow(10, -10)` → `0.0000000001` but `2 * math.pow(10, -11)` → `0`).
+/// `math.atan(-0.000000000001)` → `-0.0000000001deg` sits between the two — the degrees it converts to
+/// (`-5.7e-11`) still has a digit at the tenth place (`atan.hrx::negative_zero_fuzzy`).
 #[tokio::test]
-async fn a_carried_negative_zero_keeps_its_sign() {
+async fn a_carried_negative_zero_keeps_its_sign_a_cut_one_does_not() {
     for (input, want) in [
         ("a {b: math.sin(-0.0)}", "-0"),
         ("a {b: math.tan(-0.0)}", "-0"),
         ("a {b: math.atan(-0.0)}", "-0deg"),
         ("a {b: math.asin(-0.0)}", "-0deg"),
+        ("a {b: math.sin(-0.000000000001)}", "0"),
+        ("a {b: math.sin(0.000000000001)}", "0"),
+        ("a {b: math.tan(-0.000000000001)}", "0"),
+        ("a {b: math.tan(0.000000000001)}", "0"),
         ("a {b: math.atan(-0.000000000001)}", "-0.0000000001deg"),
         ("a {b: math.asin(0.000000000001)}", "0.0000000001deg"),
     ] {
@@ -118,7 +121,7 @@ async fn a_carried_negative_zero_keeps_its_sign() {
 /// -10mm)` → `135deg` needs the length factors to be exact rather than the corpus's ten-decimal readings
 /// (ours lands on `135.0000000003`), and `atan2(1px, 1deg)` → `$x: 1deg and $y: 1px have incompatible units.`
 /// needs `deg` in the dimension table at all (`crate::builtins::math::dimension`), which `comparable.hrx`
-/// never demanded. Both stay red.
+/// never demanded. Both stay red, and the printing cut that `sin`/`tan` needed is pinned above.
 #[tokio::test]
 async fn atan2_needs_one_dimension_and_keeps_ieee_signs() {
     for (input, want) in [

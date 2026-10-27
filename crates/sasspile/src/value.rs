@@ -230,9 +230,16 @@ impl Value {
     }
 }
 
-/// Sass number output: integers lose the fraction, everything else prints at the shortest
-/// round-trip precision (so `1in + 1px` is `97px`, and a parsed `f64::MAX` literal keeps
-/// the 17 digits that actually identify it).
+/// Sass number output: a number whose written form needs **ten or fewer digits after the point** prints as
+/// it stands, and anything longer is cut at the tenth decimal (`1in + 1px` is `97px`, `2 * 3 / 5 * 7 / 11`
+/// is `0.7636363636`, and a parsed `f64::MAX` literal keeps the 309 digits that identify it — a whole number
+/// has no decimals to cut). `values/numbers/precision.hrx` is what fixes the boundary on both sides:
+/// `math.pow(10, -10)` → `0.0000000001` while `2 * math.pow(10, -11)` → `0`, and `10 + math.pow(10, -10)` →
+/// `10.0000000001` while `10 + 2 * math.pow(10, -11)` → `10`.
+///
+/// There is no "already short in significant digits" exemption: an earlier version had one, and it printed
+/// `math.sin(-0.000000000001)` as `-0.000000000001` where `core_functions/math/sin.hrx::negative_zero_fuzzy`
+/// wants `0` — a magnitude below the tenth decimal place is cut to zero whatever its digit count.
 pub(crate) fn format_number(value: f64) -> String {
     if value.is_infinite() {
         // Sass spells the infinities `infinity` / `-infinity`; Rust's `Display` gives `inf`, which CSS
@@ -259,20 +266,8 @@ pub(crate) fn format_number(value: f64) -> String {
         return format!("{}", value as i64);
     }
     let natural = format!("{value}");
-    // A number whose significant digits already fit in ten is printed as it stands: that is what keeps
-    // `0.000000000000001` (one significant digit) and a `f64::MAX` literal intact.
-    let significant = natural
-        .trim_start_matches(['-', '+'])
-        .replace('.', "")
-        .trim_start_matches('0')
-        .chars()
-        .filter(|c| c.is_ascii_digit())
-        .count();
-    if significant <= 10 {
-        return natural;
-    }
-    // Past that, the cut is **ten digits after the decimal point**, not ten significant ones. A colour's
-    // percentage conversion shows the difference: `rgb(74.7%, 173, 93%)` prints
+    // Past ten decimal places, the cut is **ten digits after the decimal point**, not ten significant ones. A
+    // colour's percentage conversion shows the difference: `rgb(74.7%, 173, 93%)` prints
     // `rgb(74.7%, 67.8431372549%, 93%)` — twelve significant digits, because `173 × 100 / 255` has fourteen
     // decimals and ten of them survive (`core_functions/color/rgb/three_args/percents::unitless/green`).
     // It agrees with the arithmetic rows already pinned here: `2 * 3 / 5 * 7 / 11` → `0.7636363636` and
