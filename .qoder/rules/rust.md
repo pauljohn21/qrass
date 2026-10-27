@@ -23,15 +23,18 @@ alwaysApply: true
    词法已把 `*` 提成 `Op`，`/` 只在调用参数内由 `expr::release_slashes` 变算子；复合单位不得离开 `calc( )`）与
    **1.4d 后半：calc 内容平展归约**（`src/brackets.rs` 一次 fold 出 `level`/`owner` 的文档序 run、调用折成
    一个词素；`src/calc.rs` 按层自底向上归约成摘要项 `Term{value,printed,precedence}`，**无树、无递归、
-   无状态旗标**，看不懂就走 `Reading::Declined`；括号只在 join 时由优先级定一次）。
+   无状态旗标**，看不懂就走 `Reading::Declined`；括号只在 join 时由优先级定一次）、**1.4d 收尾：调用作
+   为算术操作数**（`operations::split` 在顶层算子处切 run（括号内不切），`expr::operand_expr` 读操作数，
+   优先级改为 `tree/products/chain` 两趟 fold——`build()` 递归与 `Piece::Other` 已删；`math.div` 产出有理
+   单位，`math.compatible` 比维度签名；复合单位不得裸打印由 `Value::is_plain` 在 `exec::evaluated` 出口把关）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **823/11,533**（7.14%，**实质通过 658** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `calc-flat`）；
+   **以上均不得重做/重新发明**。当前基线 hrx **827/11,533**（7.17%，**实质通过 662** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `operands-823`）；
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一步主战场：**调用/已绑定计算作为外部算术的操作数**（`math.div(6, 3px) * 1px`、
-   `calc/operator/units/{denominators,multiplication}`、`multiple::division/cancels/*` 全卡在这一刀：
-   `operations::classify` 把非数字词素一律记 `Other` 而整串放弃）→ 1.5 色彩 → 1.7 其余分派（含惰性 `if()`，
-   已被实测否定为快收益）；以及 P7 诊断消息——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
+   下一刀（已定具体形状）：**已绑定的计算拆回项参与运算** —— 把 `Value::Calculation(name, text)` 的第二
+   字段换成 `calc` 的摘要项，余下 9 条候选（`calc/operator/units/{denominators,multiplication}` +
+   `multiple::division/cancels/*`）全在这一刀上 → 1.5 色彩 → 1.7 其余分派（含惰性 `if()`，已被实测否定为
+   快收益）；以及 P7 诊断消息——语料里大量 `error` 用例缺的是**消息**，不是错误管道。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 

@@ -332,13 +332,23 @@
       （`multiple::division/by/{multiple_denominators,multiple_numerators}`）；无效错误仍 **53**。
       中途曾出现两条真错，均由 A/B 揭出而非推定：一是 `var(` 被当组导致 `function/sass/namespace` 归退，
       二是 `format_number` 的 `exponent.max(0.0)` 使 `(0,1)` 少一位（`0.763636364` vs 金样 `0.7636363636`）。
-      **仍剩（不属 1.4d 字面范围，但候选集点了名）**：`math/div::unit/{denominator,incompatible,unknown}` 与
-      `math/comparable::unit/to_inverse`、`calc/operator/units/{denominators,multiplication}`、
-      `multiple::division/cancels/*` —— 它们缺的是**调用/已绑定计算作为外部算术的操作数**
-      （`math.div(6, 3px) * 1px`、`calc($number / (1 / 1ms))`）：声明值解析在 `operations::classify` 里把非数字
-      词素一律记 `Other` 而整串放弃。下一刀是把它换成 `Piece::Operand(Expr)`（并让 `Value::Calculation` 携带
-      可参与运算的值），而 `calc/cancels` 一族还要求绑定计算能拆回项（得把文本换成树）。
-      `calc.rs` 400 行、`brackets.rs` 207 行、`calculation.rs` 446 行（均在 500 红线内）。
+      **候选集里点名的四条已翻绿**（hrx **823 → 827，实质 658 → 662**，`ledger diff calc-flat operands-823`
+      = `regress=0 net=4`，无效错误仍 53）：`math/div::unit/{denominator,incompatible,unknown}` 与
+      `math/comparable::unit/to_inverse`。靠两个改动：
+      ① `math.div` 不再对“不可换算”直接 decline，而是走 `Unit::over` 产出**有理单位**（`6/3px` → `2/px`）；
+         `math.compatible` 改为比较**维度签名**（分子/分母各自的维度多重集），所以 `1px` vs `1/1px` 能答 `false`；
+      ② `operations::split` 把 run 在**顶层算子**处切开（深度作为 fold 携带的数据，括号内的算子不分割），
+         操作数由 `expr::operand_expr` 读（数字 / 已注册调用 / 计算），因此 `math.div(6, 3px) * 1px` 是运算；
+         优先级改为**两趟 fold**（`tree`/`products`/`chain`），`build()` 的递归与 `classify`/`Piece::Other` 均删除。
+      **复合单位不得裸打印的律上移到出口**：`Value::is_plain` + `exec::evaluated` 的
+      `Ok(value) if !value.is_plain() => Ok(None)` —— `math.div(6in, 3s)` 单独作声明值仍逐字保留（金样从不单独
+      出现：`math.div(6in, 3s)` 只以 `* 1s` 形式存在于 `div.hrx::unit/incompatible`；写下拒绝消息的
+      `issue_783.hrx` 是注释行且不入基线，所以不造错误消息，那属 P7）。`calculation::collapsible` 已改调该律。
+      **仍剩（已实测条数）**：`calc/operator/units/{denominators,multiplication}` 2 条与
+      `values/numbers/units/multiple::division/cancels/*` 7 条 —— 它们需要**已绑定的计算能拆回项参与运算**
+      （`calc($number / (1 / 1ms))` → `calc(1px * 1rad / 1Hz)`），而 `Value::Calculation` 目前存的是**文本**；
+      下一刀得把它的第二个字段换成 `calc::Pieces`/摘要项（并重新处理“出壳”判据）。
+      `operations.rs` 287 行、`expr.rs` 366 行、`calc.rs` 400 行、`brackets.rs` 207 行、`calculation.rs` 442 行。
       词法输出律（全来自 `core_functions/math/unit.hrx`，不推定）：
       • `math.unit(1px)` → `"px"`；`math.unit(1)` → `""`；
       • `1px * 1em * 1rad` → `"px*em*rad"`（分子用 `*` 连接）；

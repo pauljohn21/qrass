@@ -404,11 +404,7 @@ fn without_leading_sign(content: &[Tok]) -> Vec<Tok> {
 /// already-green cases of this cluster green (`calc(foobar)`, `calc(c())`, `calc(var(--c))`,
 /// `calc(#{1px + 2px})`, `calc((#{1px + 2px}))`).
 fn collapsible(value: &Value) -> bool {
-    match value {
-        Value::Bool(..) => true,
-        Value::Number(_, unit) => unit.is_plain(),
-        _ => false,
-    }
+    matches!(value, Value::Bool(..) | Value::Number(..)) && value.is_plain()
 }
 
 /// The readable parts of an argument list, joined the way the corpus separates them (`, `).

@@ -56,6 +56,14 @@ impl Value {
         }
     }
 
+    /// Whether this value can be printed **outside** a calculation. Only a number with a compound unit
+    /// fails (`Unit::is_plain`) — the law this project read off
+    /// `values/numbers/units/multiple::multiple_denominators` — so such a result never becomes a
+    /// declaration value; see [`crate::exec::State::evaluated`].
+    pub fn is_plain(&self) -> bool {
+        !matches!(self, Value::Number(_, unit) if !unit.is_plain())
+    }
+
     /// `a + b` in Sass: convert `b` into `a`'s unit, adopting a unitless side's counterpart.
     pub fn plus(&self, rhs: &Value) -> Result<Value, SassError> {
         self.combine(rhs, |left, right| left + right)

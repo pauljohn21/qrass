@@ -164,7 +164,34 @@ pub fn from_tokens(toks: &[Tok], env: &Env) -> Option<Expr> {
     if has_dynamic(toks) {
         interpolation(toks, env)
     } else {
-        arithmetic(toks).or_else(|| concatenation(toks))
+        arithmetic(toks, env).or_else(|| concatenation(toks))
+    }
+}
+
+/// One **operand** of an operation: a registered call, a calculation, or a number lexeme.
+///
+/// This is deliberately narrower than [`from_tokens`]: the operands of a split run are read here once, so
+/// no run ever re-enters its own split, and a variable or interpolation operand is not this path's business
+/// (`from_tokens` sends those to the interpolation branch before arithmetic runs). Widening it to calls and
+/// calculations is what makes `math.div(6, 3px) * 1px` an operation at all
+/// (`core_functions/math/div.hrx::unit/denominator` → `2`), where before the call lexeme marked the run
+/// unreadable and the whole declaration stayed verbatim text.
+pub(crate) fn operand_expr(toks: &[Tok], env: &Env) -> Option<Expr> {
+    if let Some((name, args)) = crate::calls::known_call(toks) {
+        return Some(Expr::Call { name, args });
+    }
+    if let Some(value) = crate::calculation::value(toks, env) {
+        return Some(Expr::Calculation(value));
+    }
+    let meaningful = toks
+        .iter()
+        .filter(|tok| !matches!(tok, Tok::Space(_)))
+        .collect::<Vec<&Tok>>();
+    match meaningful.as_slice() {
+        [Tok::Word(word)] => {
+            number_lexeme(word).map(|(value, unit)| Expr::Num(value, Unit::named(unit)))
+        }
+        _ => None,
     }
 }
 

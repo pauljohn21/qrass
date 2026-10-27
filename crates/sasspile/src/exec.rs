@@ -316,6 +316,13 @@ impl State {
             return Ok(None);
         }
         match expr.eval(&self.env) {
+            // A number carrying a **compound unit** is calculation-only (`Unit::is_plain`), so the run keeps
+            // its text instead of printing `2in/s` bare. The corpus never shows one alone: `math.div(6in, 3s)`
+            // occurs only as `math.div(6in, 3s) * 1s` → `2in` (`core_functions/math/div.hrx::unit/incompatible`),
+            // where the product cancels the unit; the one file that spells out the rejection
+            // (`libsass-closed-issues/issue_783.hrx`) is commented out and excluded from the baseline, so no
+            // error message is invented for it here — that belongs to P7.
+            Ok(value) if !value.is_plain() => Ok(None),
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_fatal() && !(plain || expr::special_call(toks)) => Err(err),
             Err(_) => Ok(None),

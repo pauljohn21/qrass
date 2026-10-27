@@ -119,6 +119,12 @@ impl Unit {
         }
     }
 
+    /// Both sides as written, for a function that must judge the whole fraction rather than one name
+    /// (`builtins::dimension` compares two units by their **dimension signature**).
+    pub fn names(&self) -> (&[String], &[String]) {
+        (&self.numerator, &self.denominator)
+    }
+
     /// A unit as its two sides, already cancelled. The cancellation is a multiset intersection: each name
     /// that appears on both sides disappears once from each, and the survivors keep their order.
     pub fn from_parts(numerator: Names, denominator: Names) -> Self {

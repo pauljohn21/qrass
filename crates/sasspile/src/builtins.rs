@@ -28,9 +28,12 @@ pub struct Builtin {
 }
 
 /// `math.div(6, 3)` → `2`: numbers only, with the unit law the goldens state — same unit cancels
-/// (`6px / 3px` → `2`), a unitless divisor keeps the numerator's unit (`6px / 3` → `2px`), and convertible
+/// (`6px / 3px` → `2`), a unitless divisor keeps the numerator's unit (`6px / 3` → `2px`), convertible
 /// units convert first (`6in / 3px` → `192`, which also fixes `1in = 96px` as the only factor the corpus
-/// evidences). Anything else declines to a verbatim fallback.
+/// evidences), and anything else becomes a **rational unit** rather than a refusal:
+/// `math.div(6, 3px)` is `2/px`, which `* 1px` cancels back to `2` (`div.hrx::unit/denominator`),
+/// `math.div(6in, 3s)` is `2in/s` (`…::unit/incompatible`) and `math.div(6c, 3d)` is `2c/d` — unknown
+/// units combine without being converted (`…::unit/unknown`).
 static MATH_DIV: Builtin = Builtin {
     name: "math.div",
     params: &["number1", "number2"],
@@ -50,7 +53,8 @@ static MATH_DIV: Builtin = Builtin {
                     Unit::unitless(),
                 ))
             } else {
-                Err(SassError::new("units are not convertible"))
+                Value::Number(*from, from_unit.clone())
+                    .divided_by(&Value::Number(*by, by_unit.clone()))
             }
         }
         _ => Err(SassError::new("not a number")),
@@ -147,6 +151,10 @@ static MATH_COMPATIBLE: Builtin = Builtin {
         if first_unit == second_unit || first_unit.is_unitless() || second_unit.is_unitless() {
             return Ok(Value::Bool(true));
         }
+        // Comparison is on the **dimension signature** — the multiset of dimensions on each side of the
+        // fraction — so an inverse unit answers rather than declining: `math.compatible(1px, 1/1px)` is
+        // `false` (`comparable.hrx::unit/to_inverse`), while `1px` vs `2em` stays `false`
+        // (`…::unit/to_different`) and any unit outside the proven table still declines.
         match (dimension(&first_unit), dimension(&second_unit)) {
             (Some(left), Some(right)) => Ok(Value::Bool(left == right)),
             _ => Err(SassError::new("unit dimension not proven")),
@@ -238,18 +246,30 @@ fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError>
     }
 }
 
-/// The physical dimension of a unit, only for the groups the corpus evidences: the lengths that carry a
-/// px factor and time (`max.hrx::error/incompatible_units` contrasts `1px` with `2s`), plus `em` as its own
-/// dimension because `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false`.
-/// `ex`/`ch`/`rem`/`deg`… are deliberately absent: no fixture contrasts them, so they stay unproven and
-/// every function that would need to judge them declines.
-fn dimension(unit: &Unit) -> Option<&'static str> {
-    match unit.single() {
-        Some("px" | "in" | "cm" | "mm" | "pc" | "pt") => Some("length"),
-        Some("s" | "ms") => Some("time"),
-        Some("em") => Some("em"),
+/// The dimension signature of a unit: the group each name belongs to, on both sides of the fraction, in
+/// the order written — only for the groups the corpus evidences (the lengths that carry a px factor and
+/// time, from `max.hrx::error/incompatible_units`, plus `em` as its own group because
+/// `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false`). `ex`/`ch`/`rem`/`deg`…
+/// are deliberately absent: no fixture contrasts them, so a unit outside the table makes the whole
+/// signature unproven and every function that would judge it declines.
+fn dimension(unit: &Unit) -> Option<(Vec<&'static str>, Vec<&'static str>)> {
+    let group = |name: &str| match name {
+        "px" | "in" | "cm" | "mm" | "pc" | "pt" => Some("length"),
+        "s" | "ms" => Some("time"),
+        "em" => Some("em"),
         _ => None,
-    }
+    };
+    let (numerator, denominator) = unit.names();
+    Some((
+        numerator
+            .iter()
+            .map(|name| group(name))
+            .collect::<Option<Vec<&'static str>>>()?,
+        denominator
+            .iter()
+            .map(|name| group(name))
+            .collect::<Option<Vec<&'static str>>>()?,
+    ))
 }
 
 /// The rounding family shares one parameter name and one type contract, both stated by the corpus:

@@ -1,51 +1,84 @@
-//! The lexeme-level readers that turn a token run into an **operation tree**: number lexemes, the
-//! spacing law for `+`/`-`, string concatenation of identifiers, and the precedence-aware fold. They are
-//! the half of `expr` that is about *source shape* rather than about values, which is why they live here
-//! and why `expr` keeps only the reading order and `eval`.
+//! The lexeme-level readers that turn a token run into an **operation tree**: the top-level split at
+//! operators, number lexemes, string concatenation of identifiers, and the two-pass precedence fold. They
+//! are the half of `expr` that is about *source shape* rather than about values, which is why they live
+//! here and why `expr` keeps only the reading order and `eval`.
 //!
-//! Two rules the fixtures pinned, restated where they are enforced:
-//! * a lexeme that is not a number must mark `Other` so the whole run bails — dropping it silently would
-//!   shift the alternation and turn `rgb(18 52 none)` into the number `52`;
+//! Four rules the fixtures pinned, restated where they are enforced:
+//! * an operand that cannot be read makes the **whole run decline** rather than being skipped — dropping it
+//!   silently would shift the alternation and turn `rgb(18 52 none)` into the number `52`;
 //! * `+`/`-` are operators only with whitespace on both sides (`10px - 5px` subtracts, `10px -5px` is a
 //!   two-item list), while `*` needs no such law and `/` is an operator only where a caller released it
-//!   (`expr::release_slashes`, i.e. inside a call argument).
+//!   (`expr::release_slashes`, i.e. inside a call argument);
+//! * brackets nest the run: the depth is a number carried by the fold, and an operator inside brackets
+//!   never splits what encloses it — which is what lets a call or a calculation stand as one operand
+//!   (`core_functions/math/div.hrx::unit/denominator`: `math.div(6, 3px) * 1px` → `2`);
+//! * precedence is resolved by **two folds over the flat span list** (tight operators inside each loose
+//!   piece, then the pieces), so no recursive descent over the run is needed anywhere.
 
-use crate::expr::{BinOp, Expr};
+use crate::env::Env;
+use crate::expr::{self, BinOp, Expr};
 use crate::lexer::Tok;
-use crate::unit::Unit;
 
-/// One classified lexeme of the arithmetic path.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Piece<'a> {
-    Num(f64, &'a str),
-    Op(BinOp),
-    Other,
+/// The operand spans of a split run: index ranges into the lexemes the caller already holds.
+pub(crate) type Spans = Vec<(usize, usize)>;
+
+/// A run cut at its top-level operators: the operand spans, and the operator between each pair.
+/// `None` means "not an operation we read" — no top-level operator at all, so a lone number or a CSS call
+/// is left to the other readers.
+pub(crate) fn split(toks: &[Tok]) -> Option<(Spans, Vec<BinOp>)> {
+    let (cuts, _) =
+        toks.iter()
+            .enumerate()
+            .fold((Vec::<(usize, BinOp)>::new(), 0i32), |acc, (index, tok)| {
+                let (mut cuts, depth) = acc;
+                let net = net_depth(tok);
+                if depth == 0
+                    && net == 0
+                    && let Some(op) = operator(toks, index)
+                {
+                    cuts.push((index, op));
+                }
+                (cuts, depth + net)
+            });
+    let operators = cuts.iter().map(|(_, op)| *op).collect::<Vec<BinOp>>();
+    let spans = cuts
+        .iter()
+        .map(|(index, _)| *index)
+        .chain(std::iter::once(toks.len()))
+        .scan(0usize, |from, end| {
+            let span = (*from, end);
+            *from = end + 1;
+            Some(span)
+        })
+        .collect::<Spans>();
+    (!operators.is_empty()).then_some((spans, operators))
 }
 
-/// Classify one token, given its position in the run. Only whitespace is dropped; a lexeme
-/// that is not a number must mark `Other` so the whole run bails — silently dropping it would
-/// shift the alternation and turn `rgb(18 52 none)` into the number `52`.
-/// `+`/`-` is an operator **only** when whitespace sits on both sides.
-fn classify<'a>(tok: &'a Tok, index: usize, run: &[Tok]) -> Option<Piece<'a>> {
-    let spaced = |side: Option<usize>| matches!(side.and_then(|i| run.get(i)), Some(Tok::Space(_)));
+/// One lexeme's contribution to the bracket depth: a standalone bracket, or one glued inside a word
+/// (`Word("math.div(6")` opens, `Word("3px)")` closes).
+fn net_depth(tok: &Tok) -> i32 {
     match tok {
-        Tok::Space(_) => None,
-        Tok::Word(w) => {
-            Some(number_lexeme(w).map_or(Piece::Other, |(value, unit)| Piece::Num(value, unit)))
-        }
-        Tok::Op('+') if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => {
-            Some(Piece::Op(BinOp::Add))
-        }
-        Tok::Op('-') if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => {
-            Some(Piece::Op(BinOp::Sub))
-        }
-        // `*` needs no spacing law: unlike `-` it can never continue an identifier, and unlike `/` it
-        // is never a list separator, so `2*3` and `2 * 3` are the same multiplication.
-        Tok::Op('*') => Some(Piece::Op(BinOp::Mul)),
-        // A `/` reaches this point only as its own lexeme, which happens only inside a call argument
-        // (see [`release_slashes`]) — in a declaration value it is still the slash-separated list.
-        Tok::Op('/') => Some(Piece::Op(BinOp::Div)),
-        _ => Some(Piece::Other),
+        Tok::Punct('(') => 1,
+        Tok::Punct(')') => -1,
+        Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
+        _ => 0,
+    }
+}
+
+/// The operator at this position of the run. `+`/`-` need whitespace on **both** sides or they are not
+/// operators at all: that single law keeps `10px -5px` a two-item list and `a -b` an identifier argument.
+fn operator(toks: &[Tok], index: usize) -> Option<BinOp> {
+    let Tok::Op(sign) = &toks[index] else {
+        return None;
+    };
+    let spaced =
+        |side: Option<usize>| matches!(side.and_then(|i| toks.get(i)), Some(Tok::Space(_)));
+    match sign {
+        '+' if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => Some(BinOp::Add),
+        '-' if spaced(index.checked_sub(1)) && spaced(index.checked_add(1)) => Some(BinOp::Sub),
+        '*' => Some(BinOp::Mul),
+        '/' => Some(BinOp::Div),
+        _ => None,
     }
 }
 
@@ -174,61 +207,81 @@ fn whole_wrap(text: &str) -> Option<&str> {
 }
 
 /// Numbers joined by `+`/`-`/`*`, left-associative with multiplication binding tighter; a lone number
-/// counts (it is what a `$var: 5px` binding needs).
-pub(crate) fn arithmetic(toks: &[Tok]) -> Option<Expr> {
-    let lexemes: Vec<Piece<'_>> = toks
+/// Operands joined by `+`/`-`/`*`/`/`: the operands are read first (a number, a call, a calculation), then
+/// the flat span list is folded twice — once inside each additive piece for `*` and `/`, once over the
+/// pieces. A lone number counts (it is what a `$var: 5px` binding needs, and what
+/// [`crate::exec::State::evaluated`] later filters out at the whole-value level).
+pub(crate) fn arithmetic(toks: &[Tok], env: &Env) -> Option<Expr> {
+    let (spans, operators) = split(toks)?;
+    let operands = spans
         .iter()
-        .enumerate()
-        .filter_map(|(index, tok)| classify(tok, index, toks))
-        .collect();
-    let numbers: Vec<(f64, &str)> = lexemes
-        .iter()
-        .step_by(2)
-        .map(|piece| match piece {
-            Piece::Num(value, unit) => Some((*value, *unit)),
-            Piece::Op(_) | Piece::Other => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let operators: Vec<BinOp> = lexemes
-        .iter()
-        .skip(1)
-        .step_by(2)
-        .map(|piece| match piece {
-            Piece::Op(op) => Some(*op),
-            Piece::Num(_, _) | Piece::Other => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    if numbers.is_empty() || operators.len() + 1 != numbers.len() {
-        return None;
-    }
-    build(&numbers, &operators)
+        .filter_map(|(from, to)| expr::operand_expr(&toks[*from..*to], env))
+        .collect::<Vec<Expr>>();
+    // Every span must have produced an operand: a dropped one would shift the alternation and pair the
+    // wrong operator with the wrong value, which is how `rgb(18 52 none)` once became the number `52`.
+    (operands.len() == operators.len() + 1).then(|| tree(operands, &operators))?
 }
 
-/// The tree for an alternating list of numbers and operators. The **rightmost** additive operator is the
-/// root (so `1 - 2 - 3` becomes `(1 - 2) - 3`, left-associative, and `*` binds tighter because it can
-/// never be that root); with no additive operator left, the run folds multiplicatively left-to-right.
-///
-/// Recursion here is over a *value expression*, whose depth is the number of operands in one
-/// declaration — not a document tree being walked, which is the shape the rules forbid.
-fn build(numbers: &[(f64, &str)], operators: &[BinOp]) -> Option<Expr> {
-    let literal = |(value, unit): (f64, &str)| Expr::Num(value, Unit::named(unit));
-    let head = *numbers.first()?;
-    let root = operators
-        .iter()
-        .rposition(|op| matches!(op, BinOp::Add | BinOp::Sub));
-    Some(match root {
-        // The operands to the left of the root include the one it joins, hence `..=at` on the numbers
-        // and `..at` on the operators; to its right both start just after it.
-        Some(at) => Expr::Binary(
-            Box::new(build(&numbers[..=at], &operators[..at])?),
-            operators[at],
-            Box::new(build(&numbers[at + 1..], &operators[at + 1..])?),
-        ),
-        None => operators
-            .iter()
-            .zip(numbers.iter().skip(1))
-            .fold(literal(head), |acc, (op, operand)| {
-                Expr::Binary(Box::new(acc), *op, Box::new(literal(*operand)))
-            }),
-    })
+/// The additive pieces of a run: each with the operator that joins it to the piece before, and the
+/// multiplicative chain it contains.
+type Pieces = Vec<(Option<BinOp>, Vec<(Option<BinOp>, Expr)>)>;
+
+/// One operand with the operator that precedes it (`None` for the first of a list).
+type Chain = Vec<(Option<BinOp>, Expr)>;
+
+/// The two-pass tree over already-read operands: additive pieces first, products inside each piece.
+/// Left-associative throughout, so `1 - 2 - 3` is `(1 - 2) - 3` and `2 * 3 + 4` is `(2 * 3) + 4` — the same
+/// order the corpus states for `calc( … )` (`operator/precedence::simplified/*`).
+fn tree(operands: Vec<Expr>, operators: &[BinOp]) -> Option<Expr> {
+    let paired = std::iter::once(None)
+        .chain(operators.iter().copied().map(Some))
+        .zip(operands);
+    let pieces = paired.fold(Pieces::new(), |mut acc, (op, operand)| {
+        match op {
+            Some(loose @ (BinOp::Add | BinOp::Sub)) => {
+                acc.push((Some(loose), vec![(None, operand)]));
+            }
+            tight => {
+                if acc.is_empty() {
+                    acc.push((None, Vec::new()));
+                }
+                if let Some((_, factors)) = acc.last_mut() {
+                    factors.push((tight, operand));
+                }
+            }
+        }
+        acc
+    });
+    products(pieces)
+}
+
+/// Fold each additive piece into a product, then the products into a sum. Both are one `fold` over the
+/// piece's own list, joining with the operator that preceded each operand.
+fn products(pieces: Pieces) -> Option<Expr> {
+    let folded = pieces
+        .into_iter()
+        .map(|(join, factors)| chain(factors).map(|product| (join, product)))
+        .collect::<Option<Vec<(Option<BinOp>, Expr)>>>()?;
+    folded
+        .into_iter()
+        .fold(None::<Expr>, |sum, (join, product)| {
+            Some(match (sum, join) {
+                (None, _) => product,
+                (Some(left), Some(op)) => Expr::Binary(Box::new(left), op, Box::new(product)),
+                (Some(_), None) => return None,
+            })
+        })
+}
+
+/// The same fold for one multiplicative chain: `2 * 3 / 5` is `((2 * 3) / 5)`.
+fn chain(factors: Chain) -> Option<Expr> {
+    factors
+        .into_iter()
+        .fold(None::<Expr>, |acc, (op, operand)| {
+            Some(match (acc, op) {
+                (None, _) => operand,
+                (Some(left), Some(op)) => Expr::Binary(Box::new(left), op, Box::new(operand)),
+                (Some(_), None) => return None,
+            })
+        })
 }

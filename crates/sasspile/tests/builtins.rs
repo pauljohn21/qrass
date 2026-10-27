@@ -224,9 +224,15 @@ async fn infinite_results_use_sass_spelling() {
     );
 }
 
-/// The boundary. A callee with no signature (`color.hwb`, `map.merge`) and a value the unit algebra cannot
-/// produce yet (`math.div(6in, 3s)` is a compound unit `in/s`, which the fixture prints as `2in` after
-/// multiplying by `1s`) must fall back to their source text: no invented number, no invented error.
+/// The boundary, in both directions. A callee with no signature (`color.hwb`, `map.merge`) falls back to its
+/// source text — no invented number, no invented error — and so does a result whose unit is **compound**,
+/// because a compound unit is calculation-only (`Unit::is_plain`; the corpus never prints one alone, and the
+/// only file that states the rejection is a commented-out `libsass-closed-issues` line).
+///
+/// What *does* evaluate now is a run that merely contains a call: `math.div(…) * 1px` is an operation, and
+/// the fixtures use exactly that shape — `core_functions/math/div.hrx::unit/denominator`
+/// (`math.div(6, 3px) * 1px` → `2`), `…::unit/incompatible` (`math.div(6in, 3s) * 1s` → `2in`) and
+/// `…::unit/unknown` (`math.div(6c, 3d) * 1d` → `2c`).
 #[tokio::test]
 async fn what_the_spine_does_not_know_stays_verbatim() {
     assert_eq!(
@@ -237,9 +243,16 @@ async fn what_the_spine_does_not_know_stays_verbatim() {
         css("a {b: math.div(6in, 3s)}").await,
         "a {\n  b: math.div(6in, 3s);\n}\n"
     );
-    // A run that merely *contains* a call is not one: the whole value must be the call.
-    assert_eq!(
-        css("a {b: math.div(6, 3) * 1px}").await,
-        "a {\n  b: math.div(6, 3) * 1px;\n}\n"
-    );
+    for (input, want) in [
+        ("a {b: math.div(6, 3) * 1px}", "2px"),
+        ("a {b: math.div(6, 3px) * 1px}", "2"),
+        ("a {b: math.div(6in, 3s) * 1s}", "2in"),
+        ("a {b: math.div(6c, 3d) * 1d}", "2c"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
 }
