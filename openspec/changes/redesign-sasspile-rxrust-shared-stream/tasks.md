@@ -545,6 +545,34 @@
       ④ 还有一条解释不了的律留着：`complement(turquoise)` → 整字节 `#e04050`，但
       `complement(rgba(turquoise, 0.7))` → `rgba(87.8431372549%, 25.0980392157%, 31.3725490196%, 0.7)`，
       不猜原因，先把这条当待测现象记着（它决定 `complement` 能不能动）。
+      **⑨ legacy hsl 操作族已落（`darken`/`lighten`/`desaturate`/`adjust-hue`），但过程中发现了一个真缺陷**：
+      轴变换统一收到 `Color::transform_axes`（hsl 存轴、rgb 走 `axes` 往返；饱和/亮度夹紧 0–100，色相 wrap），
+      金样判据：`desaturate(plum, 100%)` 与 `desaturate(plum, 48%)` 同色（饱和上限 100）且打
+      `rgb(74.7058823529%, …)`（非整字节），而 `darken(rgba(red, 0.2), 100%)` → `rgba(0, 0, 0, 0.2)`（整字节）；
+      `$color:`/`$amount:` 具名行也绿。
+      **实测**：hrx **956 → 975（实质 791 → 810）**，`ledger diff axes-split hsl-ops` = **`regress=0 net=19`**，
+      无效错误仍 **53**。
+      **⑨ 紧接着把那条兜底缺陷修了，`saturate` 已接回**（已实测）：先试的是“用求值后的实参重建调用文本”，
+      **实测 40 条回归**，金样当场给出三条必须保留的规则：实参**内部的空格**要留（`rgb(none 52 66)`、
+      `attr(c, %)` 逗号前那个空格）、**未绑定的标签**要留（`math.max($number1: 1, 2)`，早已钉在
+      `tests/builtins.rs`），而**变量读取要替换**（`saturate($c)` → `saturate(1)`）。同时满足三者的形状
+      就是“未知被调者”那条路：`expr::interpolated` 保留词元原文、只解析其中的变量读取 ⇒ 把
+      `exec::evaluated` 的 `Err(_) => Ok(None)` 改成先试这条路，不行才逐字。
+      **实测**：hrx **956 → 980（实质 791 → 815）**，`ledger diff axes-split decline-fix` =
+      **`regress=0 net=24`**（含 `saturate` 的 5 行），无效错误仍 **53**；新测
+      `tests/color.rs::a_declined_call_keeps_its_text_and_still_resolves_variables` 钉住四条。
+      `exec.rs` 因这段改动到 505 行，已拆：`@for` 的识别与值序列移到 `src/loops.rs`，拆分经
+      `ledger diff decline-fix loops-split` = **net=0 regress=0** 证为中性；`color.rs` 仍 499 行，下次动手先拆
+      打印律。
+      **发现的缺陷（已由上面的 ⑨ 修掉；这段留作发现记录）**：一开始把 `saturate` 也注册了，结果
+      `saturate::css_overload/with_sass_var`（`saturate($c)` 且 `$c: 1`，期望 `saturate(1)`）由 PASS 变 FAIL，
+      `regress=1`。根因：**已注册 builtin 被 body 拒绝时，兜底保留的是未求值的源文本**，变量替换丢了。
+      正确修法在 `expr.rs` 的 `Expr::Call` / `exec.rs:327` 那条拒绝路径：用**已求值的实参**重建文本
+      （`saturate.hrx::css_overload/named` 还告诉我们标签要丢：`saturate($amount: 50%)` → `saturate(50%)`）。
+      没预算把它做对之前，**与 CSS filter 同名的 `saturate` 暂不注册**（代价 5 行）；`grayscale(50%)` 这类
+      不含变量的 CSS 写法仍逐字（已钉测试）。下一步：先修这条兜底（它会影响所有 decline 路径），
+      再把 `saturate` 接回去。另记：`color.rs` 已到 499 行，下一次改动就得先拆（建议把 `to_css`/打印律
+      分到一个单独文件）。
       **⑥ `color.hue` / `color.saturation` / `color.lightness` 已落地，而且本刀根本不需要换算**（已实测）：
       先把三个文件的行全部重读一遍——**每一条“期望值”行用的都是 `hsl(…)` 色**，非 `hsl` 参数只出现在
       `error/*` 行（`color.hue(1)`、`color.hue(lch(0% 0 0deg))`、`color.hue(red, green)`），而那是要消息的 P7。

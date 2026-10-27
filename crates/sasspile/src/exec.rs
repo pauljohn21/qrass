@@ -14,6 +14,7 @@
 use crate::env::Env;
 use crate::expr::{self, Expr};
 use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
+use crate::loops::{ForLoop, for_loop};
 use crate::selector::{Piece, PropName, Selector};
 use crate::trace;
 use crate::unit::Unit;
@@ -325,7 +326,17 @@ impl State {
             Ok(value) if !value.is_plain() => Ok(None),
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_fatal() && !(plain || expr::special_call(toks)) => Err(err),
-            Err(_) => Ok(None),
+            // A call the builtin **declined** is rendered the way an unknown callee's text is rendered —
+            // through [`expr::interpolated`], which keeps the token run verbatim and resolves only its
+            // variable reads. That is the shape the corpus asks for, and each half of it was measured:
+            // rebuilding the call from evaluated arguments lost 40 rows (`rgb(18 52 none)` needs the spaces
+            // inside an argument, `attr(c, %)` needs them before a comma, and `math.max($number1: 1, 2)`
+            // needs an unbound label), while keeping the raw run unsubstituted left `saturate($c)` where
+            // `saturate.hrx::css_overload/with_sass_var` asks for `saturate(1)`.
+            Err(_) => match expr::interpolated(toks, &self.env).map(|run| run.eval(&self.env)) {
+                Some(Ok(value)) if value.is_plain() => Ok(Some(value)),
+                _ => Ok(None),
+            },
         }
     }
 
@@ -431,65 +442,4 @@ fn callable_declaration(toks: &[Tok]) -> bool {
     let declares =
         keyword.eq_ignore_ascii_case("@mixin") || keyword.eq_ignore_ascii_case("@function");
     declares && !name.starts_with("--")
-}
-
-/// A `@for` loop captured on the way in: the variable it binds, the values it walks, and the body
-/// declarations held for replay. Held as data inside the open block — the same nesting-as-value the
-/// `scopes` stack already uses, not a tree walked after the fact.
-#[derive(Debug, Clone)]
-struct ForLoop {
-    var: String,
-    values: Vec<i64>,
-    body: Vec<Event>,
-}
-
-/// Recognise **`@for $i from <int> through|to <int>`** and nothing else, decided on lexemes: exactly
-/// `@for`, a variable, `from`, an integer, a direction, an integer. Any other shape (an expression as a
-/// bound, `@each`, a nested parenthesised header) returns `None` and keeps today's behaviour, so the
-/// replay only happens where the header was read without guessing.
-///
-/// Goldens: `directives/for/for.hrx::{inclusive_forward/scss, exclusive_forward, inclusive_backward,
-/// negative_to_positive, empty/scss}`.
-fn for_loop(toks: &[Tok]) -> Option<ForLoop> {
-    let header: Vec<&Tok> = toks.iter().filter(|tok| !skipped_in_name(tok)).collect();
-    let [
-        Tok::Word(keyword),
-        Tok::Var(var),
-        Tok::Word(from_kw),
-        Tok::Word(from),
-        Tok::Word(direction),
-        Tok::Word(to),
-    ] = header.as_slice()
-    else {
-        return None;
-    };
-    if !keyword.eq_ignore_ascii_case("@for") || !from_kw.eq_ignore_ascii_case("from") {
-        return None;
-    }
-    let inclusive = if direction.eq_ignore_ascii_case("through") {
-        true
-    } else if direction.eq_ignore_ascii_case("to") {
-        false
-    } else {
-        return None;
-    };
-    let (first, last) = (from.parse::<i64>().ok()?, to.parse::<i64>().ok()?);
-    Some(ForLoop {
-        var: var.clone(),
-        values: sequence(first, last, inclusive),
-        body: Vec::new(),
-    })
-}
-
-/// The `@for` value sequence: `through` includes its endpoint, `to` excludes it, and a start above the
-/// end walks downwards (`5 through 1` → 5,4,3,2,1); an empty range stays empty instead of wrapping
-/// (`1 to 1` contributes nothing).
-fn sequence(first: i64, last: i64, inclusive: bool) -> Vec<i64> {
-    if first <= last {
-        let bound = if inclusive { last } else { last - 1 };
-        (first..=bound).collect()
-    } else {
-        let bound = if inclusive { last } else { last + 1 };
-        (bound..=first).rev().collect()
-    }
 }

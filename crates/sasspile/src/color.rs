@@ -273,46 +273,51 @@ impl Color {
         }
     }
 
-    /// The same colour with its hue moved by `degrees` and its saturation set to `saturation`, going
-    /// through the hsl axes (`color.grayscale(red)` → `rgb(50%, 50%, 50%)`: the lightness survives the
-    /// round trip, the saturation does not).
+    /// The same colour after a change to its **hsl axes**, wherever it is stored, with the two clamps and
+    /// the hue wrap the fixtures state:
+    /// * `saturate(plum, 100%)` and `saturate(plum, 53%)` both give `#ff7eff` — saturation clamps at 100
+    ///   and, landing on whole bytes, prints hex (`core_functions/color/saturate.hrx::{max,max_remaining}`);
+    /// * `desaturate(plum, 100%)` → `rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)` — lightness
+    ///   `(221 + 160)/2 = 190.5` of 255 is not a whole byte, so percentages (`desaturate.hrx::max`);
+    /// * `darken(red, 100%)` clamps lightness at 0 rather than going negative.
     ///
-    /// The axes follow CSS Color 4's arithmetic, but the *readings* below are what the corpus pins, and
-    /// they are the reason the conversion exists at all: `color.grayscale(#633736)` → `rgb(30%, 30%, 30%)`
-    /// (L = (99 + 54)/2 = 76.5 of 255), while `color.grayscale(#494949)` → `#494949` — the same operation
-    /// on a colour whose lightness is an exact byte prints hex. That pair is the whole `fractional →
-    /// percentage` law in two lines, and it lives in [`Color::to_css`].
-    pub fn recolour(&self, hue_shift: f64, saturation: Option<f64>) -> Self {
+    /// `color.grayscale` is the same entry with saturation pinned to zero, which is why it no longer needs
+    /// its own path.
+    pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Self {
+        let [hue, saturation, lightness] = change(self.axes_of());
+        let axes = [
+            hue.rem_euclid(360.0),
+            saturation.clamp(0.0, 100.0),
+            lightness.clamp(0.0, 100.0),
+        ];
         match self.representation {
-            Representation::Hsl => {
-                let [hue, current, lightness] = self.channels.map(|channel| channel.value);
-                Self {
-                    channels: [
-                        Channel {
-                            value: (hue + hue_shift).rem_euclid(360.0),
-                            percent: false,
-                        },
-                        Channel {
-                            value: saturation.unwrap_or(current),
-                            percent: true,
-                        },
-                        Channel {
-                            value: lightness,
-                            percent: true,
-                        },
-                    ],
-                    ..self.clone()
-                }
-            }
-            _ => {
-                let [hue, axis_saturation, lightness] = self.axes();
-                let channels = [
-                    hue + hue_shift,
-                    saturation.unwrap_or(axis_saturation),
-                    lightness,
-                ];
-                Self::from_axes(self, channels)
-            }
+            Representation::Hsl => Self {
+                channels: [
+                    Channel {
+                        value: axes[0],
+                        percent: false,
+                    },
+                    Channel {
+                        value: axes[1],
+                        percent: true,
+                    },
+                    Channel {
+                        value: axes[2],
+                        percent: true,
+                    },
+                ],
+                ..self.clone()
+            },
+            _ => Self::from_axes(self, axes),
+        }
+    }
+
+    /// The colour's axes: the stored ones when it is held in hsl, otherwise the round trip
+    /// ([`crate::axes`]) of its channels.
+    fn axes_of(&self) -> [f64; 3] {
+        match self.representation {
+            Representation::Hsl => self.channels.map(|channel| channel.value),
+            _ => self.axes(),
         }
     }
 

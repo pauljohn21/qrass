@@ -272,3 +272,66 @@ async fn a_filter_argument_is_not_a_colour_call() {
         "a {\n  b: grayscale(50%);\n}\n"
     );
 }
+
+/// The legacy hsl manipulators, one assertion per row read out of `darken.hrx` / `lighten.hrx` /
+/// `desaturate.hrx`. They exercise both halves of the axis law at once: `desaturate(plum, 100%)` and
+/// `desaturate(plum, 48%)` are the same colour because saturation clamps at 100, and the two printings
+/// (`rgb(74.7058823529%, …)` vs `rgba(0, 0, 0, 0.2)`) differ only because one lands between whole bytes.
+///
+/// Rows whose expected output is a colour **name** (`desaturate(plum, 0%)` → `plum`, `darken(red, 100%)` →
+/// `black`) are not claimed here — reverse name printing is still open. `saturate` is registered nowhere
+/// yet: see tasks.md 1.5 for the decline-path defect that would turn `saturate($c)` into un-substituted
+/// text.
+#[tokio::test]
+async fn legacy_hsl_manipulators_move_the_axes_and_clamp() {
+    for (input, want) in [
+        ("a {b: darken(red, 14%)}", "rgb(72%, 0%, 0%)"),
+        ("a {b: darken(red, 0.5%)}", "rgb(99%, 0%, 0%)"),
+        (
+            "a {b: darken($color: red, $amount: 14%)}",
+            "rgb(72%, 0%, 0%)",
+        ),
+        ("a {b: darken(rgba(red, 0.2), 100%)}", "rgba(0, 0, 0, 0.2)"),
+        ("a {b: lighten(red, 14%)}", "rgb(100%, 28%, 28%)"),
+        ("a {b: lighten(red, 0.5%)}", "rgb(100%, 1%, 1%)"),
+        (
+            "a {b: desaturate(plum, 100%)}",
+            "rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)",
+        ),
+        (
+            "a {b: desaturate(plum, 48%)}",
+            "rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// What a **declined** call must keep. Rebuilding the call from its evaluated arguments was tried first and
+/// measured as 40 regressions, so this pins the three rules the corpus actually asks for; the code keeps the
+/// token run and resolves only its variable reads (`expr::interpolated`).
+#[tokio::test]
+async fn a_declined_call_keeps_its_text_and_still_resolves_variables() {
+    for (input, want) in [
+        // A Sass variable becomes its value (`saturate.hrx::css_overload/with_sass_var`).
+        ("$c: 1;\na {b: saturate($c)}", "saturate(1)"),
+        // Spaces inside one argument survive: `rgb(18 52 none)` is a single modern-syntax argument whose
+        // channel is unmodellable (`rgb/one_arg/no_alpha::missing/red`), and the run is printed as written.
+        ("a {b: rgb(none 52 66)}", "rgb(none 52 66)"),
+        // So does the space before a comma inside another function's argument
+        // (`rgb/three_args/special_functions::attr/arg_1`).
+        ("a {b: rgb(attr(c, %), 2, 3)}", "rgb(attr(c, %), 2, 3)"),
+        // A CSS filter spelling is not a colour call at all (`saturate.hrx::css_overload/unit`).
+        ("a {b: saturate(50%)}", "saturate(50%)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}

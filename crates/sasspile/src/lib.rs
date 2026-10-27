@@ -23,6 +23,7 @@ mod env;
 mod exec;
 mod expr;
 mod lexer;
+mod loops;
 mod operations;
 mod phases;
 mod selector;

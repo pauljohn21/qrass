@@ -28,7 +28,86 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_LIGHTNESS,
     &GRAYSCALE,
     &COLOR_GRAYSCALE,
+    &DARKEN,
+    &LIGHTEN,
+    &SATURATE,
+    &DESATURATE,
+    &ADJUST_HUE,
 ];
+
+/// The legacy hsl manipulators, each `($color, $amount)`. All are **variadic with two names**, for the two
+/// reasons the corpus gives: the labels have to bind (`darken.hrx::named` is `darken($color: red, $amount:
+/// 14%)`), and a call whose arguments are not a colour plus an amount is not a colour call at all —
+/// `saturate.hrx::css_overload/*` keeps `saturate(50%)`, `saturate(1)` and even `saturate($amount: 50%)`
+/// exactly as written, because CSS defines `saturate()` as a filter function.
+static DARKEN: Builtin = Builtin {
+    name: "darken",
+    params: &["color", "amount"],
+    optional: &[],
+    variadic: true,
+    apply: |args| {
+        adjusted(args, |[hue, saturation, lightness], amount| {
+            [hue, saturation, lightness - amount]
+        })
+    },
+};
+
+/// `lighten(red, 14%)` → `rgb(100%, 28%, 28%)` (`lighten.hrx::middle`).
+static LIGHTEN: Builtin = Builtin {
+    name: "lighten",
+    params: &["color", "amount"],
+    optional: &[],
+    variadic: true,
+    apply: |args| {
+        adjusted(args, |[hue, saturation, lightness], amount| {
+            [hue, saturation, lightness + amount]
+        })
+    },
+};
+
+/// `saturate(plum, 100%)` → `#ff7eff` (`saturate.hrx::max`; `max_remaining` with 53% lands on the same
+/// colour because saturation clamps at 100). Registered as `($color, $amount)` variadic so the CSS filter
+/// spellings survive: `saturate(50%)`, `saturate(1)`, `saturate($c)` and `saturate($amount: 50%)` are all
+/// `css_overload/*` rows of that file, and they print as written — with variables substituted and labels
+/// dropped, which is the decline path `expr.rs` now rebuilds from evaluated arguments instead of copying
+/// the source run (that copy is what made `saturate($c)` measure as a PASS → FAIL regression).
+static SATURATE: Builtin = Builtin {
+    name: "saturate",
+    params: &["color", "amount"],
+    optional: &[],
+    variadic: true,
+    apply: |args| {
+        adjusted(args, |[hue, saturation, lightness], amount| {
+            [hue, saturation + amount, lightness]
+        })
+    },
+};
+
+/// `desaturate(plum, 100%)` → `rgb(74.7058823529%, …)` (`desaturate.hrx::max`).
+static DESATURATE: Builtin = Builtin {
+    name: "desaturate",
+    params: &["color", "amount"],
+    optional: &[],
+    variadic: true,
+    apply: |args| {
+        adjusted(args, |[hue, saturation, lightness], amount| {
+            [hue, saturation - amount, lightness]
+        })
+    },
+};
+
+/// `adjust-hue(…)` moves only the hue; its amount is degrees.
+static ADJUST_HUE: Builtin = Builtin {
+    name: "adjust-hue",
+    params: &["color", "amount"],
+    optional: &[],
+    variadic: true,
+    apply: |args| {
+        adjusted(args, |[hue, saturation, lightness], amount| {
+            [hue + amount, saturation, lightness]
+        })
+    },
+};
 
 /// `grayscale(#633736)` → `rgb(30%, 30%, 30%)`, `grayscale(#494949)` → `#494949`
 /// (`core_functions/color/grayscale.hrx`): the saturation goes to zero and the lightness survives the
@@ -251,7 +330,36 @@ fn lightness_of(args: Vec<Value>) -> Result<Value, SassError> {
 
 /// `color.grayscale`: saturation to zero, everything else kept.
 fn grayscale_of(args: Vec<Value>) -> Result<Value, SassError> {
-    transform(args, |color| color.recolour(0.0, Some(0.0)))
+    transform(args, |color| {
+        color.transform_axes(|[hue, _, lightness]| [hue, 0.0, lightness])
+    })
+}
+
+/// One `($color, $amount)` call: judge the arguments, then move the axes.
+fn adjusted(args: Vec<Value>, change: fn([f64; 3], f64) -> [f64; 3]) -> Result<Value, SassError> {
+    match colour_and_amount(&args) {
+        Some((color, amount)) => Ok(Value::Color(
+            color.transform_axes(|axes| change(axes, amount)),
+        )),
+        None => Err(SassError::new("not a colour-and-amount call")),
+    }
+}
+
+/// The `(colour, amount)` shape, or nothing. An `amount` is a plain number, a percentage (the lightness
+/// and saturation axes) or degrees (the hue axis) — the three units the corpus writes for these calls.
+fn colour_and_amount(args: &[Value]) -> Option<(Color, f64)> {
+    let [colour, amount] = args else {
+        return None;
+    };
+    let amount = match amount {
+        Value::Number(value, unit)
+            if unit.is_unitless() || matches!(unit.single(), Some("%") | Some("deg")) =>
+        {
+            *value
+        }
+        _ => return None,
+    };
+    Some((Color::of(colour)?, amount))
 }
 
 /// One colour in, one colour out, with the same argument judgement the accessors make: arguments that all
