@@ -46,7 +46,7 @@ pub struct Builtin {
 /// would shadow silently, so [`signature`]'s first match is the only rule that matters.
 static BUILTINS: &[&[&Builtin]] = &[math::MATHS, color::COLORS];
 
-/// The signature for a callee name, if we have one. Unknown names (`color.hwb`, `var`, `map.merge`) are
+/// The signature for a callee name, if we have one. Unknown names (`color.contrast`, `var`, `map.merge`) are
 /// `None`, so `calls::known_call` leaves the run exactly as it is today.
 ///
 /// Named `signature`, not `resolve`: `fn resolve(` is a `sasslint` ban recording the deleted pull-shaped

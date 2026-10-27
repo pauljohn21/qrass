@@ -2,24 +2,27 @@
 //! errors). Every input below is copied from the fixture cited on it, so the boundary is the corpus's,
 //! not an invented expectation.
 //!
-//! The interim contract pinned here is "a run that passes named arguments is not evaluated at all" —
-//! its text survives. Once calls evaluate (P4) the expected CSS becomes the fixture's own `output.css`,
-//! and these assertions are meant to change; they exist so the *invalid error* cannot come back.
+//! The contract pinned here is "a `$label:` names a parameter, it never becomes a variable reference" — for
+//! a callee with a signature the call evaluates to the fixture's own output, and for one without, the run's
+//! text survives. Either way the compile must not fail: an environment lookup for a label is the mistake that
+//! once produced ~1,611 bogus `Undefined variable` errors, and these assertions exist so it cannot come back.
 
 use sasspile::ErrorKind;
 use sasspile::compile;
 
 /// `core_functions/color/hwb/four_args::named` — every argument named. Sass resolves them against the
 /// function's parameters; an environment lookup for `$hue` is simply wrong.
+///
+/// This assertion used to be weaker — the call was unregistered, so the test could only require that its text
+/// survived. `hwb` now has a signature, so the labels are checked against the fixture's own `output.css`,
+/// which is the stronger statement of the same contract: the `$hue:`/`$whiteness:`/`$blackness:`/`$alpha:`
+/// labels bind to parameters in any order, none of them is looked up as a variable, and the call evaluates.
 #[tokio::test]
 async fn named_arguments_are_not_variable_references() {
     let css = compile("a {b: color.hwb($hue: 180, $whiteness: 30%, $blackness: 40%, $alpha: 0.4)}")
         .await
         .expect("named arguments must not fail the compile");
-    assert!(
-        css.contains("color.hwb($hue: 180,"),
-        "the run stays un-evaluated for now (call evaluation is P4), got {css}"
-    );
+    assert_eq!(css, "a {\n  b: hsla(180, 33.3333333333%, 45%, 0.4);\n}\n");
 }
 
 /// `core_functions/map/has_key.hrx:69` — a named argument whose value is a **map literal**, so both

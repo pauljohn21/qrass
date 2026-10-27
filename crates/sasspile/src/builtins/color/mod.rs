@@ -15,7 +15,7 @@ use crate::value::Value;
 
 mod constructors;
 
-use constructors::{HSL, HSLA, RGB, RGBA};
+use constructors::{COLOR_HWB, HSL, HSLA, HWB, RGB, RGBA};
 
 /// This domain's registrations.
 pub(super) static COLORS: &[&Builtin] = &[
@@ -23,6 +23,8 @@ pub(super) static COLORS: &[&Builtin] = &[
     &RGBA,
     &HSL,
     &HSLA,
+    &HWB,
+    &COLOR_HWB,
     &COLOR_RED,
     &COLOR_GREEN,
     &COLOR_BLUE,

@@ -43,6 +43,7 @@
 use crate::value::Value;
 
 mod ops;
+mod read;
 mod text;
 
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
@@ -53,6 +54,31 @@ fn clamp_alpha(alpha: f64) -> f64 {
     } else {
         alpha.clamp(0.0, 1.0)
     }
+}
+
+/// The magnitude of a numeric argument, whatever its unit — the axis laws above decide what to do with the
+/// unit, and `hsl`/`hwb` differ here: saturation, lightness, whiteness and blackness take the number as
+/// written, while the hue converts an angle ([`angle`]).
+fn number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number, _) => Some(*number),
+        _ => None,
+    }
+}
+
+/// A hue as degrees, folded into `0–360`. An **angle unit** converts first (`60rad` → `197.7467707849`,
+/// `hsl/three_args/units::hue/turn`-family rows); a unit that is not an angle converts nothing, so
+/// `hwb(1in, 30%, 40%)` is `hsl(1, …)` (`hwb/three_args/units::hue/non_angle`) rather than an error this
+/// slice has no message for.
+fn angle(value: &Value) -> Option<f64> {
+    let factor = match value {
+        Value::Number(_, unit) => unit
+            .single()
+            .filter(|name| crate::unit::measure(name).0 == "angle")
+            .map_or(1.0, |name| crate::unit::measure(name).1),
+        _ => 1.0,
+    };
+    Some((number(value)? * factor).rem_euclid(360.0))
 }
 
 /// One channel: the value as written, and whether it was written as a percentage.
@@ -127,6 +153,12 @@ pub enum Representation {
     /// `hsl(60, 100%, 50%)` — hue as a plain number of degrees, saturation and lightness as percentages
     /// (`core_functions/color/hsl/three_args/units.hrx`)
     Hsl,
+    /// `hwb(0, 30%, 40%)` — the channels are hue, whiteness and blackness, while the **printing** is the
+    /// hsl form the corpus gives: `hwb(0deg, 30%, 40%)` → `hsl(0, 33.3333333333%, 45%)`
+    /// (`core_functions/color/hwb/three_args/units.hrx::hue/deg`). The whiteness and blackness are still
+    /// what the colour *is*, which is why `color.channel(…, "whiteness", $space: hwb)` can read them back
+    /// (`channel/hwb.hrx`) and why a plain hsl colour cannot.
+    Hwb,
 }
 
 /// A colour value.
@@ -265,117 +297,45 @@ impl Color {
         }
     }
 
-    /// One `0–255` channel, for the accessors. A colour held in **another space** returns `None` rather
-    /// than a wrong number.
+    /// An `hwb`/`hwb`-with-alpha colour, from the global `hwb`/`color.hwb` names or the `color()` syntax.
     ///
-    /// Nothing in the corpus contradicts that caution, and the measurement says it is not a gap I should
-    /// fill by inference: `grep`ing every `.hrx` under `spec/` for `color.(red|green|blue)(…hsl(…))` finds
-    /// **no row at all** — the hsl-space fixtures read the hsl axes (`channel/hsl.hrx`), which
-    /// [`Self::hsl_channel`] now serves. `hsl` → `rgb` therefore has no golden to be written against, while
-    /// the reverse direction does and is implemented.
-    pub fn byte(&self, index: usize) -> Option<f64> {
-        match self.representation {
-            Representation::Legacy
-            | Representation::Percent
-            | Representation::Hex
-            | Representation::Named => self
-                .channels
-                .get(index)
-                .map(|channel| channel.byte().round()),
-            Representation::Hsl => None,
-        }
-    }
-
-    /// The colour's own alpha: `color.alpha(rgba(red, 0.42))` → `0.42` (`alpha.hrx::color/middle`).
-    pub fn alpha(&self) -> f64 {
-        self.alpha
-    }
-
-    /// One channel, named the way `color.channel` names it, read in a space.
-    ///
-    /// `space` is the call's `$space:` as written (`hsl`, `rgb`, `srgb`); `None` means **the colour's own
-    /// space**, which is all the corpus pins without a label: `color.channel(#abcdef, "red")` → `171` and
-    /// `color.channel(hsl(10 40% 60%), "hue")` → `10deg` (`channel/rgb.hrx::local/*`,
-    /// `channel/hsl.hrx::local/*`). A cross-space read is answered only when the label says so
-    /// (`channel/hsl.hrx::foreign/hue` is `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`);
-    /// converting on the colour's behalf without one would invent a rule no fixture states.
-    ///
-    /// Units come from the corpus too: an `rgb`/`srgb` channel is a bare number (`171`, and
-    /// `color.channel(pink, "green", $space: srgb)` → `0.7529411765` — the byte over 255), the hue carries
-    /// `deg`, saturation and lightness carry `%`.
-    pub fn channel(&self, name: &str, space: Option<&str>) -> Option<Value> {
-        let number = |value: f64| Value::Number(value, crate::unit::Unit::unitless());
-        let rgb_space = matches!(
-            self.representation,
-            Representation::Legacy
-                | Representation::Percent
-                | Representation::Hex
-                | Representation::Named
-        );
-        match name {
-            "red" | "green" | "blue" => {
-                let index = match name {
-                    "red" => 0,
-                    "green" => 1,
-                    _ => 2,
-                };
-                match space {
-                    Some("srgb") => Some(number(self.byte(index)? / 255.0)),
-                    Some("rgb") => Some(number(self.byte(index)?)),
-                    None if rgb_space => Some(number(self.byte(index)?)),
-                    _ => None,
-                }
-            }
-            "hue" | "saturation" | "lightness" => {
-                let axis = match name {
-                    "hue" => 0,
-                    "saturation" => 1,
-                    _ => 2,
-                };
-                let unit = if axis == 0 { "deg" } else { "%" };
-                let asked_own_space = space.is_none() && self.representation == Representation::Hsl;
-                match space == Some("hsl") || asked_own_space {
-                    true => Some(Value::Number(
-                        self.hsl_channel(axis)?,
-                        crate::unit::Unit::named(unit),
-                    )),
-                    false => None,
-                }
-            }
-            // `whiteness`/`blackness` and every other space (`hwb`, `lab`, `lch`, `oklab`, `oklch`, the
-            // device spaces) need conversions this compiler has not implemented.
-            _ => None,
-        }
-    }
-
-    /// The hue in degrees: `359deg` from `hsl(359, 50%, 50%)`, `180deg` from `hsl(540, …)` because the hue
-    /// was folded into `0–360` at creation (`color/hue.hrx`), and `210deg` from `#abcdef` — read off the
-    /// `rgb` channels through [`Self::axes_of`] (`modules/color/hue.hrx`).
-    pub fn hue(&self) -> Option<f64> {
-        self.hsl_channel(0)
-    }
-
-    /// The saturation, for `color.saturation`: `100%`, `0%`, `50%`, `0.5%`, `42%` (`color/saturation.hrx`)
-    /// and `68%` for `#abcdef` (`modules/color/saturation.hrx`).
-    pub fn saturation(&self) -> Option<f64> {
-        self.hsl_channel(1)
-    }
-
-    /// The lightness, for `color.lightness`: the same five readings in the L axis (`color/lightness.hrx`)
-    /// and `80.3921568627%` for `#abcdef` (`modules/color/lightness.hrx`).
-    pub fn lightness(&self) -> Option<f64> {
-        self.hsl_channel(2)
-    }
-
-    /// One axis of the colour, wherever it is stored: the channels themselves for an `hsl` colour, the
-    /// [`crate::axes`] round trip for a colour held in another space.
-    ///
-    /// The converted reading is what the corpus asks for, row by row: `color.lightness(#abcdef)` →
-    /// `80.3921568627%` is `(239 + 171)/2` of 255 and `color.saturation(#abcdef)` → `68%` is
-    /// `68/(510-410)`, both from `modules/color/*.hrx`. These three rows are why the conversion is safe to
-    /// read here; an `hsl` colour's own axes are already stored, so no round trip is taken for them.
-    fn hsl_channel(&self, index: usize) -> Option<f64> {
-        self.axes_of().get(index).copied()
+    /// The channels are stored as the call gave them — `[hue, whiteness, blackness]` — because that is what
+    /// `color.channel(…, $space: hwb)` reads back (`channel/hwb.hrx`). Two laws the fixtures state, both
+    /// different from `rgb`'s:
+    /// * the hue follows the `hsl` law: an angle unit folds to degrees (`hwb(1rad, 30%, 40%)` →
+    ///   `hsl(57.2957795131, …)`) and a non-angle is taken as a plain number (`hwb(1in, …)` → `hsl(1, …)`,
+    ///   `hwb/three_args/units::hue/non_angle`);
+    /// * whiteness and blackness are **not clamped to `0–100`**, but a pair that overflows the colour is
+    ///   **normalised at creation**: `hwb(10deg 70% 50%)` reports its whiteness as `58.3333333333%` and its
+    ///   blackness as `41.6666666667%` (`channel/hwb.hrx::local/normalized/*` — `70/120` and `50/120`), so
+    ///   what the colour *is* has already changed by the time anything reads it back. `101%` and `-1%` reach
+    ///   the axes the same way, which is what pins [`crate::axes::hwb_to_hsl`] (`hwb/four_args::whiteness/*`).
+    pub fn hwb(hue: &Value, whiteness: &Value, blackness: &Value, alpha: f64) -> Option<Self> {
+        let (white, black) = (number(whiteness)?, number(blackness)?);
+        let (white, black) = if white + black > 100.0 {
+            let span = white + black;
+            (white / span * 100.0, black / span * 100.0)
+        } else {
+            (white, black)
+        };
+        Some(Self {
+            channels: [
+                Channel {
+                    value: angle(hue)?,
+                    percent: false,
+                },
+                Channel {
+                    value: white,
+                    percent: true,
+                },
+                Channel {
+                    value: black,
+                    percent: true,
+                },
+            ],
+            alpha: clamp_alpha(alpha),
+            representation: Representation::Hwb,
+        })
     }
 
     /// A colour from `0–255` byte values, for hex parsing.
@@ -399,25 +359,10 @@ impl Color {
     /// * the alpha is clamped to `0–1` and a `1` alpha returns the three-argument spelling
     ///   (`hsl/four_args/alpha.hrx`).
     pub fn hsl(hue: &Value, saturation: &Value, lightness: &Value, alpha: f64) -> Option<Self> {
-        let number = |value: &Value| match value {
-            Value::Number(number, _) => Some(*number),
-            _ => None,
-        };
-        let degrees = |value: &Value| {
-            let number = number(value)?;
-            let factor = match value {
-                Value::Number(_, unit) => unit
-                    .single()
-                    .filter(|name| crate::unit::measure(name).0 == "angle")
-                    .map_or(1.0, |name| crate::unit::measure(name).1),
-                _ => 1.0,
-            };
-            Some((number * factor).rem_euclid(360.0))
-        };
         Some(Self {
             channels: [
                 Channel {
-                    value: degrees(hue)?,
+                    value: angle(hue)?,
                     percent: false,
                 },
                 Channel {

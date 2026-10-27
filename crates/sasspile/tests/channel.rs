@@ -87,15 +87,17 @@ async fn a_space_label_selects_the_axes() {
 /// What this slice must **not** answer. Each call keeps its written form because the space or the colour
 /// needs a conversion that has no implementation here — and a number read off the wrong axes would be a
 /// wrong value the pass count cannot see:
-/// * `hwb` (`channel/hwb.hrx::foreign/*` wants `pink`'s whiteness as `75.2941176471%`) — no hwb conversion;
 /// * an `srgb`-space colour written in `color()` syntax (`channel/srgb.hrx::local/red`) — `Color::of`
 ///   refuses parenthesised text for exactly this reason;
-/// * `whiteness`/`blackness` of an `hsl` colour, and any unknown channel name.
+/// * `whiteness`/`blackness` of an **`hsl`** colour, which stores neither;
+/// * an unknown channel name.
+///
+/// The `hwb` reads of an `rgb`-family colour used to be on this list; they became answerable when `hwb` was
+/// implemented and are now pinned with their fixture values in `tests/hwb.rs`, so listing them here would
+/// record a superseded limitation as if it were still the law.
 #[tokio::test]
 async fn an_unreachable_space_declines_rather_than_guesses() {
     for call in [
-        "color.channel(pink, \"whiteness\", $space: hwb)",
-        "color.channel(pink, \"blackness\", $space: hwb)",
         "color.channel(color(srgb 0.2 0.5 0.8), \"red\")",
         "color.channel(hsl(10deg 40% 60%), \"whiteness\", $space: hwb)",
         "color.channel(#abcdef, \"luminance\")",

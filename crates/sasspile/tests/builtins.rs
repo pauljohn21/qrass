@@ -224,10 +224,14 @@ async fn infinite_results_use_sass_spelling() {
     );
 }
 
-/// The boundary, in both directions. A callee with no signature (`color.hwb`, `map.merge`) falls back to its
-/// source text — no invented number, no invented error — and so does a result whose unit is **compound**,
+/// The boundary, in both directions. A callee with no signature (`color.contrast`, `map.merge`) falls back to
+/// its source text — no invented number, no invented error — and so does a result whose unit is **compound**,
 /// because a compound unit is calculation-only (`Unit::is_plain`; the corpus never prints one alone, and the
 /// only file that states the rejection is a commented-out `libsass-closed-issues` line).
+///
+/// `color.hwb` was this test's example until `hwb` gained a signature; using a now-implemented name to prove
+/// a fall-back would only record the old state, so the example moved to `color.contrast`, which is still
+/// unregistered. What `hwb` produces instead is pinned by `tests/hwb.rs`, per fixture row.
 ///
 /// What *does* evaluate now is a run that merely contains a call: `math.div(…) * 1px` is an operation, and
 /// the fixtures use exactly that shape — `core_functions/math/div.hrx::unit/denominator`
@@ -236,8 +240,8 @@ async fn infinite_results_use_sass_spelling() {
 #[tokio::test]
 async fn what_the_spine_does_not_know_stays_verbatim() {
     assert_eq!(
-        css("a {b: color.hwb(180, 50%, 50%)}").await,
-        "a {\n  b: color.hwb(180, 50%, 50%);\n}\n"
+        css("a {b: color.contrast(red, blue)}").await,
+        "a {\n  b: color.contrast(red, blue);\n}\n"
     );
     assert_eq!(
         css("a {b: math.div(6in, 3s)}").await,

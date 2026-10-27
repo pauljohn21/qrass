@@ -22,7 +22,7 @@ pub struct Argument {
 
 /// `name(…)` from a token run, **only when `name` resolves to a known builtin signature**.
 ///
-/// The signature gate is the whole safety of this step: `color.hwb($hue: 180)` (no signature yet) and any
+/// The signature gate is the whole safety of this step: `color.contrast` (no signature yet) and any
 /// CSS-native `var(…)`/`calc(…)` never reach argument binding, so they keep today's verbatim behaviour
 /// instead of being half-evaluated. Callers must therefore treat `None` as "not a call we know".
 pub fn known_call(toks: &[Tok]) -> Option<(String, Vec<Argument>)> {

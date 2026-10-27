@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1081/11,533**（9.4%，**实质通过 916** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `channel-read`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1133/11,533**（9.8%，**实质通过 968** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `hwb`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -95,8 +95,13 @@ alwaysApply: true
    17 行金样）：无 `$space:` 只读颜色自己的空间，跳空间必须标签自己说（`pink` 的 hue 在 `$space: hsl` 下是
    `349.5238095238deg`）；`srgb` 是字节/255。通道名在 body 那里是 `Value::Raw("\"red\"")`（与 `math.unit`
    同形），只剥一层引号，不重切文本；`$space:` 读不到时**直接 decline**（否则 hwb 的请求会被当成 hsl 答）。
-   **下一个要量的**：hwb↔rgb 换算（`channel/hwb` 仍败 8 行，`hwb/one_arg` 那 45 行现代语法也卡它）、`color()`
-   文本色（`channel/srgb` 仍败 9 行）、`list.slash` 与颜色 `==`；
+   **下一个要量的**：`color()` 文本色（`channel/srgb` 仍败 9 行）、`lab`/`lch`/`oklab`/`oklch` 新空间、
+   `list.slash` 与颜色 `==`。**`hwb` 已落**（`Color::hwb` + `hwb`/`color.hwb` 注册 + `axes::{hwb_to_hsl,rgb_to_hwb}`）：
+   打印用 hsl 形体但值仍存 whiteness/blackness；**w+b 溢出在创建时就归一化**（否则 `color.channel` 会读到
+   `70%` 而非 `58.3333333333%` —— 那是错值不是缺能力）；非角单位当普通数用（`hwb(1in,…)` → `hsl(1,…)`）；
+   整字节且恰为关键字的 hwb 色**回写关键字**（`color.hwb(0,0%,0%,100%)` → `red`）而 `rgb(0,0,0)` 不会
+   —— 这个来源差异语料未解释，故逐 fixture 记录，不推广到 `mix`/`adjust` 结果。`Color::{byte,mixed}`
+   对 `Hsl | Hwb` 仍 decline（无此类金样）。
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
@@ -148,7 +153,7 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 
 ## 🧾 反回归自查（动手前逐条 grep；命中 = 停手先重构根，再谈加功能）
 
-### ⚠️ 不得引用未出现在工具输出里的数字与动作（最高级红线）
+**⚠️ 不得引用未出现在工具输出里的数字与动作（最高级红线）**
 
 实证（同一会话内两次）：① 编译失败（`E0599`，无任何 measured 行）的那一轮，我把验收写成了
 “净 21 / 1085 / 实质 920”；② 下一条消息里我又宣称“已提交已推送 `a2370a3..c53180f`”，而当时
@@ -156,6 +161,15 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 的结果当成已发生的结果：比错读数字更严重，因为它会把未验证的改动当成已入库。
 要习性约束：**汇报里的每个数字必须能在上一条工具输出里逐字找到**（measured / AB diff / `--count` / 退出码）；
 **声称已提交/已推送时，哈希必须来自 `git log` / `git push` 自己的输出**；若只是计划要做，就说“打算”不说“完成”。
+
+**新增一个名字/能力时，先 `grep` 它在 `tests/` 里的旧断言（同样实证三次）**
+
+“因为某名字未实现，所以它保持逐字”这类断言，在实现落地时**前提就没了**，不翻就会把测试当失败。
+实证：`tests/channel.rs` 的 hwb 逐字列表、`tests/builtins.rs` 拿 `color.hwb` 当“未注册例子”、
+`tests/named_args.rs` 只要求“文本存活”（这条现在按 `output.css` 断言，更强）。
+做法：**开工前先 `grep -rn "<新名字>" crates/sasspile/tests`**，把命中的旧断言一并翻成 fixture 自己的期望，
+而不是等到测试红了才改。另：`cargo test --workspace | grep … | awk` 在**第一个失败的二进制处就停**，
+会报出“0 failed”的假绿；门禁一律用 `--no-fail-fast` 并看 `exit=0`。
 - **树/递归**：`Vec<Rule>`、`children`/`.children`、`fn …->Vec<..>` 中转、render/eval 自调用 → 平展 `Vec<Leaf>`，`map/flat_map/filter`。
 - **批量外壳**：`scan_map` 返 `Vec` + `flat_map(from_iter)`、把 body 收集后重放 → **每相写成真算子内核**
   （`struct Phase{source}` + `PhaseObserver{observer,state}` + `ObservableType`/`CoreObservable<C>`），

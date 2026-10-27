@@ -236,24 +236,49 @@ impl Color {
             // Hue is a bare number and the other two always carry a `%`; the name still follows the alpha
             // exactly as the `hsl/four_args/alpha.hrx` rows show (`100%` alpha → `hsl(…)`, `0%` →
             // `hsla(…, 0)`).
-            Representation::Hsl => {
-                let [hue, saturation, lightness] = self.channels;
-                let channels = format!(
-                    "{}, {}%, {}%",
-                    crate::value::format_number(hue.value),
-                    crate::value::format_number(saturation.value),
-                    crate::value::format_number(lightness.value)
-                );
-                let name = if self.alpha >= 1.0 { "hsl" } else { "hsla" };
-                if self.alpha >= 1.0 {
-                    format!("{name}({channels})")
-                } else {
-                    format!(
-                        "{name}({channels}, {})",
-                        crate::value::format_number(self.alpha)
-                    )
+            Representation::Hsl => self.hsl_text(self.axes_of()),
+            // A `hwb` colour prints in the hsl form the corpus gives it: `hwb(0deg, 30%, 40%)` →
+            // `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), while the value keeps its
+            // whiteness and blackness for `color.channel(.., $space: hwb)` to read back.
+            //
+            // **A whole-byte `hwb` colour whose bytes name a keyword prints that keyword**: `color.hwb(0, 0%,
+            // 0%, 100%)` → `red`, not `hsl(0, 100%, 50%)` (`hwb/four_args::alpha/percent/{max,above_max}`).
+            // That is the reverse-name law `Representation::Named` follows, and it is *not* what an `rgb`
+            // call does (`rgb(0, 0, 0)` prints itself in six fixtures) — why the two origins differ is not
+            // stated anywhere in the corpus, so this is recorded per fixture rather than generalised, and
+            // `mix`/`adjust` results keep their own origin instead of inheriting it.
+            Representation::Hwb => {
+                let axes = self.axes_of();
+                let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
+                let whole = rgb.iter().all(|value| value.fract() == 0.0);
+                let bytes = rgb.map(|value| value.round() as u32);
+                match (self.alpha >= 1.0 && whole)
+                    .then_some(bytes)
+                    .and_then(Self::keyword)
+                {
+                    Some(name) => name.to_string(),
+                    None => self.hsl_text(axes),
                 }
             }
+        }
+    }
+
+    /// The `hsl`/`hsla` spelling of three axes — shared with [`Representation::Hwb`], which prints as hsl.
+    fn hsl_text(&self, [hue, saturation, lightness]: [f64; 3]) -> String {
+        let channels = format!(
+            "{}, {}%, {}%",
+            crate::value::format_number(hue),
+            crate::value::format_number(saturation),
+            crate::value::format_number(lightness)
+        );
+        let name = if self.alpha >= 1.0 { "hsl" } else { "hsla" };
+        if self.alpha >= 1.0 {
+            format!("{name}({channels})")
+        } else {
+            format!(
+                "{name}({channels}, {})",
+                crate::value::format_number(self.alpha)
+            )
         }
     }
 

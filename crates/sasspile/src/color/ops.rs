@@ -44,6 +44,33 @@ impl Color {
                 ],
                 ..self.clone()
             },
+            // A `hwb` colour cannot store an hsl change as whiteness and blackness, so it comes back as the
+            // `hsl` value it prints — and through the `rgb` round trip, which is what the corpus shows:
+            // `color.grayscale(hwb(120deg 10% 20%))` → `hsl(0, 0%, 45%)` (`grayscale.hrx::
+            // legacy/powerless/different`), hue `0` because a grey has no hue, whereas the same operation on
+            // an `hsl` colour keeps its hue (`grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)`).
+            Representation::Hwb => {
+                let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
+                let [hue, saturation, lightness] = crate::axes::rgb_to_axes(rgb[0], rgb[1], rgb[2]);
+                Self {
+                    channels: [
+                        Channel {
+                            value: hue,
+                            percent: false,
+                        },
+                        Channel {
+                            value: saturation,
+                            percent: true,
+                        },
+                        Channel {
+                            value: lightness,
+                            percent: true,
+                        },
+                    ],
+                    alpha: self.alpha,
+                    representation: Representation::Hsl,
+                }
+            }
             _ => Self::from_axes(self, axes),
         }
     }
@@ -55,6 +82,13 @@ impl Color {
     pub(super) fn axes_of(&self) -> [f64; 3] {
         match self.representation {
             Representation::Hsl => self.channels.map(|channel| channel.value),
+            // A `hwb` colour's hsl axes are derived, not stored: `hwb(0deg, 30%, 40%)` is asked for as
+            // `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), and `color.channel` reads that
+            // same hue back (`channel/hwb.hrx::local/hue`).
+            Representation::Hwb => {
+                let [hue, whiteness, blackness] = self.channels.map(|channel| channel.value);
+                crate::axes::hwb_to_hsl(hue, whiteness, blackness)
+            }
             _ => self.axes(),
         }
     }
@@ -92,8 +126,10 @@ impl Color {
     /// * the result keeps the **first** colour's representation, which is what makes that last row print
     ///   numbers rather than a keyword when the other argument is `transparent`.
     ///
-    /// A colour held in the hsl space has no `0–255` channels to mix, so the call declines rather than
-    /// inventing a converted answer.
+    /// A colour held in the hsl or hwb space has no `0–255` channels to mix, so the call declines rather
+    /// than inventing a converted answer: no fixture states how `color.mix` treats those spaces, and mixing
+    /// a `hwb` colour's whiteness and blackness as if they were bytes would be a wrong value the pass count
+    /// cannot see.
     pub fn mixed(first: &Color, second: &Color, weight: f64) -> Option<Self> {
         let span = first.alpha - second.alpha;
         let tilt = 2.0 * (weight / 100.0).clamp(0.0, 1.0) - 1.0;
@@ -104,7 +140,7 @@ impl Color {
         } / 2.0
             + 0.5;
         let channel = |colour: &Color, index: usize| match colour.representation {
-            Representation::Hsl => None,
+            Representation::Hsl | Representation::Hwb => None,
             _ => Some(colour.channels[index].byte()),
         };
         let [red, green, blue] = [0, 1, 2].map(|index| {

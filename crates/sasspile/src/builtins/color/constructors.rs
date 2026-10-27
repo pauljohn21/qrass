@@ -53,6 +53,27 @@ pub(super) static HSLA: Builtin = Builtin {
     apply: hsl_channels,
 };
 
+/// `hwb(0deg, 30%, 40%)` → `hsl(0, 33.3333333333%, 45%)` — the **printing** is hsl while the value keeps
+/// its whiteness and blackness (`hwb/three_args/units::hue/deg`). Registered twice because the corpus calls
+/// it both ways: the global `hwb` (`hwb/global.hrx`, and CSS's own `hwb()` function) and `color.hwb`
+/// (`hwb/three_args/*`).
+pub(super) static HWB: Builtin = Builtin {
+    name: "hwb",
+    params: &["hue", "whiteness", "blackness"],
+    optional: &["alpha", "channels"],
+    variadic: true,
+    apply: hwb_channels,
+};
+
+/// `color.hwb(…)`, the namespaced spelling of the same law.
+pub(super) static COLOR_HWB: Builtin = Builtin {
+    name: "color.hwb",
+    params: &["hue", "whiteness", "blackness"],
+    optional: &["alpha", "channels"],
+    variadic: true,
+    apply: hwb_channels,
+};
+
 /// An alpha argument: a number, or a percentage — `hsl(0, 0%, 0%, 45.6%)` is `hsla(0, 0%, 0%, 0.456)`
 /// (`hsl/four_args/alpha.hrx`, and `rgb/four_args/alpha.hrx` states the same for `rgb`).
 fn alpha(value: &Value) -> Option<f64> {
@@ -131,6 +152,33 @@ fn hsl_channels(args: Vec<Value>) -> Result<Value, SassError> {
             [Value::Space(parts), given] => match parts.as_slice() {
                 [hue, saturation, lightness] => {
                     alpha(given).and_then(|alpha| Color::hsl(hue, saturation, lightness, alpha))
+                }
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    };
+    finished(built)
+}
+
+/// One `hwb`/`color.hwb` call. Same shapes as `hsl`: three comma arguments, three space-separated ones
+/// (`hwb/one_arg.hrx`), those plus `/ alpha` (`hwb/global.hrx::alpha/in_gamut/partial` is
+/// `hwb(180 30% 40% / 0.5)`), and the whole list under `$channels:` (`…::alpha/in_gamut/named`).
+fn hwb_channels(args: Vec<Value>) -> Result<Value, SassError> {
+    let built = match args.as_slice() {
+        [hue, whiteness, blackness] => Color::hwb(hue, whiteness, blackness, 1.0),
+        [hue, whiteness, blackness, given] => {
+            alpha(given).and_then(|alpha| Color::hwb(hue, whiteness, blackness, alpha))
+        }
+        [Value::Space(parts)] => match parts.as_slice() {
+            [hue, whiteness, blackness] => Color::hwb(hue, whiteness, blackness, 1.0),
+            _ => None,
+        },
+        [Value::Slash(list)] => match list.as_slice() {
+            [Value::Space(parts), given] => match parts.as_slice() {
+                [hue, whiteness, blackness] => {
+                    alpha(given).and_then(|alpha| Color::hwb(hue, whiteness, blackness, alpha))
                 }
                 _ => None,
             },

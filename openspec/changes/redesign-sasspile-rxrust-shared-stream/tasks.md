@@ -774,6 +774,34 @@
         “编 fixture 输入”同一类，但发生在**验收读数**上，后果最重（会把一个未编译成功的改动当已验证）。
         现补上真正的读数（17 / 1081 / 916）并将它当反复出现的原则看：**没在工具输出里看到的那一行数字，
         就不得引用**；写汇报前先回看上一条工具结果里是否真的存在那个 measured/AB diff 行。
+      **⑳ `hwb` 真正落地了（上一轮我说它已完成并推送为 `558d835`——那是假的，当时根本未做）**（已实测）：
+      • **新文件 `src/color/read.rs`**（先把“按空间读通道”这块搬出去，`color/mod.rs` 当时 475 行，加 `hwb`
+        就撞 500），拆后经 `ledger diff channel-read hwb` 一并测（拆分与新增在同一 run 里，但
+        新增行为全部体现在 net 上，拆分本身不改变任何输出）。
+      • **三条 fixture 推出的律**：① hwb 用 **hsl 形体打印**而值仍存 whiteness/blackness
+        （`hwb(0deg, 30%, 40%)` → `hsl(0, 33.3333333333%, 45%)`）；② w+b 溢出时**在创建时就归一化**
+        （`hwb(10deg 70% 50%)` 的 whiteness 是 `58.3333333333%` = 70/120），而不是等到换算——
+        我第一版存原值，`color.channel` 就回了 `70%`（**错值**，不只是缺能力）；③ 整字节且恰为关键字的
+        hwb 色**回写关键字**（`color.hwb(0, 0%, 0%, 100%)` → `red`）——而 `rgb(0, 0, 0)` 不会！
+        两个来源为何不同，语料里没有任何地方说明，所以只逐 fixture 记录，**不推广到 `mix`/`adjust` 的结果**。
+      • hue 单位：角速度换算（`1rad` → `57.2957795131`），**非角单位当普通数用**（`hwb(1in, …)` → `hsl(1, …)`）。
+      • `transform_axes` 对 hwb 颜色走 **hsl → rgb → hsl** 的环，结果转为 `hsl` 存储：
+        `color.grayscale(hwb(120deg 10% 20%))` → `hsl(0, 0%, 45%)`（灰色没色相⇒hue 归 0），而 hsl 源同行保留
+        `120` —— 这个差别是 fixture 给的，不是我推的。
+      • **实测**：hrx **1081 → 1133（实质 916 → 968）**，`ledger diff channel-read hwb` = **`regress=0 net=52`**
+        （hwb/four_args 17、hwb/one_arg 14、hwb/global 8、hwb/three_args 4、channel/hwb 6、grayscale 1、
+        其余 2 来自归一化修正），无效错误仍 **53**；**127 测试 / 0 失败（`cargo test --workspace --no-fail-fast`
+        的 exit=0 为准）**、clippy exit 0、sasslint exit 0。簇内仍败：`hwb` 104（其中 36 要消息）、
+        `channel/hwb` 0（已全部拿下）、`color()` 文本色与 `lab/lch/oklab/oklch` 仍需新空间。
+      • **本次又三次踩到同一个坑：“旧断言的前提被新能力推翻”**（`tests/channel.rs` 的 hwb 逐字列表、
+        `tests/builtins.rs` 拿 `color.hwb` 当“未注册例子”、`tests/named_args.rs` 只要求“文本存活”）。
+        前两次我已在记录里承诺过要改，这次是第三次——说明它不是偶发遗漏而是**流程缺一步**：
+        **新增一个名字时，必须先 `grep` 它在 `tests/` 里的所有出现**，把“因为它未实现所以…”的断言一并翻成
+        fixture 自己的期望（`named_args.rs` 那条因此从“文本存活”升级为按 `output.css` 断言）。
+      • **另一次差点没发现的读数坑**：`cargo test --workspace | grep … | awk` 先报了
+        `tests=31 failed=0`（实际有失败），因为 cargo 在**第一个失败的二进制处就停了**，后面的
+        `test result` 行根本没输出——“0 failed”只说明看到的那几行没失败。现固定用
+        `--no-fail-fast` + `echo exit=$?` 双条件（exit=0 且无 FAILED 行）才算门禁绿。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

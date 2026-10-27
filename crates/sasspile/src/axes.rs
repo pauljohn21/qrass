@@ -57,3 +57,49 @@ pub(crate) fn axes_to_rgb(hue: f64, saturation: f64, lightness: f64) -> [f64; 3]
     let offset = lightness - chroma / 2.0;
     matched.map(|component| (component + offset) * 255.0)
 }
+
+/// The hsl axes of a **whiteness/blackness** colour, as `[hue in degrees, saturation in %, lightness in %]`.
+///
+/// Three readings, each a row of `core_functions/color/hwb/**`. The middle one is why this is not a clamp:
+/// * `hwb(0deg, 30%, 40%)` → `[0, 33.3333333333, 45]` (`three_args/units::hue/deg`) — the whiteness *is*
+///   the lowest channel and `1 - blackness` the highest, so lightness is their mean and the saturation
+///   follows the same rule as [`rgb_to_axes`];
+/// * `hwb(0, 101%, 40%)` → `[0, 0, 71.6312056738]` (`four_args::whiteness/above_max`) — together the two
+///   exceed the colour, and they are **normalised by their sum**: `1.01 / 1.41 = 0.7163120567…`. Clamping
+///   the whiteness to 100% first would print `71.4285714286%` instead, so the fixture distinguishes the
+///   two readings and picks this one;
+/// * `hwb(0, -1%, 40%)` → `[0, 103.3898305085, 29.5]` (`four_args::whiteness/below_min`) — a negative
+///   whiteness is **not** clamped either; it pushes the lightness to `29.5%` and the saturation past 100%.
+pub(crate) fn hwb_to_hsl(hue: f64, whiteness: f64, blackness: f64) -> [f64; 3] {
+    let (white, black) = (whiteness / 100.0, blackness / 100.0);
+    let (low, high) = if white + black > 1.0 {
+        let sum = white + black;
+        (white / sum, black / sum)
+    } else {
+        (white, black)
+    };
+    let (min, max) = (low, 1.0 - high);
+    let lightness = (min + max) / 2.0;
+    let span = max - min;
+    // Whiteness and blackness filling the range leave no span: a grey whose saturation is 0 while its hue
+    // is kept, which is what `hwb(0, 101%, 40%)` above prints as `hsl(0, 0%, …)`.
+    let saturation = if span == 0.0 {
+        0.0
+    } else {
+        span / (1.0 - (2.0 * lightness - 1.0).abs())
+    };
+    [hue, saturation * 100.0, lightness * 100.0]
+}
+
+/// The whiteness and blackness (`0–100`) of an `rgb`-space colour, for a `hwb` read of it.
+///
+/// `color.channel(pink, "whiteness", $space: hwb)` → `75.2941176471%` and `…"blackness"…` → `0%`
+/// (`channel/hwb.hrx::foreign/*`): `pink` is `(255, 192, 203)`, so the whiteness is the lowest channel over
+/// 255 and the blackness is what the highest channel leaves below full.
+pub(crate) fn rgb_to_hwb(red: f64, green: f64, blue: f64) -> [f64; 2] {
+    let (red, green, blue) = (red / 255.0, green / 255.0, blue / 255.0);
+    [
+        red.min(green).min(blue) * 100.0,
+        (1.0 - red.max(green).max(blue)) * 100.0,
+    ]
+}
