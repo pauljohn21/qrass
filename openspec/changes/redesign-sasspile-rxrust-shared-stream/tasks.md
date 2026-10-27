@@ -564,6 +564,26 @@
       `exec.rs` 因这段改动到 505 行，已拆：`@for` 的识别与值序列移到 `src/loops.rs`，拆分经
       `ledger diff decline-fix loops-split` = **net=0 regress=0** 证为中性；`color.rs` 仍 499 行，下次动手先拆
       打印律。
+      **⑩ 先把打印律拆了，再上“关键字源→反向写名”这条律**（已实测）：`src/color.rs` →
+      `src/color/{mod.rs,text.rs}`（数据与轴变换 vs 表示法/舍入律），拆分经
+      `ledger diff loops-split color-text-split` = **net=0 regress=0** 证中性（途中发现方向可见性：子模块
+      能看见父模块的私有项，反向要 `pub(super)`）。
+      **这条律的关键是“按来源”而不是“按值”**（我上一轮的推定被金样推退）：
+      `core_functions/color/rgb/**` 里有**六行输出就是 `b: rgb(0, 0, 0);`** —— 所以数值等于黑色并不
+      触发名字；只有**由关键字创建**的颜色才记得自己是个词。据此加了 `Representation::Named`：
+      非整字节 → 百分比；半透 → `rgba(…)`；不匹配任何关键字 → hex（`complement(turquoise)` → `#e04050`）；
+      匹配则回写关键字（`lighten(red, 0%)` → `red`、`grayscale(white)` → `white`、
+      `desaturate(plum, 0%)` → `plum`、`rgb(transparent, 1)` → `black`）。
+      148 个**拼法列在 `color/text.rs` 的 `NAMES`**，**一个 RGB 值都没写**，全部向 `color::parse_color` 要；
+      拼法写错就表现为“解析不出→打 hex”，不会打错颜色，而 `tests/color.rs::a_keyword_created_colour_prints_its_keyword`
+      同批钉住了“必须不能变成名字”的那一行。
+      **实测**：hrx **980 → 997（实质 815 → 832）**，`ledger diff color-text-split colour-names` =
+      **`regress=0 net=17`**，无效错误仍 **53**（自推送基线算共 +17）。门禁：111 测试 / 0 失败、clippy
+      exit 0、`sasslint` exit 0、无超 500 行文件（`color/mod.rs` 431、`color/text.rs` 285、
+      `builtins/color.rs` 434）。
+      **一个未定项**（不猜）：`-grey` 别名颜色回写时该打哪种拼法（`grey` 输入会不会被回写成 `gray`）
+      语料里没金样，现在靠 NAMES 序决定，已归入待测现象。`complement` 仍然不动（它同时涉及
+      `rgba(关键字, α)` 为何走百分比）。
       **发现的缺陷（已由上面的 ⑨ 修掉；这段留作发现记录）**：一开始把 `saturate` 也注册了，结果
       `saturate::css_overload/with_sass_var`（`saturate($c)` 且 `$c: 1`，期望 `saturate(1)`）由 PASS 变 FAIL，
       `regress=1`。根因：**已注册 builtin 被 body 拒绝时，兜底保留的是未求值的源文本**，变量替换丢了。

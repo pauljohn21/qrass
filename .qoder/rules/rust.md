@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **980/11,533**（8.50%，**实质通过 815** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `loops-split`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **997/11,533**（8.64%，**实质通过 832** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `colour-names`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -56,7 +56,12 @@ alwaysApply: true
    **decline 律（本轮实测钉下）**：被 builtin 拒绝的调用必须保留**词元原文**且只替换其中的**变量读取**
    （走 `expr::interpolated`）：实参内部空格要留（`rgb(none 52 66)`、`attr(c, %)`），未绑定标签要留
    （`math.max($number1: 1, 2)`），而 `$c` 必须变成它的值（`saturate($c)` → `saturate(1)`）。用求值后的
-   实参重建文本已实测为 **40 条回归**，不得重试。再往后：`mix` → 颜色 `==`；而 `complement` 暂不能动，因为
+   实参重建文本已实测为 **40 条回归**，不得重试。**颜色文件已拆：`src/color/mod.rs`（数据 + 轴变换）与
+   `src/color/text.rs`（表示法与舍入律）**。反向写名已落，但它是**按来源**而非按值：只有由关键字创建的
+   颜色（`Representation::Named`）才在“opaque + 整字节 + 匹配关键字”时回写名字（`lighten(red, 0%)` → `red`、
+   `rgb(transparent, 1)` → `black`），而 `rgb(0, 0, 0)` 仍打 `rgb(0, 0, 0)`（六行金样），不匹配则回退到
+   hex（`complement(turquoise)` → `#e04050`）。148 个**只有拼法**在 `color/text.rs::NAMES`，值全向
+   `color::parse_color` 要（写错只会退化成 hex，不会打错颜色）。再往后：`mix` → 颜色 `==`；而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：

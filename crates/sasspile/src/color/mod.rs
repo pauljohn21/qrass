@@ -36,6 +36,8 @@
 
 use crate::value::Value;
 
+mod text;
+
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
 /// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
 fn clamp_alpha(alpha: f64) -> f64 {
@@ -97,6 +99,11 @@ pub enum Representation {
     Percent,
     /// `#112233` — created from a hex literal, so it prints back as hex
     Hex,
+    /// `red` — created from a CSS keyword. Such a colour prints its keyword again while its bytes still name
+    /// one (`lighten(red, 0%)` → `red`, `complement(red)` → `aqua`) and falls back to hex otherwise
+    /// (`complement(turquoise)` → `#e04050`), whereas a colour built from `rgb(0, 0, 0)` keeps printing
+    /// `rgb(0, 0, 0)` — see [`super::text`] for the fixtures that separate the two.
+    Named,
     /// `hsl(60, 100%, 50%)` — hue as a plain number of degrees, saturation and lightness as percentages
     /// (`core_functions/color/hsl/three_args/units.hrx`)
     Hsl,
@@ -202,7 +209,7 @@ impl Color {
             f64::from(u16::from(rgba.a)) / 255.0,
         )
         .map(|color| Self {
-            representation: Representation::Hex,
+            representation: Representation::Named,
             ..color
         })
     }
@@ -230,7 +237,10 @@ impl Color {
     /// its own change (the fixtures for it are `color/red.hrx` rows beyond the four pinned today).
     pub fn byte(&self, index: usize) -> Option<f64> {
         match self.representation {
-            Representation::Legacy | Representation::Percent | Representation::Hex => self
+            Representation::Legacy
+            | Representation::Percent
+            | Representation::Hex
+            | Representation::Named => self
                 .channels
                 .get(index)
                 .map(|channel| channel.byte().round()),
@@ -417,83 +427,5 @@ impl Color {
             alpha: clamp_alpha(alpha),
             ..self.clone()
         }
-    }
-
-    /// The CSS text. Percentages are printed with Sass's ten-significant-digit number form, which is what
-    /// `67.8431372549%` (from `173`) comes out of.
-    pub fn to_css(&self) -> String {
-        let byte = |value: u32| format!("{value:02x}");
-        match self.representation {
-            Representation::Hex => {
-                // A colour whose channels are not whole bytes prints percentages, not hex and not
-                // numbers: `grayscale(#633736)` → `rgb(30%, 30%, 30%)` while `grayscale(#494949)` →
-                // `#494949` (`core_functions/color/grayscale.hrx`).
-                if self.fractional() {
-                    return self.percent_form();
-                }
-                // An opaque colour comes back out as hex, but a semi-transparent one takes the legacy
-                // functional form: `rgb(#123, 1)` → `#112233` while `rgb(#123, 0.5)` → `rgba(17, 34, 51,
-                // 0.5)` (`rgb/two_args::opaque_to/{opaque,partial}`) — no eight-digit hex is printed here.
-                let bytes = self.channels.map(|channel| channel.byte().round() as u32);
-                if self.alpha < 1.0 {
-                    return self.legacy(self.channels, false);
-                }
-                format!("#{}{}{}", byte(bytes[0]), byte(bytes[1]), byte(bytes[2]))
-            }
-            Representation::Legacy => {
-                if self.fractional() {
-                    return self.percent_form();
-                }
-                self.legacy(self.channels, false)
-            }
-            Representation::Percent => self.percent_form(),
-            // Hue is a bare number and the other two always carry a `%`; the name still follows the alpha
-            // exactly as the `hsl/four_args/alpha.hrx` rows show (`100%` alpha → `hsl(…)`, `0%` →
-            // `hsla(…, 0)`).
-            Representation::Hsl => {
-                let [hue, saturation, lightness] = self.channels;
-                let channels = format!(
-                    "{}, {}%, {}%",
-                    crate::value::format_number(hue.value),
-                    crate::value::format_number(saturation.value),
-                    crate::value::format_number(lightness.value)
-                );
-                let name = if self.alpha >= 1.0 { "hsl" } else { "hsla" };
-                if self.alpha >= 1.0 {
-                    format!("{name}({channels})")
-                } else {
-                    format!(
-                        "{name}({channels}, {})",
-                        crate::value::format_number(self.alpha)
-                    )
-                }
-            }
-        }
-    }
-
-    /// The legacy functional form: `rgb(r, g, b)` while opaque, `rgba(…)` once there is alpha (which is
-    /// what every `four_args/clamped` row prints), and channels in whichever scale this representation
-    /// uses.
-    fn legacy(&self, printed: [Channel; 3], percent: bool) -> String {
-        let channels = printed
-            .iter()
-            .map(|channel| {
-                let number = crate::value::format_number(if percent {
-                    channel.value
-                } else {
-                    channel.value.round()
-                });
-                format!("{number}{}", if percent { "%" } else { "" })
-            })
-            .collect::<Vec<String>>()
-            .join(", ");
-        let name = if self.alpha >= 1.0 { "rgb" } else { "rgba" };
-        if self.alpha >= 1.0 {
-            return format!("{name}({channels})");
-        }
-        format!(
-            "{name}({channels}, {})",
-            crate::value::format_number(self.alpha)
-        )
     }
 }

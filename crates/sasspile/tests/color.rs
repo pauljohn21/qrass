@@ -335,3 +335,34 @@ async fn a_declined_call_keeps_its_text_and_still_resolves_variables() {
         );
     }
 }
+
+/// A colour **created from a keyword** prints that keyword again while its bytes still name one, and the
+/// corpus separates this from a value-only rule: a colour built from `rgb(0, 0, 0)` prints
+/// `rgb(0, 0, 0)`, not `black` (six rows under `core_functions/color/rgb/**`), so the origin is what matters.
+///
+/// The keyword list itself carries no RGB values — every name resolves through `color::parse_color` — so
+/// these rows also audit the spellings: a mistyped name would not parse and would print hex instead.
+#[tokio::test]
+async fn a_keyword_created_colour_prints_its_keyword() {
+    for (input, want) in [
+        // Unchanged value, same keyword back (`lighten.hrx::min`, `darken.hrx::min`).
+        ("a {b: lighten(red, 0%)}", "red"),
+        ("a {b: darken(red, 0%)}", "red"),
+        // Greys keep the keyword they were made from (`grayscale.hrx::{max,min}`).
+        ("a {b: color.grayscale(white)}", "white"),
+        ("a {b: color.grayscale(black)}", "black"),
+        // A colour with no saturation is unchanged (`desaturate.hrx::min`).
+        ("a {b: desaturate(plum, 0%)}", "plum"),
+        // `transparent` is a keyword too; at alpha 1 its bytes name `black`
+        // (`rgb/two_args::transparent_to/opaque`).
+        ("a {b: rgb(transparent, 1)}", "black"),
+        // The built-from-numbers case, which must **not** become a keyword.
+        ("a {b: rgb(0, 0, 0)}", "rgb(0, 0, 0)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
