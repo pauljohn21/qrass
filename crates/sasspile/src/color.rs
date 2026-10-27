@@ -36,6 +36,16 @@
 
 use crate::value::Value;
 
+/// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
+/// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
+fn clamp_alpha(alpha: f64) -> f64 {
+    if alpha.is_nan() {
+        0.0
+    } else {
+        alpha.clamp(0.0, 1.0)
+    }
+}
+
 /// One channel: the value as written, and whether it was written as a percentage.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Channel {
@@ -87,6 +97,9 @@ pub enum Representation {
     Percent,
     /// `#112233` — created from a hex literal, so it prints back as hex
     Hex,
+    /// `hsl(60, 100%, 50%)` — hue as a plain number of degrees, saturation and lightness as percentages
+    /// (`core_functions/color/hsl/three_args/units.hrx`)
+    Hsl,
 }
 
 /// A colour value.
@@ -114,11 +127,7 @@ impl Color {
         let [red, green, blue] = [channel(red)?, channel(green)?, channel(blue)?];
         Some(Self {
             channels: [red.clamped(), green.clamped(), blue.clamped()],
-            alpha: if alpha.is_nan() {
-                0.0
-            } else {
-                alpha.clamp(0.0, 1.0)
-            },
+            alpha: clamp_alpha(alpha),
             representation: match (red.percent, green.percent, blue.percent) {
                 (false, false, false) => Representation::Legacy,
                 _ => Representation::Percent,
@@ -172,15 +181,56 @@ impl Color {
         Self::new(&plain(red), &plain(green), &plain(blue), alpha)
     }
 
+    /// An `hsl`/`hsla` colour. The three laws the fixtures state, none of them shared with `rgb`:
+    /// * the **hue is folded to degrees and wrapped into `0–360`** — `hsl(60rad, 100%, 50%)` is
+    ///   `hsl(197.7467707849, 100%, 50%)` and `0deg` prints as `0`
+    ///   (`hsl/three_args/units.hrx`);
+    /// * saturation and lightness **always** carry a `%` (`hsl(0, 50, 50%)` → `hsl(0, 50%, 50%)`), and
+    ///   unlike an `rgb` channel they are **not clamped**: `hsl(0, 500%, 50%)` stays
+    ///   (`hsl/three_args/bounds.hrx`);
+    /// * the alpha is clamped to `0–1` and a `1` alpha returns the three-argument spelling
+    ///   (`hsl/four_args/alpha.hrx`).
+    pub fn hsl(hue: &Value, saturation: &Value, lightness: &Value, alpha: f64) -> Option<Self> {
+        let number = |value: &Value| match value {
+            Value::Number(number, _) => Some(*number),
+            _ => None,
+        };
+        let degrees = |value: &Value| {
+            let number = number(value)?;
+            let factor = match value {
+                Value::Number(_, unit) => unit
+                    .single()
+                    .filter(|name| crate::unit::measure(name).0 == "angle")
+                    .map_or(1.0, |name| crate::unit::measure(name).1),
+                _ => 1.0,
+            };
+            Some((number * factor).rem_euclid(360.0))
+        };
+        Some(Self {
+            channels: [
+                Channel {
+                    value: degrees(hue)?,
+                    percent: false,
+                },
+                Channel {
+                    value: number(saturation)?,
+                    percent: true,
+                },
+                Channel {
+                    value: number(lightness)?,
+                    percent: true,
+                },
+            ],
+            alpha: clamp_alpha(alpha),
+            representation: Representation::Hsl,
+        })
+    }
+
     /// The same colour under a different alpha, keeping how it was made: `rgb(#123, 0.5)` is the hex
     /// channels with the new alpha, not a different colour (`two_args::opaque_to/partial`).
     pub fn with_alpha(&self, alpha: f64) -> Self {
         Self {
-            alpha: if alpha.is_nan() {
-                0.0
-            } else {
-                alpha.clamp(0.0, 1.0)
-            },
+            alpha: clamp_alpha(alpha),
             ..self.clone()
         }
     }
@@ -207,6 +257,27 @@ impl Color {
                     percent: true,
                 });
                 self.legacy(channels, true)
+            }
+            // Hue is a bare number and the other two always carry a `%`; the name still follows the alpha
+            // exactly as the `hsl/four_args/alpha.hrx` rows show (`100%` alpha → `hsl(…)`, `0%` →
+            // `hsla(…, 0)`).
+            Representation::Hsl => {
+                let [hue, saturation, lightness] = self.channels;
+                let channels = format!(
+                    "{}, {}%, {}%",
+                    crate::value::format_number(hue.value),
+                    crate::value::format_number(saturation.value),
+                    crate::value::format_number(lightness.value)
+                );
+                let name = if self.alpha >= 1.0 { "hsl" } else { "hsla" };
+                if self.alpha >= 1.0 {
+                    format!("{name}({channels})")
+                } else {
+                    format!(
+                        "{name}({channels}, {})",
+                        crate::value::format_number(self.alpha)
+                    )
+                }
             }
         }
     }

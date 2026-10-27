@@ -64,6 +64,47 @@ async fn representation_and_alpha_choose_the_spelling() {
     }
 }
 
+/// `hsl/three_args/units.hrx` and `…/bounds.hrx`, read row by row: the **hue is folded to degrees and
+/// wrapped into `0–360`** (`60rad` → `197.7467707849`, `0deg` → `0`), saturation and lightness **always**
+/// carry a `%` (`50` → `50%`), and unlike an `rgb` channel they are **not clamped** (`500%` stays).
+/// `hsl/four_args/alpha.hrx` adds the alpha law: a percentage alpha converts, and an alpha of one returns
+/// the three-argument spelling.
+#[tokio::test]
+async fn hsl_folds_hue_and_prints_percentages() {
+    for (input, want) in [
+        ("a {b: hsl(0, 100%, 50%)}", "hsl(0, 100%, 50%)"),
+        ("a {b: hsl(0deg, 100%, 50%)}", "hsl(0, 100%, 50%)"),
+        (
+            "a {b: hsl(60rad, 100%, 50%)}",
+            "hsl(197.7467707849, 100%, 50%)",
+        ),
+        ("a {b: hsl(0, 50, 50%)}", "hsl(0, 50%, 50%)"),
+        ("a {b: hsl(0, 500%, 50%)}", "hsl(0, 500%, 50%)"),
+        ("a {b: hsl(0, 0%, 0%, 45.6%)}", "hsla(0, 0%, 0%, 0.456)"),
+        ("a {b: hsl(0, 0%, 0%, 100%)}", "hsl(0, 0%, 0%)"),
+        ("a {b: hsl(0, 0%, 0%, 250%)}", "hsl(0, 0%, 0%)"),
+        ("a {b: hsl(0, 0%, 0%, -10%)}", "hsla(0, 0%, 0%, 0)"),
+        // Labels bind, for `hsl` and `rgb` alike — the reason the registry carries optional parameters at
+        // all (`hsl/three_args/named.hrx`, `rgb/three_args/unitless::named`).
+        (
+            "a {b: hsl($hue: 0, $saturation: 100%, $lightness: 50%)}",
+            "hsl(0, 100%, 50%)",
+        ),
+        (
+            "a {b: rgb($red: 0, $green: 255, $blue: 127)}",
+            "rgb(0, 255, 127)",
+        ),
+        // An unmodellable argument keeps the call as written (`hsl/three_args/special_functions::var/*`).
+        ("a {b: hsl(var(--foo), 2%, 3%)}", "hsl(var(--foo), 2%, 3%)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
 /// What must **not** happen. An argument the colour law cannot read declines the call, and the run keeps
 /// its verbatim text — `three_args::1_of_3` (`var()` is substituted before parsing, so the list can hold
 /// anything) is a golden of exactly that. And a hex written straight into a declaration is not a `Color`

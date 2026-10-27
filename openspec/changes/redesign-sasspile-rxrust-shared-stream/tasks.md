@@ -443,9 +443,22 @@
       hex 造的 opaque → `#112233`，但一旦半透就改走 `rgba(17, 34, 51, 0.5)`（`two_args::opaque_to/partial`，
       比上一版“8 位 hex”的推定更正）；通道入口夹紧（256→255、-1→0、-0→0、NaN→0）。**声明里的裸 hex 不解析**
       （`#AbCd` 连大小写都得留，`values/colors/alpha_hex/initial_letter`）。
-      **两个已知代价，记录而不掩饰**：`rgb`/`rgba` 先注册为 variadic（三参与四参都要收，定长签名会在第四参报
-      “只允许 3 个”），代价是 `rgb($red: 0, …)`（`three_args/unitless::named`）暂仍逐字；要它得先给注册表
-      加“可选参数”概念。`calc(infinity)` 这类通道位也要先能拆回数才能算（`four_args/clamped` 里四行）。
+      **两个已知代价的当前状态**：~~`rgb`/`rgba` 暂为 variadic 导致具名实参失效~~ —— **已解决**：
+      `rgb(#123, 1)`（一/二参是“颜色+alpha”，三/四是通道）证明 `rgb` 是**重载 arity**，定长签名必报
+      “缺 `$blue`”（该错就是这么被测试拦下来的）。正解是给注册表加 `optional: &'static [&'static str]`
+      并且**允许“带名字的 variadic”绑标签**（旧规则“variadic 不能接具名实参”是我自己发明的，
+      `min/max` 只是碰巧无名可绑）：“必需参数缺失”只约束定长签名，`math.div(6)` 仍照旧报
+      `Missing argument $number2.`。现在 `rgb($red: 0, $green: 255, $blue: 127)` 与
+      `hsl($hue: 0, …)` 都已绿。剩下的代价只有一条：`rgb(calc(infinity), …)` 这类通道位仍要等
+      绑定 calc 能拆回数才能算（`rgb/four_args/clamped` 里四行）。
+      **④ `hsl`/`hsla` 已落地；`hwb` 未做**（已实测）：hrx **877 → 912（实质 712 → 747）**，
+      `ledger diff color-rgb color-hsl` = **`regress=0 net=35`**，无效错误仍 **53**。分布：
+      `hsl/four_args/alpha` 10、`hsl/three_args/units` 7、`rgb/four_args/alpha` 5（`%` alpha）、
+      `hsl/four_args/in_gamut` 5、`hsl/four_args/out_of_gamut` 3、`hsl/three_args/named` 1 等。
+      `hsl` 的律与 `rgb` **不共用**：hue 折成度并 mod 360（`60rad` → `197.7467707849`、`0deg` → `0`），
+      s/l 永远带 `%`（`50` → `50%`）且**不夹紧**（`500%` 保留），alpha 夹紧并将 `%` 换算（`45.6%` → `0.456`），
+      =1 时退回三参 spelling。`hwb` 本批未做：它的金样用**现代空格语法**（`hwb(0 30% 40% / 0.5)`），
+      需要先能拆“空格 + `/` alpha”的参数形状，不能拿 legacy 逗号规则套。
       **实测**：hrx **847 → 877（实质 682 → 712）**，`ledger diff builtins-split color-rgb` = **`regress=0 net=30`**，
       簇内 scoped diff 同数（`core_functions/color` 6,323 → 6,293）；无效错误仍 **53**。分布：
       `rgb/four_args/clamped` 9、`rgb/two_args` 7、`rgb/four_args/alpha` 5、`rgb/three_args/unitless` 3、

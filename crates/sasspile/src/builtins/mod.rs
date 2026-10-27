@@ -33,6 +33,11 @@ mod math;
 pub struct Builtin {
     pub name: &'static str,
     pub params: &'static [&'static str],
+    /// Parameters a call may leave out, in declaration order after `params`. `rgb` needs this because the
+    /// corpus accepts **both** `rgb(18, 52, 86)` and `rgb(0, 0, 0, 0.5)` (`rgb/four_args/alpha.hrx`), which
+    /// a fixed arity would reject at the fourth argument and a `variadic` signature would lose the
+    /// `$red:`/`$green:`/`$blue:` labels for (`three_args/unitless::named`).
+    pub optional: &'static [&'static str],
     pub variadic: bool,
     pub apply: fn(Vec<Value>) -> Result<Value, SassError>,
 }
@@ -61,9 +66,11 @@ pub fn signature(name: &str) -> Option<&'static Builtin> {
 pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value, SassError> {
     let builtin =
         signature(name).ok_or_else(|| SassError::new(format!("unknown builtin {name}")))?;
-    // A variadic signature takes every positional argument and has no parameter names for a `$label:` to
-    // bind to, so a labelled run declines (the 1.2b rule) rather than guessing which parameter was meant.
-    // Its one arity rule is the corpus's own: no arguments at all is an error.
+    // A variadic signature takes every positional argument. Its one arity rule is the corpus's own: no
+    // arguments at all is an error. When it also declares names — `rgb` does, so that `$red:`/`$green:`/
+    // `$blue:` can bind (`three_args/unitless::named`) — the run falls through to the shared binding
+    // below, which skips the required-parameter check; the body decides how many arguments it accepts,
+    // because `rgb` is genuinely overloaded (`rgb(#123, 1)` is two arguments, `rgb(1, 2, 3)` is three).
     if builtin.variadic {
         if given.is_empty() {
             return Err(SassError::typed(
@@ -71,16 +78,18 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
                 "At least one argument must be passed.",
             ));
         }
-        return given
-            .into_iter()
-            .map(|(label, value)| match label {
-                Some(_) => Err(SassError::new(
-                    "named arguments are not bound for a variadic builtin",
-                )),
-                None => Ok(value),
-            })
-            .collect::<Result<Vec<Value>, SassError>>()
-            .and_then(|bound| (builtin.apply)(bound));
+        if builtin.params.is_empty() && builtin.optional.is_empty() {
+            return given
+                .into_iter()
+                .map(|(label, value)| match label {
+                    Some(_) => Err(SassError::new(
+                        "named arguments have no parameter to bind to here",
+                    )),
+                    None => Ok(value),
+                })
+                .collect::<Result<Vec<Value>, SassError>>()
+                .and_then(|bound| (builtin.apply)(bound));
+        }
     }
     let positional = given
         .iter()
@@ -91,24 +100,42 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
         .iter()
         .filter_map(|(label, value)| label.as_ref().map(|name| (name.as_str(), value)))
         .collect::<Vec<(&str, &Value)>>();
-    if given.len() > builtin.params.len() {
-        return Err(too_many(builtin.params.len(), given.len()));
+    let allowed = builtin.params.len() + builtin.optional.len();
+    if !builtin.variadic && given.len() > allowed {
+        return Err(too_many(allowed, given.len()));
     }
-    builtin
+    // One slot per name, filled by label first and by position second, so an optional parameter written
+    // out of order (`rgb(1, 2, 3, $alpha: 0.5)`) still binds to the alpha.
+    let slots = builtin
         .params
         .iter()
+        .chain(builtin.optional)
         .enumerate()
-        .map(
-            |(index, param)| match named.iter().find(|(label, _)| label == param) {
-                Some((_, value)) => Ok((*value).clone()),
-                None => positional
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| missing((*param).to_string())),
-            },
-        )
-        .collect::<Result<Vec<Value>, SassError>>()
-        .and_then(|bound| (builtin.apply)(bound))
+        .map(|(index, param)| {
+            named
+                .iter()
+                .find(|(label, _)| label == param)
+                .map(|(_, value)| (*value).clone())
+                .or_else(|| positional.get(index).cloned())
+        })
+        .collect::<Vec<Option<Value>>>();
+    // Every declared parameter up to the first absent one is handed to the body, so a body never sees a
+    // hole. A required parameter left absent is the corpus's own message — but only for a fixed signature;
+    // a variadic one lets its body judge the count.
+    let taken = slots
+        .iter()
+        .position(Option::is_none)
+        .unwrap_or(slots.len());
+    if taken < builtin.params.len() && !builtin.variadic {
+        return Err(missing(builtin.params[taken].to_string()));
+    }
+    (builtin.apply)(
+        slots
+            .into_iter()
+            .take(taken)
+            .flatten()
+            .collect::<Vec<Value>>(),
+    )
 }
 
 /// `Error: Missing argument $number2.` — the first parameter left without a value.
