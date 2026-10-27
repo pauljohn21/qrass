@@ -6,10 +6,17 @@
 //! `math.$pi` would all look alike to `expr`, and re-scanning the rendered text there is the mistake this
 //! project has measured four times.
 //!
-//! Still open: `math.$pi: 0;` → `Error: Cannot modify built-in variable.`
-//! (`…::error/assignment/*`) — an assignment whose target is namespaced is not read as an assignment yet.
+//! Still open: none in this fixture — `variables.hrx`'s 7 value rows and its 7 assignment rows are both
+//! pinned below; the second group is what the module table's read-only rule is for.
 
 use sasspile::compile;
+
+async fn failure(input: &str) -> String {
+    match compile(input).await {
+        Ok(css) => panic!("{input} was expected to fail, but it compiled to:{css}"),
+        Err(error) => error.message,
+    }
+}
 
 async fn css(input: &str) -> String {
     compile(input)
@@ -62,6 +69,28 @@ async fn a_constant_times_an_exponent_literal_folds() {
             css(input).await,
             format!("a {{\n  b: {want};\n}}\n"),
             "for input {input}"
+        );
+    }
+}
+
+/// A built-in module's constants are read-only: `math.$pi: 0;` → `Error: Cannot modify built-in variable.`
+/// (`variables.hrx::error/assignment/*`, one row per constant). The refusal asks the module table, so a name
+/// the table does not own is still an ordinary property — no fixture gives `upstream.$a: 0;` this message.
+#[tokio::test]
+async fn a_built_in_module_member_refuses_assignment() {
+    for name in [
+        "$pi",
+        "$e",
+        "$epsilon",
+        "$max-safe-integer",
+        "$min-safe-integer",
+        "$max-number",
+        "$min-number",
+    ] {
+        assert_eq!(
+            failure(&format!("math.{name}: 0;")).await,
+            "Cannot modify built-in variable.",
+            "for math.{name}"
         );
     }
 }

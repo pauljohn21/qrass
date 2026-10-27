@@ -161,6 +161,15 @@ impl State {
         // `strip_prefix('$')` would have to undo.
         let target = match prop.iter().find(|tok| !skipped_in_name(tok)) {
             Some(Tok::Var(var)) => Target::Variable(var.clone()),
+            // `math.$pi: 0;` binds nothing: a built-in module's constant is read-only, and the oracle says so
+            // by name (`core_functions/math/variables.hrx::error/assignment/*`). The test asks the module
+            // table rather than matching the namespace text, so `upstream.$a:` — a member this compiler has
+            // not got — keeps its old reading instead of gaining an error nobody stated.
+            Some(Tok::MemberVar(module, name))
+                if crate::builtins::module_value(module, name).is_some() =>
+            {
+                Target::ReadOnly
+            }
             _ => Target::Property(PropName::from_pieces(&self.head_pieces(prop, "")?)),
         };
         match target {
@@ -171,6 +180,12 @@ impl State {
                 // (`lexer::without_flags`); a declaration's `!important` keeps its text.
                 let bound = self.value_of(&var, without_flags(value))?;
                 self.env.bind(&var, bound);
+            }
+            Target::ReadOnly => {
+                return Err(SassError::typed(
+                    ErrorKind::ReadOnlyVariable,
+                    "Cannot modify built-in variable.",
+                ));
             }
             Target::Property(name) => {
                 let owned = self.decl_value(&name, value, self.in_plain_css())?;
@@ -427,6 +442,8 @@ fn skipped_in_name(tok: &Tok) -> bool {
 enum Target {
     Variable(String),
     Property(PropName),
+    /// the left side of a declaration named a built-in module's constant, which has no binding to update
+    ReadOnly,
 }
 
 /// Whether a settled head text opens a **plain-CSS at-rule** body: `@function` (any case) naming a

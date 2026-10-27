@@ -78,6 +78,11 @@ pub enum ErrorKind {
     /// is the mistake behind the ~1,611 bogus `Undefined variable` cases (`expr::named_argument`). Only the
     /// registry sees the labels, so only it can say this.
     UnknownParameter,
+    /// a declaration whose left side is a **built-in module member** — `math.$pi: 0;`. The constants of a
+    /// built-in module are read-only: `Cannot modify built-in variable.`
+    /// (`core_functions/math/variables.hrx::error/assignment/*`). Only a name the module table actually owns
+    /// earns this; any other `foo.$bar:` is still read as an ordinary property.
+    ReadOnlyVariable,
     /// everything else
     Other,
 }
@@ -115,6 +120,7 @@ const FATAL: &[ErrorKind] = &[
     ErrorKind::NotAColor,
     ErrorKind::NotAString,
     ErrorKind::Channel,
+    ErrorKind::ReadOnlyVariable,
 ];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
