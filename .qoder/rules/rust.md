@@ -35,8 +35,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1589/11,533**（13.8%，**实质通过 1424** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `precision`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1777/11,533**（15.4%，**实质通过 1612** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `exponents`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -221,10 +221,23 @@ alwaysApply: true
        挡住它的正是旧的“10 位有效数字就原样”豁免（已删，四行全绿，`tests/math_trig.rs` 把它们钉回断言）。
        另两行仍红：`atan2(1cm, -10mm)` → `135deg` 要长度因子精确（我们落在 `135.0000000003`）；
        `atan2(1px, 1deg)` 要 `deg` 进维度表（`dimension()` 故意只收已实证的长度/时间/em）。
-     • **下一刀已量定**：`values/numbers/precision.hrx` 那 30 行留着的是 `-10 + math.pow(10, -11)` 这种原文，
-       不是打印律，是 **`math.pow` 未注册**（同一原因还遮住 `sqrt`/`log*`/`exp*`/`hypot`/`clamp`）。
-       上一轮写的“precision 共 108 行要输出”是错读数：108 是 `values/numbers` **整个前缀**的数，
-       precision.hrx 只有 30 例 —— **按子目录计数要给它自己的前缀，别拿父目录的数当子目录的数**。
+     • **下一刀已落地：`math.pow`/`sqrt`/`log` 与非有限值的打印形**（新 `builtins/math/exponents.rs`；
+       上一轮量定的“30 行 precision 卡在 `math.pow` 未注册”完全成立，108 行 `math/pow/*` 也一样）。
+       run `exponents`：**net 188，1589→1777（实质 1612）**，regress=0，空库复算同读数，无效错误仍 53。
+     • **非有限数没有裸 CSS 写法** ⇒ 写进 `calc( )`，且单位在括号内各自带 `1`：`calc(NaN)`、
+       `calc(infinity)`、`calc(-infinity)`、`calc(NaN * 1deg)`、`calc(infinity * 1px)`、`calc(-infinity / 1px)`。
+       **不能复用 `Unit::calc_form`**（它把首个分子单位写成 `<幅值>px`，对 NaN 就成 `NaNdeg`）
+       ⇒ 新增 `Unit::calc_product`；一起变绿的有 `values/numbers/{precision,degenerate,bounds,very_large}`
+       与 `atan2`/`asin`/`acos`/`sin`/`cos`/`tan` 的无穷行。
+     • `number_arg` 之外新提出 `math.rs::unitless(name, value, unit)`：`$x: Expected 1px to have no units.`
+       这条措辞现在由反三角、`sqrt`、`pow`、`log`（含可选的 `$base`）共读 —— 同一律不写两遍。
+     • 其它逐行的细节：`pow(0, -2)` → `calc(infinity)`、`pow(-0.0, -3)` → `calc(-infinity)` 而
+       `pow(-0.0, -3.000000000001)` 又回 `calc(infinity)`（只有奇整数翻转零的符号，
+       `pow/base_negative_zero.hrx::with_exponent/*`）；`math.log(2, null)` = 自然对数（**写出的 `null`
+       就是“没传 base”**，`log.hrx::base/null`）；`sqrt(-0.0)` → `-0`。金样单测 = `tests/math_exponents.rs`
+       （五个）+ `tests/math_trig.rs` 补上 `calc(NaN * 1deg)` 三行。
+     • 仍未注册：`hypot`（19）、`clamp`（26）、`random`（8）、`math.$pi`/`$e` 等模块变量（14）；
+       `atan2(1cm,-10mm)` 要精确长度因子、`atan2(1px,1deg)` 要 `deg` 进 `dimension()` 两行也仍红。
    而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。

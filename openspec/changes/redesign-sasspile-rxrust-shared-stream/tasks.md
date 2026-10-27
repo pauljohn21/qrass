@@ -874,7 +874,7 @@
         hsl 轴**不接 legacy 夹紧** —— `adjust/hsl.hrx::saturation/max_remaining` 要
         `hsl(300, 100.2868217054%, 74.7058823529%)`，而同一移动的 `saturate.hrx::two_args/max_remaining` 要
         `#ff7eff` ⇒ `adjust` 也走 `with_axes`，`transform_axes` 只留给 legacy 那族（**纠正 ㉒a 里
-        “`transform_axes`（adjust 族）仍夹紧”的措词**）；但 **saturation 下界仍夹 0**
+        “`transform_axes`（adjust 族）仍夹紧”的措辞**）；但 **saturation 下界仍夹 0**
         （`saturation/{min,min_remaining,arg_below_min}` 要那个灰），lightness 两头都不夹；hwb **先加再按和归一**
         （`hwb.hrx::whiteness/max` → `rgb(87.5%,…)`）；**没点任何通道是 no-op**，只给 `$alpha:` 仍移动 alpha 且夹
         `0–1`（`no_channels.hrx::{positional,named}` 及其 `alpha/*`）；`units.hrx::alpha/*` 取任意单位的量值。
@@ -1025,6 +1025,25 @@
         `-10 + math.pow(10, -11)` 这种原文 —— 卡在 **`math.pow` 未注册**，不是打印律；同一原因还遮住
         `sqrt`/`log*`/`exp*`/`hypot`/`clamp`。我上轮写的“precision 共 108 行”错在用了 `values/numbers` 整个
         前缀的数（precision.hrx 只 30 例）——**子目录计数要给自己的前缀**。
+      **㉙ `math.pow`/`sqrt`/`log` 已注册，并且发现“非有限数没有裸 CSS 写法”**（已实测，run `exponents`）：
+      • **大发现是打印形**：`NaN`/`infinity`/`-infinity` 必须写成 `calc(NaN)`、`calc(infinity)`、
+        `calc(-infinity)`，带单位时单位在括号内各自乘 1 —— `calc(NaN * 1deg)`（`asin.hrx::greater_than_one`）、
+        `calc(infinity * 1px)`、`calc(-infinity / 1px)`（`values/numbers/units/multiple.hrx`）。不能复用
+        `Unit::calc_form`（它把首个分子单位写成 `<幅值>px` → `NaNdeg`），新增 `Unit::calc_product`。
+      • **形状**：新 `builtins/math/exponents.rs`（pow/sqrt/log 三个）；`$x: Expected 1px to have no units.`
+        从 `trig::ratio` 提到 `math.rs::unitless(name, value, unit)`，现由反三角/sqrt/pow/log 共读（同一个
+        可选 `$base` 也用同一条措辞，`log.hrx::error/base_has_units`）。`math.log(2, null)` 要当“没传 base”
+        读（`log.hrx::base/null`）；`pow(-0.0, -3)` → `calc(-infinity)` 而 `-3.000000000001` 回到
+        `calc(infinity)`（IEEE 只在奇整数上翻转零的符号，`pow/base_negative_zero.hrx::with_exponent/*`）。
+      • **实测**：hrx **1589 → 1777（15.4%，实质 1612）**，`ledger diff precision exponents` =
+        **`regress=0 net=188`**，无效错误仍 **53**；空库复算（`/tmp/qrass-ab7.db`：
+        exp-verify-before 1589 vs exp-verify-after 1777）逐字重现；`cargo test --workspace --no-fail-fast`
+        exit=0（43 块）、clippy `-D warnings` exit 0、sasslint `count=0`。金样单测：`tests/math_exponents.rs`
+        （五个测试），`tests/math_trig.rs` 补上三行 `calc(NaN * 1deg)`。
+      • **一个过程错（值得记）**：中途 `unit.rs` 有个 `&str + &String` 编译错，而我那条链式命令里
+        `cargo test | grep` 与 `HRX_RUN=… | grep` 都没输出，我却把后面的 `ledger diff` 读数当成新结果读了 ——
+        那个 net=179 其实是旧 run 的入库值。重新跑后真数是 net=188。**编译失败时不得读任何“下一个命令的输出”**，
+        每条验收读数都要当条命令自己的输出。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
