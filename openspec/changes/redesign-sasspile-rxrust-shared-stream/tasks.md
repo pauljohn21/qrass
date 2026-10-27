@@ -606,6 +606,14 @@
       body 之前就被剔掉**，body 无从得知；修它需把“未识别标签”递给 body（属注册表形状变更，另开一步）。
       ② hsl 源的颜色不参与混色（无 `0–255` 通道），按同一理由 decline。
       **尺寸警报**：`color/mod.rs` 481、`builtins/color.rs` 478、`tests/color.rs` 432 —— 下一刀开工前先拆。
+      **⑬ 拆了 `builtins/color.rs`**（开工先还上一条债）：`builtins/color/{mod.rs,constructors.rs}` ——
+      构造子（`rgb`/`rgba`/`hsl`/`hsla` + `alpha`/`channels`/`hsl_channels`/`finished`）单独成文件，
+      访问器与轴操作留在域根。拆分经 `ledger diff mix constructors-split` = **net=0 regress=0** 证中性；
+      113 测试 / clippy exit 0 / sasslint exit 0。基线 run 改为 `constructors-split`（1013 / 实质 848）。
+      途中又一次确认方向可见性：**子模块能用父模块的私有项，反向要 `pub(super)`**（四个构造子 statics
+      因此需 `pub(super)`，而 `channels`/`finished` 只在自己文件内用仍保持私有）。
+      **仍欠**：`color/mod.rs` 481 行（数据 + 轴变换）贴线，下一次动它时再拆（可把 `transform_axes`/`mixed`
+      连同 `axes` 入口归到一个 `color/ops.rs`）。
       **发现的缺陷（已由上面的 ⑨ 修掉；这段留作发现记录）**：一开始把 `saturate` 也注册了，结果
       `saturate::css_overload/with_sass_var`（`saturate($c)` 且 `$c: 1`，期望 `saturate(1)`）由 PASS 变 FAIL，
       `regress=1`。根因：**已注册 builtin 被 body 拒绝时，兜底保留的是未求值的源文本**，变量替换丢了。

@@ -34,10 +34,10 @@ alwaysApply: true
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
    **以上均不得重做/重新发明**。当前基线 hrx **1013/11,533**（8.79%，**实质通过 848** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `mix`）；无效错误仍 **53**（曾一度因定长 arity 把
+   A/B 记录 = `reports/hrx.db` 里的具名 run `constructors-split`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一主战场：**1.5 色彩（已开头）**。`src/color.rs` + `builtins/color.rs` 已落 `rgb`/`rgba`：颜色**记住它是用什么
+   下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
    表示法创建的**（unitless 通道→`rgb(18, 52, 86)`、有 `%` 通道→全部转 `%`（`173`→`67.8431372549%`）、
    hex 造的且 opaque→`#112233`、一旦半透→`rgba(17, 34, 51, 0.5)`），通道入口夹紧；**声明里的裸 hex 仍走 `Raw`**
    （`#AbCd` 连大小写都要保留）。 rgb 那批 +30、hsl 那批 +35、颜色名+访问器那批 +20，全部
@@ -68,8 +68,8 @@ alwaysApply: true
    `color(display-p3 …)`/`lab(…)` 会被顺手转成 sRGB —— 那类行仍旧算红（pass 看不出），但内容**是错的**；
    现在逐字。未解决：带 `$method:`/`$space:` 标签的调用仍会被当 legacy 混色（**未绑定标签在进 body 前就
    被剔掉**，body 看不到），要修得先让未识别标签递给 body；hsl 源不混色（decline）。`-grey` 拼法回写已定为
-   **不可测**（语料无 `-grey` 输出）。**尺寸警报**：`color/mod.rs` 481、`builtins/color.rs` 478、
-   `tests/color.rs` 432 —— 下一刀开工先拆。再往后：`mix` 完 → 颜色 `==`；而 `complement` 暂不能动，因为
+   **不可测**（语料无 `-grey` 输出）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
+   （net=0 已验）；`color/mod.rs` 仍 481 行贴线，下次动它时拆 `transform_axes`/`mixed` 到 `color/ops.rs`。再往后：`mix` 完 → 颜色 `==`；而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
