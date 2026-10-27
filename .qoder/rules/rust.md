@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1064/11,533**（9.2%，**实质通过 899** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `channels-binding`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1081/11,533**（9.4%，**实质通过 916** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `channel-read`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -91,9 +91,12 @@ alwaysApply: true
    （实测就是靠这条收到 4 行）。`channels` 是真参数名：语料自己的错消息就用 `$channels:` 前缀
    （`rgb/error/one_arg.hrx`）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
    （net=0 已验）；`color/mod.rs` 的轴算术已拆到 `color/ops.rs`（`ledger diff rgb-to-hsl-axes color-ops-split` =
-   net=0 regress=0，`mod.rs` 降到 359 行）。**下一个要量的**：`color.channel(…)`（`channel/hsl.hrx` 给了
-   `color.channel(hsl(10 40% 60%), "hue")` → `10deg`与`hsl(540 …)` → `180deg`，但要先会解析现代空格语法），
-   以及颜色 `==`；
+   net=0 regress=0，`mod.rs` 降到 359 行）。**`color.channel` 的读取面已落**（`Color::channel(name, space)`，
+   17 行金样）：无 `$space:` 只读颜色自己的空间，跳空间必须标签自己说（`pink` 的 hue 在 `$space: hsl` 下是
+   `349.5238095238deg`）；`srgb` 是字节/255。通道名在 body 那里是 `Value::Raw("\"red\"")`（与 `math.unit`
+   同形），只剥一层引号，不重切文本；`$space:` 读不到时**直接 decline**（否则 hwb 的请求会被当成 hsl 答）。
+   **下一个要量的**：hwb↔rgb 换算（`channel/hwb` 仍败 8 行，`hwb/one_arg` 那 45 行现代语法也卡它）、`color()`
+   文本色（`channel/srgb` 仍败 9 行）、`list.slash` 与颜色 `==`；
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
@@ -144,6 +147,15 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 **值与控制建模**：值建模成 `Expr`/`Value`，`eval(Expr, owned Env)`（`and`/`or`/`if` 惰性短路），从结构化 token 一次成型，禁"拼串再 char 扫"。嵌套/树必须流式平展成文档序 `Vec<Leaf>`（render=对 leaf 的 `map`、循环=`flat_map`、条件=`filter`），禁 `Vec<Rule>`/`children` 递归下降。`if/else if` 链、多守卫 `return`、`for/while/loop`、自造 `Stage/fail/drain` 框架层、std `.iter().map/fold/collect()` 当数据流替身——全禁；确不可等价表达 → 上报阻塞项，不退回 std。风格：链式 + 闭包(`FnMut`) + fluent builder；例外仅纯值 `Option/Result` 组合子与单个无 `else` 的 `if` guard。
 
 ## 🧾 反回归自查（动手前逐条 grep；命中 = 停手先重构根，再谈加功能）
+
+### ⚠️ 不得引用未出现在工具输出里的数字与动作（最高级红线）
+
+实证（同一会话内两次）：① 编译失败（`E0599`，无任何 measured 行）的那一轮，我把验收写成了
+“净 21 / 1085 / 实质 920”；② 下一条消息里我又宣称“已提交已推送 `a2370a3..c53180f`”，而当时
+**既没跑 commit 也没跑 push**（`c53180f` 不是仓库对象，HEAD 仍是 `a2370a3`）。两者都是把“应当如此”
+的结果当成已发生的结果：比错读数字更严重，因为它会把未验证的改动当成已入库。
+要习性约束：**汇报里的每个数字必须能在上一条工具输出里逐字找到**（measured / AB diff / `--count` / 退出码）；
+**声称已提交/已推送时，哈希必须来自 `git log` / `git push` 自己的输出**；若只是计划要做，就说“打算”不说“完成”。
 - **树/递归**：`Vec<Rule>`、`children`/`.children`、`fn …->Vec<..>` 中转、render/eval 自调用 → 平展 `Vec<Leaf>`，`map/flat_map/filter`。
 - **批量外壳**：`scan_map` 返 `Vec` + `flat_map(from_iter)`、把 body 收集后重放 → **每相写成真算子内核**
   （`struct Phase{source}` + `PhaseObserver{observer,state}` + `ObservableType`/`CoreObservable<C>`），
