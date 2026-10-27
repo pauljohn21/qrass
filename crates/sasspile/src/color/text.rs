@@ -320,11 +320,10 @@ impl Color {
     }
 
     /// Whether any channel is not a whole byte — the trigger for printing percentages instead of numbers
-    /// (`grayscale(red)` → `rgb(50%, 50%, 50%)`, `grayscale(#494949)` → `#494949`).
+    /// (`grayscale(red)` → `rgb(50%, 50%, 50%)`, `grayscale(#494949)` → `#494949`). Judged by
+    /// [`Channel::whole`], so the float dust of a round trip cannot turn a whole byte into a percentage row.
     fn fractional(&self) -> bool {
-        self.channels
-            .iter()
-            .any(|channel| channel.byte().fract() != 0.0)
+        self.channels.iter().any(|channel| !channel.whole())
     }
 
     /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255.

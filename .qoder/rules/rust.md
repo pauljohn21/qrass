@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1185/11,533**（10.3%，**实质通过 1020** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `change-axes`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1197/11,533**（10.4%，**实质通过 1032** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `change-hwb`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -113,7 +113,15 @@ alwaysApply: true
    配套三条细则：“越界就打印**写入的那组轴**”（`Color.authored`，先例是 `calc::Content{folded, printed}`；
    从字节反推会把 `hsl(0,100%,120%)` 弄成 `hsl(180,-100%,120%)`）、**判越界前先取整**（`$lightness: 0.5%`
    反推出 -1.1e-15 这种“零的浮点余尘”，裸 double 比较会让它“越界”）、`format_number` 截断后要把 `-0`
-   归零（`rgb(1%, -0%, -0%)` → `rgb(1%, 0%, 0%)`）。`change` 簇内仍败 335（73 要消息）。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
+   归零（`rgb(1%, -0%, -0%)` → `rgb(1%, 0%, 0%)`）。**`change` 还能写 whiteness/blackness（net 12，1185→1197）**：
+   **写与读不对称** —— `color.channel` 跨空间**读**必须给 `$space:`，而 `color.change(#cc6666, $whiteness: 80%)`
+   不给标签就能写（`change/hwb.hrx`，名字本身就定了空间）；新入口 `Color::{with_hwb, hwb_of}`，且
+   “w+b 溢出按和归一”已抽成 `axes::normalise_hwb` 单一来源（三处共用，写三份就会漂三份）。
+   同时把**“是否整字节”的判据定成可推导的容差**：`Channel::whole()` 用 `format_number` 最末一位的一半
+   （10 位小数 ⇒ 5e-11），因为 `color.change(#993333, $blackness: 80%)` 算出的 `51.000000000000014` 会
+   被 `fract() != 0.0` 误判成非整而打 `rgb(20%, 20%, 20%)`（语料要 `#333333`）——与“判越界前先取整”同属
+   “取整属于打印”。`change/hwb::alpha_input`/`alpha_arg` 与 `rgb(#123, 0.5)` 三者对不上任何一条统一规则
+   （带 alpha 要百分比、不带要 hex、后者要数字），**仍留红不拟合**。`change` 簇内仍败 335（73 要消息）。`change/rgb::green/out_of_range` 与 hsl 公式不符（要 hue 120/S +100%，公式给 300/-100%），
    **未解释不当已解决**，不为单行拟合。
    `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别

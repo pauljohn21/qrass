@@ -112,13 +112,69 @@ async fn change_writes_the_hsl_axes_too() {
     }
 }
 
-/// Three rows in this file are **not** claimed, and the reasons are different:
-/// * `red|green|blue/none` (`color.change(black, $red: none)` → `rgb(none 0 0)`) needs a `none` *value*,
-///   which this compiler does not model — a byte channel cannot express it, so the call keeps its text;
-/// * `alpha_arg` names `$alpha:` too, and in-gamut alphas are written above;
-/// * `green/out_of_range` disagrees with the hue derivation: the corpus writes
-///   `hsl(120, 100%, -9.8039215686%)` for `(0, -50, 0)` while the legacy hsl formula gives hue `300` and
-///   saturation `-100%` (while `red/out_of_range` and `blue/out_of_range` both agree with the formula).
+/// **Whiteness and blackness can be written without any `$space:` label** — the name itself says which space
+/// it means (`change/hwb.hrx`; contrast `color.channel`, which needs `$space:` to *read* across spaces).
+/// Every row below is that file's own pair, and they pin three things at once: the origin is kept
+/// (`#cc6666` → `#cc0000`, hex, not `rgb(…)`), an overflowing pair is normalised by its sum
+/// (`color.change(#cc6666, $whiteness: 100%)` → all three channels `83.3333333333%`, i.e. `100/120`), and a
+/// pair that leaves the gamut prints the hsl triple (`color.change(#993333, $whiteness: 50%, $blackness: -20%)`
+/// → `hsl(0, 233.3333333333%, 85%)`).
+#[tokio::test]
+async fn change_writes_whiteness_and_blackness() {
+    for (input, want) in [
+        ("a {b: color.change(#cc6666, $whiteness: 0%)}", "#cc0000"),
+        ("a {b: color.change(#cc6666, $whiteness: 20%)}", "#cc3333"),
+        ("a {b: color.change(#cc6666, $whiteness: 80%)}", "#cccccc"),
+        (
+            "a {b: color.change(#cc6666, $whiteness: 100%)}",
+            "rgb(83.3333333333%, 83.3333333333%, 83.3333333333%)",
+        ),
+        ("a {b: color.change(#993333, $blackness: 0%)}", "#ff3333"),
+        ("a {b: color.change(#993333, $blackness: 20%)}", "#cc3333"),
+        ("a {b: color.change(#993333, $blackness: 80%)}", "#333333"),
+        (
+            "a {b: color.change(#993333, $blackness: 100%)}",
+            "rgb(16.6666666667%, 16.6666666667%, 16.6666666667%)",
+        ),
+        (
+            "a {b: color.change(#993333, $whiteness: 50%, $blackness: -20%)}",
+            "hsl(0, 233.3333333333%, 85%)",
+        ),
+        // Hue travels with the whiteness/blackness pair, by position and by label.
+        (
+            "a {b: color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)}",
+            "#339966",
+        ),
+        (
+            "a {b: color.change($color: blue, $hue: 150, $whiteness: 20%, $blackness: 40%)}",
+            "#339966",
+        ),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}
+
+/// Rows this file does **not** claim, of two different kinds. Some need a `none` value, which this compiler
+/// does not model: `color.change(black, $red: none)` → `rgb(none 0 0)` (`change/rgb.hrx::red/none`), the same
+/// on an hsl colour (`change/hsl.hrx::hue/none`) and on a hwb one (`change/hwb.hrx::whiteness/none`). A byte
+/// channel cannot express `none`, so the call keeps its text.
+///
+/// One is a space this compiler cannot convert (`change/space.hrx::identical`), where keeping the text happens
+/// to match what the corpus prints.
+///
+/// And one pair is **unexplained and left red rather than fitted**: `change/hwb.hrx::alpha_input` and
+/// `…::alpha_arg` print the same colour as `rgba(20%, 60%, 40%, 0.7)` once an alpha is named, while
+/// `…::all` prints it as `#339966` opaque (asserted above) and `rgb(#123, 0.5)` prints decimal channels
+/// (`rgb/two_args::opaque_to/partial`). No mechanism here reconciles those three; inventing one would trade
+/// two visible red rows for a wrong value the pass count cannot see.
+///
+/// A third disagreement sits in the hue derivation itself: `change/rgb.hrx::green/out_of_range` writes
+/// `hsl(120, 100%, -9.8039215686%)` for `(0, -50, 0)` where the legacy hsl formula gives hue `300` and
+/// saturation `-100%`, while that file's `red/` and `blue/out_of_range` rows both agree with the formula.
 #[tokio::test]
 async fn what_change_still_declines() {
     for call in [
@@ -126,8 +182,10 @@ async fn what_change_still_declines() {
         "color.change(black, $red: none)",
         // `change/hsl.hrx::hue/none` — same, on a colour the compiler does hold as axes.
         "color.change(hsl(0deg 100% 50%), $hue: none)",
+        // `change/hwb.hrx::whiteness/none` — and again on a `hwb` colour.
+        "color.change(hwb(180deg 30% 50%), $whiteness: none)",
         // `change/space.hrx::identical` — a request about spaces this compiler cannot convert; the corpus
-        // itself leaves the colour untouched, and keeping the text is the honest near-neighbour.
+        // itself leaves the colour untouched, so keeping the text matches its output.
         "color.change(oklch(50% 0.2 0deg), $space: lab)",
     ] {
         assert_eq!(

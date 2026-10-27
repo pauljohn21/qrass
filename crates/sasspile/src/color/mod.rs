@@ -107,6 +107,17 @@ impl Channel {
         }
     }
 
+    /// Whether this channel **prints** as a whole byte, which is what decides hex/numbers against percentages.
+    ///
+    /// The tolerance is not arbitrary: it is half of the last place `format_number` can print (ten digits
+    /// after the point, so `5e-11`). Without it, float dust decides the form — `color.change(#993333,
+    /// $blackness: 80%)` implies a red channel of `51.000000000000014`, and the corpus prints `#333333`
+    /// rather than `rgb(20%, 20%, 20%)` (`change/hwb.hrx::blackness/high`). Same reason the gamut test in
+    /// [`super::text`] rounds before comparing: **rounding belongs to printing**, both directions.
+    fn whole(self) -> bool {
+        (self.byte() - self.byte().round()).abs() < 5e-11
+    }
+
     /// Clamped into its own scale: percentages to `0–100`, plain numbers to `0–255`. A negative zero
     /// becomes zero, which is what `four_args/clamped::red/minus_zero` shows (`rgb(-0, …)` → `0`).
     ///
@@ -322,13 +333,7 @@ impl Color {
     ///   what the colour *is* has already changed by the time anything reads it back. `101%` and `-1%` reach
     ///   the axes the same way, which is what pins [`crate::axes::hwb_to_hsl`] (`hwb/four_args::whiteness/*`).
     pub fn hwb(hue: &Value, whiteness: &Value, blackness: &Value, alpha: f64) -> Option<Self> {
-        let (white, black) = (number(whiteness)?, number(blackness)?);
-        let (white, black) = if white + black > 100.0 {
-            let span = white + black;
-            (white / span * 100.0, black / span * 100.0)
-        } else {
-            (white, black)
-        };
+        let (white, black) = crate::axes::normalise_hwb(number(whiteness)?, number(blackness)?);
         Some(Self {
             channels: [
                 Channel {

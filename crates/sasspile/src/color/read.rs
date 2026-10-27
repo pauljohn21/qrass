@@ -120,6 +120,23 @@ impl Color {
         }
     }
 
+    /// The colour's `[hue, whiteness, blackness]`, in the form [`Color::with_hwb`] takes back:
+    /// stored for a `hwb` colour, derived from the bytes otherwise (`color.channel(pink, "whiteness",
+    /// $space: hwb)` → `75.2941176471%` reads the same derivation, `channel/hwb.hrx::foreign/*`).
+    /// `None` for an `hsl`-created colour, whose whiteness and blackness no fixture ever asks for.
+    pub fn hwb_of(&self) -> Option<[f64; 3]> {
+        let hue = self.hue()?;
+        match self.representation {
+            Representation::Hwb => Some([hue, self.channels[1].value, self.channels[2].value]),
+            _ if self.writes_bytes() => {
+                let [red, green, blue] = self.channels.map(|channel| channel.byte());
+                let [white, black] = crate::axes::rgb_to_hwb(red, green, blue);
+                Some([hue, white, black])
+            }
+            _ => None,
+        }
+    }
+
     /// The hue in degrees: `359deg` from `hsl(359, 50%, 50%)`, `180deg` from `hsl(540, …)` because the hue
     /// was folded into `0–360` at creation (`color/hue.hrx`), and `210deg` from `#abcdef` — read off the
     /// `rgb` channels through [`Self::axes_of`] (`modules/color/hue.hrx`).

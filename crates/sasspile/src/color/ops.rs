@@ -139,6 +139,29 @@ impl Color {
         }
     }
 
+    /// The same colour with its **whiteness and blackness written**, keeping the caller's own representation:
+    /// `color.change(#cc6666, $whiteness: 80%)` → `#cccccc` (`change/hwb.hrx::whiteness/high`), while a pair
+    /// that leaves the gamut prints the hsl triple it implies —
+    /// `color.change(#993333, $whiteness: 50%, $blackness: -20%)` → `hsl(0, 233.3333333333%, 85%)`
+    /// (`…::out_of_range`), which is [`super::Color::authored`] doing its job.
+    ///
+    /// An `hsl`-created colour is not answered here: no fixture writes whiteness or blackness into one, and
+    /// inventing the round trip through bytes would be a rule nobody stated.
+    pub fn with_hwb(&self, hue: f64, whiteness: f64, blackness: f64) -> Option<Self> {
+        let (white, black) = crate::axes::normalise_hwb(whiteness, blackness);
+        let axes = crate::axes::hwb_to_hsl(hue, white, black);
+        let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
+        self.writes_bytes().then(|| Self {
+            channels: rgb.map(|value| Channel {
+                value,
+                percent: false,
+            }),
+            alpha: self.alpha,
+            representation: self.representation,
+            authored: Some(axes),
+        })
+    }
+
     /// The colour's axes: the stored ones when it is held in hsl, otherwise the round trip
     /// ([`crate::axes`]) of its channels. `pub(super)` because [`super::Color::hsl_channel`] reads the same
     /// axes an operation writes — one path, so an accessor and a `darken` cannot disagree about a colour's

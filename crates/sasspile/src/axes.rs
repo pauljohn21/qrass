@@ -58,6 +58,21 @@ pub(crate) fn axes_to_rgb(hue: f64, saturation: f64, lightness: f64) -> [f64; 3]
     matched.map(|component| (component + offset) * 255.0)
 }
 
+/// The whiteness and blackness a colour **stores** after a pair that overflows it: they are scaled by their
+/// own sum, not clamped — `hwb(0, 101%, 40%)` is `1.01 / 1.41` of the range, and a clamp to 100% would
+/// print `71.4285714286%` where the corpus prints `71.6312056863%` (`hwb/four_args::whiteness/above_max`).
+/// One source for that rule, shared by [`hwb_to_hsl`], [`Color::hwb`](crate::color::Color::hwb) and
+/// [`Color::with_hwb`](crate::color::Color::with_hwb) — a pair of copies is how the two drifted apart last
+/// time a law like this was written down twice.
+pub(crate) fn normalise_hwb(whiteness: f64, blackness: f64) -> (f64, f64) {
+    if whiteness + blackness > 100.0 {
+        let span = whiteness + blackness;
+        (whiteness / span * 100.0, blackness / span * 100.0)
+    } else {
+        (whiteness, blackness)
+    }
+}
+
 /// The hsl axes of a **whiteness/blackness** colour, as `[hue in degrees, saturation in %, lightness in %]`.
 ///
 /// Three readings, each a row of `core_functions/color/hwb/**`. The middle one is why this is not a clamp:
@@ -71,13 +86,8 @@ pub(crate) fn axes_to_rgb(hue: f64, saturation: f64, lightness: f64) -> [f64; 3]
 /// * `hwb(0, -1%, 40%)` → `[0, 103.3898305085, 29.5]` (`four_args::whiteness/below_min`) — a negative
 ///   whiteness is **not** clamped either; it pushes the lightness to `29.5%` and the saturation past 100%.
 pub(crate) fn hwb_to_hsl(hue: f64, whiteness: f64, blackness: f64) -> [f64; 3] {
-    let (white, black) = (whiteness / 100.0, blackness / 100.0);
-    let (low, high) = if white + black > 1.0 {
-        let sum = white + black;
-        (white / sum, black / sum)
-    } else {
-        (white, black)
-    };
+    let (low, high) = normalise_hwb(whiteness, blackness);
+    let (low, high) = (low / 100.0, high / 100.0);
     let (min, max) = (low, 1.0 - high);
     let lightness = (min + max) / 2.0;
     let span = max - min;

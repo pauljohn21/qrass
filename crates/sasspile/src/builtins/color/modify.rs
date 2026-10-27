@@ -65,46 +65,71 @@ fn changed(given: Vec<Given>) -> Result<Value, SassError> {
         Some(colour) => colour,
         None => return decline,
     };
-    // Whiteness and blackness are a different space's axes and `$space:` asks for a space this compiler has
-    // no conversion for, so both decline (`change/hwb.hrx` and the modern-space `change/*.hrx` files).
-    let beyond = ["whiteness", "blackness", "space"]
-        .into_iter()
-        .any(|name| Given::names(&given, name));
+    // `$space:` asks for a space this compiler has no conversion for, so it declines; the modern-space
+    // `change/*.hrx` files (a98-rgb, display-p3, lab, lch, oklab, oklch, xyz, …) stay red for that reason.
+    let beyond = Given::names(&given, "space");
     let bytes = [("red", 0), ("green", 1), ("blue", 2)]
         .into_iter()
         .filter(|(name, _)| Given::names(&given, name))
         .collect::<Vec<(&str, usize)>>();
-    let axes = ["hue", "saturation", "lightness"]
+    let hsl = ["saturation", "lightness"]
         .into_iter()
         .filter(|name| Given::names(&given, name))
         .collect::<Vec<&str>>();
-    // Writing both spaces in one call is not read here: which one applies second decides the result, and
-    // no `change` fixture states the order.
-    if beyond || (bytes.is_empty() && axes.is_empty()) || (!bytes.is_empty() && !axes.is_empty()) {
+    let hwb = ["whiteness", "blackness"]
+        .into_iter()
+        .filter(|name| Given::names(&given, name))
+        .collect::<Vec<&str>>();
+    let hue = Given::names(&given, "hue");
+    // Which space the call is writing: bytes, the hsl axes, or the hwb ones. `$hue:` belongs to both axis
+    // spaces (`change/hsl.hrx::hue/*` writes it as hsl, `change/hwb.hrx::all` alongside whiteness and
+    // blackness), so it never decides on its own — but naming hsl *and* hwb axes together, or bytes together
+    // with axes, would need an order no fixture states, and those decline.
+    let named = bytes.len() + hsl.len() + hwb.len() + usize::from(hue);
+    if beyond
+        || named == 0
+        || (!hsl.is_empty() && !hwb.is_empty())
+        || (!bytes.is_empty() && named > bytes.len())
+    {
         return decline;
     }
-    // A named axis that cannot be read stops the call rather than keeping its current value:
+    // A named channel that cannot be read stops the call rather than keeping its current value:
     // `color.change(hsl(0deg 100% 50%), $hue: none)` wants `hsl(none 100% 50%)`, and answering it with the
     // unchanged hue would print a colour the call did not ask for.
-    let writes = axes
-        .iter()
-        .map(|name| Some((*name, axis(&given, name)?)))
+    let reads = ["hue", "saturation", "lightness", "whiteness", "blackness"]
+        .into_iter()
+        .filter(|name| Given::names(&given, name))
+        .map(|name| Some((name, axis(&given, name)?)))
         .collect::<Option<Vec<(&str, f64)>>>();
-    let built = match (bytes.is_empty(), writes) {
-        (false, _) => bytes
+    let reads = match reads {
+        Some(reads) => reads,
+        None => return decline,
+    };
+    let built = if !bytes.is_empty() {
+        bytes
             .into_iter()
             .try_fold(colour.clone(), |colour, (name, index)| {
                 let value = byte(Given::find(&given, name)?)?;
                 colour.with_channel(index, value)
-            }),
-        (true, Some(writes)) => colour.with_axes(|[hue, saturation, lightness]| {
+            })
+    } else if !hwb.is_empty() {
+        let current = match colour.hwb_of() {
+            Some(axes) => axes,
+            None => return decline,
+        };
+        colour.with_hwb(
+            keep(&reads, "hue", current[0]),
+            keep(&reads, "whiteness", current[1]),
+            keep(&reads, "blackness", current[2]),
+        )
+    } else {
+        colour.with_axes(|[hue, saturation, lightness]| {
             [
-                keep(&writes, "hue", hue),
-                keep(&writes, "saturation", saturation),
-                keep(&writes, "lightness", lightness),
+                keep(&reads, "hue", hue),
+                keep(&reads, "saturation", saturation),
+                keep(&reads, "lightness", lightness),
             ]
-        }),
-        (true, None) => return decline,
+        })
     };
     let Some(built) = built else {
         return decline;
