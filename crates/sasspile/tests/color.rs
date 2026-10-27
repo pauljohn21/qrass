@@ -172,8 +172,12 @@ async fn accessors_read_channels_and_the_keyword_table_matches_the_corpus() {
     }
 }
 
-/// The honest edge: a colour held in the **hsl** space has no `0–255` channels to hand out, and converting
-/// is a separate change (its own fixture rows). Reporting a number computed off the wrong axes would be a
+/// The honest edge: a colour held in the **hsl** space has no `0–255` channels to hand out.
+///
+/// This one is measured rather than assumed, unlike the reverse direction below: `grep`ing every `.hrx`
+/// under `spec/` for `color.(red|green|blue)(…hsl(…))` returns **zero rows** — the hsl-space fixtures read
+/// the hsl axes instead (`channel/hsl.hrx` reads `hue`/`saturation`/`lightness`), so there is no golden to
+/// write an `hsl`→`rgb` conversion against. Reporting a number computed off the wrong axes would be a
 /// wrong answer scored as a pass, so the call declines and the text stands.
 #[tokio::test]
 async fn an_hsl_colour_declines_an_rgb_channel() {
@@ -215,20 +219,31 @@ async fn hue_saturation_lightness_read_the_hsl_axes() {
     }
 }
 
-/// The other direction of the same honesty: an `rgb` colour asked for a hue has no hsl axis stored, and
-/// inventing one without a golden to check the rounding against would be a wrong answer scored as a pass.
-/// The call declines, so the text stands — until the conversion lands with its own fixtures.
+/// The **other** direction. Three of these rows are fixtures — `core_functions/modules/color/{hue,
+/// saturation,lightness}.hrx` each feeds an `rgb`-space colour to a hsl accessor, which is what overturned
+/// the earlier version of this file (it declined every such call as "no golden exists"). The expectations
+/// are the corpus's own numbers, printed with the units it states:
+/// * `color.hue(#abcdef)` → `210deg`, `color.saturation(#abcdef)` → `68%`, `color.lightness(#abcdef)` →
+///   `80.3921568627%` (`#abcdef` = `(171, 205, 239)`).
+///
+/// The last two rows are **not** fixture rows; they are the same formula checked against a statement the
+/// corpus does make: `values/colors/equality.hrx` writes `purple == hsl(300, 100%, 25.098039215686%)`, and
+/// `purple` = `(128, 0, 128)` gives exactly hue `300` and saturation `100%` here. A grey is deliberately not
+/// asserted: the same file states `gray == hsl(none 0% 50.196078431373%)`, and how `color.hue` prints a
+/// colour with no hue is not something these three rows settle.
 #[tokio::test]
-async fn an_rgb_colour_declines_a_hue_request() {
-    for call in [
-        "color.hue(#f00)",
-        "color.saturation(red)",
-        "color.lightness(#ff0000)",
+async fn rgb_colours_answer_hsl_axis_questions() {
+    for (input, want) in [
+        ("a {b: color.hue(#abcdef)}", "210deg"),
+        ("a {b: color.saturation(#abcdef)}", "68%"),
+        ("a {b: color.lightness(#abcdef)}", "80.3921568627%"),
+        ("a {b: color.hue(purple)}", "300deg"),
+        ("a {b: color.saturation(purple)}", "100%"),
     ] {
         assert_eq!(
-            css(&format!("a {{b: {call}}}")).await,
-            format!("a {{\n  b: {call};\n}}\n"),
-            "an unconvertible request must not be answered: {call}"
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
         );
     }
 }

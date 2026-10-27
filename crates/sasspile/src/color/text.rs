@@ -257,10 +257,29 @@ impl Color {
         }
     }
 
+    /// Whether any channel is not a whole byte — the trigger for printing percentages instead of numbers
+    /// (`grayscale(red)` → `rgb(50%, 50%, 50%)`, `grayscale(#494949)` → `#494949`).
+    fn fractional(&self) -> bool {
+        self.channels
+            .iter()
+            .any(|channel| channel.byte().fract() != 0.0)
+    }
+
+    /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255.
+    fn percent_form(&self) -> String {
+        let channels = self.channels.map(|channel| Channel {
+            value: channel.percent_form(),
+            percent: true,
+        });
+        self.legacy(channels, true)
+    }
+
     /// The legacy functional form: `rgb(r, g, b)` while opaque, `rgba(…)` once there is alpha (which is
     /// what every `four_args/clamped` row prints), and channels in whichever scale this representation
-    /// uses. `pub(super)` because [`super::Color::percent_form`] reaches for it from the parent module.
-    pub(super) fn legacy(&self, printed: [Channel; 3], percent: bool) -> String {
+    /// uses. Private to this file: the whole rounding-and-printing law — [`Color::fractional`],
+    /// [`Color::percent_form`] and this — moved here from the parent module, so nothing outside it needs to
+    /// reach in any more.
+    fn legacy(&self, printed: [Channel; 3], percent: bool) -> String {
         let channels = printed
             .iter()
             .map(|channel| {

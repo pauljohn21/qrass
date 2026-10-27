@@ -1,4 +1,10 @@
-//! Color — a colour **created by a function**, and the representation law that decides how it prints.
+//! Color — a colour **created by a function**, as data: its channels, its alpha, and the
+//! representation that decides how it prints.
+//!
+//! Three files, one law each, split because each was contradicted by the corpus on its own terms: this one
+//! holds the value and its reading ([`Color::byte`], [`Color::hsl_channel`]), [`ops`] holds the axis
+//! arithmetic that moves a colour through hsl, and [`text`] holds the printing law (whole bytes print as
+//! numbers or hex, anything between prints as percentages, keyword-created colours print their keyword).
 //!
 //! ## Why a colour is not just channels
 //!
@@ -36,6 +42,7 @@
 
 use crate::value::Value;
 
+mod ops;
 mod text;
 
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
@@ -242,8 +249,13 @@ impl Color {
     }
 
     /// One `0–255` channel, for the accessors. A colour held in **another space** returns `None` rather
-    /// than a wrong number: reading `color.red(hsl(0, 100%, 50%))` needs the rgb↔hsl conversion, which is
-    /// its own change (the fixtures for it are `color/red.hrx` rows beyond the four pinned today).
+    /// than a wrong number.
+    ///
+    /// Nothing in the corpus contradicts that caution, and the measurement says it is not a gap I should
+    /// fill by inference: `grep`ing every `.hrx` under `spec/` for `color.(red|green|blue)(…hsl(…))` finds
+    /// **no row at all** — the hsl-space fixtures read the hsl axes (`channel/hsl.hrx`), which
+    /// [`Self::hsl_channel`] now serves. `hsl` → `rgb` therefore has no golden to be written against, while
+    /// the reverse direction does and is implemented.
     pub fn byte(&self, index: usize) -> Option<f64> {
         match self.representation {
             Representation::Legacy
@@ -262,161 +274,34 @@ impl Color {
         self.alpha
     }
 
-    /// The hue in degrees, for `color.hue` (`hue.hrx`: `359deg`, and `hsl(540, 50%, 50%)` → `180deg`
-    /// because the hue was already folded into `0–360` at creation).
+    /// The hue in degrees: `359deg` from `hsl(359, 50%, 50%)`, `180deg` from `hsl(540, …)` because the hue
+    /// was folded into `0–360` at creation (`color/hue.hrx`), and `210deg` from `#abcdef` — read off the
+    /// `rgb` channels through [`Self::axes_of`] (`modules/color/hue.hrx`).
     pub fn hue(&self) -> Option<f64> {
         self.hsl_channel(0)
     }
 
-    /// The saturation, for `color.saturation` (`saturation.hrx`: `100%`, `0%`, `50%`, `0.5%`, `42%`).
+    /// The saturation, for `color.saturation`: `100%`, `0%`, `50%`, `0.5%`, `42%` (`color/saturation.hrx`)
+    /// and `68%` for `#abcdef` (`modules/color/saturation.hrx`).
     pub fn saturation(&self) -> Option<f64> {
         self.hsl_channel(1)
     }
 
-    /// The lightness, for `color.lightness` (`lightness.hrx`: the same five readings in the L axis).
+    /// The lightness, for `color.lightness`: the same five readings in the L axis (`color/lightness.hrx`)
+    /// and `80.3921568627%` for `#abcdef` (`modules/color/lightness.hrx`).
     pub fn lightness(&self) -> Option<f64> {
         self.hsl_channel(2)
     }
 
-    /// One axis of a colour **held in the hsl space**, or nothing.
+    /// One axis of the colour, wherever it is stored: the channels themselves for an `hsl` colour, the
+    /// [`crate::axes`] round trip for a colour held in another space.
     ///
-    /// An `rgb`/hex/keyword-sourced colour is not read here: every value row of
-    /// `core_functions/color/{hue,saturation,lightness}.hrx` feeds an `hsl(…)` colour (the non-`hsl`
-    /// arguments in those files are `error/*` rows, which want messages this project has not built), so
-    /// the rgb→hsl conversion has no golden to be written against yet. Declining keeps a converted guess
-    /// out of the pass count; the conversion is `adjust`/`change`/`channel`'s prerequisite and its own step.
+    /// The converted reading is what the corpus asks for, row by row: `color.lightness(#abcdef)` →
+    /// `80.3921568627%` is `(239 + 171)/2` of 255 and `color.saturation(#abcdef)` → `68%` is
+    /// `68/(510-410)`, both from `modules/color/*.hrx`. These three rows are why the conversion is safe to
+    /// read here; an `hsl` colour's own axes are already stored, so no round trip is taken for them.
     fn hsl_channel(&self, index: usize) -> Option<f64> {
-        match self.representation {
-            Representation::Hsl => self.channels.get(index).map(|channel| channel.value),
-            _ => None,
-        }
-    }
-
-    /// The same colour after a change to its **hsl axes**, wherever it is stored, with the two clamps and
-    /// the hue wrap the fixtures state:
-    /// * `saturate(plum, 100%)` and `saturate(plum, 53%)` both give `#ff7eff` — saturation clamps at 100
-    ///   and, landing on whole bytes, prints hex (`core_functions/color/saturate.hrx::{max,max_remaining}`);
-    /// * `desaturate(plum, 100%)` → `rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)` — lightness
-    ///   `(221 + 160)/2 = 190.5` of 255 is not a whole byte, so percentages (`desaturate.hrx::max`);
-    /// * `darken(red, 100%)` clamps lightness at 0 rather than going negative.
-    ///
-    /// `color.grayscale` is the same entry with saturation pinned to zero, which is why it no longer needs
-    /// its own path.
-    pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Self {
-        let [hue, saturation, lightness] = change(self.axes_of());
-        let axes = [
-            hue.rem_euclid(360.0),
-            saturation.clamp(0.0, 100.0),
-            lightness.clamp(0.0, 100.0),
-        ];
-        match self.representation {
-            Representation::Hsl => Self {
-                channels: [
-                    Channel {
-                        value: axes[0],
-                        percent: false,
-                    },
-                    Channel {
-                        value: axes[1],
-                        percent: true,
-                    },
-                    Channel {
-                        value: axes[2],
-                        percent: true,
-                    },
-                ],
-                ..self.clone()
-            },
-            _ => Self::from_axes(self, axes),
-        }
-    }
-
-    /// The colour's axes: the stored ones when it is held in hsl, otherwise the round trip
-    /// ([`crate::axes`]) of its channels.
-    fn axes_of(&self) -> [f64; 3] {
-        match self.representation {
-            Representation::Hsl => self.channels.map(|channel| channel.value),
-            _ => self.axes(),
-        }
-    }
-
-    /// The hsl axes of an `rgb`-space colour, via [`crate::axes`] — the conversion is pure `f64` and is
-    /// tested there on its own, so this only hands it the channel values.
-    fn axes(&self) -> [f64; 3] {
-        let [red, green, blue] = self.channels.map(|channel| channel.byte());
-        crate::axes::rgb_to_axes(red, green, blue)
-    }
-
-    /// Rebuild a colour of the same kind from hsl axes, keeping the channels un-rounded so the printing
-    /// rule can decide between numbers, percentages and hex.
-    fn from_axes(source: &Color, [hue, saturation, lightness]: [f64; 3]) -> Self {
-        let channels = crate::axes::axes_to_rgb(hue, saturation, lightness);
-        Self {
-            channels: channels.map(|value| Channel {
-                value,
-                percent: false,
-            }),
-            alpha: source.alpha,
-            representation: source.representation,
-        }
-    }
-
-    /// Whether any channel is not a whole byte — the trigger for printing percentages instead of numbers
-    /// (`grayscale(red)` → `rgb(50%, 50%, 50%)`, `grayscale(#494949)` → `#494949`).
-    fn fractional(&self) -> bool {
-        self.channels
-            .iter()
-            .any(|channel| channel.byte().fract() != 0.0)
-    }
-
-    /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255.
-    fn percent_form(&self) -> String {
-        let channels = self.channels.map(|channel| Channel {
-            value: channel.percent_form(),
-            percent: true,
-        });
-        self.legacy(channels, true)
-    }
-
-    /// The legacy `mix`: an **alpha-weighted** average in sRGB, whose shape only this formula explains.
-    /// Verified row by row against `core_functions/color/mix/{unweighted,explicit_weight,alpha}.hrx`:
-    /// * `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)` — with equal
-    ///   alphas the weight is a plain 0.5, giving `(145 + 1)/2 = 73` over 255;
-    /// * `color.mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → `rgba(42.7450980392%, …, 0.55)` — `w = 0`,
-    ///   `a = 0.5`, so the first colour carries `0.75`: `145 × 0.75 + 1 × 0.25 = 109`, and alpha is the
-    ///   average; the mirrored row (`0.4`/`0.9`) gives `0.25` → `37` → `14.5098039216%`;
-    /// * `color.mix(#91e16f, transparent)` → `rgba(145, 225, 111, 0.5)` — `a = 1` makes the first colour
-    ///   carry everything, and the result stays whole-byte so it prints numbers;
-    /// * the result keeps the **first** colour's representation, which is what makes that last row print
-    ///   numbers rather than a keyword when the other argument is `transparent`.
-    ///
-    /// A colour held in the hsl space has no `0–255` channels to mix, so the call declines rather than
-    /// inventing a converted answer.
-    pub fn mixed(first: &Color, second: &Color, weight: f64) -> Option<Self> {
-        let span = first.alpha - second.alpha;
-        let tilt = 2.0 * (weight / 100.0).clamp(0.0, 1.0) - 1.0;
-        let ratio = if tilt * span == -1.0 {
-            tilt
-        } else {
-            (tilt + span) / (1.0 + tilt * span)
-        } / 2.0
-            + 0.5;
-        let channel = |colour: &Color, index: usize| match colour.representation {
-            Representation::Hsl => None,
-            _ => Some(colour.channels[index].byte()),
-        };
-        let [red, green, blue] = [0, 1, 2].map(|index| {
-            let value = channel(first, index)? * ratio + channel(second, index)? * (1.0 - ratio);
-            Some(Channel {
-                value,
-                percent: false,
-            })
-        });
-        Some(Self {
-            channels: [red?, green?, blue?],
-            alpha: (first.alpha + second.alpha) / 2.0,
-            representation: first.representation,
-        })
+        self.axes_of().get(index).copied()
     }
 
     /// A colour from `0–255` byte values, for hex parsing.

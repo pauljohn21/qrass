@@ -645,12 +645,43 @@
       所以访问器只读已存在 hsl 里的轴，不新造换算。`hue.hrx` 给的单位律（推导不出来的那部分）：
       hue 打 **`359deg`/`180deg`/`0deg`/`123deg`/`0.5deg`**，saturation/lightness 打 **`100%`/`0%`/`50%`/`0.5%`/`42%`**；
       `hsl(540, …)` → `180deg` 靠的是创建时已经做过的 mod-360 折叠，访问器不再重算。
-      公共形状收干到一个 `accessor(args, unit, read)`（单位由轴决定，不在各 body 里重复 arity 分支）。
+      公共形状收敛到一个 `accessor(args, unit, read)`（单位由轴决定，不在各 body 里重复 arity 分支）。
       **实测**：hrx **932 → 949（实质 767 → 784）**，`ledger diff color-names color-axes` =
       **`regress=0 net=17`**（hue 7 / saturation 5 / lightness 5），无效错误仍 **53**。
       **仍不做也不装成做了**：rgb 来路的色被问 hue（`color.hue(#f00)`）一律 decline 逐字，已钉成测试——
-      rgb→hsl 换算在没有金样可用校舍入之前不写；下一步先取换算的金样（`adjust`/`change`/`channel`/`mix`/`grayscale`
+      rgb→hsl 换算在没有金样可校验之前不写；下一步先取换算的金样（`adjust`/`change`/`channel`/`mix`/`grayscale`
       里那群 `red`/`blue`/`pink` 源的行）再动手，而不是先写公式再找理由。
+      **【上面的“不需要换算”与“一律 decline”已被 ⑮ 推翻并更正】**金样确实存在，只是不在
+      `core_functions/color/{hue,saturation,lightness}.hrx`，而在 `core_functions/modules/color/` 同名文件里——
+      我当初只读了三个同名的 legacy 文件就断言“全语料无金样”，这是**取证面太小**，不是结论。
+      **⑮ rgb→hsl 换算已落（访问器读换算出来的轴），同时纠正两处我的推定**（已实测）：
+      • **被推翻的推定 1**：我上一轮说“`color.red(hsl(0, 100%, 50%))` = 255 是金样”。实测：
+        `grep` 全 `spec/` 找 `color.(red|green|blue)(…hsl(…))` **一条也没有** —— 那是我把它当 fixture 说了。
+        所以 `Color::byte` 对 `Hsl` 仍 decline，但理由改成“语料无此类行”（已把 grep 结论写进代码与测试注释）。
+      • **被推翻的推定 2**：“rgb 源被问 hsl 轴无金样”不成立。`core_functions/modules/color/{hue,
+        saturation,lightness}.hrx` 各有一行：`color.hue(#abcdef)` → `210deg`、`color.saturation(#abcdef)` →
+        `68%`、`color.lightness(#abcdef)` → `80.3921568627%`。改法只有一处：`hsl_channel` 从“只认 Hsl 存的轴”
+        改为读 `axes_of()`（Hsl 用存下的轴，其余走 `crate::axes::rgb_to_axes`），访问器与 `darken` 因此共用同一条
+        轴路径，不会各算各的。
+      • **顺带否掉自己“要修精度”的假设**：我先怀疑 hue 因“先除 255”得 209.999…，实际 IEEE754 下
+        两条路都精确给 210（用 node 当计算器核了一次——但这违反“禁脚本量具”的纪律，已改掉做法，
+        正确的证据是三条 fixture 行本身与单测）。**没有为不存在的 bug 改代码**。
+      • 测试的诚实边界：`rgb_colours_answer_hsl_axis_questions` 里只有前三行是 fixture；后两行
+        （`color.hue(purple)` → `300deg`、`color.saturation(purple)` → `100%`）标注为“同一公式对语料自陈
+        陈述的交叉校验”（`values/colors/equality.hrx` 写 `purple == hsl(300, 100%, 25.098039215686%)`）。
+        灰色**不**断言：同文件写 `gray == hsl(none 0% 50.196078431373%)`，这几行不足以定“无 hue 怎么打”。
+      • **还了一条债**：`color/mod.rs` 已到 486 行，按注册过的方案拆出 `color/ops.rs`
+        （`transform_axes`/`axes_of`/`axes`/`from_axes`/`mixed` = 轴算术），并把 `fractional`/`percent_form`
+        并入 `color/text.rs`（打印律与 `to_css` 同处，`legacy` 因此不再需要 `pub(super)`）。拆分经
+        `ledger diff rgb-to-hsl-axes color-ops-split` = **net=0 regress=0** 证中性；`mod.rs` 359 行。
+      **实测**：hrx **1013 → 1016（实质 848 → 851）**，`ledger diff constructors-split rgb-to-hsl-axes` =
+      **`regress=0 net=3`**，三条全部单例复算为 `total=1 pass=1 pass_substantive=1`；无效错误仍 **53**；
+      114 测试 / 0 失败、clippy exit 0、sasslint exit 0。
+      **量具的两条新发现（不改代码，先记账）**：① `HRX_DB=<相对路径>` 是按 **crate 目录**解析的
+      （`target/verify-ab.db` 变成 `crates/sasspile/target/…` 而打不开，报 exit 1 而不是静默错），复算必须用绝对路径；
+      ② `modules/color/*.hrx` 这类**单例文件**（section 直接叫 `input.scss`，无 `<name>/` 前缀）的 key 尾部为空
+      （`…hue::`），合法且不撞名，但 `warning` 段（这批行期望一条 `color.hue() is deprecated` 弃用警告）
+      **harness 不比对** —— 这 3 行是“输出对、警告缺”，不得当成 deprecation 已实现。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

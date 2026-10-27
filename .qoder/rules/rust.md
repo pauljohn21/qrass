@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1013/11,533**（8.79%，**实质通过 848** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `constructors-split`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1016/11,533**（8.81%，**实质通过 851** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `color-ops-split`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -45,19 +45,25 @@ alwaysApply: true
    标签（`rgb($red: 0, …)`、`hsl($hue: 0, …)` 已绿；“必需参数缺失”只约束定长签名——但 arity 错误仍在进 body
    之前，所以带 CSS 重载的名字一律用 variadic，否则 filter 写法会被误报致命）。已落 `color.red/green/blue/alpha`
    访问器，颜色名最初取自一个名字表依赖（**现已换成 `color`，见下**；**只用数据**，解析与打印不从它来；
-   已拿 6 个语料自陈的名字做抽检）；`color.hue/saturation/lightness` 也已落（**全 17 条金样行用的都是
-   `hsl(…)` 色**，所以本刀不需换算；单位律由金样给出：hue → `359deg`，saturation/lightness → `42%`）。
+   已拿 6 个语料自陈的名字做抽检）；`color.hue/saturation/lightness` 也已落（legacy 那 17 条金样行用的都是
+   `hsl(…)` 色；单位律由金样给出：hue → `359deg`，saturation/lightness → `42%`）。
    **颜色名的最终依赖 = `color`（linebender，活跃）的 `parse_color`**：`color-name` 因不再维护而被剔除
    （未知 bug 风险比它的多 7 个别名更有分量）；`color` 词表缺的 7 个 `-grey` 拼法用“拼法折叠 `grey`→`gray`”
-   补齐，**不录入任何手敲 RGB 值**。已落 **rgb↔hsl 换算**（`src/axes.rs`，纯 f64，故意不取整）与
+   补齐，**不录入任何手敲 RGB 值**。已落 **rgb↔hsl 换算**（`src/axes.rs`，纯 f64，故意不取整）**与它的读取面**
+   （`Color::hsl_channel` 走 `axes_of()`，所以 `color.hue(#abcdef)` → `210deg`、`color.saturation(#abcdef)` →
+   `68%`、`color.lightness(#abcdef)` → `80.3921568627%`，三条来自
+   `core_functions/modules/color/{hue,saturation,lightness}.hrx`；当时“全语料无此类金样”的断言是**取证面太小**——
+   只读了同名的 legacy 文件。反向 `hsl`→`rgb`（`color.red(hsl(…))`）**仍 decline 且有依据**：grep 全 `spec/`
+   找此类调用**一条也没有**，不得拿“255”当金样说话）。
    **打印律**：通道不是整字节就打百分比（`grayscale(#633736)` → `rgb(30%, 30%, 30%)`），整字节就打
    数值/hex（`grayscale(#494949)` → `#494949`）——取整属于打印。轴变换已统一到
    `Color::transform_axes`（`darken`/`lighten`/`saturate`/`desaturate`/`adjust-hue`/`grayscale` 全部已接）。
    **decline 律（本轮实测钉下）**：被 builtin 拒绝的调用必须保留**词元原文**且只替换其中的**变量读取**
    （走 `expr::interpolated`）：实参内部空格要留（`rgb(none 52 66)`、`attr(c, %)`），未绑定标签要留
    （`math.max($number1: 1, 2)`），而 `$c` 必须变成它的值（`saturate($c)` → `saturate(1)`）。用求值后的
-   实参重建文本已实测为 **40 条回归**，不得重试。**颜色文件已拆：`src/color/mod.rs`（数据 + 轴变换）与
-   `src/color/text.rs`（表示法与舍入律）**。反向写名已落，但它是**按来源**而非按值：只有由关键字创建的
+   实参重建文本已实测为 **40 条回归**，不得重试。**颜色文件已拆三处**：`src/color/mod.rs`（数据与读取）、
+   `src/color/ops.rs`（轴算术 `transform_axes`/`axes_of`/`mixed`）、`src/color/text.rs`（表示法与舍入律，
+   `fractional`/`percent_form`/`legacy` 全在本文件私有）。反向写名已落，但它是**按来源**而非按值：只有由关键字创建的
    颜色（`Representation::Named`）才在“opaque + 整字节 + 匹配关键字”时回写名字（`lighten(red, 0%)` → `red`、
    `rgb(transparent, 1)` → `black`），而 `rgb(0, 0, 0)` 仍打 `rgb(0, 0, 0)`（六行金样），不匹配则回退到
    hex（`complement(turquoise)` → `#e04050`）。148 个**只有拼法**在 `color/text.rs::NAMES`，值全向
@@ -71,7 +77,11 @@ alwaysApply: true
    “带不带标签”只有 registry 能定 —— 在词元层用 `named_argument` 猜会把 `saturate($c)` 弄红（实测 regress=1）。
    剩余未解决：hsl 源不混色（decline）。`-grey` 拼法回写已定为
    **不可测**（语料无 `-grey` 输出）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
-   （net=0 已验）；`color/mod.rs` 仍 481 行贴线，下次动它时拆 `transform_axes`/`mixed` 到 `color/ops.rs`。再往后：`mix` 完 → 颜色 `==`；而 `complement` 暂不能动，因为
+   （net=0 已验）；`color/mod.rs` 的轴算术已拆到 `color/ops.rs`（`ledger diff rgb-to-hsl-axes color-ops-split` =
+   net=0 regress=0，`mod.rs` 降到 359 行）。**下一个要量的**：`color.channel(…)`（`channel/hsl.hrx` 给了
+   `color.channel(hsl(10 40% 60%), "hue")` → `10deg`与`hsl(540 …)` → `180deg`，但要先会解析现代空格语法），
+   以及颜色 `==`；
+   `adjust`/`change` 那两大群仍需 `change` 的“按通道改写 + 表示法选择”律。而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
@@ -202,6 +212,11 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
   `substr` 切片多吞一个引号字符，使“仅差空白/仅差大小写”都报 0，差点得出“无 cheap win”的结论。同类第二次：
   `ledger passed <run> operators/` 对**根本没扫过该簇的** run 报 29 条“通过”（库不记测量范围）。新增读数
   自己也要带阳性对照与“匹配为空”两条测试，否则它只是另一个会静默失效的量具。
+- **`HRX_DB` 的相对路径按 crate 目录解析**：`HRX_DB=target/x.db` 会变成`crates/sasspile/target/x.db`，因目录不存在而
+  直接报 `unable to open database file`（好在是 exit 1，不是静默错）。空库复算一律用**绝对路径**。
+- **harness 不比对 `warning` 段**：不少行同时期望一条 deprecation 警告（如 `core_functions/modules/color/hue::`
+  期望 `color.hue() is deprecated`）。这类行“输出对、警告缺”，**不得据此宣称 deprecation 已实现**；
+  单例文件（section 直接叫 `input.scss`）的 key 尾部为空（`…hue::`）是合法的，不撞名。
 - **链式量具命令先确认 `pwd`**：shell 会话会复用，cwd 会漂到子模块里（本轮实际发生：漂进 `sass-spec/spec`）。
   在这种目录下用相对路径读写会静默写错地方或读不到文件，而**用相对路径去读语料恰好仍然成立**，
   所以错误不会报错只会被隐藏——路径一律用绝对路径或先 `cd` 到仓根。
