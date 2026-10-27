@@ -961,8 +961,30 @@
         `tests/color_diagnostics.rs` 钉九条消息；`tests/color_scale.rs` 里“`$hue:` 逐字”的断言已翻成
         按消息断言（第七次“旧断言前提被实现推翻”）。
       • **仍未做**：`*/none`（缺通道值，要 `none` 这个值本身）、`Color space rgb doesn't have a channel with
-        this name.`（`incompatible_channel` + `mixed_formats`）、`$space:`/现代空间、`Undefined function.`、
+        this name.`（`incompatible_channel`+`mixed_formats`）、`$space:`/ 现代空间、`Undefined function.`、
         `Unknown color space "c".`。
+      **㉙b `math.clamp`/`hypot` 已注册，换算表归一到 `unit::UNITS` 一处**（已实测，run `ordering`；
+      时间上紧接 ㉙，但夹在 ㉕ 与 ㉖ 之间写，因为它与 ㉗–㉙ 同属 math 域的一条线）：
+      • **表归一**：`math.rs` 自带的那张十位小数长度表已删，`to_base`/`dimension` 都改读
+        `crate::unit::conversion`（新增该 accessor，返回 `Option<(&'static str, f64)>`）。直接的导火索是
+        `hypot.hrx::units`：`math.hypot(3cm, 4mm * 10, 5q * 40, math.div(6in, 2.54), 7px * math.div(96, 2.54))`
+        → `11.6189500386cm` 需要 `q`（= 1/4 mm）与精确的 cm/in 关系，而 `q` 只在共享表里。
+      • **一条比较，两种消息**：新增 `compare`（`Ordered`/`PartlyUnitless`/`Clash`/`Unproven`）与
+        `compare_named`。`min`/`max` 的消息不点名（`1px and 2s have incompatible units.`），而
+        `clamp`/`hypot` 必须点两个名字且“先比到谁就报谁”（`$number: 1px and $min: 1deg …` vs
+        `$max: 1px and $min: 1deg …`；`hypot` 用 1 基的 `$numbers[2]`/`$numbers[1]`），而“只一边有单位”
+        另有从句 —— 同一规则写两遍就会漂，所以只有一个 `compare`。
+      • **`clamp` 的两个取平方向向**（三行 `preserves_units` 共同定出）：向内 `<`（等于上界给上界）、
+        向外 `<=`（等于下界给下界），返回原写单位；`clamp(1, 2, 0)` → `1` 还否定“两个独立比较”。
+      • **第八次“旧断言前提被实现推翻”**：`tests/builtins.rs` 用 `2q` 当“表外单位”的例子，`q` 入表后立刻红。
+        它们钉的是我的选择而非语料行 ⇒ 换成无证的 `rem`/`ch`，并把 `q` 的现在行为（`max → 2q`、
+        `compatible → true`）一同钉住；本步 **`regress=0`** 就是“没有 fixture 反对此解释”的证。
+      • **实测**：hrx **1777 → 1824（15.8%，实质 1612 → 1659）**，`ledger diff exponents ordering` =
+        **`regress=0 net=47`**（`clamp` 25+1、`hypot` 19、`atan2/arguments` 2），无效错误仍 **53**；
+        空库复算（`/tmp/qrass-ab8.db`：ord-verify-before 1777 vs ord-verify-after 1824）逐字重现；
+        `cargo test --workspace --no-fail-fast` exit=0（44 块）、clippy `-D warnings` exit 0、sasslint
+        `count=0`。金样单测 = 新 `tests/math_ordering.rs`（三个测试，逐条引 fixture；我原本写的
+        `math.hypot(3, 4)` → `5` 在语料里不存在，已先 grep 发现再删）。
       **㉖ P7 第三片：一条调用点两个空间的名字 = 按名字拒绝，而 `hue` 不决定空间**（已实测）：
       • **律**：第一个“能定空间”的组定空间，第一个外来的名字被点名 ——
         `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with

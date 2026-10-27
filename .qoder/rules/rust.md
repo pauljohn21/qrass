@@ -35,8 +35,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1777/11,533**（15.4%，**实质通过 1612** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `exponents`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1824/11,533**（15.8%，**实质通过 1659** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `ordering`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -236,8 +236,21 @@ alwaysApply: true
        `pow/base_negative_zero.hrx::with_exponent/*`）；`math.log(2, null)` = 自然对数（**写出的 `null`
        就是“没传 base”**，`log.hrx::base/null`）；`sqrt(-0.0)` → `-0`。金样单测 = `tests/math_exponents.rs`
        （五个）+ `tests/math_trig.rs` 补上 `calc(NaN * 1deg)` 三行。
-     • 仍未注册：`hypot`（19）、`clamp`（26）、`random`（8）、`math.$pi`/`$e` 等模块变量（14）；
+     • 仍未注册：`random`（8）、`math.$pi`/`$e` 等模块变量（14，tan/log 的多行也卡在它）；
        `atan2(1cm,-10mm)` 要精确长度因子、`atan2(1px,1deg)` 要 `deg` 进 `dimension()` 两行也仍红。
+     • **第三片：`math.clamp`/`math.hypot` 已注册，且换算表归一**（新 `builtins/math/combining.rs`，
+       run `ordering`：net 47，1777→1824（实质 1659），regress=0，空库复算同读数，无效错误仍 53）。
+       表归一：`math.rs` 自带的十位小数长度表已删，`to_base`/`dimension` 改读 `crate::unit::conversion`
+       —— `hypot(3cm, 4mm*10, 5q*40, div(6in,2.54), 7px*div(96,2.54))` → `11.6189500386cm` 需要 `q`，
+       而 `q` 只在共享表里（两张表就是本会话反复出错的地方）。新增单一比较 `compare`+`compare_named`
+       （后者把两个参数名都写进消息，`min`/`max` 用一个不名的消息，两者不能混用）。
+     • `clamp` 的取平方向由三行 `preserves_units/{number,max,min}` 定：向内用 `<`（等于上界时给上界），
+       向外用 `<=`（等于下界时给下界），且返回**原写形式**（`0.75turn` 不被改写成 deg）；
+       `clamp(1, 2, 0)` → `1` 说明折叠是“先贴上界再托下界”，独立两比较会给 `0`。
+     • **第八次“旧断言前提被实现推翻”**：`tests/builtins.rs` 拿 `math.max(1px, 2q)`/`math.compatible(1px, 2q)`
+       当“表外单位 decline”的例子，`q` 一进共享表这两条就红了 —— 它们钉的本来是我的选择而不是语料行，
+       现换成真正无证的 `rem`/`ch`，并把 `q` 的现在行为（`2q`/`true`）一并钉住（无任一 2q 的 fixture 行，
+       hrx 也无回归 —— 表外/表内的界限以 `unit::UNITS` 为准，不再拿“我认识哪些单位”当证据）。
    而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
