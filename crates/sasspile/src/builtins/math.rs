@@ -1,6 +1,9 @@
 //! The `math` domain (`core_functions/math/**`). Bodies only: the contract, the registry entry and the
 //! arity diagnostics live in [`crate::builtins`], because the corpus states those identically for every
-//! function and duplicating them per domain is how they drift.
+//! function and duplicating them per domain is how they drift. The trigonometric seven are in
+//! [`trig`], which shares this file's argument readers rather than repeating them.
+
+pub(super) mod trig;
 
 use crate::builtins::{Builtin, missing};
 use crate::unit::Unit;
@@ -20,6 +23,13 @@ pub(super) static MATHS: &[&Builtin] = &[
     &MATH_IS_UNITLESS,
     &MATH_PERCENTAGE,
     &MATH_COMPATIBLE,
+    &trig::MATH_SIN,
+    &trig::MATH_COS,
+    &trig::MATH_TAN,
+    &trig::MATH_ASIN,
+    &trig::MATH_ACOS,
+    &trig::MATH_ATAN,
+    &trig::MATH_ATAN2,
 ];
 
 /// `math.div(6, 3)` → `2`: numbers only, with the unit law the goldens state — same unit cancels
@@ -283,7 +293,14 @@ static MATH_ROUND: Builtin = Builtin {
     variadic: false,
     labelled: None,
     apply: |args| {
-        number_arg("number", &args).map(|(value, unit)| Value::Number(value.round(), unit))
+        number_arg("number", &args).map(|(value, unit)| {
+            // Rounding a value that is **not** itself zero lands on zero, and the corpus prints that as
+            // plain `0`: `math.round(-0.2)` → `0` (`core_functions/math/round.hrx::up/to_zero`). A
+            // transcendental handed a `-0.0` keeps the sign instead (`math.sin(-0.0)` → `-0`,
+            // `sin.hrx::negative_zero`) — so the distinction lives in the operation, not in the printer.
+            let rounded = value.round();
+            Value::Number(if rounded == 0.0 { 0.0 } else { rounded }, unit)
+        })
     },
 };
 

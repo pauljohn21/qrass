@@ -243,7 +243,19 @@ pub(crate) fn format_number(value: f64) -> String {
             "-infinity".to_string()
         };
     }
-    if value == 0.0 || (value.fract() == 0.0 && value.abs() < 1e15) {
+    if value == 0.0 {
+        // An **exact** negative zero keeps its sign, because the corpus prints one: `math.sin(-0.0)` → `-0`
+        // (`core_functions/math/sin.hrx::negative_zero`) and `math.atan(-0.0)` → `-0deg`
+        // (`…/atan.hrx::negative_zero`). A value that merely *cuts* to zero — the `-1.1e-15` a colour channel
+        // gets back from `color.change(red, $lightness: 0.5%)`, whose row wants `rgb(1%, 0%, 0%)` — is
+        // collapsed by the branch below, so the two laws do not fight.
+        return if value.is_sign_negative() {
+            "-0".to_string()
+        } else {
+            "0".to_string()
+        };
+    }
+    if value.fract() == 0.0 && value.abs() < 1e15 {
         return format!("{}", value as i64);
     }
     let natural = format!("{value}");

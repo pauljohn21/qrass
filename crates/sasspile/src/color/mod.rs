@@ -49,7 +49,12 @@ mod text;
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
 /// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
 fn clamp_alpha(alpha: f64) -> f64 {
-    if alpha.is_nan() {
+    // A zero loses its sign here, because the alpha is **clamped** rather than carried:
+    // `rgb(0, 0, 0, -0)` → `rgba(0, 0, 0, 0)` and `hwb(…, -0)` → `hsla(…, 0)`
+    // (`core_functions/color/rgb/four_args/clamped.hrx::alpha/negative_zero`,
+    // `…/hwb/four_args.hrx::alpha/negative_zero`). A transcendental that receives a `-0.0` keeps it
+    // (`math.sin(-0.0)` → `-0`) — that law is in the printer, not here.
+    if alpha.is_nan() || alpha == 0.0 {
         0.0
     } else {
         alpha.clamp(0.0, 1.0)
@@ -70,6 +75,11 @@ fn number(value: &Value) -> Option<f64> {
 /// `hsl/three_args/units::hue/turn`-family rows); a unit that is not an angle converts nothing, so
 /// `hwb(1in, 30%, 40%)` is `hsl(1, …)` (`hwb/three_args/units::hue/non_angle`) rather than an error this
 /// slice has no message for.
+///
+/// The fold also **loses a zero's sign**: `color.hwb(-0, 30%, 40%, 0.5)` →
+/// `hsla(0, 33.3333333333%, 45%, 0.5)` and `hsl(-1 * 0, 100%, 50%)` → `hsl(0, 100%, 50%)`
+/// (`core_functions/color/hwb/four_args.hrx::hue/negative_zero`,
+/// `…/hsl/four_args/in_gamut.hrx::negative_zero/hue`) — `f64::rem_euclid` keeps `-0.0`, so this path does not.
 pub fn angle_of(value: &Value) -> Option<f64> {
     let factor = match value {
         Value::Number(_, unit) => unit
@@ -78,7 +88,8 @@ pub fn angle_of(value: &Value) -> Option<f64> {
             .map_or(1.0, |name| crate::unit::measure(name).1),
         _ => 1.0,
     };
-    Some((number(value)? * factor).rem_euclid(360.0))
+    let folded = (number(value)? * factor).rem_euclid(360.0);
+    Some(if folded == 0.0 { 0.0 } else { folded })
 }
 
 /// One channel: the value as written, and whether it was written as a percentage.
