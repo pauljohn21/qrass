@@ -33,8 +33,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1359/11,533**（11.8%，**实质通过 1194** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `scale-legacy`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1434/11,533**（12.4%，**实质通过 1269** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `colour-diagnostics`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -148,8 +148,9 @@ alwaysApply: true
    • **本刀的真错（我自己造的）**：第一版把 scale 的金额用 `byte()` 读 —— `100%` 就成了 **255 个字节**而不是
      “100% 的份额”，16 条 `scale/rgb` 全跑出色域。金额一律取**量值**（`number()`，与轴同一读法）；这条区别已
      写进代码注释并钉在 `tests/color_scale.rs`（关键字结果与小数结果各钉一次）。
-   • **`$hue:` 无行 ⇒ decline**：没有任何 `scale/*.hrx` 点它，角度也没有可缩放的界；拿 `adjust` 的 wrap 当
-     依凭就是“同族应当一致”那类推断（已钉成测试，连 `$space:`/现代色/`none` 三类逐字一起）。
+   • **`$hue:` 在 scale 里不是“无行”而是有消息**（本段原先说“无行 ⇒ decline”，已被 `colour-diagnostics` 纠正）：
+     `scale/error/{args,polar}.hrx` 要 `Error: $hue: Channel isn't scalable.`；而 `scale/*.hrx` 确实不用它做别的。
+     教训：“没行”不等于“有 decline 金样”，**要连 `error/` 子目录一起查完再说**。
    • **三函数×三空间不再搭 if 链**：改成 `let space = match (named == 0, !bytes.is_empty(), !hwb.is_empty())`+
      `match (space, writing)`（`Space{Nothing,Bytes,Hwb,Axes}`）——第四个 writing 进来时不必重读一条守卫链。
    • **已注册两个名字**：`color.scale` 与 legacy 全局别名 `scale-color`（`scale/global.hrx::legacy`、
@@ -158,7 +159,33 @@ alwaysApply: true
      `scale/error/**` 125（要消息）、现代空间与 `$space:`（`space` 13、`out_of_gamut` 4、`no_channels` 3、
      `global::non_legacy` 1 —— 它要 `$chroma:`/`$space: oklch` 被当 legacy 答，按 decline 律逐字）。
    `change`/`adjust`/`scale` 三者的 legacy 子集至此都已收；剩下的两大块是**现代空间**（属 P8，需 `color()`
-   文本色与 lab/lch/oklab/oklch 换算）与 **`*/error/**` 要消息**（属 P7）。而 `complement` 暂不能动，因为
+   文本色与 lab/lch/oklab/oklch 换算）与 **`*/error/**` 要消息**（属 P7）。**而 P7 的第一片已落**
+   （run `colour-diagnostics`，net 75，1359→1434；regress=0，空库复算同读数，无效错误仍 53）：
+   • **新的 `builtins/color/amount.rs`** = “参数能不能读 + 不能读时语料怎么说”那一半（从 `modify.rs` 拆出；
+     拆后 `modify.rs` 450 行、`amount.rs` 147 行，不拆就过 500 硬线）：`axis`/`share`/`byte` 三个读数 +
+     `not_a_number`/`expected_percent`/`decline` 三条消息。拆的理由
+     就是“同一条律写两遍会漂”：`scale` 的金额取量值（份额），`adjust`/`change` 的 rgb 通道取 `byte()`（`50%` = 127.5）。
+   • **三族措辞不同，全部逐行照抄**：`change` 说 `c is not a number or unquoted "none".`（它**也**收无引号 `none`，
+     那是“缺通道”另一条律），`adjust`/`scale` 连 `none` 也说 `is not a number.`；只有 scale 要求**每个**金额带 `%`
+     （`Expected 1 to have unit "%".`），而 `adjust`/`change` 只对 whiteness/blackness 要求（`units/hwb.hrx`）；
+     scale 还查 `-100%…100%` 范围（`bounds.hrx::legacy/*`）与 `$hue: Channel isn't scalable.`。
+   • **新增三个致命 `ErrorKind`**：`NotAColor`（`$color: 1 is not a color.` —— **只对数字说**，现代色仍 decline）、
+     `NotAString`（`$space: 1 is not a string.`）、`Channel`（通道名/范围类：`Channel isn't scalable.` 与
+     `Expected -100.001% to be within -100% and 100%.`）。未越界的 `$space:` 字符串仍 decline（现代空间属 P8）。
+   • **两处脊级改动（注册表）**：① 声明了参数名的 variadic **空实参时递给 body**，因为 body 知道缺哪个
+     名字 —— `color.change()` 要 `Missing argument $color.`、`saturate()` 要 `Missing argument $amount.`，而
+     `hypot/max/min`（无声明名）仍用原来的 `At least one argument must be passed.`（已验那三行仍绿）；
+     ② `Given` 多一个 `label: bool`（实参是否写了 `$name:`）+ `Given::positional()`，因为语料规定这三个函数
+     **只允许一个位置实参**（`Only one positional argument is allowed. All other arguments must be passed by name.`）
+     —— 去掉标签后 `color.change(red, 1)` 与 `color.change($color: red, $red: 1)` 在 body 那里完全一样。
+   • **本轮靠量具拦下的两个错**：第一版给 `$hue: none` 上了类型消息，把一条**期望输出**的行（
+     `change/hsl::hue/none`）变成“意外错误”（53→54）——`ledger failures … --count` 直接拓出来；另一个是我
+     又在注释里写了不存在的 case 名 `scale/error/type.hrx::alpha_none`（真名就是 `none`）——第七次同类错。
+     75 行分布：三个 `error/type` 共 35、scale 的 `error/units/*` 14、change+adjust 的 `units/hwb` 8、
+     `error/args` 7、`bounds` 2、`polar` 1，外加 8 条 legacy 访问器/`saturate` 的 `too_few_args`。
+     金样单测 = `tests/color_diagnostics.rs`（九条消息）。而 `change`/`adjust`/`scale` 的 `*/none`（缺通道值）、
+     `Color space rgb doesn't have a channel with this name.`（`incompatible_channel`+`mixed_formats`）与 `space.hrx` 仍未做。
+   而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
    地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
@@ -228,7 +255,9 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 → `#ffcdef`（fixture 是 `$red: 200`）与“hsl 轴夹在 0–100”（那是 **legacy `saturate`** 的律；8 条 `adjust/hsl` 行一直反对，
 而其中 `saturation/max_remaining` 当时就是红的 —— 注释把失败行为说成了规范）。
 做法（写进注释前）：**把某行写进注释/文档前先 `sed -n '/^<===> <case>\/input/,/====/p' sass-spec/spec/.../<file>.hrx` 逐条复核输入与输出**，
-不得凭“同族函数应当一致”去推断。
+不得凭“同族函数应当一致”去推断。**第七次（同一回合）：编了个不存在的 case 名**
+`scale/error/type.hrx::alpha_none`（真名就是 `none`）—— **case 路径与例名也是字面量**，引用前
+`grep -oE "^<===> [a-z_0-9]+/input.scss" <file>.hrx` 先把名子列出来再写。
 做法：**开工前先 `grep -rn "<新名字>" crates/sasspile/tests`**，把命中的旧断言一并翻成 fixture 自己的期望，
 而不是等到测试红了才改。另：`cargo test --workspace | grep … | awk` 在**第一个失败的二进制处就停**，
 会报出“0 failed”的假绿；门禁一律用 `--no-fail-fast` 并看 `exit=0`。

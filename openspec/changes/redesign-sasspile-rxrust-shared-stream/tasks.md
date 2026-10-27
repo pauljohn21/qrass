@@ -928,6 +928,41 @@
         sasslint CLI `count=0`。`scale` 簇仍败 **369**：`scale/error/**` 125（要消息，P7）+ 现代空间与
         `$space:`（`space` 13、`out_of_gamut` 4、`no_channels` 3、`global::non_legacy` 1）。`modify.rs` 已到
         439 行，下一次动它先把三个 `Writing` 拆成子文件。
+      **㉕ P7 第一片：`change`/`adjust`/`scale` 的参数拒用现在说语料的话（顺带把 `modify.rs` 拆了）**（已实测）：
+      • **选它的理由是先量后做**：`scale` 簇 424 红里 125 行在 `error/`，`adjust` 簇 376 红里 75 行也在那——
+        同一函数族、金样就是错消息首行（harness 比 `oracle_header`），不需要新空间换算。实际收下 75 行。
+      • **拆文件**：`builtins/color/amount.rs`（新，147 行）拿走“参数能不能读 + 不能读时怎么说”：`axis`/`share`/`byte`
+        与 `not_a_number`/`expected_percent`/`decline`；`modify.rs` 拆后仍 450 行（本刀新加的律文字两边都有），
+        **不拆就会过 500 的硬线**。拆的边界止于一处：份额（scale，量值）vs 通道值（adjust/change 的 rgb，
+        `byte()`）——上一刀刚因把它们混用错过 16 行。
+      • **三族措辞不统一，逐行抄**：`change` 说 `c is not a number or unquoted "none".`（它**也**收无引号
+        `none`，那是“缺通道”另一条律，故对 `none` 仍 decline）；`adjust`/`scale` 连 `none` 也说
+        `is not a number.`。只有 scale 要求**每个**金额带 `%`（`scale/error/units/{rgb,hsl,hwb}.hrx`），
+        `adjust`/`change` 只对 whiteness/blackness 要求；scale 另查 `-100%…100%`（`bounds.hrx::legacy/*`）。
+      • **三个新致命 kind**：`NotAColor`、`NotAString`、`Channel`（通道名/范围类共用一个，因为它们都是
+        “这个通道参数不能被这样用”）。**`$color: 1 is not a color.` 只对数字说**：现代色仍 decline，
+        否则会把“逐字”变成“错答案另一种形体”。
+      • **注册表两处**：① 声明了名字的 variadic 空实参递给 body（`color.change()` → `Missing argument $color.`，
+        `saturate()` → `Missing argument $amount.`；`hypot/max/min` 无声明名仍走旧消息，那三行未红）——
+        这一改顺手多收 8 条 legacy 访问器/`saturate` 的 `too_few_args`；② `Given.label: bool` +
+        `Given::positional()`，因为语料规定这三个函数只允许一个位置实参（去掉标签后
+        `color.change(red, 1)` 与 `color.change($color: red, $red: 1)` 不可区分）。
+      • **本回合自己的两个错，都是量具拓出来的**：（一）第一版给 `$hue: none` 上类型消息，把一条**期望输出**
+        的行（`change/hsl::hue/none`）变成意外错误——**53 → 54**，靠 `ledger failures … --count` 当场发现；
+        （二）我在注释里又编了不存在的 case 名 `scale/error/type.hrx::alpha_none`（真名 `none`）——第七次
+        同类错，已把“case 名也是字面量，先 grep 名子列表”写进 rust.md。
+      • **实测**：hrx **1359 → 1434（实质 1194 → 1269，空期望仍 165）**，`ledger diff scale-legacy colour-diagnostics`
+        = **`regress=0 net=75`**，无效错误仍 **53**；空库复算（`/tmp/qrass-ab3.db` 里 diag-verify-before 1359 vs
+        diag-verify-after 1434）逐字重现；`cargo test --workspace --no-fail-fast` exit=0（41 个 test result 块）、
+        clippy `-D warnings` exit 0、sasslint CLI `count=0`。净增 75 的分布（NET 按文件计数）：
+        `change/error/type` 12、`adjust/error/type` 12、`scale/error/type` 11、`scale/error/units/{rgb,hsl,hwb}`
+        6+4+4、`{change,adjust}/error/units/hwb` 4+4、`error/args` 3+2+2、`scale/error/bounds` 2、
+        `scale/error/polar` 1，另 8 条 legacy 访问器与 `saturate` 的 `too_few_args`。新测
+        `tests/color_diagnostics.rs` 钉九条消息；`tests/color_scale.rs` 里“`$hue:` 逐字”的断言已翻成
+        按消息断言（第七次“旧断言前提被实现推翻”）。
+      • **仍未做**：`*/none`（缺通道值，要 `none` 这个值本身）、`Color space rgb doesn't have a channel with
+        this name.`（`incompatible_channel` + `mixed_formats`）、`$space:`/现代空间、`Undefined function.`、
+        `Unknown color space "c".`。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：
