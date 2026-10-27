@@ -398,6 +398,45 @@
       尚缺证据因而**暂不做**：同一单位重复出现时的书写（`px^2` 一类幂次记法）——语料里没找到对比用例，
       实现前必须先取到金样。
 - [ ] 1.5 **CSS Color 4 空间基础**(rgb/hsl/hwb + 通道访问;`Color` 全空间留 P8)(`values/colors/**`、`core_functions/color/**`)
+      **本轮实测的地形（run `split-brackets`，全部走 `ledger failures`，并过了阳性对照）**——每条簇拆“期望值 / 期望错误”，
+      因为只有期望值是 1.5 能拿下的：
+      | 簇 | 失败 | 期望错误（属 P1.7 逐参校验）| 期望值（属本条）|
+      |---|---|---|---|
+      | `values/colors` | 27 | 0 | 27 |
+      | `core_functions/color/rgb` | 222 | 34 | 188 |
+      | `…/hsl` | 200 | 33 | 167 |
+      | `…/hwb` | 145 | 37 | 108 |
+      | `…/change` | 385 | 74 | 311 |
+      | `…/invert` | 63 | 13 | 50 |、`…/complement` 33/13/20、`…/grayscale` 22/4/18 ⇒ 期望值共 ~880
+      **两个推翻了原顺序的结论**（都不是推定，是逐条读 got/want 读出来的）：
+      1. **`values/colors/**` 不是最小切口**。它那 27 条几乎全是**颜色相等比较**（`lab(…) == lab(…)`、
+         `purple == hsl(300, 100%, 25.098039215686%)`、`oklch(50% 0% none) == oklch(50% 0% 0)`、
+         `within_epsilon` 一类），同时要求（a）值层 `==` 比较、（b）lab/lch/oklab/oklch/color() **全空间**与
+         `none` 通道 —— 后者按本条自己的划分属 P8。把它当 1.5 的第一步会一上来就兵分两处。
+      2. **真正的最小起点是 `core_functions/color/rgb/three_args/*`**（单函数最大的期望值群体）。它要的不是
+         只把颜色存下来，而是一整套 legacy 通道语义：`%` 通道与无单位通道**双形式**
+         （`rgb(190, 68%, …)` / `rgb(74.7%, …)`）、**越界夹紧**（`rgb(256,0,0)` → `rgb(255, …)`、
+         `-1` → `0`）、`$red/$green/$blue` **具名实参**、以及通道位里放 `calc()`
+         （`special_functions::calc/string/arg_*`）。后两项有前置：具名实参的 run 目前在 1.2b 里整串保持原文，
+         `calc` 通道需要 `Value::Calculation` 能与 `Value::Color` 相互参与运算。
+      **以 1.5 开工的建议顺序**（每一步单独 A/B，不一次扑大）：
+      ① `Value::Color`（legacy rgb/hsl/hwb + alpha + 书写形式）与 `to_css`。**词法已够用，不用先改**：
+         实测（2026-10-27，`trace` 面的 `raw_value`）`a {b: #fff; c: red; d: rgb(1,2,3)}` 就是
+         `Word("#fff")`/`Word("red")`/`Word("rgb(1,2,3)")` 各一个词素，`lexer.rs:182-190` 只在 `#{` 时转插值，
+         单独的 `#` 留在词素缓冲里 ⇒ “分类粒度不能超过词法”已满足，“把 `#hex` 先做成词素”这步预备动作取消。
+      ② **【已完成】`builtins` 按域拆目录**：`builtins.rs`（436 行）→ `builtins/mod.rs`（135 行，只留 `Builtin`
+            契约、分组注册表 `BUILTINS: &[&[&Builtin]]`、`signature`、`evaluate`、两条 arity 消息）+
+            `builtins/math.rs`（324 行，11 个 `MATH_*` 与 `to_base`/`extremum`/`comparable`/`dimension`/`number_arg`，
+            导出 `MATHS`）。对外面不变（`signature`/`evaluate`，三处调用方：`calls.rs:29`、`brackets.rs:127`、
+            `expr.rs:367`）；`missing` 改为 `pub(super)` 供域内使用。**中性已证**：`git diff -M` 认出
+            `{builtins.rs => builtins/math.rs}` 为重命名，`ledger diff split-brackets builtins-split` =
+            **`regress=0 net=0`**（847 不变），96 测试/0 失败，clippy exit 0，`sasslint` exit 0。
+            过程中三个真错均由门禁拦住：行范围多带了一行旧文档注释、旧 `BUILTINS` 表被搬进 math.rs 成死码、
+            `&[&math::MATHS]` 被 clippy 报 needless borrow（改成 `&[math::MATHS]`）——无一条用 `#[allow]` 压掉。
+      ③ `rgb()`/`rgba()` 三/四参 + `%`/夹紧 + 通道访问（`red()/green()/blue()/alpha()` 与 `color.*`），
+         经 `core_functions/color/rgb/**` 验；新增域只需在 `builtins/` 加一个文件 + 注册表加一项。
+      ④ 再才考虑 `hsl`/`hwb` 与 `change`（后者最大的单一群体 311 条，但依赖 `math.is_*` 与逐参校验）。
+      **不得跨过去的事**：期望错误那 ~227 条要的是逐参数类型/单位消息（P1.7），不得用“不报错抹平”拿分。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

@@ -35,9 +35,12 @@ alwaysApply: true
    **以上均不得重做/重新发明**。当前基线 hrx **847/11,533**（7.35%，**实质通过 682** + 空期望蒙对 165；
    A/B 记录 = `reports/hrx.db` 里的具名 run `binding-content`）；
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
-   下一主战场：**1.5 色彩**（`Color` 变体与 `builtins::color/*`）→ 1.7 其余分派（含惰性 `if()`，已被实测
-   否定为快收益）→ **P7 诊断消息**：语料里大量 `error` 用例缺的是**消息**而不是错误管道，现在已积到单条
-   级别（例：`math/unitless::error/wrong_name` 要 `Undefined function.`，即 1.4d 唯一未复现的候选行）。
+   下一主战场：**1.5 色彩**。地形已量录在 tasks.md 1.5（期望值 ~880 条 / 期望错误 ~227 条），两条要点：
+   **最小切口是 `core_functions/color/rgb/three_args/*`，不是 `values/colors/**`**（后者几乎全要颜色 `==`
+   比较 + lab/lch/oklab 全空间，按本 change 自己的划分属 P8）；前置动作是 `builtins` **按域拆目录**
+   （`builtins.rs` 已 436 行，颜色函数一接必越 500 红线）。再往下是 1.7 其余分派 → **P7 诊断消息**：
+   语料里大量 `error` 用例缺的是**消息**而不是错误管道，现已积到单条级别（例：
+   `math/unitless::error/wrong_name` 要 `Undefined function.`，即 1.4d 唯一未复现的候选行）。
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 
