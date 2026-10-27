@@ -17,7 +17,7 @@ mod constructors;
 mod modify;
 
 use constructors::{COLOR_HWB, HSL, HSLA, HWB, RGB, RGBA};
-use modify::{COLOR_ADJUST, COLOR_CHANGE};
+use modify::{COLOR_ADJUST, COLOR_CHANGE, COLOR_SCALE, SCALE_COLOR};
 
 /// This domain's registrations.
 pub(super) static COLORS: &[&Builtin] = &[
@@ -37,6 +37,8 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_CHANNEL,
     &COLOR_CHANGE,
     &COLOR_ADJUST,
+    &COLOR_SCALE,
+    &SCALE_COLOR,
     &GRAYSCALE,
     &COLOR_GRAYSCALE,
     &DARKEN,
