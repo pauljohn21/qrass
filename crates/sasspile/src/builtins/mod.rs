@@ -137,9 +137,9 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
                 .or_else(|| positional.get(index).cloned())
         })
         .collect::<Vec<Option<Value>>>();
-    // Every declared parameter up to the first absent one is handed to the body, so a body never sees a
-    // hole. A required parameter left absent is the corpus's own message — but only for a fixed signature;
-    // a variadic one lets its body judge the count.
+    // Every declared parameter up to the first absent one is handed to a **fixed** body, so it never sees a
+    // hole, and a required parameter left absent is the corpus's own message
+    // (`math/div.hrx::error/missing_argument` → `Missing argument $number2.`).
     let taken = slots
         .iter()
         .position(Option::is_none)
@@ -147,13 +147,21 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     if taken < builtin.params.len() && !builtin.variadic {
         return Err(missing(builtin.params[taken].to_string()));
     }
-    (builtin.apply)(
+    // A **variadic** signature lets its body judge the count, so the body sees every parameter that got a
+    // value, in declaration order. Trimming at the first hole (the fixed rule) is what silently discarded a
+    // label bound to anything but the leading slots: `rgb($channels: 0 255 127)`
+    // (`rgb/one_arg/no_alpha.hrx::unitless/named`, which wants `rgb(0, 255, 127)`) arrived as no arguments
+    // at all. Positional calls are unaffected — with no holes, both rules give the same list.
+    let bound = if builtin.variadic {
+        slots.into_iter().flatten().collect::<Vec<Value>>()
+    } else {
         slots
             .into_iter()
             .take(taken)
             .flatten()
-            .collect::<Vec<Value>>(),
-    )
+            .collect::<Vec<Value>>()
+    };
+    (builtin.apply)(bound)
 }
 
 /// `Error: Missing argument $number2.` — the first parameter left without a value.

@@ -14,11 +14,12 @@ use crate::value::Value;
 /// Declared **variadic, with names**: the call is overloaded — one or two arguments are a colour plus an
 /// optional alpha, three or four are channels — so the body judges the count, while `params`/`optional`
 /// still give the labels something to bind to (`rgb($red: 0, $green: 255, $blue: 127)` →
-/// `rgb(0, 255, 127)`, `three_args/unitless::named`).
+/// `rgb(0, 255, 127)`, `three_args/unitless::named`). `channels` is a name too, because CSS Color 4's
+/// one-argument spelling is written that way (`rgb($channels: 0 255 127)`, `rgb/one_arg/no_alpha.hrx::unitless/named`).
 pub(super) static RGB: Builtin = Builtin {
     name: "rgb",
     params: &["red", "green", "blue"],
-    optional: &["alpha"],
+    optional: &["alpha", "channels"],
     variadic: true,
     apply: channels,
 };
@@ -27,7 +28,7 @@ pub(super) static RGB: Builtin = Builtin {
 pub(super) static RGBA: Builtin = Builtin {
     name: "rgba",
     params: &["red", "green", "blue"],
-    optional: &["alpha"],
+    optional: &["alpha", "channels"],
     variadic: true,
     apply: channels,
 };
@@ -38,7 +39,7 @@ pub(super) static RGBA: Builtin = Builtin {
 pub(super) static HSL: Builtin = Builtin {
     name: "hsl",
     params: &["hue", "saturation", "lightness"],
-    optional: &["alpha"],
+    optional: &["alpha", "channels"],
     variadic: true,
     apply: hsl_channels,
 };
@@ -47,7 +48,7 @@ pub(super) static HSL: Builtin = Builtin {
 pub(super) static HSLA: Builtin = Builtin {
     name: "hsla",
     params: &["hue", "saturation", "lightness"],
-    optional: &["alpha"],
+    optional: &["alpha", "channels"],
     variadic: true,
     apply: hsl_channels,
 };

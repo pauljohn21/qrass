@@ -24,11 +24,10 @@ async fn rgb_space_separated_channels() {
         ("a {b: rgb(18 52 86)}", "rgb(18, 52, 86)"),
         ("a {b: rgb(190 173 237)}", "rgb(190, 173, 237)"),
         ("a {b: rgb(0 255 127)}", "rgb(0, 255, 127)"),
-        // Deliberately NOT asserted: `unitless/named` writes `rgb($channels: 0 255 127)` and wants
-        // `rgb(0, 255, 127)`, so `channels` is a real parameter of the one-argument form. Binding currently
-        // hands a body only the parameters up to the first absent one, so a lone `$channels:` reaches the body
-        // as nothing and the call keeps its text — that row stays red in `ledger`, and asserting today's
-        // output here would write an unimplemented binding up as if it were the law.
+        // The one-argument spelling also arrives **by label**: `channels` is a real parameter of `rgb`/`hsl`
+        // (the corpus's own diagnostics are prefixed `$channels:` — `rgb/error/one_arg.hrx`), and a labelled
+        // argument binds wherever it sits (`rgb/one_arg/no_alpha.hrx::unitless/named`).
+        ("a {b: rgb($channels: 0 255 127)}", "rgb(0, 255, 127)"),
         ("a {b: rgb(256 0 0)}", "rgb(255, 0, 0)"),
         ("a {b: rgb(0 -1 0)}", "rgb(0, 0, 0)"),
         ("a {b: rgb(7.1% 20.4% 33.9%)}", "rgb(7.1%, 20.4%, 33.9%)"),
@@ -87,6 +86,7 @@ async fn hsl_space_separated_axes() {
         ("a {b: hsl(0deg 100% 50%)}", "hsl(0, 100%, 50%)"),
         ("a {b: hsl(0 50 50%)}", "hsl(0, 50%, 50%)"),
         ("a {b: hsl(0 100% 50)}", "hsl(0, 100%, 50%)"),
+        ("a {b: hsl($channels: 0 100% 50%)}", "hsl(0, 100%, 50%)"),
     ] {
         assert_eq!(
             css(input).await,
@@ -127,7 +127,6 @@ async fn an_unreadable_component_keeps_the_run_verbatim() {
 /// arithmetic.
 ///
 /// Rows still NOT claimed here, because they need abilities this compiler lacks:
-/// * `in_gamut/named` (`rgb($channels: 0 255 127 / 0.3)`) — the `$channels:` binding gap noted above;
 /// * `slash_list` — `list.slash(…)` is not registered yet;
 /// * `missing/slash` and `missing/slash_list` — `none` as an alpha, where the corpus keeps the run as text
 ///   for `rgb` but half-reformats it (`hsl(180deg 60% 50% / none)`) for `hsl`.
@@ -141,7 +140,16 @@ async fn modern_alpha_follows_a_slash() {
         ("a {b: rgb(190 173 237 / 1)}", "rgb(190, 173, 237)"),
         ("a {b: rgb(0 255 127 / 0)}", "rgba(0, 255, 127, 0)"),
         ("a {b: rgb(0 255 127 / 0.3)}", "rgba(0, 255, 127, 0.3)"),
+        // The same call written with the label (`rgb/one_arg/alpha.hrx::in_gamut/named`).
+        (
+            "a {b: rgb($channels: 0 255 127 / 0.3)}",
+            "rgba(0, 255, 127, 0.3)",
+        ),
         ("a {b: hsl(180 60% 50% / 0.5)}", "hsla(180, 60%, 50%, 0.5)"),
+        (
+            "a {b: hsl($channels: 180 60% 50% / 0.4)}",
+            "hsla(180, 60%, 50%, 0.4)",
+        ),
         ("a {b: hsl(180 60% 50% / 1)}", "hsl(180, 60%, 50%)"),
         ("a {b: hsl(180 60% 50% / 0)}", "hsla(180, 60%, 50%, 0)"),
         // The alpha clamps, the axes keep their own laws (negative saturation to 0, lightness untouched).
