@@ -82,7 +82,10 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
             return given
                 .into_iter()
                 .map(|(label, value)| match label {
-                    Some(_) => Err(SassError::new(
+                    // Same meaning as the check below: a label with no parameter to bind to is a refusal,
+                    // and the kind is what stops the caller from resolving `$number1` as a variable.
+                    Some(_) => Err(SassError::typed(
+                        ErrorKind::UnknownParameter,
                         "named arguments have no parameter to bind to here",
                     )),
                     None => Ok(value),
@@ -103,6 +106,21 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     let allowed = builtin.params.len() + builtin.optional.len();
     if !builtin.variadic && given.len() > allowed {
         return Err(too_many(allowed, given.len()));
+    }
+    // A `$label:` that names **no parameter of this signature** is not this builtin's call to answer.
+    // dart-sass reports `No $x parameter.`; until P7 builds that message the run declines and keeps its
+    // text. Doing this here rather than in each body is the point: without it a labelled argument is simply
+    // dropped by the binding below, so `color.mix(#a, #b, $method: oklab)` reached the legacy sRGB mixer and
+    // answered a request for another colour space — a wrong value that the pass count cannot see, because
+    // those rows (`mix/explicit_method`, `named::polar_space`, `hue_interpolation`) were already failing.
+    if named
+        .iter()
+        .any(|(label, _)| !builtin.params.contains(label) && !builtin.optional.contains(label))
+    {
+        return Err(SassError::typed(
+            ErrorKind::UnknownParameter,
+            "this signature has no parameter with that name",
+        ));
     }
     // One slot per name, filled by label first and by position second, so an optional parameter written
     // out of order (`rgb(1, 2, 3, $alpha: 0.5)`) still binds to the alpha.

@@ -59,6 +59,12 @@ pub enum ErrorKind {
     /// a number parameter required a specific unit (or none); again the oracle's words
     /// (`$number: Expected 1% to have no units.`, `core_functions/math/percentage.hrx::error/unit`)
     WrongUnits,
+    /// a `$label:` that names no parameter of the callee's signature. Not fatal: the run keeps its own text.
+    /// The kind exists so the **caller** knows not to re-render the run through the interpolation path — a
+    /// `$name:` in an argument list *names* a parameter instead of referencing a variable, and resolving it
+    /// is the mistake behind the ~1,611 bogus `Undefined variable` cases (`expr::named_argument`). Only the
+    /// registry sees the labels, so only it can say this.
+    UnknownParameter,
     /// everything else
     Other,
 }

@@ -430,3 +430,38 @@ async fn a_colour_in_an_unimplemented_space_is_not_answered_in_srgb() {
         "a {\n  b: color.mix(color(display-p3 1 0 0), color(display-p3 0 1 0), 20%);\n}\n"
     );
 }
+
+/// What the registry now refuses, and what it must still resolve.
+///
+/// A `$label:` that names no parameter of the callee's signature is not this builtin's call to answer, so
+/// the run keeps its own text: answering `color.mix(…, $method: oklab)` with a legacy sRGB mix would be a
+/// wrong value that the pass count cannot see, because those rows were already failing for other reasons
+/// (`mix/explicit_method`, `named::polar_space`, `hue_interpolation`). Declared labels keep working, and a
+/// declined call with **no** label still resolves its variables — the row this rule nearly broke
+/// (`saturate.hrx::css_overload/with_sass_var`) is pinned here so it cannot be "fixed" by guessing again.
+#[tokio::test]
+async fn an_unknown_parameter_label_is_a_refusal_not_a_legacy_answer() {
+    for (input, want) in [
+        (
+            "a {b: color.mix(#91e16f, #0144bf, $method: oklab)}",
+            "color.mix(#91e16f, #0144bf, $method: oklab)",
+        ),
+        (
+            "a {b: color.mix(#91e16f, #0144bf, $space: hsl)}",
+            "color.mix(#91e16f, #0144bf, $space: hsl)",
+        ),
+        // The same call with a declared label still mixes.
+        (
+            "a {b: color.mix($color1: #91e16f, $color2: #0144bf, $weight: 100%)}",
+            "#91e16f",
+        ),
+        // And a decline with no label still resolves the variable (`css_overload/with_sass_var`).
+        ("$c: 1;\na {b: saturate($c)}", "saturate(1)"),
+    ] {
+        assert_eq!(
+            css(input).await,
+            format!("a {{\n  b: {want};\n}}\n"),
+            "for input {input}"
+        );
+    }
+}

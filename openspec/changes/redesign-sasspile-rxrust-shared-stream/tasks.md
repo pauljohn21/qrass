@@ -614,6 +614,22 @@
       因此需 `pub(super)`，而 `channels`/`finished` 只在自己文件内用仍保持私有）。
       **仍欠**：`color/mod.rs` 481 行（数据 + 轴变换）贴线，下一次动它时再拆（可把 `transform_axes`/`mixed`
       连同 `axes` 入口归到一个 `color/ops.rs`）。
+      **⑭ 未识别参数标签不再被静默丢弃**（已实测，**net=0 是预期的**，因为本刀买的是“拒答”不是“得分”）：
+      之前 spine 把绑不上名字的标签当不存在，于是 `color.mix(#a, #b, $method: oklab)` 只剩两个颜色进去，
+      被 legacy sRGB 混色**错答**（那行本来就是红的，pass 读数永远看不见）。现在注册表知道标签，就由它说
+      “这不是我能答的调用”：新增 `ErrorKind::UnknownParameter`（非致命，`is_fatal` 是白名单），exec 遇到它
+      **不重渲染**，直接留原文。两处均归二：variadic 无参数名的分支（`math.max($number1: …)`）也用同一 kind。
+      **途中两次自我修正，都是量具拦下来的**：
+      • 我先在 `decline` 里用 `expr::named_argument(toks)` 当“带标签”的判据 ⇒ `saturate($c)` 那行直接红
+        （`regress=1`）。分离变量（只去掉守卫）证实回归来自守卫而不是新规则：**“带不带标签”只有 registry 能定，
+        在词元层猜必错**。
+      • 我曾把重渲染里的失败改成“沿真 `Err` 通道上报” ⇒ **无效错误 53 → 74**，还把
+        `math.max($number1: 1, 2)` 变成 `Undefined variable.`（错是我们二遍渲染造出来的，不是源码里的）。
+        现回到“失败就留原文”，并把这两个数字写进函数注释当理由（clippy 要 `.ok()`、sasslint 禁吞错，
+        用 `and_then(Result::ok)` 拆行同时满足两闸，未改闸也未加 `#[allow]`）。
+      **实测**：`ledger diff constructors-split unknown-labels` = **`regress=0 net=0`**，无效错误回到 **53**，
+      114 测试 / 0 失败（新增 `an_unknown_parameter_label_is_a_refusal_not_a_legacy_answer` 4 条：
+      `$method:`/`$space:` 逐字、已声明标签照旧能混、`saturate($c)` 仍解为 `saturate(1)`）。
       **发现的缺陷（已由上面的 ⑨ 修掉；这段留作发现记录）**：一开始把 `saturate` 也注册了，结果
       `saturate::css_overload/with_sass_var`（`saturate($c)` 且 `$c: 1`，期望 `saturate(1)`）由 PASS 变 FAIL，
       `regress=1`。根因：**已注册 builtin 被 body 拒绝时，兜底保留的是未求值的源文本**，变量替换丢了。

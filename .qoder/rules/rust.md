@@ -66,8 +66,10 @@ alwaysApply: true
    `42.7450980392%`；镜像行权重 0.25 ⇒ `37` = `14.5098039216%`），alpha 取平均，结果**继承第一个颜色的表示法**，
    权重**单位一律当百分数读**（`50px` 也是 50）。`Color::of` 现在**拒绝含括号的文本**：否则
    `color(display-p3 …)`/`lab(…)` 会被顺手转成 sRGB —— 那类行仍旧算红（pass 看不出），但内容**是错的**；
-   现在逐字。未解决：带 `$method:`/`$space:` 标签的调用仍会被当 legacy 混色（**未绑定标签在进 body 前就
-   被剔掉**，body 看不到），要修得先让未识别标签递给 body；hsl 源不混色（decline）。`-grey` 拼法回写已定为
+   现在逐字。**未识别标签已收口**：绑不上签名的 `$label:` 现在报 `ErrorKind::UnknownParameter`（非致命），
+   `exec::evaluated` 看到它就**不重渲染**、直接留原文（`color.mix(…, $method: oklab)` 不再被 legacy 错答）；
+   “带不带标签”只有 registry 能定 —— 在词元层用 `named_argument` 猜会把 `saturate($c)` 弄红（实测 regress=1）。
+   剩余未解决：hsl 源不混色（decline）。`-grey` 拼法回写已定为
    **不可测**（语料无 `-grey` 输出）。**尺子**：`builtins/color.rs` 已拆为 `builtins/color/{mod.rs,constructors.rs}`
    （net=0 已验）；`color/mod.rs` 仍 481 行贴线，下次动它时拆 `transform_axes`/`mixed` 到 `color/ops.rs`。再往后：`mix` 完 → 颜色 `==`；而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别

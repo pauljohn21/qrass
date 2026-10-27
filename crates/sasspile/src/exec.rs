@@ -11,6 +11,7 @@
 //! Nesting depth is data inside this value (`scopes`), never a call stack; no observable type
 //! appears here, because `compile` (crate root) owns the one operator chain.
 
+use crate::ErrorKind;
 use crate::env::Env;
 use crate::expr::{self, Expr};
 use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
@@ -326,6 +327,10 @@ impl State {
             Ok(value) if !value.is_plain() => Ok(None),
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_fatal() && !(plain || expr::special_call(toks)) => Err(err),
+            // A `$label:` naming no parameter of the signature is a refusal to answer, not something to
+            // re-render: those labels name parameters rather than referencing variables, so the run keeps
+            // its own text (`color.mix(#a, #b, $method: oklab)` must not be answered with a legacy mix).
+            Err(err) if err.kind == ErrorKind::UnknownParameter => Ok(None),
             // A call the builtin **declined** is rendered the way an unknown callee's text is rendered —
             // through [`expr::interpolated`], which keeps the token run verbatim and resolves only its
             // variable reads. That is the shape the corpus asks for, and each half of it was measured:
@@ -333,10 +338,7 @@ impl State {
             // inside an argument, `attr(c, %)` needs them before a comma, and `math.max($number1: 1, 2)`
             // needs an unbound label), while keeping the raw run unsubstituted left `saturate($c)` where
             // `saturate.hrx::css_overload/with_sass_var` asks for `saturate(1)`.
-            Err(_) => match expr::interpolated(toks, &self.env).map(|run| run.eval(&self.env)) {
-                Some(Ok(value)) if value.is_plain() => Ok(Some(value)),
-                _ => Ok(None),
-            },
+            Err(_) => Ok(decline(toks, &self.env)),
         }
     }
 
@@ -394,6 +396,24 @@ impl State {
             Err(_) => Ok(render(inner)),
         }
     }
+}
+
+/// What a call that its builtin declined becomes: the run rendered the way an unknown callee's text is,
+/// i.e. through [`expr::interpolated`], which keeps every lexeme verbatim and resolves only its **variable
+/// reads** — that is what `saturate($c)` needs (`saturate.hrx::css_overload/with_sass_var`).
+///
+/// A declined call is never an error to report: the corpus's own answer to a run this compiler cannot
+/// produce is the run's own text. Propagating a failure from the re-render was tried and measured — it
+/// raised the invalid-error readings 53 → 74 and turned `math.max($number1: 1, 2)` into
+/// `Undefined variable.`, because the error came from **our** second pass, not from the Sass source. What
+/// must never be re-rendered at all — an unknown parameter **label**, which names a parameter rather than
+/// a variable — is matched by its own kind in the caller, so this path is only reached for runs whose
+/// labels (if any) bound successfully.
+fn decline(toks: &[Tok], env: &Env) -> Option<Value> {
+    expr::interpolated(toks, env)
+        .map(|run| run.eval(env))
+        .and_then(Result::ok)
+        .filter(Value::is_plain)
 }
 
 /// What carries no meaning into a property name: layout whitespace and a dropped silent comment. Both
