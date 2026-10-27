@@ -1009,6 +1009,22 @@
       • **三行金样在、律不在本刀**（已写进测试文档并仍红）：`sin/tan(-1e-12)` → `0` 要“足够接近整数就印整数”
         的精度律（`values/numbers/precision/**` 共 108 行要输出 —— 下一刀就取它）；`atan2(1cm,-10mm)` → `135deg`
         要长度因子精确（我们现在落在 `135.0000000003`）；`atan2(1px,1deg)` 要 `deg` 进 `dimension()`。
+      **㉘ 数字打印律纠正：不存在“10 位有效数字就原样”的豁免**（已实测，run `precision`，net 4）：
+      • ㉑ 之前记的“自然表示不超 10 位**有效**数字则原样”是错的（它把 `math.sin(-0.000000000001)` 印成
+        `-0.000000000001`，而 `{sin,tan}.hrx::negative_zero_fuzzy` 要 `0`）。金样要的是：**一律截到小数点后
+        10 位**，不够 10 位的自然形式原样输出 —— 所以 `values/numbers/precision.hrx::very_small/*`
+        （`1e-10` 留、`2e-11` 归 0）与 `very_close_to_int/*`（`10+1e-10` 留、`10+2e-11` 归 10）、
+        `values/numbers/{bounds,very_large}.hrx`（整数/309 位的 `f64::MAX` 字面量无小数可截，原样）
+        同属一条律，不需要 fuzzy 比较。
+      • **实测**：hrx **1585 → 1589（实质 1420 → 1424）**，`ledger diff trig precision` = **`regress=0 net=4`**
+        （正好 sin/tan 的 `zero_fuzzy` 与 `negative_zero_fuzzy` 四行），无效错误仍 **53**；
+        空库复算（`/tmp/qrass-ab6.db`：prec-verify-before 1585 vs prec-verify-after 1589）逐字重现；
+        42 个测试块 exit=0、clippy `-D warnings` exit 0、sasslint `count=0`；`tests/math_trig.rs` 里被摘掉的
+        四行已钉回断言。
+      • **下一刀已量定（并且纠正一个错读数）**：`values/numbers/precision.hrx` 那 30 行留着的是
+        `-10 + math.pow(10, -11)` 这种原文 —— 卡在 **`math.pow` 未注册**，不是打印律；同一原因还遮住
+        `sqrt`/`log*`/`exp*`/`hypot`/`clamp`。我上轮写的“precision 共 108 行”错在用了 `values/numbers` 整个
+        前缀的数（precision.hrx 只 30 例）——**子目录计数要给自己的前缀**。
 - [ ] 1.6 结构化 token→`Expr` 求值**接入 `compile` 声明值路径**(白名单 + 无歧义触发),经 `core_functions/**` 与 `operators/**` 金样验 `regress=0`
 - [ ] 1.7 内置函数各域分派接线(math/string/list/map/color/meta/selector),经 `core_functions/**` 验。**全局裸名 `global/*` deprecation 部分可后置**(真实几乎不用,见语料分析)
 - [x] 1.7a **调用脊柱（已合入）**。选型依据（逐条量具）：

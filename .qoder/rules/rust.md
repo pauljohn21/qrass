@@ -17,8 +17,10 @@ alwaysApply: true
    `#[ignore]`）。P1 已落：具名实参不当引用（`expr::named_argument`）、标识符 `+`/`-` 拼接
    （`expr::concatenation`）、绑定旗标剔除（`lexer::without_flags`）、**调用脊柱**（`calls.rs`+`builtins.rs` 注册表：
    `math.div/round/abs/ceil/floor/min/max/unit/is-unitless/percentage/compatible`，含 arity 与类型消息金样）、
-   `Value::Bool` 与 Sass 数字序列化（**自然表示不超 10 位有效数字则原样，否则截到 10 位小数**——
-   2026-10-27 由颜色金样纠正，原先记的“10 位有效数字”对 `67.8431372549%` 是错的）、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
+   `Value::Bool` 与 Sass 数字序列化（**一律截到小数点后 10 位，小数位不够 10 位的原样输出** ——
+   2026-10-27 先由颜色金样纠正为“自然表示不超 10 位**有效**数字则原样”，同日再由
+   `core_functions/math/{sin,tan}.hrx::negative_zero_fuzzy` 与 `values/numbers/precision.hrx::very_small/*`
+   推翻：那个“有效数字”豁免会把 `1e-12` 原样打出去，语料要 `0`，已删）、**1.4a `Calculation` 第一片**（`src/calculation.rs`：`Value::Calculation`，
    单项出壳 / 嵌套脱一层壳 / 否则原式保留）、**1.4d 前半：有理单位**（`src/unit.rs` 的 `Unit{num,den}` 是
    **保序**多重集 + 构造时同名抵消，`Value::Number(f64, Unit)`，`BinOp::{Mul,Div}` 与 `build()` 优先级；
    词法已把 `*` 提成 `Op`，`/` 只在调用参数内由 `expr::release_slashes` 变算子；复合单位不得离开 `calc( )`）与
@@ -33,8 +35,8 @@ alwaysApply: true
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1585/11,533**（13.7%，**实质通过 1420** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `trig`）；无效错误仍 **53**（曾一度因定长 arity 把
+   **以上均不得重做/重新发明**。当前基线 hrx **1589/11,533**（13.8%，**实质通过 1424** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `precision`）；无效错误仍 **53**（曾一度因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
@@ -214,11 +216,15 @@ alwaysApply: true
        （`math.round(-0.2)` → `0`；`angle_of` 的 mod-360 折叠与 `clamp_alpha` 也是）——所以上一条“判越界
        前先取整”写的“`format_number` 把 `-0` 归零”已收窄为：**打印层保留精确的 `-0`，由四舍/折叠/夹紧自己丢**
        （`f64::rem_euclid` 会保留 `-0.0`，这一点必须在折叠处显式归正）。
-     • **三行没做也不装成做了**（金样在，律不在本刀）：`sin/tan(-0.000000000001)` → `0` 要“足够接近整数就印
-       整数”的精度律（`values/numbers/precision/**` 共 108 行要输出，下一个就取它）；`atan2(1cm, -10mm)` →
-       `135deg` 要长度因子精确而非语料那 10 位小数读数；`atan2(1px, 1deg)` 要 `deg` 进维度表
-       （`dimension()` 故意只收已实证的长度/时间/em）。已钉的 `tests/math_trig.rs` 只断言能过的行，
-       这三行在文档里写明留红。
+     • **当时列为“未做”的三行，现在只剩两行**（run `precision`，net 4，1585→1589；regress=0，空库复算
+       同读数）：`sin/tan(-1e-12)` → `0` **不需要** fuzzy 比较，需要的就是上面那条“一律截到 10 位小数”，
+       挡住它的正是旧的“10 位有效数字就原样”豁免（已删，四行全绿，`tests/math_trig.rs` 把它们钉回断言）。
+       另两行仍红：`atan2(1cm, -10mm)` → `135deg` 要长度因子精确（我们落在 `135.0000000003`）；
+       `atan2(1px, 1deg)` 要 `deg` 进维度表（`dimension()` 故意只收已实证的长度/时间/em）。
+     • **下一刀已量定**：`values/numbers/precision.hrx` 那 30 行留着的是 `-10 + math.pow(10, -11)` 这种原文，
+       不是打印律，是 **`math.pow` 未注册**（同一原因还遮住 `sqrt`/`log*`/`exp*`/`hypot`/`clamp`）。
+       上一轮写的“precision 共 108 行要输出”是错读数：108 是 `values/numbers` **整个前缀**的数，
+       precision.hrx 只有 30 例 —— **按子目录计数要给它自己的前缀，别拿父目录的数当子目录的数**。
    而 `complement` 暂不能动，因为
    `complement(turquoise)` → `#e04050`（整字节）与 `complement(rgba(turquoise, 0.7))` → 百分比形态这对差别
    还没解释清（已当待测现象记录在 tasks.md 1.5 ⑧，不猜原因）。
