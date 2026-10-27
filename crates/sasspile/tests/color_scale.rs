@@ -1,6 +1,10 @@
 //! `color.scale`, pinned row by row on `core_functions/color/scale/{rgb,hsl,hwb,no_space,global}.hrx`.
 //! Every input and expectation is copied from the fixture's own `input.scss` / `output.css`.
 //!
+//! The refusals and messages a scale raises (`$hue: Channel isn't scalable.`, the `%` requirement on an
+//! amount, the `-100%…100%` range) are in [`tests/color_diagnostics.rs`](crate), which holds the three
+//! families' shared diagnostic law.
+//!
 //! The law this file exists for: a scale moves a channel **toward whichever bound its sign points at, by that
 //! share of the distance still between the channel and that bound** — so `sienna`'s red `160` with
 //! `$red: 12%` is `160 + (255 − 160) × 0.12`, and `-33%` of `lightcoral`'s red `240` is
@@ -238,14 +242,16 @@ async fn the_alpha_scales_between_zero_and_one_and_nothing_named_is_a_no_op() {
     }
 }
 
-/// A boundary of **this slice**, not a corpus row: no `scale/*.hrx` names `$hue:`, and an angle has no bound
-/// to scale toward, so borrowing `adjust`'s wrap (`adjust/hsl.hrx::hue/arg_above_max` reads 540 as 180) would
-/// be inventing the law. The refusal keeps the call's text, which is the decline law already in force —
-/// pinned here so a later change cannot quietly start answering it from a neighbour's rule.
+/// A boundary of **this slice**, not a corpus row: the calls whose *output* this compiler cannot produce keep
+/// the call's text — `$space:` for a space it has no conversion for, a modern `color(…)` colour it refuses to
+/// read into sRGB, and a `none` channel it cannot move. Those rows stay red, and pinning the text is what
+/// stops a later change from quietly answering them in the wrong space.
+///
+/// The hue is not here any more: `color.scale(white, $hue: 10%)` is answered with the corpus's own message,
+/// pinned in `tests/color_diagnostics.rs` (`scale/error/args.hrx::hue`).
 #[tokio::test]
-async fn a_scale_that_names_the_hue_is_refused_rather_than_invented() {
+async fn calls_this_slice_cannot_answer_keep_their_text() {
     for call in [
-        "color.scale(red, $hue: 10%)",
         // `$space:` asks for a space this compiler has no conversion for (`scale/no_channels.hrx::identical`
         // is the oklch row, whose own expectation the text does not match — that row stays red on purpose).
         "color.scale(oklch(50% 0.2 0deg), $space: lab)",

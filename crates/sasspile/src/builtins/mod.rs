@@ -34,12 +34,24 @@ mod math;
 pub struct Given {
     pub param: &'static str,
     pub value: Value,
+    /// Whether the call **wrote a `$label:`** for this parameter, as opposed to filling it by position.
+    /// `color.change`/`color.adjust`/`color.scale` take exactly one positional argument — the colour — and
+    /// refuse the rest by name (`Only one positional argument is allowed. All other arguments must be passed
+    /// by name.`, `change/error/args.hrx::too_many`), and that distinction is not recoverable from the
+    /// bound value: `color.change(red, 1)` and `color.change($color: red, $red: 1)` land on the same slots.
+    pub label: bool,
 }
 
 impl Given {
     /// The values alone, for a body whose reading does not depend on which parameter an argument filled.
     pub fn values(given: Vec<Self>) -> Vec<Value> {
         given.into_iter().map(|argument| argument.value).collect()
+    }
+
+    /// How many arguments were written **positionally** — the count the colour calls' name-or-none rule
+    /// judges, and the reason [`Given::label`] exists.
+    pub fn positional(given: &[Self]) -> usize {
+        given.iter().filter(|argument| !argument.label).count()
     }
 
     /// The value passed for one parameter, if the call named it.
@@ -123,7 +135,14 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     // below, which skips the required-parameter check; the body decides how many arguments it accepts,
     // because `rgb` is genuinely overloaded (`rgb(#123, 1)` is two arguments, `rgb(1, 2, 3)` is three).
     if builtin.variadic {
-        if given.is_empty() {
+        // A variadic that declares **no** names takes every argument positionally, so an empty call has no
+        // parameter to name in its message: `At least one argument must be passed.`
+        // (`core_functions/math/{hypot,max,min}.hrx::error/too_few_args`). One that does declare names lets
+        // the empty call through to its body, because the body knows which parameter is missing —
+        // `color.change()` reports `Missing argument $color.` (`change/error/args.hrx::too_few`) and
+        // `saturate()` reports `Missing argument $amount.` (`saturate.hrx::error/too_few_args`), neither of
+        // which this generic message could say.
+        if given.is_empty() && builtin.params.is_empty() && builtin.optional.is_empty() {
             return Err(SassError::typed(
                 ErrorKind::MissingArgument,
                 "At least one argument must be passed.",
@@ -182,20 +201,21 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
         .chain(builtin.optional)
         .enumerate()
         .map(|(index, param)| {
+            let label = named.iter().any(|(name, _)| name == param);
             let value = named
                 .iter()
                 .find(|(label, _)| label == param)
                 .map(|(_, value)| (*value).clone())
                 .or_else(|| positional.get(index).cloned());
-            (*param, value)
+            (*param, value, label)
         })
-        .collect::<Vec<(&'static str, Option<Value>)>>();
+        .collect::<Vec<(&'static str, Option<Value>, bool)>>();
     // Every declared parameter up to the first absent one is handed to a **fixed** body, so it never sees a
     // hole, and a required parameter left absent is the corpus's own message
     // (`math/div.hrx::error/missing_argument` → `Missing argument $number2.`).
     let taken = slots
         .iter()
-        .position(|(_, value)| value.is_none())
+        .position(|(_, value, _)| value.is_none())
         .unwrap_or(slots.len());
     if taken < builtin.params.len() && !builtin.variadic {
         return Err(missing(builtin.params[taken].to_string()));
@@ -212,9 +232,10 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     };
     let given = kept
         .into_iter()
-        .filter_map(|(param, value)| {
+        .filter_map(|(param, value, label)| {
             Some(Given {
                 param,
+                label,
                 value: value?,
             })
         })

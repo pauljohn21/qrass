@@ -13,6 +13,7 @@ use crate::builtins::Builtin;
 use crate::color::Color;
 use crate::value::Value;
 
+mod amount;
 mod constructors;
 mod modify;
 
@@ -343,6 +344,12 @@ fn grayscale_of(args: Vec<Value>) -> Result<Value, SassError> {
 
 /// One `($color, $amount)` call: judge the arguments, then move the axes.
 fn adjusted(args: Vec<Value>, change: fn([f64; 3], f64) -> [f64; 3]) -> Result<Value, SassError> {
+    // `saturate()` with nothing at all names the parameter it lacks — `Error: Missing argument $amount.`
+    // (`core_functions/color/saturate.hrx::error/too_few_args`, and `darken.hrx` says the same), which the
+    // registry's generic variadic message could not say for a signature that declares names.
+    if args.is_empty() {
+        return Err(super::missing("amount".to_string()));
+    }
     match colour_and_amount(&args) {
         Some((color, amount)) => Ok(Value::Color(
             color.transform_axes(|axes| change(axes, amount)),

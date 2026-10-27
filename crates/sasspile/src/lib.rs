@@ -59,6 +59,19 @@ pub enum ErrorKind {
     /// a number parameter required a specific unit (or none); again the oracle's words
     /// (`$number: Expected 1% to have no units.`, `core_functions/math/percentage.hrx::error/unit`)
     WrongUnits,
+    /// a colour parameter received something that is not a colour, and the oracle says so
+    /// (`$color: 1 is not a color.`, `core_functions/color/change/error/type.hrx::color`). Only a **number**
+    /// earns this message: a colour in a space this compiler has not got (`color(srgb …)`, `lab(…)`)
+    /// declines, because answering it in sRGB would be a wrong value the pass count cannot see.
+    NotAColor,
+    /// a string parameter received a non-string (`$space: 1 is not a string.`,
+    /// `core_functions/color/scale/error/type.hrx::space`)
+    NotAString,
+    /// a call named a channel its colour cannot answer, or a share outside the range the oracle allows —
+    /// `$hue: Channel isn't scalable.` (`core_functions/color/scale/error/args.hrx::hue`) and
+    /// `$saturation: Expected -100.001% to be within -100% and 100%.` (`…::error/bounds.hrx::legacy/too_low`).
+    /// Both are about the **channel argument**, so they share one kind; which name is refused is in the text.
+    Channel,
     /// a `$label:` that names no parameter of the callee's signature. Not fatal: the run keeps its own text.
     /// The kind exists so the **caller** knows not to re-render the run through the interpolation path — a
     /// `$name:` in an argument list *names* a parameter instead of referencing a variable, and resolving it
@@ -99,6 +112,9 @@ const FATAL: &[ErrorKind] = &[
     ErrorKind::NotANumber,
     ErrorKind::IncompatibleUnits,
     ErrorKind::WrongUnits,
+    ErrorKind::NotAColor,
+    ErrorKind::NotAString,
+    ErrorKind::Channel,
 ];
 
 /// Compiler error carried on the stream's **real** `Err` channel (`Observer::error`), never as a
