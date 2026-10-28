@@ -12,9 +12,12 @@ alwaysApply: true
 2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）里的
    「Single sources already fixed here」表——**六条已定死的单一
    真源**（单位表/比较/色彩 route/无单位拒语/打印律/`Tok::MemberVar`）；新增第二份副本就是回归本身，先合并。
-3. `docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md`（跨会话防 GC 的五层防线设计：
-   F1–F6 六类实测失效→ 哪层拦什么、拦不住什么→ S1–S5 分期。**未获你批准前不实施**，但它写的两条纪律已生效：
-   **读数只能来自产生它的那条命令**；**陈旧摘要/旧 dump 的记忆不是证据**（本轮 9 次“旧断言前提变了”同一成因）。
+3. `sasspile-start` skill（已落地）：起手四步必须实跑命令并**逐字复述读数**（`ledger runs`、
+   意外错误计数、`sasslint` 命中数、`openspec status`）；细则在它自己的 `reference/` 三份里。设计文档
+   `docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md` 的 S1+S2 已实施（两条新闸
+   +`defence_fitness` 体检+子代理+本文件瘦身），**但它的“冷启动三次实测”验收尚未跑** —— 见同一
+   change 的 plan 末尾「实施结果与遗留」。两条纪律先从纪律层面生效：
+   **读数只能来自产生它的那条命令**；**陈旧摘要/旧 dump 的记忆不是证据**（本轮 10 次“旧断言前提变了”同一成因）。
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、

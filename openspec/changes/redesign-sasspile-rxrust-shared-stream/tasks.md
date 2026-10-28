@@ -1400,3 +1400,23 @@
 
 - [ ] 9.1 `element-plus` theme-chalk 端到端编译(**经 P1/P3/P4/P5/P7 主干即应达成,不依赖 P6**),无 panic、输出与自基线一致不劣化(`ledger` 归一化)
 - [ ] 9.2 全量 `sass-spec`(排除 `non_conformant`/`libsass-*`/`:todo:`)通过率相对基线单调上升、`regress=0`;`sasslint` 0;clippy `-D warnings` 绿
+
+- [x] 9.3 **跨会话防 GC 回归的防线 S1+S2（已落地，行为无涉）**：不是特征，是让每一轮"判据是否被记住"
+      不再依赖模型自觉的基础设施。**动手前先实测问题形状**，得到六类失效（F1 拿陈旧摘要/旧 dump 当证据、
+      F2 伪造字面量、F3 把"我的选择"钉成语料律、F4 结构退回 GC/第二份真源、F5 读数来自不产生它的命令、
+      F6 深会话尾部判断力衰减）——只有 F4 可确定性机检，其余要靠"真值 = 一次命令 + 命令 = 闸门"。
+      **落地物**：`sasslint` 两条新闸（`no-stage-layer` 锚定 `fn drain(`/`fn fail<`；`single-table` 认
+      "单位名绑定到值"的 `=>` 臂**与**元组条目，豁免按"定义 `pub const UNITS`"而非文件名）；
+      `tests/defence_fitness.rs`（闸清单从引擎派生、14 条阳性对照、闸数钉死、注释后置表行号、教条形状下界、
+      未落地闸的债记录）；`.qoder/agents/gc-auditor.md`（只读审查者，finding 必须带 `file:line` + 金样 case，
+      禁提"放松闸/改名绕闸/先记 TODO"）；`.qoder/skills/sasspile-start/`（起手四步实跑 + 逐字复述 + 三份
+      按需 reference）；`.qoder/rules/rust.md` 474 → 85 行（三节整段搬出留指针，基线仍是唯一副本）。
+      **`no-else-if-chain` 未落地并记为裁决**：现存 7 处 `} else if` 按 rust.md 是**存量债**而非合法形状，
+      重构生产码超出该计划范围；改为整树计数 == 7 的可失败记录，闸落地或债数变化都会红。
+      **读数**：`cargo test --workspace --no-fail-fast` exit=0、182 passed / 0 failed；`clippy -D warnings`
+      exit=0；`sasslint count=0`；hrx `pass=1841 / substantive=1676` 与 `regress=0 net=0`（证明确实行为无涉）。
+      计划末尾「实施结果与遗留」记有 7 条裁决与本计划自身三次复发的 F5（README 曾写 clippy clean 而 HEAD 已红）。
+- [ ] 9.4 **冷启动三次实测（尚未跑，新会话的第一件事）**：全新上下文只说「继续 sasspile」，三次都必须
+      先跑 `sasspile-start`、复述数字与 `ledger runs` 逐字相同、批次后触发 `gc-auditor` 且 finding 带引用。
+      本计划无法对自己诚实完成这一条（它就是被检验的对象）。通过后再开 S3（`crates/guard` MCP）→
+      S4（插件）→ S5（hook，需批准改宿主设置）的各自计划。

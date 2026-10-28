@@ -527,3 +527,51 @@ git commit -m "docs(rules): shorten the always-on contract and move the counter-
 **冷启动验收（S1+S2 完成的判据）**：全新上下文只给一句"继续 sasspile"，连续三次都必须——先跑 `sasspile-start`、
 复述的基线与 `ledger runs` 输出逐字相同、批次后触发 `gc-auditor` 且每条 finding 带 `file:line`。任一失败 = 补闸，
 不写"下次注意"。
+
+---
+
+## 实施结果与遗留（2026-10-28，S1+S2 执行完毕）
+
+执行路线经用户批准为**内联实现 + `CodeReview` 子代理做任务级审查**，分支 `main`（项目规范）。
+本节的唯一目的：把 `.superpowers/sdd/<plan>/progress.md`（git-ignored 的临时账本）里不可丢的裁决与
+未验收项提升到受版本控制的文档，然后销毁工作区。
+
+**任务状态**（提交 `f5cf0d6..`，全部经两轮修复循环 + 一次整枝终审）
+
+| Task | 状态 | 说明 |
+|---|---|---|
+| 1 `no-stage-layer` | ✅ 落地 | needle 带分隔符锚定（`fn drain(`/`fn fail<`），`fn failure()` 不误伤 |
+| 1 `no-else-if-chain` | ⏸ 见裁决 1 | 未实现，改为机器可见的债记录 |
+| 2 `single-table` | ✅ 落地（终审后加固） | 单位名绑定到值算臂（`=>` **或** `", (`）；豁免按"是否定义 `pub const UNITS`"，不按文件名 |
+| 3 `defence_fitness.rs` | ✅ 落地 | 闸清单**从引擎派生**（表改 pub）+ 14 条阳性对照 + 闸数钉死 + 注释后置表行号 + 教条形状下界 |
+| 4 `gc-auditor` | ✅ 落地 | `.qoder/agents/gc-auditor.md`，宿主约定经 `create-subagent` 核实；按名派发不支持、`generalpurpose` 被用户禁用 ⇒ 本会话的"新鲜席位"是 CodeReview |
+| 5 `sasspile-start` | ✅ 落地 | 四条起手命令全部实跑验证；`reference/` 三份为迁出而非复制 |
+| 6 `rust.md` 瘦身 | ✅ 落地（见裁决 5） | 474 行 → 85 行（终审后的最后一次再测：写它 82 的那两处已同步改掉），三节整段搬出并留指针 |
+
+**终读数**：`cargo test --workspace --no-fail-fast` exit=0、182 passed / 0 failed；`sasslint` CLI `count=0`；
+`clippy -D warnings` exit=0；`openspec validate --strict` valid；hrx `pass=1841 / substantive=1676`、
+`ledger diff readonly-module defence-s1s2` = `regress=0 net=0`（防线行为无涉）。
+
+**裁决（ledger 里的 `Ruling:` 全量，逐条附代价）**
+
+1. **`no-else-if-chain` 不在本计划落地**——rust.md 禁的是链，现存 7 处 `} else if` 是**存量债**（审查者纠正了我"它们合法"的错误说法），重构生产码超出本计划"不碰 `crates/sasspile/src`"的范围。改为 `defence_fitness::the_deferred_branch_gate_stays_recorded`：闸落地却没更新记录、或债数变化（整树计数 == 7），测试即红。代价：这一条教条由测试守着而不是 lint 守着。
+2. **闸清单从引擎派生 + 钉死数量**（`SUBSTRING_BANS`/`AND_BANS`/`LINE_START_BANS`/`FILE_RULE_IDS` 改 pub）。代价：新增闸必须同步更新被钉住的数字，这是有意为之的摩擦。
+3. **`single-table` 取消按文件名豁免**，改为"定义 `pub const UNITS` 的那个文件"。代价：判据稍宽，靠"名字绑定到值"的相关性把 `matches!` 与纯名称数组排除在下界之外。
+4. **计划点名的 `reference/evidence-discipline.md` 不单独建档**，内容并入 `tooling-redlines.md`。代价：计划文本比现实多一个文件名（已在本节说明，不留悬空指针）。
+5. **always-on 的 ≤40 行上限被替换成它真正想买的性质**（无逐特征叙述、无重复索引）。代价：每次会话多载约 40 行；替代方案是把铁律本身挤出 always-on。
+6. **`gc-auditor` 的 `tools:` 无法按模式收窄**（宿主格式只列名字）。代价："只读"靠正文约束。
+7. **暂缓 minor**：`M-5` 植入临时文件的清理发生在断言之后（失败路径会在 `$TMPDIR` 残留，文件名唯一、无测试读取它）。
+
+**本计划自己复现过的失效（写下来，因为它证明防线不是空谈）**
+- 把基线数字复制进 `state-of-the-port.md`（C-1）；在反复制的防线里造第二副本。
+- 留着一句"当前 746 PASS"（I-1），而它所在的节就规定读数须来自产生它的命令。
+- 声称 rust.md 是 80/81 行而实测 82，改完又变 85（同一漂移第三次）；声称"always-on 只有 rust.md"而 `codegraph.md` 同为 always_on。
+- **`&PathBuf` 使 clippy 在 HEAD 上是红的，而 README 写着 clean**（我最后一次跑 clippy 早于引入问题的代码）——F5 第二次复发。
+
+### 尚未跑的验收：冷启动三次（新会话的第一件事）
+
+设计 §5.4 与上面的"真判据"要求：**全新上下文**里只说「继续 sasspile」，连续三次都要
+①先跑 `sasspile-start` 的四条命令；②复述的数字与 `cargo run -q -p ledger -- runs` 的输出**逐字相同**；
+③实现批次后触发审计且每条 finding 带 `file:line`。
+本会话无法对自己诚实完成这一条（它就是被检验的对象）。三次实测通过后：把结果记进本节、更新设计 §5 的
+状态，再进 **S3（`crates/guard` MCP）→ S4（插件）→ S5（hook，需批准改宿主设置）** 的各自计划。
