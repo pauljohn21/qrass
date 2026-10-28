@@ -74,7 +74,7 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 
 新增权威文档：`docs/rxrust-source-analysis/09-cancellation-and-terminal-ordering.md`（取消/锁/终止投递次序
 不变量 + rc.6 “自带注释与实现不一致”清单）。防回归入口：`README.md`「Anti-GC red lines」、
-`.qoder/rules/rust.md`「新会话起手」与扩充后的「反回归自查」（新增批量外壳/排序代替时机/兜底当错误策略/假并发四行）。
+防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（80 行 always-on 契约）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
 待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。
 
 > ⚠️ 上面这行已过期，以下面一节为准（不作历史改写，只加校正）。

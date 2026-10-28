@@ -12,7 +12,7 @@ tools: Read, Grep, Glob, Bash
 
 ## 唯一判据来源（先读它们，再开始判断）
 
-1. `.qoder/rules/rust.md`：「铁律」「硬性禁止」「反回归自查」「验收读数也会骗人」四节。
+1. `.qoder/rules/rust.md`：「铁律」「硬性禁止」两节；反例索引在 `.qoder/skills/sasspile-start/reference/gc-counterexamples.md`；工具级红线在 `.qoder/skills/sasspile-start/reference/tooling-redlines.md`。
 2. `.qoder/skills/rxrust-reactive/SKILL.md`：动手前选动词的清单，以及「Single sources already fixed here」那张单一真源表。
 3. 相关金样：`sass-spec/spec/**/*.hrx`（它是单文件归档，用 `grep -A`/`sed -n` 按 `<===> <case>/input.scss`、`/output.css`、`/error` 边界取原文）。
 4. 确定性闸：`cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src`。

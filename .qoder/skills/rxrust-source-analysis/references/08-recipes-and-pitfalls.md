@@ -123,7 +123,7 @@ Local::from_iter(sibs)
 
 ### (c) 嵌套 / 树 = 流上的 owned 结构 + `flat_map` 下钻（**不是**先 parse 成 `Vec<Rule>` 再递归遍历）
 
-判据（`rust.md` 反回归自查）：出现 `Vec<Rule>` / `.children` 递归下降 / `fn …->Vec<..>` 中转，
+判据（`sasspile-start/reference/gc-counterexamples.md`）：出现 `Vec<Rule>` / `.children` 递归下降 / `fn …->Vec<..>` 中转，
 就是"物化结构再遍历"。正确形态：**结构作为被 move 的数据沿流走**，需要下钻处用 `flat_map`
 把子节点当子流展开；深度用累加子里的 owned 栈表达（`reduce_initial`/`scan_map`），
 不是调用栈递归、也不是 `from_fn` 手动驱动。
@@ -177,7 +177,7 @@ let b = shared.clone().filter(fb);
 - 错误当数据（in-stream `Result` + `Err=Infallible`）或显式 `on_error`/`into_future`。
 - 跨函数/异构存流用 `box_it()`。
 
-**Don't**（= `rust.md` 反回归自查 + `sasslint` 规则命中项）
+**Don't**（= `sasspile-start/reference/gc-counterexamples.md` + `sasslint` 规则命中项）
 - 不 `Vec<Rule>`/`.children` 递归下降遍历（`no-tree`/`no-recursive-descent`）。
 - 不 `fn -> Vec<..>` 命令式中转（`no-relay-vec`）。
 - 不把 token/值 `collect` 成字符串再 char 状态机重扫（`no-string-machine`）。
