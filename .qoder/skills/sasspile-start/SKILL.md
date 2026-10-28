@@ -14,8 +14,8 @@ metadata:
 伪造字面量、把"我的选择"钉成语料律、结构退回 GC、读数来自不产生它的命令、深会话尾部判断力衰减）。
 所以本 skill 不重复教条，只做一件事：**把真值变成一次命令，并要求你复述它**。
 
-`always-on` 的规则只有 `.qoder/rules/rust.md` 里那 81 行（另有 `codegraph.md` 39 行同为 always-on）（技术栈、基线数字、三条不可协商、铁律、指针）。
-细节全在这里按需加载。
+`always-on` 的文件有两个：`.qoder/rules/rust.md`（82 行：技术栈、基线数字、过程门禁、硬性禁止、铁律、指针）
+与 `.qoder/rules/codegraph.md`（39 行：代码查询先走 CodeGraph）。其余细则全在本目录按需加载。
 
 ## 起手四步（缺一不可，跑完必须复述读数）
 
@@ -47,7 +47,8 @@ metadata:
    openspec status --change redesign-sasspile-rxrust-shared-stream --json | tail -20
    ```
 
-   再读本目录 `reference/state-of-the-port.md` 与 `openspec/.../tasks.md` 最后一条**已实测**编号之后的第一条未做项。
+   再读本目录 `reference/state-of-the-port.md` 与
+   `openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md` 里最后一条**已实测**编号之后的第一条未做项。
 
 **然后复述**：run 名、`total`、`pass`、`pass_rate`（来第 1 步）、`pass_substantive` 与
 `pass_empty_expectation`（来现跑的 hrx 读数行）、意外错误计数（第 2 步）、`sasslint` 命中数（第 3 步）、

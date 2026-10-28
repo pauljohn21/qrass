@@ -73,8 +73,8 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 | 基线 560→561 | 现为 **595 → 598**（+3 来自规范驱动的发射时机更正）；`sass-spec` 全量实测 14,345 条 input / 11,808 条 output |
 
 新增权威文档：`docs/rxrust-source-analysis/09-cancellation-and-terminal-ordering.md`（取消/锁/终止投递次序
-不变量 + rc.6 “自带注释与实现不一致”清单）。防回归入口：`README.md`「Anti-GC red lines」、
-防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（81 行 always-on 契约，另有 `codegraph.md` 39 行）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
+不变量 + rc.6 “自带注释与实现不一致”清单）。
+防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（82 行 always-on 契约，另有 `codegraph.md` 39 行）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
 待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。
 
 > ⚠️ 上面这行已过期，以下面一节为准（不作历史改写，只加校正）。
@@ -95,8 +95,9 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 | 未提及 | `crates/docsizer` 已从 workspace 成员里删除（悬空引用会让所有 `cargo` 命令失败）；其逐行教程 change
   与 `docs/rxrust-from-scratch/` 仅作历史，不得 apply 或重启 |
 
-现行权威入口：`openspec/.../design.md` + `tasks.md`（每个结论背面的实测数字都记 在那里）、`README.md`
-「Anti-GC red lines」（现为 9 条）、`.qoder/rules/rust.md`。A/B 记录 = `reports/hrx.db` 里的具名 run
+现行权威入口：`openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` + 同目录 `tasks.md`
+（每个结论背面的实测数字都记在那里）、`README.md`
+「Anti-GC red lines」（现为 11 条）、`.qoder/rules/rust.md`。A/B 记录 = `reports/hrx.db` 里的具名 run
 （该库不入库跟踪，只存本地），散存快照文件的做法已被废除。
 
 ## 第三次校正（2026-10-28，值建模层）
