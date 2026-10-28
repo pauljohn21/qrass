@@ -49,12 +49,14 @@ F6 只能靠"换上下文重审"来防。** 由此得到五层。
 
 ### L2 机器闸：编辑即检，且规则本身要有阳性对照
 
-- **扩 `sasslint` 规则**（现 4 条 → 加 5 条，全为确定性文本/结构判据）：
-  `no-recursive-ast`（`Vec<Rule>`、`.children`、render/eval 自调用）、`no-work-queue`（同行 `from_fn(` +
-  `VecDeque`/`Vec<Frame>`）、`no-stage-layer`（`fn drain`/`drain_one`/`fail(` / `type Stage`）、
-  `no-imperative-flow`（行首 `for`/`while`/`loop`、`else if` 链、堆叠 `return` 守卫计数阈值）、
-  `single-table`（同一模块内出现第二张单位/精度常量表：`match unit {` 字面量分支 ≥ 3 即报，正是本轮
-  删掉的 `math.rs` 长度表的形状）。
+- **扩 `sasslint` 规则**：写本节时我按 `rust.md` 里“四条铁律机器闸”的说法以为只有 4 条，实地读
+  `crates/sasslint/src/lib.rs` 后真实是 **12 条**（`no-tree`/`no-relay-vec`/`no-string-machine`/
+  `no-recursive-descent`/`no-from-fn-driver`/`no-work-queue`/`mutable-accumulator-drives`/`no-sort-for-order`/
+  `no-batch-shell`/`require-err-channel`/`require-slot-before-subscribe`/`no-imperative-loop`）。
+  所以只补真正缺的**三**条（已覆盖的形状不重造——本设计自己的“单一真源”原则同样适用于它自个体量）：
+  `no-stage-layer`（`type Stage`/`fn drain`/`fn fail` 自造框架层）、`no-else-if-chain`（`} else if` 链代替 `filter`）、
+  `single-table`（同一事实的第二张常量表：文件里出现 ≥4 个单位字面量的 `match` 即报，`unit.rs` 那张真源除外），
+  全为确定性文本/结构判据。
 - **规则的规则**：每条新规则必须配一个 `tests/` 内的**植入反例**测试（内嵌 fixture 字符串，断言命中）与
   一个**合法形状不误伤**测试（现有 `legal_stream_shapes_are_not_flagged` 的下界做法）。没有阳性对照的规则不许合入
   ——本轮两次"为 0 的读数"都是量具自己坏了。
