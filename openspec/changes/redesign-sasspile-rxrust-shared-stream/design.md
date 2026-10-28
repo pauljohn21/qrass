@@ -53,8 +53,9 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
 **现状(P0′ 已收尾)**:上述四个内核已在 `crates/sasspile/src/phases.rs`,`compile` 链就是上面 6 个环;
 `order` 键/`sort_by_key`/`from_stream` 假并发已不存在;真 `Err` 通道已接上且 `UndefinedVariable` 已致命;
 选择器/属性名是结构化值(`src/selector.rs`),`&` 组合不再走 `str::replace`;四条铁律已编成 `sasslint`
-机器闸并打开 CI 门。harness 基线 595 → **635/11,533**(量具已换成全路径 key + 错误消息金样 + 9 个安全子集
-目录,见 tasks 0′.3 与 0.6)。**0′.3 只真值 +1** 这件事本身是结论:剩下大量 `error` 用例要的是尚未实现的
+机器闸并打开 CI 门。harness 量具已换成全路径 key + 错误消息金样 + 完整 `SPEC_DIRS` 覆盖
+(见 tasks 0′.3 与 0.6)。**基线数字不在本文写** —— 它只存于 `.qoder/rules/rust.md` 的头部与
+`reports/hrx.db` 的具名 run;本文写数字就会漂(本轮实测到 9 次“旧断言前提变了”,全是同一个成因)。**0′.3 只真值 +1** 这件事本身是结论:剩下大量 `error` 用例要的是尚未实现的
 **消息**(单位代数、`Expected identifier.`、deprecation),归 P1/P7。P0′ 仅剩 0′.5(共享态
 `C::RcMut`/`C::RcCell`)——它当前无可改之物(四个内核状态全为观察者独有),真正触发点是 P4(`@content` 闭包流)
 与 P5(模块多播)。**P1 已先落三块**(`tasks.md` 1.2b/1.3b/3.6a):具名实参不当引用、标识符 `+`/`-` 拼接

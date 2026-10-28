@@ -14,42 +14,55 @@ reduce_initial → into_future`. There is no materialized AST walked by recursio
 
 ## Workspace
 
-| Crate | Role | Size (measured 2026-10-26) |
+| Crate | Role | Size (measured 2026-10-28) |
 | --- | --- | --- |
-| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 8 `src/*.rs`, 1,815 lines, 12 test targets |
-| `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress` | 396 lines |
-| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 596 lines, 10 tests |
+| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 30 `src/*.rs`, 8,457 lines, 28 test targets |
+| `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress` | 1,068 lines |
+| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 740 lines |
 
 Source layout of the compiler: `lib.rs` (the single chain), `phases.rs` (the four kernels),
-`lexer.rs`, `exec.rs`, `expr.rs`, `value.rs`, `selector.rs`, `env.rs`. Two module directories,
-`src/builtins/` and `src/directives/`, are still empty placeholders for P1.7/P3+.
+`lexer.rs`, `exec.rs`, `expr.rs`, `value.rs`, `selector.rs`, `env.rs`, plus the module directories
+`src/builtins/` (one file per function domain — `math/` and `color/` have child modules of their own)
+and `src/directives/`.
+
+> **Numbers in this file are a snapshot.** The single source of truth for the baseline, the machine
+> gates and the current front is `.qoder/rules/rust.md` (headline) with
+> `openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md` (per-cut evidence) and
+> `reports/hrx.db` (the A/B record). If this table disagrees with those, those are right and this
+> table is stale — re-measure rather than copy.
 
 `crates/docsizer` — the counting tool of a cancelled tutorial programme — has been **removed from the
 workspace** (its dangling member entry was breaking every `cargo` invocation). Do not reinvent it.
 
-## Status (all numbers re-measured on 2026-10-26)
+## Status (all numbers re-measured on 2026-10-28)
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Tests | `cargo test --all-targets` | **78 passed / 0 failed / 0 ignored** |
+| Tests | `cargo test --workspace --no-fail-fast` | **172 passed / 0 failed / 0 ignored** (exit 0) |
 | Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
 | Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
-| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=746` (**6.5 %**), of which **`pass_substantive=581`** and `pass_empty_expectation=165` |
-| Clippy | `cargo clippy --all-targets -- -D warnings` | **clean (exit 0)** |
+| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=1,841` (**16.0 %**), of which **`pass_substantive=1,676`** and `pass_empty_expectation=165` |
+| Bogus-error count | `cargo run -p ledger -- failures <run> "unexpected error" --count` | **18** (was 53 before `module.$name` became a lexeme) |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | **clean (exit 0)** |
 | Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` | valid |
 
 **P0′ (the framework-native rewrite) is closed**: phases are kernels (0′.1/.2), order comes from the
 stream (0′.4), the `Err` channel is real with `UndefinedVariable` fatal (0′.3), the four iron rules are
 machine-gated (0′.6) and selectors/property names are structured values (0′.7). Only 0′.5 (shared state
 as `C::RcMut`/`C::RcCell`) is open, and it has nothing to change until P4/P5 introduce shared state.
-The next front is **P1 (value foundation) + P7 (diagnostic messages)**.
+P1 (value foundation) is largely in — numbers with units, structured selectors, `Expr`/`Value` with
+short-circuit `and`/`or`/`if`, exponent literals — and so is most of the colour domain plus the `math`
+and `color` core-function families. The next fronts are **the `none` channel value** (the largest
+remaining red cluster in `color/mix/missing`), **P7 diagnostic messages**, and **P8 modern colour
+spaces**. See `.qoder/rules/rust.md` for the measured list of what is and is not implemented.
 
-The 5.5 % pass rate is **not** a regression signal: the compiler is deliberately incomplete while the
+The pass rate — 16.0 % today, 5.5 % when this section was written — is **not** a regression signal: the
+compiler is deliberately incomplete while the
 architecture is rebuilt phase by phase (P0–P8). What a round must never do is lose previously passing
 cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**, not by the raw rate.
 `tests/hrx.rs` asserts nothing case-by-case for the same reason.
 
-**Read `pass_substantive`, not `pass`.** 165 of the 643 passes are against fixtures whose expected CSS is
+**Read `pass_substantive`, not `pass`.** 165 of the passes are against fixtures whose expected CSS is
 empty — legitimately correct (Sass really emits nothing there), but also what a compiler that produces
 nothing scores, so they prove nothing about a feature. The audit that found this: `directives/{if,for,while}`
 showed 39 “passing” cases, **all 39** with empty expectations, i.e. `@if`/`@each`/`@for` were
@@ -150,6 +163,18 @@ rediscover them:
    the true gain was **+1**. Likewise: case keys must be unique (`<basename>.hrx::<case>` collided 1,135
    times, 33 with both a PASS and a FAIL), and the harness's scanned directory list must equal the dirs
    the plan cites — `operators`/`parser`/`variables` had 79 cases nobody was measuring.
+10. **One fact, one place in the code.** A law written twice is the bug source, not the comment: the
+    convertible-unit table existed in `unit::UNITS` *and* as a list of length literals in `builtins/math.rs`
+    (deleted — `math.hypot(3cm, 4mm * 10, 5q * 40, …)` needed `q`, which only the shared table has), the
+    comparison now lives once in `math.rs::compare` with two message renderings (`comparable`,
+    `compare_named`), and the three colour families share one `color/modify.rs::route(given, writing)`.
+    Adding a second table/rule is the regression; merge it instead.
+11. **A reading belongs only to the command that produced it.** When a build fails, the next command in a
+    chain prints the *previously recorded* numbers — one wrong `net` was read this way. And a zero from a
+    tool that looks in the wrong place is not a finding: `grep --include=input.scss` can only return 0
+    against `.hrx` archives, because those are single-file archives with no such files on disk. Stale
+    summaries and remembered dumps are not evidence either — a proposed "exponent printing" cut was
+    voided on the spot once the corpus was grepped: no expected output asks for scientific notation.
 
 **Verification is not self-evident either.** `ledger` stores only failures, so re-importing a run name
 must clear that run's old `run_fail` rows (it does now, with tests) — otherwise a fixed case reports a

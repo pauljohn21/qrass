@@ -144,6 +144,26 @@ Local::create::<i32, Infallible, _, _>(|emitter: &mut dyn Emitter<i32, Infallibl
 .subscribe(|v: Vec<i32>| { /* … */ });
 ```
 
+## Single sources already fixed here (adding a second copy IS the regression)
+
+Each of these was duplicated at some point and each duplication produced a measured wrong answer, so check
+for an existing one before writing a helper:
+
+| Law | Lives in | What duplicating it cost |
+|---|---|---|
+| convertible units (family + factor) | `crate::unit::UNITS` via `unit::conversion` | `math.rs` kept ten-decimal length literals; `hypot(3cm, 4mm*10, 5q*40, …)` → `11.6189500386cm` was unanswerable (`q` exists only in the shared table) |
+| comparing two numbers under the unit law | `builtins/math.rs::compare` (+ `comparable` / `compare_named` renderings) | two message shapes were about to grow two comparisons; `min`/`max` name nothing while `clamp`/`hypot` name both parameters |
+| `change`/`adjust`/`scale` channel writing | `builtins/color/modify.rs::route(given, writing)` × `Space` | reading a scale amount with the rgb-channel reader made `100%` mean 255 bytes and looked like a formula error |
+| "must have no units" refusal | `builtins/math.rs::unitless` | per-function wording drift |
+| number printing | `value.rs::format_number` (10 decimal places, sign of `-0` kept) + `Unit::calc_product` for non-finite values | `Unit::calc_form` prints `NaNdeg`; two printing laws was the bug |
+| a name with a module prefix | `lexer::Tok::MemberVar` (decided at the character that starts `$`) | split `Word("math.")`+`Var("pi")` cannot be re-joined downstream: `math.$pi`, `math . $pi` and `5.$pi` are indistinguishable |
+
+Related discipline that is not about rxrust but is measured here: **quote a number only from the command that
+printed it**, and **a zero from an instrument pointed at the wrong place is not a finding** (`.hrx` files are
+archives — there are no `input.scss` files on disk to grep). See
+`docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md` for how these guards are meant
+to survive a fresh session.
+
 ## Do / Don't recap
 
 - Move values; `scan` (state **is** the emitted item) or `scan_map`/`reduce_initial` (private acc)

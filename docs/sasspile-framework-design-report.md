@@ -95,6 +95,31 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 | 未提及 | `crates/docsizer` 已从 workspace 成员里删除（悬空引用会让所有 `cargo` 命令失败）；其逐行教程 change
   与 `docs/rxrust-from-scratch/` 仅作历史，不得 apply 或重启 |
 
-现行权威入口：`openspec/.../design.md` + `tasks.md`（每个结论背面的实测数字都记在那里）、`README.md`
+现行权威入口：`openspec/.../design.md` + `tasks.md`（每个结论背面的实测数字都记 在那里）、`README.md`
 「Anti-GC red lines」（现为 9 条）、`.qoder/rules/rust.md`。A/B 记录 = `reports/hrx.db` 里的具名 run
 （该库不入库跟踪，只存本地），散存快照文件的做法已被废除。
+
+## 第三次校正（2026-10-28，值建模层）
+
+上一节的表仍成立，只是基线与“谁在防 GC”这两项变了：
+
+| 上次说法 | 现况 |
+|---|---|
+| 基线 635/11,533（5.51%） | **1,841/11,533（16.0%，实质通过 1,676 + 空期望 165）**，具名 run `readonly-module`；
+  无效错误（“该通过的行意外报错”）长期基线 **53 → 18**。逐个增量在 `tasks.md` ㉑–㉜ |
+| “四条铁律已成 sasslint 机器闸” | 仍是 4 条，但已证明**它们是代理而非证明**：本轮反复被推翻的不是代码而是
+  **文档里的断言**（9 次）：伪造金样文本、伪造 case 名、把“我的选择”当成语料钉住（`math.max(1px, 2q)`）、
+  把旧 dump 的记忆当证据（“指数打印侧”候选被当场推翻）、以及“读数只能来自产生它的那条命令”（编译失败时
+  后续命令吐的是旧入库值）。这些不是 GC，但同属“拿不该信的东西当依据” |
+| 值建模只到 `Expr`/`Value` | 新增三条已实测的建模律：① `module.$name`（`math.$pi`）在 **lexer 层就是一个词素**
+  （`Tok::MemberVar`）—— `Word+’.’+Var` 分开后下游不可再合并，而“未知命名空间逐字保留”把 33 行意外错误直接
+  消掉；内置模块成员**只读**（`exec::Target::ReadOnly`，判据是模块表认得这个名字而非命名空间文本）；
+  ② 指数字面量属数（`operations::number_lexeme` + `exponent_len`；`e` 后无数字仍是单位 `e`，无金样不外推）；
+  ③ 含常量的乘法**先试 `arithmetic` 再回落插值**，回落安全由 `operand_expr` 的窄读法保证 |
+| “一张表一份规则”只在文档里说说 | 已用实现固定：换算表只剩 `unit::UNITS`（`unit::conversion`），`math.rs`
+  自带的十位小数长度表已删；比较只剩 `math.rs::compare`/`compare_named`（同一规则、两种消息）；
+  色彩三族共用 `color/modify.rs::route(given, writing)` × `Space`；无单位拒语只有 `builtins/math.rs::unitless` |
+
+防 GC 的下一层防线（跨会话）已写成设计：`docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md`
+——五层（不依赖记忆的硬闸 / 钩子 / 子代理 / MCP 单真源 / 可分发插件），每层写明能拦什么、拦不住什么、
+以及验收办法。
