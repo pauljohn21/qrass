@@ -1237,6 +1237,13 @@
          金样 `@function abs($arg) {@return $arg}` → `b: -2`；注册裸名后同一行 `got "a {\n  b: 2;\n}"`
          （`ledger failures <run> "abs::overridden"` 两侧对照），即从“诚实逐字”变成“算出相反的值”。
          `min/max.hrx::overridden` 同形，所以这条卡住整个裸名族，不是 `abs` 一家的小事。
+         **本轮（壳路批）纠正对这条规模的误估**：它不是“加个优先级判据”的小改。实测两面：
+         `grep -rn '@return\|Return' crates/sasspile/src` → **0 命中**（调用机制无处），
+         而记录库 `failures number-shells "abs::overridden"` 的 got 就是逐字 `abs(-2)`
+         —— 即 **P4.1 “调用用户定义的函数”本身就还没做**；1.2d（`crates/sasspile/tests/callables.rs`）
+         只做到“声明处不求值、不外泄正文”（tasks 4.0）。因此顺序是：P4.1（收集 `@function` 声明、
+         实参绑定形参、`@return` 求值）→ 才谈“谁赢”的优先级 → 才谈注册裸全局名。
+         先把裸名注册去做会产金样相反值，上面两侧读数就是证据。
       3. **括号深度律只有 `brackets::delta` 一份**。本轮新写的深度计数与 `expr::protected` 内联那份同形，
          且已开始漂移（`protected` 递归进 `Tok::Interp`，新谓词没有）⇒ 同一 `#{…}` 内运算符两边结论相反。
          先合并（`protected` 与任何“顶层运算符”判据共用同一条 `scan` walk），再谈注册新名字。
