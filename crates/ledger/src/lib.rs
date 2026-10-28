@@ -20,6 +20,8 @@
 //! Usage:
 //!   ledger import <run-name> <file.tsv> [more.tsv...]   (run-name applies to all)
 //!   ledger diff <a> <b> [key-prefix]                        (regressions / net, per cluster if given)
+//!   ledger changed <a> <b> [key-prefix]                 (failing BOTH runs with a different detail: the
+//!                                                         shape change `regress=0` cannot see)
 //!   ledger runs                                           (summary table)
 //!   ledger failures <run> [key-or-detail-substring] [--count]
 //!   ledger passed   <run> <key-prefix>
@@ -36,6 +38,9 @@ use rusqlite::{Connection, Result as QResult};
 use std::path::Path;
 use tracing::{info, warn};
 
+mod changed;
+pub use changed::changed_details;
+
 /// Default ledger location, relative to the repository root.
 pub const DB: &str = "reports/hrx.db";
 
@@ -47,11 +52,12 @@ pub fn run(conn: &Connection, argv: &[String]) -> QResult<()> {
         Some("note-import") => note_import(conn, &argv[1..]),
         Some("note-dump") => note_dump(conn, &argv[1..]),
         Some("diff") => diff(conn, &argv[1..]),
+        Some("changed") => changed::run_cli(conn, &argv[1..]),
         Some("runs") => runs(conn),
         Some("failures") => failures(conn, &argv[1..]),
         Some("passed") => passed(conn, &argv[1..]),
         _ => {
-            info!("usage: ledger import|diff|runs|failures|passed [--db=<path>] ...");
+            info!("usage: ledger import|diff|changed|runs|failures|passed [--db=<path>] ...");
             Ok(())
         }
     }
@@ -248,7 +254,7 @@ fn import(conn: &Connection, args: &[String]) -> QResult<()> {
     })
 }
 
-fn run_id(conn: &Connection, name: &str) -> QResult<i64> {
+pub(crate) fn run_id(conn: &Connection, name: &str) -> QResult<i64> {
     conn.query_row("SELECT id FROM run WHERE name=?1", params![name], |r| {
         r.get(0)
     })
