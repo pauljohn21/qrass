@@ -20,9 +20,13 @@
 ## P0′ — rxrust 原生重构（v2 口径落码；design §1/§5/§6 的三条改正）
 
 > 输入 = `sass-spec` 语料 + `element-plus`，**不以现有实现为设计输入**。本阶段先把“非框架模式”的
-> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`（当前整库基线 **pass=643/11,533**，其中
-> **实质通过 478**（非空期望）、空期望蒙对 165；量具 = 相对 `spec/` 全路径 key + 错误消息金样 + 9 个安全
-> 子集目录，现直接输出 `pass_substantive`/`pass_empty_expectation`，见 0′.3 末“可复核数据”与 0.6）。
+> 根子拆掉，再往下堆语言面；每子项完成后跑 scoped `regress=0`。**基线数字不在本文件里**（唯一副本在
+> `.qoder/rules/rust.md` §基线，A/B 读数在 `reports/hrx.db`）：本节写下当时是 **pass=643/11,533**
+> （实质 478 + 空期望 165），它只代表 0′ 阶段的历史起点，不得当现行基线、也不得当 diff 的 base。
+> 量具形态仍成立：key = 相对 `spec/` 全路径 + 错误消息金样 + 安全子集目录（目录清单以 `tests/hrx.rs` 的
+> `SPEC_DIRS` 现读为准（`crates/sasspile/tests/hrx.rs:31`，现为 9 个目录；覆盖面不足的教训写在
+> `.qoder/skills/sasspile-start/reference/tooling-redlines.md`），harness 直接输出 `pass_substantive`/`pass_empty_expectation`，
+> 验收除 `diff` 外还跑 `changed`（见 9.5）。
 
 - [x] 0′.1 **词法/结构相内核化**：`Lexer<S>`/`Structurize<S>` 写成三件套（`struct{source}`+`Observer` 持状态+
       `ObservableType`/`CoreObservable`），在自己 `next` 里逐条发射 0..N 项；删除
