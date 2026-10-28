@@ -161,16 +161,25 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
 - 无冒号语句在事件层**没有形状**：`lexer::MsgAcc::push_decl`（`lexer.rs:320-330`）只在 run 里有 `:` 时
   发 `Event::Decl`；无冒号（`@return $arg;`、`@use "x";`、`@debug …;`）整 run 被 `take` 后丢弃。
   `Event` 共三种：`Open(Vec<Tok>)` / `Decl{prop,value}` / `Close`（`lexer.rs:43-47`）。
-- 声明体现在被**整块丢弃**：`exec::Scope.inert`（定义 `exec.rs:62-68`，置位 `exec.rs:108-110` 的
-  `callable_declaration(&head)`，消费 `exec.rs:132-134` 直接 `return Ok(None)`）；`Event::Close`
-  （`exec.rs:146-152`）只对 `loop_` 做 `replay`，callable 分支什不收集。
+- 声明体现在被**整块丢弃**：`exec::Scope.inert`（定义 `exec.rs:62-68`，置位 `exec.rs:108-110`）；
+  消费处 `exec.rs:132-134` 对 `in_inert()` 直接 `return Ok(None)`，`Event::Close`（`exec.rs:146-152`）
+  只对 `loop_` 做 `replay`，callable 分支什么都不收集。
+  **但 `inert` 不是 callable 专有态**（本轮实测 `exec.rs:108-110`）：
+  `inert = self.in_inert() || self.in_loop() || (!plain_css && callable_declaration(&head))` ——
+  嵌套在可调用体内、**以及嵌套在循环体内**的块都走同一个 132 的早退，且它在 137 的 `in_loop()` 之前。
 - 注册表为空：`grep -rn '@return\|Return' crates/sasspile/src` → 0 命中。
 - 已有先例（本件要复用，不新造）：`ForLoop { var, values, body: Vec<Event> }` —— Open 时建 Scope、
   body 事件**作为数据携带**（`exec.rs:137-141`）、Close 时 `try_for_each` 重放（`exec.rs:207-221`）。
-- 待解钩子（本轮实测）：`abs::overridden` got 逐字 `abs(-2)`、`min::overridden` got 逐字 `min(2, 1)`；
-  全库 22 行 `overridden`（恰在 22 个不同 `.hrx` 里，每件一条），其中 `values/calculation/` 下 16 行
-  的定义形如 `@function <内置名>(…)`（16 行 / 16 文件，两个口径同数）。簇量级：`callable/` 42 失败/0 通过、
-  `directives/function` 27/0（基线 run `number-shells`）。
+- 待解钩子（本轮实测，口径已写明）。口径一：`<===> overridden/input.scss` 段落数全库 **22**
+  （恰 22 个文件各一条），其中 `values/calculation/` 下 **21**（21 行 / 21 文件；定义名 20 种，`round` 占 2）。
+  口径二：基线 run `number-shells` 里**当前为红的 `::overridden` = 21 行**
+  （`ledger failures number-shells "::overridden" --count`）—— 所以下一批的目标是 21 行，不是 22。
+  例子读数：`abs::overridden` got 逐字 `abs(-2)`（金样 `-2`）、`min::overridden` got 逐字 `min(2, 1)`（金样 `2`）。
+  簇量级（均现跑）：`callable` 42 失败 / **29 通过**，`directives/function` 27 失败 / **12 通过**，
+  其中**只有 `callable/parameters` 是 0 通过 / 18 失败**。
+  纪律附记：上一版本行写的“两簇各自 0 通过”来自一条形如 `… | grep -c '|'` 的计数，
+  而 `ledger passed` 的输出行里根本不含 `|` —— 那是“读数来自不产生它的命令”的又一次命中（本轮自栽），
+  改用 `grep -c INFO` 重测后得到上面的数。
 
 ### 9.1 D1：新增一个事件种类，名叫它的形状
 `Event::Statement(Vec<Tok>)` —— 一个以 `;` 结束、**不含顶层 `:`** 的 run。落在
@@ -178,32 +187,58 @@ chars ─▶ Lexer<S>            (char → Tok,逐条发射;interp/注释状态�
 也不是 block（无头）；`@return`/`@use`/`@debug` 共用这一个种类，词法层不再为每个关键字开一个变体。
 **兼容性约束**：`exec::State::step` 对未处理的 `Statement` 必须 `Ok(None)`（不产不报），否则本件会
 一次性改变 `@use`/`@import`/`@charset` 等现有行的形状。新种类同时得补进 `ForLoop.body` 的重放匹配（
-`exec.rs:214-219` 现只列 `Decl`/`Open`/`Close`，穷量匹配会编译报缺臂 —— 那是门，不是障碍）。
+`exec.rs:214-219` 现只列 `Decl`/`Open`/`Close`，穷尽匹配会编译报缺臂 —— 那是门，不是障碍）。
 
-### 9.2 D2：收集用 `ForLoop` 的形状，不用新机制
+### 9.2 D2：收集用 `ForLoop` 的形状，但必须按“归属”分流，不得抢 132 的早退
 `Scope.callable: Option<Callable>`，`Callable { name: String, params: Params, body: Vec<Event> }`；
-Open 且 `callable_declaration(&head)` 时解析头部得到 `name`/`params`（复用 `calls::brackets`/`split` 已有的
-切分，**不**重写括号律，见 1.7b 前置 3），`inert` 路径从 `return Ok(None)` 改为“往 `body` 里 push”；
-`Close` 时把整个 `Callable` 注册进 `State.callables`（owned 数据，随流携带）。与 `loop_` 一样，
-注册本身不发射任何规则（`settled = None`）。
+Open 时**仅当 `callable_declaration(&head)` 本身命中**（不是 `in_inert()`）才开收集态。
+头部解析的可复用面（本轮核过可见性）：`calls::brackets`（`calls.rs:52`，`pub(crate)`）、
+`calls::top_level_groups`（`calls.rs:138`）、`calls::cut_at`（`calls.rs:146`）。
+**不可直接复用 `calls::split`**（`calls.rs:94`，**模块私有**，且 `calls.rs:111-115` 要求 run 头部就是
+`name(`；`@function a(…)` 的首词元是 `@function`，现件读不出声明头）——要么先提可见性并把它改成
+接受“头前多一段关键字”的形状，要么走上面三件；**不得新写第四份括号律**（1.7b 前置 3）。
+收集的实现：把 `exec.rs:132-134` 的单一早退拆成“先判 callable 归属 → push 进 `body`；其余 inert（循环内嵌套块）
+→ 保持今日的 `return Ok(None)`”两臂；**不得整体把 132-134 改成 push**，否则循环体内嵌套块的 `Decl`
+会首次被收进 `ForLoop.body`，改到 `directives/for/for.hrx::inclusive_forward/scss`（现 PASS）的形状。
 
 ### 9.3 D3：注册表住在 `Env`，所以优先级只有一个判点
 用户函数得被 `Expr::Call` 看见，而 `expr` 不摸 AST。做法：把本模块的 callable 表作为**第二个随流数据**
 放进 `Env`（已有变量帧的那个 `Env`，`exec::State.env` 与 `Expr::eval(env)` 已经共用它），注册时 `env.add_callable(...)`。
 于是 §3 的优先级律落在**单点**：`Expr::Call` 先问 `env.callable(name)`，命中则调用用户函数；
-未命中才 `builtins::evaluate(name, …)`。依据的金样：`values/calculation/min.hrx::overridden`（
-`@function min($arg1, $arg2) {@return $arg1}` 调 `min(2, 1)` → 要 `2`，内置会给 `1`）。
-这一条必须先于“往 `BUILTINS` 注册裸全局名”（1.7b 前置 2 的顺序约束）。
+未命中才 `builtins::evaluate(name, …)`。依据的金样：`values/calculation/min.hrx::overridden` 全文
+`@function min($arg1, $arg2) {@return $arg1}` + `a {b: min(2, 1)}`，金样要 `2`（用户函数拿首参）。
+注：**“内置会给 `1`”是前瞻而非现测** —— 裸 `min` 从未注册（`min` 只以 `math.min` 存在，
+`builtins/math/combining.rs:31`），该行今日的 got 是逐字 `min(2, 1)`；“给 `1`”是 `math.rs:295` 的
+`compare`（同名入口 `compare_named`，`math.rs:340`）一旦接到裸名就会产的结果。
+无论哪种，它都与金样相反，所以这一条必须先于“往 `BUILTINS` 注册裸全局名”（1.7b 前置 2 的顺序约束）。
 
 ### 9.4 D4：首刀白名单 = body 恰好一条 `@return`
-只支持形如 `@function a(…) { @return <一个表达式>; }` 的体（本轮实测的三种形状：
-`callable/parameters.hrx::function/trailing_comma/rest/alone` 的 `@function a($b..., ) { @return $b }` 调 `a(1)` → `1`；
-同件 `default/alone` 的 `@function a($b: 1, ) { @return $b }` 调 `a()` → `1`；
-`values/calculation/abs.hrx::overridden` 的 `@function abs($arg) { @return $arg }` 调 `abs(-2)` → `-2`）。
-**其余一切（多条声明、嵌套块、体内 `@if`/`@each`/`@warn`）一律不注册为可调用**，呼叫处回到今天的逐字兑当前行为
-（记忆里的“隔离-白名单-A/B”生长范式；禁止用“先记 TODO”顶替）。
+只支持“声明头 + 体内只有一条 `@return`”的形状。三条逐字引文（本轮从归档原文抄回，不折行不改空格）：
+
+```
+sass-spec/spec/callable/parameters.hrx:168-172        callable/parameters.hrx::function/trailing_comma/rest/alone
+@function a($b..., ) {
+  @return $b;
+}
+
+c {d: a(1)}                                              →  c { d: 1; }
+
+同件 :default/alone
+@function a($b: 1, ) {
+  @return $b;
+}
+
+c {d: a()}                                               →  c { d: 1; }
+
+sass-spec/spec/values/calculation/abs.hrx:161-162      values/calculation/abs.hrx::overridden
+@function abs($arg) {@return $arg}
+a {b: abs(-2)}                                           →  a { b: -2; }
+```
+
+**其余一切（多条声明、嵌套块、体内 `@if`/`@each`/`@warn`）一律不注册为可调用**，呼叫处回到今天的逐字
+当前行为（记忆里的“隔离-白名单-A/B”生长范式；禁止用“先记 TODO”顶替）。
 白名单必须在**注册时**判定（`body.len() == 1` 且 `matches!(Statement, 首词元 `@return`)`），而不是调用时
-再看——后者会把“为何这个函数不可用”变成第二趟可变成量，止好是上一批被抓到的 GC 形。
+再看——后者会把“为何这个函数不可用”变成第二趟可变成量，正是上一批被抓到的 GC 形。
 
 ### 9.5 D5：参数绑定读成数据，不搞游标
 `Params { required: Vec<(name, Option<default>)>, rest: Option<String> }`，由声明头切出（`...` 后缀 → `rest`）。
