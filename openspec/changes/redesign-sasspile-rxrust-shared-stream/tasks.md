@@ -1437,6 +1437,29 @@
       `directives/for` 14 属**循环变量未绑定**（P3.2），`expressions/if` 10 属分支/短路（P3）。
 - [ ] 4.1 `@mixin`/`@include`/`@content`/`@yield` + 参数(位置/默认/`$r...`/named-splat)绑定 + 动态作用域;注册表 + 一到多多播(`directives/mixin/**`、`callable/**`)
 - [ ] 4.2 `@function`/`@return` + 用户函数求值 + `meta.get-function/call`(`directives/function/**`、`callable/**`)
+      本轮（壳路批收尾）把动手前的地形量清了，下一批不必重探：
+      • 丢弃点 = `exec::Scope.inert`（`exec.rs:62-68` 定义，`exec.rs:108-110` 由
+        `callable_declaration(&head)` 置位，`exec.rs:128+` 将其内 `Event::Decl` 直接丢），
+        **Close 时不收集任何东西** —— 注册表现在是空的（`grep -rn '@return\|Return' crates/sasspile/src` → 0）。
+      • `lexer::Event` 只有三个种类：`Open(Vec<Tok>)` / `Decl{prop,value}` / `Close`（`lexer.rs:43-47`），
+        即**无块的 at-rule 语句（`@return …;`）在事件层没有形状**。这是一批要做的第一个决定，
+        不是尾巴；而它是词法/结构层的改动，会同时作于 `@use`/`@at-root` 等现有判读路径。
+      • 因此 4.2 不可拆成“先收集后调用”：只收集不调用的批次 **net=0**，只能靠“无作为”得分，
+        违反本仓的验收纪律（记忆：验收指标必须度量用户视角的结果）。最小可验批次 =
+        收集 + 调用 + `@return` 求值三者同批。首组目标簇（现跑读数，基线 run `number-shells`）：
+        `callable/` 42 失败 / 0 通过，`directives/function` 27 失败 / 0 通过，`core_functions/meta` 346 失败 /
+        0 通过（目录实名：`callable/{arguments,parameters,whitespace}.hrx`、
+        `directives/function/{comment,escaped,name,whitespace}.hrx`；上一版这里写的
+        `directives/function/user/*.hrx` **不存在**，是本会话第三起假路径，已改）。
+      • 我先拿它当“4.2 之外的并行口”，**量后立即发现自己错了**：`values/calculation/{min,max}.hrx::simplified/*`
+        全族（16 行）要的是跨单位比较求值，而同件 `min.hrx::overridden` 的输入是
+        `@function min($arg1, $arg2) {@return $arg1}` 调 `min(2, 1)`，金样要 **`2`**（用户函数拿首参），
+        而内置 min 会给 `1` —— 即无 4.2 就实现选择，会直接产出**与金样相反的值**（本轮已两次为此回退整批）。
+        读数：`ledger failures number-shells "min::overridden"` → `got "min(2, 1)" want "2"`；
+        `ledger passed number-shells "values/calculation/min"` 显示现在绿的只属 `preserved/*` 逐字家族。
+        结论：`simplified/*` 不是并行口，它与裸名注册一起卡在 4.2。
+      • 顺序约束（上一段已记）：4.2 落地才谈“用户函数赢过全局内置”，才谈往 `BUILTINS` 注册裸全局名；
+        壳名集（`brackets::CALCULATION_NAMES`）已能独立推进，不依赖这批。
 
 ## P5 — 模块系统(唯一真并发处)
 - [ ] 5.1 加载器(partial/index/扩展名)+ `@use`(命名空间/`as *`/`with`+`!default`)(`directives/use/**`)
