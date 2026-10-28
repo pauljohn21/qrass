@@ -69,6 +69,54 @@ fn every_gate_the_engine_can_emit_has_a_positive_control() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// The gate must find a second table **behind a doc comment** and report the arm line, not some other
+/// line. This exists because the first version of the fix computed the arm line inside the
+/// comment-stripped string while `scan_file` reports lines of the original file — a two-line comment
+/// made the gate miss the file entirely, and no other fixture had a comment, so nothing failed.
+#[test]
+fn a_table_behind_comments_is_still_caught_at_its_arm_line() {
+    let path = std::env::temp_dir().join("sasslint_commented_table.rs");
+    fs::write(
+        &path,
+        "/// Convertible units and their factors.\n\
+         /// Kept locally for speed.\n\
+         fn to_base(unit: &str) -> f64 {\n\
+         \x20   match unit {\n\
+         \x20       \"px\" => 1.0,\n\
+         \x20       \"in\" => 96.0,\n\
+         \x20       \"cm\" => 37.0,\n\
+         \x20       \"turn\" => 360.0,\n\
+         \x20       _ => 0.0,\n\
+         \x20   }\n}\n",
+    )
+    .unwrap();
+    let hits: Vec<usize> = scan_file(&path)
+        .into_iter()
+        .filter(|f| f.rule == "single-table")
+        .map(|f| f.line)
+        .collect();
+    assert_eq!(
+        hits,
+        vec![5],
+        "the first arm line of a commented-out table must be the reported line"
+    );
+}
+
+/// A gate that disappears is as silent as a gate that never worked: coverage derives from the engine,
+/// so the *count* is pinned here. If this fails, either a gate was deleted (restore it) or one was
+/// added (plant its shape above and update the number deliberately).
+#[test]
+fn the_gate_count_is_pinned() {
+    let mut ids = engine_rule_ids();
+    ids.sort_unstable();
+    ids.dedup(); // `require-err-channel` is emitted by both a same-line pair and a file-level check
+    assert_eq!(
+        ids.len(),
+        14,
+        "the gate set changed size: {ids:?} — a deleted gate must come back, a new one needs a plant"
+    );
+}
+
 #[test]
 fn the_production_tree_is_clean() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src");
@@ -118,26 +166,21 @@ fn branch(items: Vec<Item>) { items.into_iter().filter(|item| item.keep) }
 /// `rust.md` bans `if/else if` chains outright (its only exception is a single guard `if` without
 /// `else`), so the existing sites are stock debt rather than legal shapes — and a needle that cannot
 /// tell them apart would have flagged the tree on day one. When they are reworked, implement the gate
-/// and delete this test, which fails if either half of the record stops being true.
+/// and delete this test, which fails if either half of the record stops being true. The count walks the
+/// whole tree, so a new chain in a file nobody listed here cannot hide behind a hardcoded file list;
+/// it counts the `} else if` spelling, which is what the engine's own branch chain looks like.
 #[test]
 fn the_deferred_branch_gate_stays_recorded() {
     assert!(
         !engine_rule_ids().contains(&"no-else-if-chain"),
         "`no-else-if-chain` now exists — this record is obsolete, delete it and let the positive control cover the gate"
     );
-    let sites = [
-        "lexer.rs",
-        "loops.rs",
-        "expr.rs",
-        "builtins/math.rs",
-        "color/read.rs",
-    ];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src");
-    let counted = sites
+    let counted = rust_files(&root)
         .iter()
-        .map(|site| {
-            fs::read_to_string(root.join(site))
-                .unwrap_or_else(|e| panic!("{} moved: {e}", root.join(site).display()))
+        .map(|file| {
+            fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("{} unreadable: {e}", file.display()))
                 .lines()
                 .filter(|line| line.contains("} else if"))
                 .count()
@@ -149,4 +192,27 @@ fn the_deferred_branch_gate_stays_recorded() {
          (implement the gate and remove this record) or new ones were added (a doctrine violation \
          that must be fixed, not counted)"
     );
+}
+
+/// Every `.rs` file under `dir`. Test-only: tooling may recurse, the ban is on the compiled pipeline
+/// walking a tree. The debt record has to see the whole tree, or a new chain in a file nobody listed
+/// would keep the record green.
+fn rust_files(dir: &PathBuf) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![dir.clone()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .for_each(|path| {
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    files.push(path);
+                }
+            });
+    }
+    files
 }

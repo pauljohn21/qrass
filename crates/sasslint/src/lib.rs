@@ -97,13 +97,20 @@ pub const AND_BANS: &[(&str, &[(&str, &str)])] = &[
     ("require-err-channel", &[(".ok()", "eval")]),
 ];
 
-/// The ids emitted by the file-level checks in [`FileFacts::line_findings`], in the order they are
-/// checked. The fitness test reads this list instead of a copy of it, so a gate added there cannot be
-/// left out of the positive controls without a test failing.
+/// The ids emitted by the file-level checks in [`FileFacts::line_findings`]. Named constants rather
+/// than positions in a slice: a call site that picked the wrong index out of `FILE_RULE_IDS[0..3]`
+/// would mis-tag a finding while every id still fired somewhere, which the positive control cannot see.
+pub const REQUIRE_ERR_CHANNEL: &str = "require-err-channel";
+/// the higher-order subscription without a `SingleAssignment` slot parked first
+pub const REQUIRE_SLOT_BEFORE_SUBSCRIBE: &str = "require-slot-before-subscribe";
+/// a second convertible-unit table
+pub const SINGLE_TABLE: &str = "single-table";
+
+/// The file-level ids, assembled from the same constants the checks emit, so there is one spelling.
 pub const FILE_RULE_IDS: &[&str] = &[
-    "require-err-channel",
-    "require-slot-before-subscribe",
-    "single-table",
+    REQUIRE_ERR_CHANNEL,
+    REQUIRE_SLOT_BEFORE_SUBSCRIBE,
+    SINGLE_TABLE,
 ];
 
 /// Combinators whose inner subscription must be parked in a slot **before** subscribing: rc.6
@@ -166,22 +173,33 @@ fn is_table_arm(line: &str) -> bool {
     line.contains("=>") && UNIT_LITERALS.iter().any(|needle| line.contains(needle))
 }
 
-/// Distinct unit names appearing on `=>` arm lines.
-fn distinct_table_units(code: &str) -> usize {
+/// Whether a line counts as table evidence: not a comment, and an arm carrying a unit literal. The
+/// **original** content is always the input here — a line number must be comparable with the line
+/// numbers `scan_file` reports, and the comment-stripped string used for the file-level booleans is a
+/// different index space (a second table behind a doc comment would otherwise be invisible: measured
+/// with one and with two leading comment lines, the gate reported the wrong line, then nothing).
+fn is_table_evidence(line: &str) -> bool {
+    !is_comment(line) && is_table_arm(line)
+}
+
+/// Distinct unit names appearing on table-arm lines of `content`.
+fn distinct_table_units(content: &str) -> usize {
     UNIT_LITERALS
         .into_iter()
         .filter(|needle| {
-            code.lines()
-                .any(|line| is_table_arm(line) && line.contains(needle))
+            content
+                .lines()
+                .any(|line| is_table_evidence(line) && line.contains(needle))
         })
         .count()
 }
 
-/// The first arm line of such a table, so one table is one finding rather than one per arm.
-fn first_table_arm_line(code: &str) -> Option<usize> {
-    code.lines()
+/// The first arm line of such a table, in the caller's line space, so one table is one finding.
+fn first_table_arm_line(content: &str) -> Option<usize> {
+    content
+        .lines()
         .enumerate()
-        .find(|(_, line)| is_table_arm(line))
+        .find(|(_, line)| is_table_evidence(line))
         .map(|(index, _)| index + 1)
 }
 
@@ -205,8 +223,8 @@ impl FileFacts {
             // Correlation matters: a file may legally *name* units (a lexer table, a serialiser) and may
             // legally contain `matches!(…)`. What makes a second conversion table is unit literals sitting
             // **on `=>` arms**, where each arm is one row of that table.
-            table_units: distinct_table_units(&code),
-            first_table_arm: first_table_arm_line(&code),
+            table_units: distinct_table_units(content),
+            first_table_arm: first_table_arm_line(content),
         }
     }
 
@@ -220,14 +238,14 @@ impl FileFacts {
         let mut out = Vec::new();
         if self.has_verbatim_fallback && !self.declares_fatality && raw.contains("unwrap_or_else(")
         {
-            out.push(finding(file, line_no, FILE_RULE_IDS[0], raw));
+            out.push(finding(file, line_no, REQUIRE_ERR_CHANNEL, raw));
         }
         if self.uses_higher_order
             && self.subscribes
             && !self.builds_slot
             && raw.contains(".subscribe(")
         {
-            out.push(finding(file, line_no, FILE_RULE_IDS[1], raw));
+            out.push(finding(file, line_no, REQUIRE_SLOT_BEFORE_SUBSCRIBE, raw));
         }
         // One fact, one place. Four or more unit names sitting on `=>` arms is a second convertible-unit
         // table: the copy in `builtins/math.rs` (`"px" => Some(1.0)`, `"cm" => Some(37.7952755906)`, …)
@@ -236,7 +254,7 @@ impl FileFacts {
         // because it is an array of `(unit, (family, factor))` rows, not because of what the file is called
         // (a name-based exemption would be a hole a new file could walk through).
         if self.table_units >= 4 && self.first_table_arm == Some(line_no) {
-            out.push(finding(file, line_no, FILE_RULE_IDS[2], raw));
+            out.push(finding(file, line_no, SINGLE_TABLE, raw));
         }
         out
     }
