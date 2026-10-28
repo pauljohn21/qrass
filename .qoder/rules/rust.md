@@ -25,11 +25,11 @@ alwaysApply: true
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
    唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
 
-**三条不可协商（违反 = 任务失败）**
+**三条不可协商（过程门禁；技术禁令见下面「硬性禁止」，不在此重复）**
 1. 动手前必过 `sasspile-start` 的起手四步，并复述它打出的读数（复述不上 = 没读）。
-2. 禁 Python/脚本；生产码禁 `println!`；`src/` 无内联测试；单文件 ≤ 500 行。
-3. 批次后必跑 `sasslint`（要 `count=0`）与 `gc-auditor`（finding 必须带 `file:line`）；
-   不得放松闸、不得改名换形状绕闸、不得用"先记 TODO"顶替修复。
+2. 批次后必跑 `sasslint`（要 `count=0`）与 `gc-auditor`（finding 必须带 `file:line`）。
+3. 不得放松闸、不得改名换形状绕闸、不得用"先记 TODO"顶替修复。
+
 ## 硬性禁止（违反 = 任务失败）
 1. **禁 Python/脚本**：不用 python3/pip，一律 Rust；测试用 `#[test]` 且放 `tests/`（`src/` 保持纯生产码，禁内联测试）。
 2. **禁 `println!/eprintln!`**：一律 tracing 宏；跨函数/阶段的管道必须用 `tracing::span!` 记上下文与耗时（字段 `stage`/`module`/`id`/`elapsed_ms`），不得仅用单条 `event!`。
@@ -73,7 +73,8 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 - 反例索引（动手前逐条 grep、命中即回根上重构）：`.qoder/skills/sasspile-start/reference/gc-counterexamples.md`
 - 工具级红线（验收读数也会骗人 / A-B 记录 / 量具覆盖面）：`.qoder/skills/sasspile-start/reference/tooling-redlines.md`
 - 移植现状长叙述（每相/每族做到哪、为何这么判）：`.qoder/skills/sasspile-start/reference/state-of-the-port.md`
-  —— 逐条实测证据在 `openspec/.../tasks.md`，A/B 读数在 `reports/hrx.db` 的具名 run。
+  —— 逐条实测证据在 `openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md`，
+  架构决策在其同目录 `design.md`，A/B 读数在 `reports/hrx.db` 的具名 run。
 ## 🔌 接线纪律（新功能）
 新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测** 钉死，**不接 `compile`**；接线时只在无歧义处触发：含 `/ * %` 的值跳过（护 `font:12px/1.5`、`grid:1/2` 等 CSS 斜杠分隔符），函数走**白名单** `call_builtin`，未知名 `eval→Err→` 原样兜底（`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；会动全局 truthiness 的比较/布尔单列一步、先护选择器（`a > b` combinator 不得当比较）。每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。
 

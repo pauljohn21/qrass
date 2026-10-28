@@ -26,12 +26,8 @@
    `expr::protected` 改为上下文判据（括号内的 `/ * %` 不是 CSS 分隔符）；**乘法与除法共用 `Value::cross`，
    可换算对跳着分数线抵消时把因子带进幅值**）。
    **同单位 `+` 化简已按金样做**（`operator/{plus,minus,times,precedence}::simplified`）。
-   **以上均不得重做/重新发明**。当前基线 hrx **1841/11,533**（16.0%，**实质通过 1676** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `readonly-module`）；无效错误长期基线 53 → **20** → **18**
-   （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
-   本轮把它做成词素后消失；曾因定长 arity 把
-   Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
-   唯余 0′.5（共享态 `C::RcMut`/`C::RcCell`，现无可改之物，触发点在 P4 `@content` / P5 模块多播）。
+> 基线数字不在本文重复：唯一副本在 `.qoder/rules/rust.md`「📌 基线」。本文只写增量的历史。
+
    下一主战场：**1.5 色彩（已大半）**。`src/color/*` + `src/builtins/color/*` 已落 `rgb`/`rgba`：颜色**记住它是用什么
    表示法创建的**（unitless 通道→`rgb(18, 52, 86)`、有 `%` 通道→全部转 `%`（`173`→`67.8431372549%`）、
    hex 造的且 opaque→`#112233`、一旦半透→`rgba(17, 34, 51, 0.5)`），通道入口夹紧；**声明里的裸 hex 仍走 `Raw`**

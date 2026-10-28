@@ -74,7 +74,7 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 
 新增权威文档：`docs/rxrust-source-analysis/09-cancellation-and-terminal-ordering.md`（取消/锁/终止投递次序
 不变量 + rc.6 “自带注释与实现不一致”清单）。防回归入口：`README.md`「Anti-GC red lines」、
-防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（80 行 always-on 契约）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
+防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（81 行 always-on 契约，另有 `codegraph.md` 39 行）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
 待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。
 
 > ⚠️ 上面这行已过期，以下面一节为准（不作历史改写，只加校正）。
@@ -105,7 +105,7 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 
 | 上次说法 | 现况 |
 |---|---|
-| 基线 635/11,533（5.51%） | **1,841/11,533（16.0%，实质通过 1,676 + 空期望 165）**，具名 run `readonly-module`；
+| 基线 635/11,533（5.51%） | **（2026-10-28 当时读数）1,841/11,533（16.0%，实质 1,676 + 空期望 165）**，具名 run `readonly-module`；
   无效错误（“该通过的行意外报错”）长期基线 **53 → 18**。逐个增量在 `tasks.md` ㉑–㉜ |
 | “四条铁律已成 sasslint 机器闸” | 仍是 4 条，但已证明**它们是代理而非证明**：本轮反复被推翻的不是代码而是
   **文档里的断言**（9 次）：伪造金样文本、伪造 case 名、把“我的选择”当成语料钉住（`math.max(1px, 2q)`）、
