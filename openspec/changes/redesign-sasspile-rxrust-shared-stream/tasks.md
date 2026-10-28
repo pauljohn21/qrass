@@ -1273,6 +1273,37 @@
       本批欠账（不当场顺手改）：`crates/ledger/src/lib.rs` 现 499 行，已贴 500 红线，**下一个动词必须先拆
       CLI dispatch**；`format!("{prefix}%")` 的作用域模式现在有三份（`diff_runs`/`failing_any`/`changed_details`），
       应与 `changed.rs` 里那份计数闭包一同合并到 `brackets`-风格的单点。
+      同一壳路再进九名（run `number-shells`）：`sqrt`/`exp`/`log`/`pow`/`sin`/`cos`/`tan`/`hypot`/`rem`，
+      依据仍是各件自己的 `simplification` 行。折叠为何在哪停下，两个原因是不同的事：
+      `hypot(1px + 2px - var(--c), -7px + 4em)` 的 `-7px + 4em` **不折**，因为 `em` 是上下文相对单位
+      （`em` 故意不在 `unit::conversion` 里 ⇒ `math.compatible(1px, 4em)` 为假，
+      `core_functions/math/comparable.hrx::unit/to_different`）；`log(…, var(--e))` 保留 `var(--e)`
+      那么是因为该实参根本读不成值。读数（ scoped 全部现跑）：全库 `1845 → 1854`（实质 `1689`）、
+      `regress=0 net=9`（NET 恰是九行 `simplification`）；`values/calculation/` 822→813 `regress=0 net=9`；
+      `core_functions/math/` 18→18、`values/numbers/` 77→77、`css/` 699→699、`operators/` 8→8、
+      `expressions/` 162→162 均 `regress=0 net=0`；`unexpected error` 仍 18；空库复算同读数。
+      **`changed trig-shell number-shells` = 6 行**，全属“got 变成该行自己的 `expected error` 所引用的
+      拼写”这一族（`cos::error/unit/complex`、`sin::error/units/complex`、`tan::error/units/complex`、
+      `log::error/units/complex_and_unknown`、`hypot::error/unsimplifiable`、`rem::error/units/complex_and_unknown`）；
+      空匹配对照 `changed … "zzz/"` → `fails_a=0 fails_b=0 changed=0`。
+      **arity 律（本批的真结构修法）**：`calculation::folded` 的 `find_map` 会把**多参**计算的第一个实参
+      当作它的值，于是 `math.div(1, min(10, 20))` 出 `0.1`、`max(10, 20) * 1` 出 `10`。这不是哪个名字的家史：
+      `min`/`max`/`clamp`/`atan2` 早就在名单上。现由 `calculation::one_argument_value` 在**两个调用点**
+      （非 `calc` 壳与 `calc` 的多参支）一起收口：只有单参计算才可声称有值。RED 钉在
+      `crates/sasspile/tests/calculation.rs::a_multi_argument_shell_claims_no_value`；单参路径未误伤由
+      `ledger passed number-shells "values/calculation/calc/operator/units"` 证明（`::multiplication` 仍 PASS）。
+      **`abs`/`sign` 试过、量过、又撤了**：`ledger diff shell-arity abs-sign-rem` → `regress=0 net=5`
+      （`abs`/`sign`/`rem::simplification` + `sign::zero` + `sign::negative_zero`），但 `changed` 指出两行新值
+      **与金样相反**：`abs::preserves_units` 从逐字变 `-1.75px`（金样 `1.75px`）、`sign::preserves_units` 变
+      `-1.75px`（金样 `-1px`）。因由是结构性的：单参壳声称的值就是它的实参（恒等），这对
+      `values/calculation/min.hrx::simplified/only`（`min(1px)` → `1px`）对，对名字自己要对值再运算的
+      `abs`/`sign` 不对 —— 他们等前置 2。
+      **未声称的同形行**（别当已做）：`abs::simplification`、`sign::simplification`、`mod::simplification`、
+      `round/two_arguments::simplification`、`round/strategy/nearest::simplification` 仍 FAIL。
+      上一版此处两句不可复现，已删：① 把 `regress=0 net=11` 当作本批 rem 探针的读数（那是已作废的
+      `bare-abs` 批的数，且 rem 探针未入库）；② 引 `min.hrx::preserved/single_unit` 主张“单参壳 collapse
+      是对的”（该 case **不存在**，全库 `single_unit` 只命中 numbers/round/abs 四件）。③ 把 `-7px + 4em` 的
+      不折说成“长度与角度无公共进制”（px/em 同为长度，无角度参与；真实成因见上面的 `unit::conversion`）。
 
 - [ ] 1.8 **`if()` 不是“一个签名就能赢”的快收益（本轮量过并否定）**。当前失败最多的文件：
       `expressions/if/sass`(48)、`core_functions/selector/unify/simple/pseudo`(44)、`css/plain/import/conditions`(42)、

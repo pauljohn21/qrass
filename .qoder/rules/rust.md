@@ -21,9 +21,9 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1845/11,533**（16.0%，**实质通过 1680** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `trig-shell`；该库中 `readonly-module`/`defence-s1s2` 为
-   旧基线，`bare-calc-fns`/`bare-abs` 是**已回退批次作废读数**，均不得当 diff 的 base）；无效错误长期基线 53 → **20** → **18**
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1854/11,533**（16.1%，**实质通过 1689** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `number-shells`。**diff 的 base 只准用本节点名的当前 run**，
+   库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
