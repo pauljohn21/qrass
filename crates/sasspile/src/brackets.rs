@@ -212,7 +212,28 @@ pub(crate) fn trim_layout(run: &[Tok]) -> Vec<Tok> {
 /// prefix means it is not one: `-a-calc(` is a single lexeme and
 /// `css/functions/special/prefixed/lowercase::calc/script_like` keeps `-a-calc($c)` as text, so the
 /// prefix-stripping `expr::special_call` does must not be reused here.
-const CALCULATION_NAMES: [&str; 4] = ["calc", "min", "max", "clamp"];
+///
+/// `min`/`max`/`clamp` were 1.4a's do-not-guess trio. The four inverse-trig names join them on the
+/// evidence of their own `simplification` rows, which state the shell law exactly — keep the callee's
+/// spelling, fold the computable part of an argument, leave the unreadable part inside
+/// (`values/calculation/{acos,asin,atan,atan2}.hrx::simplification`: `acos(3px - 1px + var(--c))` →
+/// `acos(2px + var(--c))`, `atan2(3px - 1px + var(--c), -7px / 4em * 1em)` →
+/// `atan2(2px + var(--c), -1.75px)`).
+///
+/// Nothing else in those four files is claimed by this list, and the reason is checkable per family:
+/// their remaining rows pass **one literal per argument** (`atan2(1cm, -10mm)` in `units/compatible`,
+/// `atan(infinity)` in `infinity`, `acos(-1)` in `negative_one`), so there is no intra-argument
+/// arithmetic for the shell to fold and the text comes back as it read. Those rows fail for a different
+/// reason — they want the function's **value** (`135deg`, `90deg`, `180deg` on those very three rows),
+/// which needs the builtin registration, case-insensitive name lookup and user-function precedence
+/// (`tasks.md` 1.7b's 前置 2).
+/// The row families are not shared across the four files, so they are not listed as if they were:
+/// `acos`/`asin` have `one`/`zero`/`negative_one`/`greater_than_one`/`less_than_negative_one`, `atan`
+/// has `one`/`zero`/`infinity`/`negative_infinity`, `atan2` has the `units/*` family; and its refusal
+/// prefix is plural `error/units/*` where the other three use `error/unit/*`.
+const CALCULATION_NAMES: [&str; 8] = [
+    "calc", "min", "max", "clamp", "acos", "asin", "atan", "atan2",
+];
 
 /// A calculation call. `name` is the callee **as written** and `lower` its case-folded form, which is
 /// the only thing the law reads: 1.4c forbids turning case normalisation into an output rule, so a

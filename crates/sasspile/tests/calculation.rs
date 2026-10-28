@@ -238,6 +238,37 @@ async fn outside_a_calculation_nothing_is_newly_read() {
     assert_eq!(value("a {b: url(http://x/y)}").await, "url(http://x/y)");
 }
 
+/// The inverse-trig names are calculation shells as well: the corpus's own `simplification` rows keep the
+/// callee's spelling, fold what computes inside the argument, and leave the unreadable part of it alone
+/// (`values/calculation/{acos,asin,atan,atan2}.hrx::simplification`). `atan2` shows both halves of the law
+/// at once — the second argument folds to `-1.75px` while the first keeps `var(--c)` beside its folded
+/// `2px`. What is *not* claimed here: the same files' `one`/`zero`/`overridden`/`case_insensitive` rows
+/// want the function's **value** (`0deg`, `1`), which needs the builtin registration plus user-function
+/// precedence, and stays a separate batch (tasks.md 1.7b).
+#[tokio::test]
+async fn inverse_trig_shells_fold_what_they_can() {
+    for (input, want) in [
+        (
+            "a { b: acos(3px - 1px + var(--c)); }",
+            "acos(2px + var(--c))",
+        ),
+        (
+            "a { b: asin(3px - 1px + var(--c)); }",
+            "asin(2px + var(--c))",
+        ),
+        (
+            "a { b: atan(3px - 1px + var(--c)); }",
+            "atan(2px + var(--c))",
+        ),
+        (
+            "a { b: atan2(3px - 1px + var(--c), -7px / 4em * 1em); }",
+            "atan2(2px + var(--c), -1.75px)",
+        ),
+    ] {
+        assert_eq!(value(input).await, want, "for {input}");
+    }
+}
+
 /// An unbound `$x` inside a calc must not become a fatal error — the fixture family
 /// `::variable/not_parsed_as_interpolation/*` and `css/functions/special_variable` both keep the text,
 /// which is the second guard `expr::special_call` records.
