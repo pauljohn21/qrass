@@ -1440,6 +1440,7 @@
       `directives/for` 14 属**循环变量未绑定**（P3.2），`expressions/if` 10 属分支/短路（P3）。
 - [ ] 4.1 `@mixin`/`@include`/`@content`/`@yield` + 参数(位置/默认/`$r...`/named-splat)绑定 + 动态作用域;注册表 + 一到多多播(`directives/mixin/**`、`callable/**`)
 - [ ] 4.2 `@function`/`@return` + 用户函数求值 + `meta.get-function/call`(`directives/function/**`、`callable/**`)
+      设计件已交（`design.md` §9，D1–D6 + 验收拆分 + 风险退路）；实现时按它开工，本节只留指针与读数。
       本轮（壳路批收尾）把动手前的地形量清了，下一批不必重探：
       • 丢弃点 = `exec::Scope.inert`（`exec.rs:62-68` 定义，`exec.rs:108-110` 由
         `callable_declaration(&head)` 置位，`exec.rs:128+` 将其内 `Event::Decl` 直接丢），
