@@ -269,6 +269,63 @@ async fn inverse_trig_shells_fold_what_they_can() {
     }
 }
 
+/// The same law, one literal pair per file, for the nine remaining number names whose `simplification`
+/// row asks for it: `sqrt`/`exp`/`log`/`pow`/`sin`/`cos`/`tan`/`hypot`/`rem`
+/// (`values/calculation/<name>.hrx::simplification`, read in this session). `hypot`'s second argument
+/// `-7px + 4em` is **not** folded — `em` is context-relative, so `math.compatible(1px, 4em)` is false —
+/// which is a different reason from `log`'s untouched `var(--e)`: that argument is not readable as a
+/// value. `rem` is in the list only while `a_multi_argument_shell_claims_no_value` holds: with more than
+/// one argument a shell claims no value, so `rem`'s own rows keep their text instead of fabricating one.
+#[tokio::test]
+async fn number_shells_fold_what_their_own_rows_ask() {
+    for (input, want) in [
+        (
+            "a { b: sqrt(1px + 2px - var(--c)) }",
+            "sqrt(3px - var(--c))",
+        ),
+        ("a { b: exp(1px + 2px - var(--c)) }", "exp(3px - var(--c))"),
+        (
+            "a {b: log(3px - 1px + var(--c), var(--e));}",
+            "log(2px + var(--c), var(--e))",
+        ),
+        (
+            "a {b: pow(3px - 1px + var(--c), 4px + 10px)}",
+            "pow(2px + var(--c), 14px)",
+        ),
+        ("a { b: sin(3px - 1px + var(--c)); }", "sin(2px + var(--c))"),
+        ("a { b: cos(3px - 1px + var(--c)); }", "cos(2px + var(--c))"),
+        ("a { b: tan(3px - 1px + var(--c)); }", "tan(2px + var(--c))"),
+        (
+            "a { b: rem(3px - 1px + var(--c), -7px / 4em * 1em); }",
+            "rem(2px + var(--c), -1.75px)",
+        ),
+        (
+            "a { b: hypot(1px + 2px - var(--c), -7px + 4em) }",
+            "hypot(3px - var(--c), -7px + 4em)",
+        ),
+    ] {
+        assert_eq!(value(input).await, want, "for {input}");
+    }
+}
+
+/// A shell with **more than one argument claims no value**: `min(10, 20)` is not `10`. `calculation::folded`
+/// walks the parts with `find_map`, so a multi-argument shell was handed out as its first argument and
+/// could then take part in arithmetic — `math.div(1, min(10, 20))` printed `0.1`, `max(10, 20) * 1`
+/// printed `10`. I searched the corpus for a row that puts a multi-argument calculation into arithmetic
+/// (a shell on the right of `math.div`, and `/ calc(`) and there is none, so nothing pins the fabricated
+/// number; the shape this project already uses when it cannot evaluate is the text as written (1.4a's
+/// do-not-guess law), which is what these two rows assert. The **one**-argument path is not claimed by a
+/// literal of mine either: `calc/operator/units::multiplication` pins only how `calc(2px * 3px)` prints,
+/// so the hrx record is the guard there.
+#[tokio::test]
+async fn a_multi_argument_shell_claims_no_value() {
+    assert_eq!(
+        value("a {b: math.div(1, min(10, 20))}").await,
+        "math.div(1, min(10, 20))"
+    );
+    assert_eq!(value("a {b: max(10, 20) * 1}").await, "max(10, 20) * 1");
+}
+
 /// An unbound `$x` inside a calc must not become a fatal error — the fixture family
 /// `::variable/not_parsed_as_interpolation/*` and `css/functions/special_variable` both keep the text,
 /// which is the second guard `expr::special_call` records.

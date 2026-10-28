@@ -231,8 +231,34 @@ pub(crate) fn trim_layout(run: &[Tok]) -> Vec<Tok> {
 /// `acos`/`asin` have `one`/`zero`/`negative_one`/`greater_than_one`/`less_than_negative_one`, `atan`
 /// has `one`/`zero`/`infinity`/`negative_infinity`, `atan2` has the `units/*` family; and its refusal
 /// prefix is plural `error/units/*` where the other three use `error/unit/*`.
-const CALCULATION_NAMES: [&str; 8] = [
-    "calc", "min", "max", "clamp", "acos", "asin", "atan", "atan2",
+///
+/// Nine more number names join on the same evidence, one `simplification` row each (`sqrt`, `exp`,
+/// `log`, `pow`, `sin`, `cos`, `tan`, `hypot`, `rem` — `values/calculation/<name>.hrx::simplification`).
+/// Two of those rows show where the fold stops, for two different reasons:
+/// `hypot(1px + 2px - var(--c), -7px + 4em)` prints `-7px + 4em` **unfolded** because `em` is
+/// context-relative — px and em are both lengths, but `em` is deliberately absent from
+/// `unit::conversion`, so `math.compatible(1px, 4em)` is false
+/// (`core_functions/math/comparable.hrx::unit/to_different`, the law `crate::unit` already owns) — while
+/// `log(3px - 1px + var(--c), var(--e))` keeps `var(--e)` because that argument is not readable as a
+/// value at all.
+///
+/// `rem` belongs here only because `calculation::one_argument_value` says a multi-argument calculation
+/// claims no value: with that guard, `values/calculation/rem::negative_zero` keeps
+/// `math.div(1, rem(-7, 7))` as written (measured in run `number-shells`); without it the same row printed
+/// the fabricated `-0.1428571429`.
+///
+/// `abs` and `sign` were tried, measured, and taken out. `ledger diff shell-arity abs-sign-rem` read
+/// `regress=0 net=5` — the five being `abs::simplification`, `sign::simplification`, `rem::simplification`,
+/// `sign::zero`, `sign::negative_zero` — but `ledger changed` showed two rows whose new value
+/// **contradicts** the golden: `abs::preserves_units` went from the verbatim `abs(-7px / 4em) * 1em` to
+/// `-1.75px` where the row says `1.75px`, and `sign::preserves_units` to `-1.75px` where it says `-1px`.
+/// The cause is structural, not name-specific: a **one-argument** shell claims its argument's value, which
+/// is the identity `values/calculation/min.hrx::simplified/only` asks for (`min(1px)` → `1px`) but wrong
+/// for a name whose own rows apply a function to that value. `abs`/`sign` wait for 1.7b's prerequisite 2
+/// (register the bodies, user-function precedence), where they will compute instead of echo.
+const CALCULATION_NAMES: [&str; 17] = [
+    "calc", "min", "max", "clamp", "acos", "asin", "atan", "atan2", "sqrt", "exp", "log", "pow",
+    "sin", "cos", "tan", "hypot", "rem",
 ];
 
 /// A calculation call. `name` is the callee **as written** and `lower` its case-folded form, which is
