@@ -7,10 +7,15 @@ alwaysApply: true
 - Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释保持 English。
 - 以 **rxrust 为核心**（见「铁律」）。版本钉 `=1.0.0-rc.6`。
 
-## 🧭 新会话起手（先读这三处再写码，否则必返工）
+## 🧭 新会话起手（先读这几处再写码，否则必返工）
 1. `docs/rxrust-source-analysis/`（rc.6 逐行取证，01–09；**09** = 取消/锁/终止投递次序不变量 + “库自带注释与实现不一致”清单）；
-2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）；
-3. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` + `tasks.md`（现状：**P0′ 已收尾**——四个内核
+2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）里的
+   「Single sources already fixed here」表——**六条已定死的单一
+   真源**（单位表/比较/色彩 route/无单位拒语/打印律/`Tok::MemberVar`）；新增第二份副本就是回归本身，先合并。
+3. `docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md`（跨会话防 GC 的五层防线设计：
+   F1–F6 六类实测失效→ 哪层拦什么、拦不住什么→ S1–S5 分期。**未获你批准前不实施**，但它写的两条纪律已生效：
+   **读数只能来自产生它的那条命令**；**陈旧摘要/旧 dump 的记忆不是证据**（本轮 9 次“旧断言前提变了”同一成因）。
+4. `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` + `tasks.md`（现状：**P0′ 已收尾**——四个内核
    `Lexer/Structurize/Exec/Render` 在 `crates/sasspile/src/phases.rs`；0′.1/.2/.3/.4/.6/.7 均已合入：真 `Err` 通道已接且
    `UndefinedVariable` 已致命（守卫：头部只认 `#{}`、special 调用参数、plain-CSS at-rule 体）、选择器/属性名是
    `src/selector.rs` 的结构化值（`&` 就是词素，`str::replace` 已删）、四条铁律已成 `sasslint` 机器闸（CI 门已去
