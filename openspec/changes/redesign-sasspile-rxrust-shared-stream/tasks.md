@@ -1253,6 +1253,9 @@
       ② 为处理探针/删代码我用了 `perl`/`sed -i`，直接违反“禁脚本、一律 Rust”，并因此留下过死代码
       （`has_call_head`、`Env::has`）与三处缩进错乱，clippy 才把它们抓出来。
       库内脏读数：`reports/hrx.db` 存着两个已作废的 run（代码已随批回退），**均不得当 diff 的 base**；
+      本轮又多了两个：**`abs-sign-rem`（1858）是已被撤回的探针**（它比基线高 4 行，极易被下一个会话
+      误当已交付，它就是 `abs`/`sign` 被撤的直接证据）；`shell-arity`（1853）是“arity 闸而无 `rem`”的
+      中间态，仅用于引用上面那两组读数，也不得当 base。**当前唯一定基 run = `number-shells`（1854）**。
       复现式写法（两侧 run 都要点名，数字随 b 变）：
       `ledger diff bare-calc-fns bare-abs` → `regress=47 net=0`；
       `ledger diff bare-calc-fns trig-shell` → `regress=58 net=4`；
