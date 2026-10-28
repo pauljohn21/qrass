@@ -26,10 +26,24 @@ pub struct Finding {
     pub text: String,
 }
 
+/// Unit names that must be spelled in exactly one table. A file branching on four or more of them is a
+/// second convertible-unit table (see the `single-table` rule); the real table is `sasspile`'s
+/// `crate::unit::UNITS`, which lists them as array entries rather than `match` arms.
+const UNIT_LITERALS: [&str; 12] = [
+    "\"px\"", "\"in\"", "\"cm\"", "\"mm\"", "\"pt\"", "\"pc\"", "\"q\"", "\"deg\"", "\"grad\"",
+    "\"rad\"", "\"turn\"", "\"ms\"",
+];
+
 /// Substring bans: each is a precise signature of a forbidden pattern (kept narrow to
 /// avoid false positives on `@for`/`@else if` string literals and comments).
 const SUBSTRING_BANS: &[(&str, &[&str])] = &[
     ("no-tree", &["Vec<Rule>", "pub children", ".children"]),
+    // A hand-rolled orchestration layer is the shape that bent rxrust into running the project's own
+    // control flow — the recurring rework root. These three names are the layer's own vocabulary
+    // (`type Stage`, `fn drain`, `fn fail`); a real kernel never uses them, it implements
+    // `ObservableType`/`CoreObservable` and emits with `observer.next(..)`, so no legitimate shape is
+    // caught here (measured: `count=0` over `crates/sasspile/src` with this gate on).
+    ("no-stage-layer", &["type Stage", "fn drain", "fn fail"]),
     ("no-relay-vec", &["-> Vec<Rule>"]),
     ("no-string-machine", &["fn subst", "stmt_text"]),
     (
@@ -120,6 +134,8 @@ struct FileFacts {
     subscribes: bool,
     /// the file parks a subscription in the framework's slot
     builds_slot: bool,
+    /// how many distinct convertible-unit names the file spells as string literals — see `single-table`
+    unit_literals: usize,
 }
 
 impl FileFacts {
@@ -139,6 +155,10 @@ impl FileFacts {
             uses_higher_order: holds(HIGHER_ORDER),
             subscribes: code.contains(".subscribe("),
             builds_slot: code.contains("SingleAssignment"),
+            unit_literals: UNIT_LITERALS
+                .into_iter()
+                .filter(|needle| code.contains(needle))
+                .count(),
         }
     }
 
@@ -160,6 +180,14 @@ impl FileFacts {
             && raw.contains(".subscribe(")
         {
             out.push(finding(file, line_no, "require-slot-before-subscribe", raw));
+        }
+        // One fact, one place. A `match` over four or more unit literals is a second convertible-unit
+        // table: the copy in `builtins/math.rs` (`"px" => Some(1.0)`, `"cm" => Some(37.7952755906)`, …)
+        // could not answer `hypot.hrx::units`, which needs `q` and the exact quarter-millimetre relation
+        // that only `unit::UNITS` carries. The single source of truth builds its table as an array, not
+        // as a `match`, and `unit.rs` is exempt by name so it can never flag itself.
+        if self.unit_literals >= 4 && file != "unit.rs" && raw.contains("match") {
+            out.push(finding(file, line_no, "single-table", raw));
         }
         out
     }

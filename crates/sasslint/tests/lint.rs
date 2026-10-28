@@ -239,3 +239,97 @@ fn mcp_protocol_handshake_and_review() {
     );
     fs::remove_dir_all(&dir).ok();
 }
+
+/// Positive control for `no-stage-layer`: a hand-rolled `Stage`/`drain`/`fail` layer is exactly the
+/// shape that made rxrust run the project's own control flow, so the gate must fire on it. The
+/// kernel source that rxrust actually asks for must not fire — that is the lower bound.
+#[test]
+fn planted_framework_layer_is_caught_and_a_kernel_is_not() {
+    let planted = std::env::temp_dir().join("sasslint_planted_layer.rs");
+    fs::write(
+        &planted,
+        "type Stage<T> = Box<dyn Fn(T) -> T>;\n\
+         fn drain(&mut self) -> Vec<Item> { vec![] }\n\
+         fn fail<T>(m: &str) -> Result<T, Error> { Err(err(m)) }\n",
+    )
+    .unwrap();
+    let f = scan_file(&planted);
+    for (line, rule) in [
+        (1usize, "no-stage-layer"),
+        (2, "no-stage-layer"),
+        (3, "no-stage-layer"),
+    ] {
+        assert!(
+            f.iter()
+                .any(|found| found.rule == rule && found.line == line),
+            "planted {rule} at line {line} not caught: {f:?}"
+        );
+    }
+
+    let kernel = std::env::temp_dir().join("sasslint_legal_kernel.rs");
+    fs::write(
+        &kernel,
+        "struct Lex<S> { source: S }\n\
+         impl<C: Context> CoreObservable<C> for Lex<LocalBoxedObservable<Event>> {\n\
+         \x20   fn subscribe(self, ctx: C) { let w = ctx.transform(|o| LexObserver { observer: o }); }\n\
+         }\n\
+         fn go(x: i32) { if x == 0 { return; } run(x); }\n",
+    )
+    .unwrap();
+    let clean = scan_file(&kernel);
+    assert!(
+        !clean.iter().any(|found| found.rule == "no-stage-layer"),
+        "a real operator kernel was misflagged: {clean:?}"
+    );
+}
+
+/// The gates are measured against the tree they police: the production source must stay clean, so a
+/// gate cannot have been widened past what the doctrine bans.
+#[test]
+fn the_new_gates_leave_the_production_tree_clean() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src");
+    let findings = scan_dir(&dir);
+    for rule in ["no-stage-layer", "single-table"] {
+        assert!(
+            !findings.iter().any(|f| f.rule == rule),
+            "{rule} fires on existing code — narrow it, never relax it: {:?}",
+            findings
+                .iter()
+                .filter(|f| f.rule == rule)
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Positive control for `single-table`: the shape this project actually shipped twice — a `match` over
+/// unit literals carrying its own conversion factors — must be caught in any file except the single
+/// source of truth (`crates/sasspile/src/unit.rs`, whose table is an array of `(unit, (family, factor))`
+/// rather than `match` arms).
+#[test]
+fn a_second_unit_table_is_caught_and_the_shared_one_is_not() {
+    let planted = std::env::temp_dir().join("sasslint_planted_table.rs");
+    fs::write(
+        &planted,
+        "fn to_base(unit: &str) -> Option<f64> {\n\
+         \x20   match unit {\n\
+         \x20       \"px\" => Some(1.0),\n\
+         \x20       \"in\" => Some(96.0),\n\
+         \x20       \"cm\" => Some(37.7952755906),\n\
+         \x20       \"turn\" => Some(360.0),\n\
+         \x20       _ => None,\n\
+         \x20   }\n}\n",
+    )
+    .unwrap();
+    let f = scan_file(&planted);
+    assert!(
+        f.iter().any(|found| found.rule == "single-table"),
+        "a second convertible-unit table was not caught: {f:?}"
+    );
+
+    let shared = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src/unit.rs");
+    let findings = scan_file(&shared);
+    assert!(
+        !findings.iter().any(|f| f.rule == "single-table"),
+        "the single source of truth flagged itself: {findings:?}"
+    );
+}
