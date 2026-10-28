@@ -36,14 +36,24 @@ const UNIT_LITERALS: [&str; 12] = [
 
 /// Substring bans: each is a precise signature of a forbidden pattern (kept narrow to
 /// avoid false positives on `@for`/`@else if` string literals and comments).
-const SUBSTRING_BANS: &[(&str, &[&str])] = &[
+/// Public so `tests/defence_fitness.rs` can derive the gate list from the engine itself: a hand-copied
+/// list in the test is the same fact written twice, which is what let a gate id disappear from it once.
+pub const SUBSTRING_BANS: &[(&str, &[&str])] = &[
     ("no-tree", &["Vec<Rule>", "pub children", ".children"]),
     // A hand-rolled orchestration layer is the shape that bent rxrust into running the project's own
-    // control flow — the recurring rework root. These three names are the layer's own vocabulary
-    // (`type Stage`, `fn drain`, `fn fail`); a real kernel never uses them, it implements
-    // `ObservableType`/`CoreObservable` and emits with `observer.next(..)`, so no legitimate shape is
-    // caught here (measured: `count=0` over `crates/sasspile/src` with this gate on).
-    ("no-stage-layer", &["type Stage", "fn drain", "fn fail"]),
+    // control flow — the recurring rework root. The names are that layer's own vocabulary, anchored with
+    // their delimiter the way `no-recursive-descent` anchors `fn resolve(`: a bare `fn fail` would also
+    // match `fn failure(&self) -> bool`, which is not a framework layer.
+    (
+        "no-stage-layer",
+        &[
+            "type Stage",
+            "fn drain(",
+            "fn drain<",
+            "fn fail(",
+            "fn fail<",
+        ],
+    ),
     ("no-relay-vec", &["-> Vec<Rule>"]),
     ("no-string-machine", &["fn subst", "stmt_text"]),
     (
@@ -70,7 +80,7 @@ const SUBSTRING_BANS: &[(&str, &[&str])] = &[
 /// Same-line conjunctions: `(rule, &[(needle_a, needle_b)])`. Each pair is one forbidden shape whose
 /// meaning only exists when both halves appear together — which is exactly what keeps the legal
 /// single half from firing.
-const AND_BANS: &[(&str, &[(&str, &str)])] = &[
+pub const AND_BANS: &[(&str, &[(&str, &str)])] = &[
     // a phase that batches its output into a `Vec` and flattens it again downstream: the
     // `scan_map(acc) -> Vec<Tok> -> flat_map(from_iter)` shell removed by P0′.1/.2, where the
     // kernel emits its own 0..N items with `observer.next(..)`
@@ -87,6 +97,15 @@ const AND_BANS: &[(&str, &[(&str, &str)])] = &[
     ("require-err-channel", &[(".ok()", "eval")]),
 ];
 
+/// The ids emitted by the file-level checks in [`FileFacts::line_findings`], in the order they are
+/// checked. The fitness test reads this list instead of a copy of it, so a gate added there cannot be
+/// left out of the positive controls without a test failing.
+pub const FILE_RULE_IDS: &[&str] = &[
+    "require-err-channel",
+    "require-slot-before-subscribe",
+    "single-table",
+];
+
 /// Combinators whose inner subscription must be parked in a slot **before** subscribing: rc.6
 /// `into_future`/higher-order sources drop (or lose) what arrives while the slot is still empty
 /// (docs/rxrust-source-analysis 09 §1), and a queued inner in `merge_all` **loses** emissions.
@@ -101,7 +120,7 @@ const HIGHER_ORDER: &[&str] = &[
 ];
 
 /// Control-flow keywords banned when they START a (non-comment, non-`//`) line.
-const LINE_START_BANS: &[&str] = &["for ", "while ", "loop "];
+pub const LINE_START_BANS: &[&str] = &["for ", "while ", "loop "];
 
 fn is_comment(text: &str) -> bool {
     let t = text.trim_start();
@@ -134,8 +153,36 @@ struct FileFacts {
     subscribes: bool,
     /// the file parks a subscription in the framework's slot
     builds_slot: bool,
-    /// how many distinct convertible-unit names the file spells as string literals — see `single-table`
-    unit_literals: usize,
+    /// distinct unit names appearing on a `=>` arm line — see the `single-table` check
+    table_units: usize,
+    /// the first such arm line, so one table produces one finding rather than six
+    first_table_arm: Option<usize>,
+}
+
+/// An arm line of a unit table: something maps a quoted unit name to a value. Both halves on the same
+/// line is the correlation that makes the shape — what keeps a lexer listing units in an array, or a
+/// `matches!(name, "px" | "cm")`, from being read as a second table.
+fn is_table_arm(line: &str) -> bool {
+    line.contains("=>") && UNIT_LITERALS.iter().any(|needle| line.contains(needle))
+}
+
+/// Distinct unit names appearing on `=>` arm lines.
+fn distinct_table_units(code: &str) -> usize {
+    UNIT_LITERALS
+        .into_iter()
+        .filter(|needle| {
+            code.lines()
+                .any(|line| is_table_arm(line) && line.contains(needle))
+        })
+        .count()
+}
+
+/// The first arm line of such a table, so one table is one finding rather than one per arm.
+fn first_table_arm_line(code: &str) -> Option<usize> {
+    code.lines()
+        .enumerate()
+        .find(|(_, line)| is_table_arm(line))
+        .map(|(index, _)| index + 1)
 }
 
 impl FileFacts {
@@ -155,10 +202,11 @@ impl FileFacts {
             uses_higher_order: holds(HIGHER_ORDER),
             subscribes: code.contains(".subscribe("),
             builds_slot: code.contains("SingleAssignment"),
-            unit_literals: UNIT_LITERALS
-                .into_iter()
-                .filter(|needle| code.contains(needle))
-                .count(),
+            // Correlation matters: a file may legally *name* units (a lexer table, a serialiser) and may
+            // legally contain `matches!(…)`. What makes a second conversion table is unit literals sitting
+            // **on `=>` arms**, where each arm is one row of that table.
+            table_units: distinct_table_units(&code),
+            first_table_arm: first_table_arm_line(&code),
         }
     }
 
@@ -172,22 +220,23 @@ impl FileFacts {
         let mut out = Vec::new();
         if self.has_verbatim_fallback && !self.declares_fatality && raw.contains("unwrap_or_else(")
         {
-            out.push(finding(file, line_no, "require-err-channel", raw));
+            out.push(finding(file, line_no, FILE_RULE_IDS[0], raw));
         }
         if self.uses_higher_order
             && self.subscribes
             && !self.builds_slot
             && raw.contains(".subscribe(")
         {
-            out.push(finding(file, line_no, "require-slot-before-subscribe", raw));
+            out.push(finding(file, line_no, FILE_RULE_IDS[1], raw));
         }
-        // One fact, one place. A `match` over four or more unit literals is a second convertible-unit
+        // One fact, one place. Four or more unit names sitting on `=>` arms is a second convertible-unit
         // table: the copy in `builtins/math.rs` (`"px" => Some(1.0)`, `"cm" => Some(37.7952755906)`, …)
         // could not answer `hypot.hrx::units`, which needs `q` and the exact quarter-millimetre relation
-        // that only `unit::UNITS` carries. The single source of truth builds its table as an array, not
-        // as a `match`, and `unit.rs` is exempt by name so it can never flag itself.
-        if self.unit_literals >= 4 && file != "unit.rs" && raw.contains("match") {
-            out.push(finding(file, line_no, "single-table", raw));
+        // that only `unit::UNITS` carries. No file is exempt by name — the shared table is not flagged
+        // because it is an array of `(unit, (family, factor))` rows, not because of what the file is called
+        // (a name-based exemption would be a hole a new file could walk through).
+        if self.table_units >= 4 && self.first_table_arm == Some(line_no) {
+            out.push(finding(file, line_no, FILE_RULE_IDS[2], raw));
         }
         out
     }
