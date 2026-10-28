@@ -38,7 +38,7 @@ workspace** (its dangling member entry was breaking every `cargo` invocation). D
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Tests | `cargo test --workspace --no-fail-fast` | **181 passed / 0 failed / 0 ignored** (exit 0) |
+| Tests | `cargo test --workspace --no-fail-fast` | **182 passed / 0 failed / 0 ignored** (exit 0) |
 | Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
 | Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
 | sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=1,841` (**16.0 %**), of which **`pass_substantive=1,676`** and `pass_empty_expectation=165` |

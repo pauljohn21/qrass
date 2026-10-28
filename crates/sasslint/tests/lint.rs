@@ -333,3 +333,41 @@ fn a_second_unit_table_is_caught_and_the_shared_one_is_not() {
         "the single source of truth flagged itself: {findings:?}"
     );
 }
+
+/// The blind spot that made the previous version of this gate almost decorative: a factor table written as
+/// an **array of tuples** (the shape `unit::UNITS` itself uses) was invisible to a rule that only looked at
+/// `=>` arms. And the sanctioned table is now recognised by what it defines (`pub const UNITS`), not by its
+/// filename — so a copy parked in a file called `unit.rs` is still caught.
+#[test]
+fn a_tuple_array_table_is_caught_even_when_the_file_is_named_unit_rs() {
+    let array_table = std::env::temp_dir().join("sasslint_planted_tuple_table.rs");
+    fs::write(
+        &array_table,
+        "const FACTORS: [(&str, f64); 4] = [\n\
+         \x20   (\"px\", (1.0)),\n\
+         \x20   (\"cm\", (37.0)),\n\
+         \x20   (\"in\", (96.0)),\n\
+         \x20   (\"turn\", (360.0)),\n\
+         ];\n",
+    )
+    .unwrap();
+    assert!(
+        scan_file(&array_table)
+            .iter()
+            .any(|f| f.rule == "single-table"),
+        "a factor table written as tuples slipped through"
+    );
+
+    let disguised = std::env::temp_dir().join("unit.rs");
+    fs::write(
+        &disguised,
+        "const F: [(&str, f64); 4] [(\"px\", (1.0)), (\"cm\", (37.0)), (\"in\", (96.0)), (\"turn\", (360.0))]\n",
+    )
+    .unwrap();
+    assert!(
+        scan_file(&disguised)
+            .iter()
+            .any(|f| f.rule == "single-table"),
+        "naming a copy `unit.rs` must not exempt it - the sanctioned file is the one defining `pub const UNITS`"
+    );
+}

@@ -12,7 +12,7 @@
 //! 4. **A deferred gate is recorded with its debt**, so a gap is legible instead of invisible.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sasslint::{
     AND_BANS, FILE_RULE_IDS, Finding, LINE_START_BANS, SUBSTRING_BANS, scan_dir, scan_file,
@@ -197,9 +197,9 @@ fn the_deferred_branch_gate_stays_recorded() {
 /// Every `.rs` file under `dir`. Test-only: tooling may recurse, the ban is on the compiled pipeline
 /// walking a tree. The debt record has to see the whole tree, or a new chain in a file nobody listed
 /// would keep the record green.
-fn rust_files(dir: &PathBuf) -> Vec<PathBuf> {
+fn rust_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let mut stack = vec![dir.clone()];
+    let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
         let Ok(entries) = fs::read_dir(&current) else {
             continue;

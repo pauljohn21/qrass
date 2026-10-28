@@ -160,17 +160,22 @@ struct FileFacts {
     subscribes: bool,
     /// the file parks a subscription in the framework's slot
     builds_slot: bool,
+    /// the file is the sanctioned convertible-unit table (identified by what it defines, not by its name,
+    /// so a copy cannot dodge the gate by being called `unit.rs`)
+    owns_units_table: bool,
     /// distinct unit names appearing on a `=>` arm line — see the `single-table` check
     table_units: usize,
     /// the first such arm line, so one table produces one finding rather than six
     first_table_arm: Option<usize>,
 }
 
-/// An arm line of a unit table: something maps a quoted unit name to a value. Both halves on the same
-/// line is the correlation that makes the shape — what keeps a lexer listing units in an array, or a
-/// `matches!(name, "px" | "cm")`, from being read as a second table.
+/// An arm line of a unit table: a quoted unit name bound to a value. Two shapes count, because the
+/// second table this project really shipped used the first (`"px" => Some(1.0)`) while the sanctioned
+/// table uses the second (`("px", ("length", 1.0))`) — a gate that only recognised `=>` arms would be
+/// blind to a factor table written as an array of tuples, which is exactly how a copy could hide.
 fn is_table_arm(line: &str) -> bool {
-    line.contains("=>") && UNIT_LITERALS.iter().any(|needle| line.contains(needle))
+    let bound = line.contains("=>") || line.contains("\", (");
+    bound && UNIT_LITERALS.iter().any(|needle| line.contains(needle))
 }
 
 /// Whether a line counts as table evidence: not a comment, and an arm carrying a unit literal. The
@@ -220,6 +225,7 @@ impl FileFacts {
             uses_higher_order: holds(HIGHER_ORDER),
             subscribes: code.contains(".subscribe("),
             builds_slot: code.contains("SingleAssignment"),
+            owns_units_table: code.contains("pub const UNITS"),
             // Correlation matters: a file may legally *name* units (a lexer table, a serialiser) and may
             // legally contain `matches!(…)`. What makes a second conversion table is unit literals sitting
             // **on `=>` arms**, where each arm is one row of that table.
@@ -247,13 +253,13 @@ impl FileFacts {
         {
             out.push(finding(file, line_no, REQUIRE_SLOT_BEFORE_SUBSCRIBE, raw));
         }
-        // One fact, one place. Four or more unit names sitting on `=>` arms is a second convertible-unit
-        // table: the copy in `builtins/math.rs` (`"px" => Some(1.0)`, `"cm" => Some(37.7952755906)`, …)
-        // could not answer `hypot.hrx::units`, which needs `q` and the exact quarter-millimetre relation
-        // that only `unit::UNITS` carries. No file is exempt by name — the shared table is not flagged
-        // because it is an array of `(unit, (family, factor))` rows, not because of what the file is called
-        // (a name-based exemption would be a hole a new file could walk through).
-        if self.table_units >= 4 && self.first_table_arm == Some(line_no) {
+        // One fact, one place. Four or more unit names bound to values is a convertible-unit table: the copy
+        // in `builtins/math.rs` (`"px" => Some(1.0)`, `"cm" => Some(37.7952755906)`, …) could not answer
+        // `hypot.hrx::units`, which needs `q` and the exact quarter-millimetre relation that only
+        // `unit::UNITS` carries. The file that defines `pub const UNITS` is the sanctioned one; nothing is
+        // exempt by filename.
+        if self.table_units >= 4 && self.first_table_arm == Some(line_no) && !self.owns_units_table
+        {
             out.push(finding(file, line_no, SINGLE_TABLE, raw));
         }
         out
