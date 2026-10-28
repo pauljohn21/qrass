@@ -96,7 +96,7 @@ fn to_value(shell: &Shell, parts: &[Outcome], env: &Env) -> Option<Value> {
             Value::Calculation(
                 shell.name.clone(),
                 Content {
-                    folded: folded(parts),
+                    folded: one_argument_value(parts),
                     printed: rendered(parts),
                     precedence: 3,
                 },
@@ -131,7 +131,7 @@ fn to_value(shell: &Shell, parts: &[Outcome], env: &Env) -> Option<Value> {
         many => Some(Value::Calculation(
             shell.name.clone(),
             Content {
-                folded: folded(many),
+                folded: one_argument_value(many),
                 printed: rendered(many),
                 precedence: 3,
             },
@@ -150,6 +150,21 @@ fn folded(parts: &[Outcome]) -> Option<(f64, Unit)> {
         },
         _ => None,
     })
+}
+
+/// [`folded`] behind the arity guard: a calculation may claim a value only when its argument list is
+/// **one part**. `find_map` stopping at the first value is right for one argument and a fabrication for
+/// more — `min(10, 20)` is not `10`, yet `math.div(1, min(10, 20))` printed `0.1`, and
+/// `max(10, 20) * 1` printed `10`. Nothing in the corpus puts a multi-argument calculation into
+/// arithmetic (`values/calculation/min.hrx::preserved/*` keep the call written and no row divides by
+/// such a shell), so the shape left standing is the project's own answer for "cannot be evaluated":
+/// the text as written (1.4a's do-not-guess law), reached because `Value::number()` then yields `None`
+/// and the arithmetic declines.
+fn one_argument_value(parts: &[Outcome]) -> Option<(f64, Unit)> {
+    match parts {
+        [single] => folded(std::slice::from_ref(single)),
+        _ => None,
+    }
 }
 
 /// The argument list this slice cannot read as a value: its normalised text survives, and if that text is
