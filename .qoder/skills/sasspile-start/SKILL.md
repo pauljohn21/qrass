@@ -14,8 +14,8 @@ metadata:
 伪造字面量、把"我的选择"钉成语料律、结构退回 GC、读数来自不产生它的命令、深会话尾部判断力衰减）。
 所以本 skill 不重复教条，只做一件事：**把真值变成一次命令，并要求你复述它**。
 
-`always-on` 的文件有两个：`.qoder/rules/rust.md`（85 行：技术栈、基线数字、过程门禁、硬性禁止、铁律、指针）
-与 `.qoder/rules/codegraph.md`（39 行：代码查询先走 CodeGraph）。其余细则全在本目录按需加载。
+`always-on` 的文件有两个：`.qoder/rules/rust.md`（技术栈、基线数字、过程门禁、硬性禁止、铁律、指针）
+与 `.qoder/rules/codegraph.md`（代码查询先走 CodeGraph），**两份都很短，起手时全文读完**。其余细则全在本目录按需加载。（本行以前还写这两份各多少行 —— 已删：行数每次改动就漂移，是又一处会过期的副本。）
 
 ## 起手四步（缺一不可，跑完必须复述读数）
 
@@ -79,6 +79,10 @@ metadata:
 1. 全量测试：`cargo test --workspace --no-fail-fast`（看 `exit`，不要只看最后一条 `test result` 行）。
 2. `HRX_RUN=<增量名> cargo test -p sasspile --test hrx` → `cargo run -q -p ledger -- diff <base> <增量名>`，
    要求 **`regress=0`**；行为变更必须点名**哪几条用例**变了及其金样依据，并在**另一个空库**复算一次。
-3. 跑 `gc-auditor`（`.qoder/agents/gc-auditor.md`）审本批次 diff：finding 必须带 `file:line`，
-   涉及行为的必须带金样 case 名；它的"没问题"结论不替代第 2 步的读数。
-4. 提交：feat 与 docs 分开 `git add`；推送用 `git push github main`。
+3. `cargo run -q -p ledger -- changed <base> <增量名> [簇前缀]`：接住 `diff` 结构上看不见的一类——
+   **两侧都失败、但失败详情变了**。每个 `CHANGED` 逐条定性：“got 靠齐了该行自己 `expected error` 引用的
+   拼写”（可接受，仍 FAIL），还是“逐字 → 错值”/“发明错误”（不可接受 → 整批回退）。本会话两次实证：
+   `regress=0 net=11` 与“`abs::overridden` 算出金样明令相反的值”共存，只有这条读数看得见。
+4. 跑 `gc-auditor`（`.qoder/agents/gc-auditor.md`）审本批次 diff：finding 必须带 `file:line`，
+   涉及行为的必须带金样 case 名；它的"没问题"结论不替代第 2、3 步的读数。
+5. 提交：feat 与 docs 分开 `git add`；推送用 `git push github main`。

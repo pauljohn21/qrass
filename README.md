@@ -16,9 +16,9 @@ reduce_initial → into_future`. There is no materialized AST walked by recursio
 
 | Crate | Role | Size (measured 2026-10-28) |
 | --- | --- | --- |
-| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 30 `src/*.rs`, 8,457 lines, 28 test targets |
-| `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress` | 1,068 lines |
-| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 740 lines |
+| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 30 `src/*.rs` (all levels), 8,519 lines, 28 test targets |
+| `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress`, `ledger changed` → failure-shape | 1,255 lines (src 662 + tests 593) |
+| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 1,191 lines (src 500 + tests) |
 
 Source layout of the compiler: `lib.rs` (the single chain), `phases.rs` (the four kernels),
 `lexer.rs`, `exec.rs`, `expr.rs`, `value.rs`, `selector.rs`, `env.rs`, plus the module directories
@@ -34,17 +34,24 @@ and `src/directives/`.
 `crates/docsizer` — the counting tool of a cancelled tutorial programme — has been **removed from the
 workspace** (its dangling member entry was breaking every `cargo` invocation). Do not reinvent it.
 
-## Status (all numbers re-measured on 2026-10-28)
+## Status (gate commands; the baseline numbers live in one place only)
 
-| Gate | Command | Result |
-| --- | --- | --- |
-| Tests | `cargo test --workspace --no-fail-fast` | **182 passed / 0 failed / 0 ignored** (exit 0) |
-| Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` | **`count=0`** |
-| Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`) | **passes**; no longer `#[ignore]`d |
-| sass-spec `.hrx` snapshot | `cargo test -p sasspile --test hrx` | `total=11,533 pass=1,841` (**16.0 %**), of which **`pass_substantive=1,676`** and `pass_empty_expectation=165` |
-| Bogus-error count | `cargo run -p ledger -- failures <run> "unexpected error" --count` | **18** (was 53 before `module.$name` became a lexeme) |
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | **clean (exit 0)** |
-| Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` | valid |
+The hrx baseline and the invalid-error baseline have a **single copy**: `.qoder/rules/rust.md`, §基线.
+The A/B record is `reports/hrx.db`, and the current reference run is named there; this README deliberately
+does **not** restate those numbers, because every restated copy in this project has eventually been cited
+as evidence while it was already stale (measured 2026-10-28: the table below had been quoting a baseline
+that two batches had already moved past).
+
+| Gate | Command |
+| --- | --- |
+| Tests | `cargo test --workspace --no-fail-fast` — read the exit code, not the last `test result` line |
+| Rule gate | `cargo run -p sasslint --bin sasslint -- lint crates/sasspile/src` — must report `count=0` |
+| Rule gate as CI | `cargo test -p sasslint` (`gate_sasspile_is_clean`; no longer `#[ignore]`d) |
+| Conformance snapshot | `cargo test -p sasspile --test hrx` (`total` / `pass` / `pass_substantive` / `pass_empty_expectation`) |
+| A/B per step | `cargo run -p ledger -- diff <base> <run>` (must be `regress=0`) **and** `… changed <base> <run>` — the second one catches failures that changed *shape* while `regress`/`net` stay silent, which is how a fabricated value hid behind `regress=0 net=11` |
+| Bogus-error count | `cargo run -p ledger -- failures <run> "unexpected error" --count` |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
+| Plan | `openspec validate redesign-sasspile-rxrust-shared-stream --strict` |
 
 **P0′ (the framework-native rewrite) is closed**: phases are kernels (0′.1/.2), order comes from the
 stream (0′.4), the `Err` channel is real with `UndefinedVariable` fatal (0′.3), the four iron rules are
@@ -56,7 +63,7 @@ and `color` core-function families. The next fronts are **the `none` channel val
 remaining red cluster in `color/mix/missing`), **P7 diagnostic messages**, and **P8 modern colour
 spaces**. See `.qoder/rules/rust.md` for the measured list of what is and is not implemented.
 
-The pass rate — 16.0 % today, 5.5 % when this section was written — is **not** a regression signal: the
+The pass rate — read it from the single copy above, not from this sentence — is **not** a regression signal: the
 compiler is deliberately incomplete while the
 architecture is rebuilt phase by phase (P0–P8). What a round must never do is lose previously passing
 cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0`**, not by the raw rate.

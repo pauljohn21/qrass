@@ -281,6 +281,33 @@
    `builtins/mod.rs` + `math.rs` + `color.rs`）。再往下是 1.7 其余分派 → **P7 诊断消息**：
    语料里大量 `error` 用例缺的是**消息**而不是错误管道，现已积到单条级别（例：
    `math/unitless::error/wrong_name` 要 `Undefined function.`，即 1.4d 唯一未复现的候选行）。
+## 壳路（`brackets::CALCULATION_NAMES`）与 P4.2 门槛（2026-10-28 实测）
+
+• **壳名集共 17 名**：`calc/min/max/clamp`（1.4a 三族）+ 四个反三角
+  `acos/asin/atan/atan2` + `sqrt/exp/log/pow/sin/cos/tan/hypot/rem`。准入判据只有一条：**该件自己的
+  `values/calculation/<name>.hrx::simplification` 行陈述了壳律**（名字保留、能算的算掉、读不成的原样留在壳里）。
+  折叠在哪里停下是两个不同的原因，不得再合并成一句：“长度与角度无公共进制”是我的虚构 ——
+  `hypot(…, -7px + 4em)` 不折是因为 `em` 是上下文相对单位（`unit::conversion` 故意不含它，
+  `core_functions/math/comparable.hrx::unit/to_different`），而 `log(…, var(--e))` 保留是因为该实参
+  根本读不成值。
+• **`abs`/`sign` 试过、量过、又撤了**（不是没考虑）：加进去是 `regress=0 net=5`，但 `ledger changed`
+  指出两行新值与金样相反（`abs::preserves_units` 出 `-1.75px`、金样 `1.75px`；`sign::preserves_units`
+  出 `-1.75px`、金样 `-1px`）。因由是结构性的：**单参壳声称的值就是它的实参（恒等）**，这对
+  `min.hrx::simplified/only`（`min(1px)` → `1px`）对，对名字自己还要对值再运算的 `abs`/`sign` 不对。
+• **arity 律已收口**：`calculation::one_argument_value` 规定**只有单参计算才可声称有值**，两个构造点
+  （非 `calc` 壳、`calc` 的多参支）一起走。原由：`folded` 的 `find_map` 取首个带值 part，于是
+  `math.div(1, min(10, 20))` 出 `0.1` —— 语料无行能把这件事照出来，`regress`/`net` 全盲。`rem` 只因为
+  这条闸才留在名单内（否则它的行会产出 `-0.1428571429` 这种发明值）。
+• **`values/calculation` 剩下的收益全部汇到 P4.2**：裸全局名注册、`simplified/*` 比较求值族（16 行）、
+  `case_insensitive`、`error/unit(s)/*` 消息族——都要求“用户函数能赢过全局内置”先成立。理由（实测）：
+  `min.hrx::overridden` 定义 `@function min($arg1, $arg2) {@return $arg1}` 并调 `min(2, 1)`，金样要 `2`。
+• **P4.2 本身是能力不是判据**：无块 at-rule 在事件层**没有形状**（`MsgAcc::push_decl` 只在 run 含 `:` 时
+  发 `Event::Decl`，`@return $arg;` 整 run 被丢），声明体在 `Scope.inert` 处被整块丢弃（`inert` 与“循环内
+  嵌套块”共用，所以收集必须按 callable 归属分流）；`grep -rn '@return\|Return' crates/sasspile/src` → 0。
+  设计件在 `openspec/changes/redesign-sasspile-rxrust-shared-stream/design.md` §9（D1–D6 + 首组 RED 行 +
+  风险退路），逐条带 `file:line` 已经 `gc-auditor` 核过。簇量级：`callable` 42 失败/29 通过、
+  `directives/function` 27/12、`callable/parameters` 18/0；全库 `overridden` 语料 22 段、**当前为红 21 行**。
+
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 

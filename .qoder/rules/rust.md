@@ -31,7 +31,8 @@ alwaysApply: true
 
 **三条不可协商（过程门禁；技术禁令见下面「硬性禁止」，不在此重复）**
 1. 动手前必过 `sasspile-start` 的起手四步，并复述它打出的读数（复述不上 = 没读）。
-2. 批次后必跑 `sasslint`（要 `count=0`）与 `gc-auditor`（finding 必须带 `file:line`）。
+2. 批次后必跑 `sasslint`（要 `count=0`）、`ledger changed <base> <run>`（接住 `regress`/`net`
+   看不见的 FAIL→FAIL 形状变化）与 `gc-auditor`（finding 必须带 `file:line`）。
 3. 不得放松闸、不得改名换形状绕闸、不得用"先记 TODO"顶替修复。
 
 ## 硬性禁止（违反 = 任务失败）
@@ -83,4 +84,4 @@ rxrust 不是包在命令式代码外的响应式库，而是 **Rust 所有权�
 新算子/函数先在 `expr.rs`/`value.rs` 做成 **pub 独立件 + 金样单测** 钉死，**不接 `compile`**；接线时只在无歧义处触发：含 `/ * %` 的值跳过（护 `font:12px/1.5`、`grid:1/2` 等 CSS 斜杠分隔符），函数走**白名单** `call_builtin`，未知名 `eval→Err→` 原样兜底（`url/calc/min/max` 等 CSS 原生函数永不当 Sass 内置求值）；会动全局 truthiness 的比较/布尔单列一步、先护选择器（`a > b` combinator 不得当比较）。每步 `ledger diff` 确认 **`regress=0`** 才提交，否则回退。
 
 ## ✅ 验收 / 参照
-项目 = clean-room `crates/sasspile`（配 `ledger` A/B 库、`sasslint` 铁律审核）；`crates/qrass` 已删除，**不得**以其代码为模板。行为**唯一**参照 = 本地 `sass-spec/*.hrx`（input→output.css/error）+ `element-plus`，**严禁**参照 dart-sass 源码/文档推断行为。每步跑 hrx 快照 + `ledger diff <base> <run>` 守 **`regress=0`**。
+项目 = clean-room `crates/sasspile`（配 `ledger` A/B 库、`sasslint` 铁律审核）；`crates/qrass` 已删除，**不得**以其代码为模板。行为**唯一**参照 = 本地 `sass-spec/*.hrx`（input→output.css/error）+ `element-plus`，**严禁**参照 dart-sass 源码/文档推断行为。每步跑 hrx 快照 + `ledger diff <base> <run>` 守 **`regress=0`**，**并再跑 `ledger changed <base> <run>`** 逐条定性两侧都失败但详情变了的行（错值与发明错误只在这一条读数里现形）。
