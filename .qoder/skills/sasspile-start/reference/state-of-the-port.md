@@ -317,11 +317,14 @@
 `tasks.md` 9.6）：括号深度律收成 `lexer::Tok::net` 一份、hue 周期律只留 `axes::axes_to_rgb` 一处折返、
 `@for` 区间不再物化（`loops::Walk`）、`expr.rs` 拆回门槛内、阶段 span 补 `module` 且 `compile` span 带 `id`。
 **它们没让任何一行 hrx 变绿**（`regress=0 net=0 changed=0`），所以不得当作能力引用。
-仍未做：`@for` 的 body 捕获→重放→内核内 `flat_map` 扇出（design.md:88）需先定“扇出住哪个内核”；
+仍未做：`@for` 扇出的**载体**（下文 9.8 段；不是“扇出住哪个内核”——那个已定在结构相切、`Exec` 重灌）；
 块级 `Env` 作用域（tasks 3.6/4.1）、`calc.rs` 的 `.ok()` 与 `expr.rs` 的 `?` 判据不一、design.md:47 的全局 fold pass 均未动。
 
-已推进一步的（2026-10-29 9.7）：`@for` 的**一到多扇出本身已成立**——`step` 改接 `lexer::Emit` 汇口，
-体内含块时每轮产一条规则，金样 `directives/for/for.hrx::to_scope` 从 unexpected error 转为实质通过
-（`pass_substantive` 1689→1690、意外错误 18→17）；仍开放的是**载体**（收集后重放，见上反例索引）。
-逐条开放项与读数在 `tasks.md` 9.7。
+已推进一步的（2026-10-29 9.7→9.8）：`@for` 的**一到多扇出已成立**且**边界已归位**——结构相
+（`structure::MsgAcc{depth, cut}`）在闭合自己的 `}` 时发一个 owned `Event::For{head, body}`，
+`Exec` 侧的 `Scope::loop_`/`ForLoop{body, open}`/`capture`/`replay` 四符号已删（自查用 `grep -rEn`，
+BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为实质通过。
+**未做的仍是载体**：`exec::unroll`/`pass` 以 `try_for_each` + 每轮一次 `body.clone()` 重灌 `step`，
+而 `flat_map` 这个动词在 rc.6 里存在，所以这是**未做的选型**（`State` 改为流携带的累加子 = 0′.5），
+不得说成框架限制。逐条开放项与读数在 `tasks.md` 9.7/9.8。
 

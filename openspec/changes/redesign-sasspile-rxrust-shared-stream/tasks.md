@@ -1638,3 +1638,49 @@
       `changed` = `changed=0`；`sasslint count=0`；`cargo test --workspace --no-fail-fast` exit=0（48 组）。
       量具盲区如实记：`sasslint` 的签名（`Vec<Rule>`/`scan_map(`+`Vec<`/`flat_map(`+`from_iter(`/`.ok()`+`eval`
       同行）覆盖不到“收集后重放”与不在同一行的 `.ok()?`，所以 `count=0` 不构成结构清白的证据。
+
+- [x] 9.8 **`@for` 分解返工：边界交回拥有花括号的那一相（2026-10-29，基线 3cadf61 / run for-fan-out-final）**。
+      触发点是用户三次打断（“你又回到 GC 思维了”）与 `gc-auditor` 上一轮的三条签名：`Scope::loop_` +
+      `ForLoop{body: Vec<Event>, open: i32}` + `exec::replay` 自调 `step` = **缓冲 + 跨元素游标 + 重放**。
+      • 新增 `crates/sasspile/src/structure.rs`（结构相从 `lexer.rs` 拆出，`lexer.rs` 500→391 行，顺带清掉贴顶）：
+        `MsgAcc{run, depth, cut}` 在 `{` 处用 `loops::is_for` 认头、在**自己的深度**里收 body，闭合时发一个 owned
+        `Event::For{head, body}`；深度是累加子里的数（`brackets::Run{level, owner}` 的同形先例）。
+        `depth` 必须 `saturating_sub`：自定义属性值是原样 CSS 文本，`--prop: };`（金样
+        `css/custom_properties/error.hrx::brackets/curly`）会送来没开过的闭括号。
+      • `Exec` 侧四个符号整体删除（自查：`grep -rn "loop_|fn capture|fn replay|in_loop" crates/sasspile/src` = **0**）；
+        `ForLoop` 只剩 `var`/`walk`；`is_for` 与 `for_loop` 共用 `brackets::meaningful`（我一度写了第二份副本，
+        auditor 抓到后改回既有那份）与同一个 `for_keyword`。
+      • `Event::For` 的两条“块会消失”的路径补上：EOF 未闭合的 cut 由 `MsgAcc::finish` 按 decline 同形状
+        （Open+body+Close）交回，`StructurizeObserver::complete` 调它——漏一条规则在 pass 读数里是看不见的；
+        守卫 `tests/lexer.rs::a_loop_the_input_never_closes_still_hands_on_the_blocks_it_reached`。
+        另加 `a_closing_brace_that_opened_nothing_does_not_take_the_process_down`（阳性对照：把 `saturating_sub`
+        换回 `- 1` 它就以 `attempt to subtract with overflow` 红，实测过）。
+      • **残差（不写成已交付，也不再当框架限制洗地）**：`exec::unroll`/`pass` 仍是 `walk.values().try_for_each`
+        + 每轮一次 `body.clone()` 重灌 `step`，**不是** design.md:88 的 `内核内 flat_map(一项 → body 子流)`。
+        上一版本行写的两条“框架死路”（内核 `next` 拿不到 `Context`、搬至 `Exec` 前需再造 `Env`）**其中第一条是假的**，
+        已被复审者用 rc.6 源码推翻：`flat_map` = `Map` + `MergeAll`，**内层自带 Context**（本仓库
+        `docs/rxrust-source-analysis/05-operators.md` 早已写明，保序需 `concat_map`；`merge_all` 并发槽满会丢
+        排队内层的发射）。真实的代价是形态选型：`State` 不再住在观察者里，而是变成流携带的累加子
+        （`C::RcMut`/`C::RcCell`，即 rust.md 里唯余的 **0′.5**），或 `scan` 的 owned 累加子（与 SKILL:51-53
+        “每相写成真算子内核”相抵）。**这是未做的选型，不是限制**，已按真实理由上报。
+      • **一条真缺陷：引号内的结构字符**（复审实测，当前树）：`a { b: "}"; c: 1 }` → `a {\n  b: ";\n}`，
+        `c: 1` 整条消失；`@for $i from 1 through 2 { a: "}" b: 2; }` → 输出为空（循环体连同迭代被吞）。
+        修法已定位且属于生产侧：`LexAcc::feed` 的引号支除闭合引号/`\`/`$`/`#`（及紧跟 `#` 的那一字符，护 `"#{…}"`）
+        外一律 `buf.push` 并 `return`，一个串就是一个词素。**已实探并量过：`for-structure-cut` → `string-one-lexeme`
+        = `regress=1 net=1 changed=18`，意外错误 17→18**，不满足 `regress=0` 提交条件，故**已回退**。
+        回退后本批重盘读数不变（`structure-cut-closed` 对两个 base 均 `regress=0 net=0 changed=0`）。
+        下一轮开工前提：**先补量具再改行为**——`ledger` 只有 `import|diff|changed|runs|failures|passed`，
+        无法点名“哪一条由绿变红”（禁 shell 集合运算），需先加 `ledger regressed <a> <b>`，再逐条对金样裁决。
+        结构相里**不得**加“看穿字符串”的判据（那违反 `Tok::MemberVar` 那条律：消费方不得比生产方更懂词法）。
+      • 伪规则这一选择已说出口而非藏住：“不执行的 `@for` = Open(head)+body+Close”现在只有一份
+        （`structure::as_block`，`finish` 与 `unroll` 的 decline 支共用）；它把头部当选择器输出，
+        正是 `directives/for/for.hrx::unit/same`（要 5 条 `b: Npx`）与 `…::error/from_float`（要 `1.5 is not an int.`）
+        仍红的原因——那是 1.3/P3.2 与 P7 的活，不是本批的结论，旧文档里“什么都没猜”的说法已删。
+      • `sasslint` 自查命令纠偏（复审用阳性对照推翻）：文档里曾写 `grep -rn "loop_|fn capture|..."`（BRE，
+        对含这些符号的 HEAD 也得 0 命中，是条永远为绿的量具）；现改为 `grep -rEn`。
+      • 读数：`ledger diff for-fan-out-final structure-cut-closed` = `regress=0 net=0`，`changed = changed=0`
+        （fails 双侧 9678，非零），意外错误仍 **17**，`directives/for/for::` 失败仍 **11**（其中 6 条 `error/*`、
+        4 条 `unit/*`、1 条 `in_declaration`，无一是未闭合的体内）；`for-structure-cut` 作为中间 run 也与两者
+        齐平；空库复算现跑现引（见下条）；`sasslint count=0`；`cargo test --workspace --no-fail-fast` exit=0（48 组）；
+        src 无 >500 行文件（`lexer.rs` 396、`structure.rs` 161、`exec.rs` 471）。**这批一条 pass 也没增加**，
+        它换的是分解，不得当收益记录。

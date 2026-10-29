@@ -57,17 +57,28 @@
 - **批量外壳**：`scan_map` 返 `Vec` + `flat_map(from_iter)`、把 body 收集后重放 → **每相写成真算子内核**
   （`struct Phase{source}` + `PhaseObserver{observer,state}` + `ObservableType`/`CoreObservable<C>`），
   在自己 `next` 里逐条 `observer.next(..)` 发 0..N 项；状态住 Observer、`Err` 保持泛型、不写死 `Rc`/`Arc`。
-  现存实例（**待返工，不是已成立**）：`@for` 在 `exec` 里的形状。上一版本行写过“扇出已在发射层成立、
-  金样 `for.hrx::to_scope` 已绿”——那是**拿净数给结构背书**（本文上方红线），已划掉。真相是：
-  `Scope::loop_` + `ForLoop{body: Vec<Event>, open: i32}` + `exec::replay` 自调 `step` = **缓冲 + 跨元素游标 +
-  重放**，三个签名齐全。需要缓冲这件事本身就是分解错的证据：**循环的边界在“知道花括号在哪合上”的那一相
-  就已经是数据**（`Structurize` 的 `MsgAcc` 与 `brackets::Run{level,owner}` 已经把深度做成数据）。
-  正解（下一步，不在此形状上加功能）：`Structurize` 把循环发成**一个 owned 值**，body 是其携带的
-  **文档序平展 leaf 跑**（`Event::For { var, first, last, inclusive, body }`——“嵌套做进值里”明文允许，
-  禁的是 `children`/递归下降）；`Exec` 内核保持一进一出，扇出用框架自己的动词
-  （每值 `Shared::from_iter(body)` 下接 `concat_map`/`flat_map`；`merge_all`+每 item `from_stream` 会乱序，
-  本文“排序代替时机”条已钉）。届时 `ForLoop.body`、`ForLoop.open`、`exec::replay`、`Scope::loop_` 全部消失，
-  逐轮绑定与逐轮产规则从流上自然得出。验收不变：`for.hrx` 那些行必须在新形状下继续绿（**量出来，不是假定**）。
+  现存实例（2026-10-29 返工后的真相；**上一版这段写的 `Scope::loop_`/`ForLoop{body, open}`/`exec::replay`
+  四个符号已删**，别再照它找东西，也别用净数给任何形状背书）：`@for` 的**边界**已交回给拥有花括号的那一相——
+  `structure.rs::MsgAcc{depth, cut}` 在 `{` 处用 `loops::is_for` 认头、在自己的深度里收 body，闭合时发**一个 owned**
+  `Event::For{head, body}`；`Exec` 侧的缓冲与逐块计数归零。自查命令**必须用 `-E`**：
+  `grep -rEn "loop_|fn capture|fn replay|in_loop" crates/sasspile/src` = 0 命中。写成 `grep -rn "loop_|…"` 是
+  一条永远为绿的量具（BRE 下竖线不是或，对仍带这些符号的 HEAD 也得 0）——复审拿 HEAD 做阳性对照推翻了它。
+  体内含块的金样 `directives/for/for.hrx::to_scope` 在新形状下仍绿——这是量出来的（run `structure-cut-closed`
+  对基线 `regress=0 net=0 changed=0`），不是假定。
+  **残差只剩一条，而它恰好就是 design.md:88 的那半**：`exec::unroll`/`pass` 仍以 `walk.values().try_for_each`
+  ＋每轮一次 `body.clone()` 把 body 重灌进 `step`，**不是** `内核内 flat_map(一项 → body 子流)`。
+  上一版这里写的“两条框架死路”（内核 `next` 拿不到 `Context`、搬至 `Exec` 前需再造 `Env`）**第一条是假的**，
+  已被 rc.6 源码推翻：`flat_map` = `Map` + `MergeAll`，**内层自带 Context**（本仓库
+  `docs/rxrust-source-analysis/05-operators.md` 早已写明；保序要用 `concat_map`，`merge_all` 并发槽满会丢排队
+  内层的发射）。真实的代价是**形态选型**：`State` 得从观察者字段变成流携带的累加子（`C::RcMut`/`C::RcCell`，
+  即 rust.md 里唯余的 **0′.5**）。**把选型说成限制 = 把“不想改形态”伪装成“框架不让”**，正是本仓反复记的那类自解；
+  上报真实代价，不自造机制。
+  同形状的另一条债在词法粒度：引号内的 `}`/`;`/`,` 仍被发成独立 `Tok::Punct`，实测 `a { b: "}"; c: 1 }` 整条丢掉
+  `c: 1`，`@for … { a: "}" b: 2; }` 输出为空。修法在生产侧（一个串＝一个词素，护住 `"#{…}"`）：已试过并量得
+  `regress=1 changed=18`（意外错误 17→18），因不满足 `regress=0` 而**已回退**；开工前需先给 `ledger` 补
+  `regressed <a> <b>`（现只有 `import|diff|changed|runs|failures|passed`，点不出哪条由绿变红），详见 `tasks.md` 9.8。
+  **不许**在结构相里加“看穿字符串”的判据（那是让消费方比生产方更懂词法，同 `Tok::MemberVar` 那条律）。
+  验收不变：`for.hrx` 那些行必须在新形状下继续绿（**量出来，不是假定**）。
 - **排序代替时机**：为输出顺序维护 `order`/序号 + `sort_by_key` → 先问规范里的**发射时刻**（实例：`sass-spec/css/style_rule`
   `declaration/interleaved/**` = 开子块冲刷父块待定声明段、闭块冲刷残余，一个块可出多条规则），改正后**删掉键**；
   `merge_all` 并发额度满会丢排队内层的发射，**排序救不回缺失元素**。纯 CPU 活包 `from_stream(stream::once(..))` = 假并发 → 串行或 `concat_map`/`concat_all`。

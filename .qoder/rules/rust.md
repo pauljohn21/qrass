@@ -22,9 +22,13 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1855/11,533**（16.1%，**实质通过 1690** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `for-fan-out-final`（2026-10-29：审查驱动的五批修复 `audit-closure`
+   A/B 记录 = `reports/hrx.db` 里的具名 run `structure-cut-closed`（2026-10-29：审查驱动的五批修复 `audit-closure`
    **一条 pass 也没增加**，只消缺陷与重复真源；其后的 `@for` 一到多扇出让 `directives/for/for::to_scope`
-   从 unexpected error 变实质通过（+1，无效错误 18→17），逐批读数与无金样律见 `tasks.md` 9.6/9.7）。
+   从 unexpected error 变实质通过（+1，无效错误 18→17），逐批读数与无金样律见 `tasks.md` 9.6/9.7/9.8）——9.8 那批把 `@for` 的边界交回结构相（`structure::MsgAcc` 发
+   一个 owned `Event::For`，`Exec` 侧缓冲/游标/重放四符号归零），**同样一条 pass 也没增加**
+   （`regress=0 net=0 changed=0`）。残差是 design.md:88 的 `flat_map` **未做**，而不得把它说成框架限制：
+      动词在 rc.6 里存在（`flat_map` = `Map` + `MergeAll`，内层自带 `Context`；保序用 `concat_map`），缺的是把
+      `State` 从观察者字段做成流携带的累加子这个**选型**（即本文件唯余的 0′.5）。
    **diff 的 base 只准用本节点名的当前 run**，
    库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18** → **17**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
