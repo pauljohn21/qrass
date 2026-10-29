@@ -310,6 +310,13 @@ impl Color {
     /// every channel (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`); a single `none`
     /// contributes zero to the maths and prints as a number, which is what `::missing/red` shows.
     pub fn converted(&self, space: Space) -> Self {
+        // **Same space, same numbers.** An identity conversion may neither re-round a channel nor decide which
+        // ones were `none` by way of a matrix round trip: `to_space/xyz_d50/xyz_d50.hrx::missing/x` keeps
+        // `color(xyz-d50 none 0.2 0.3)` verbatim, and running the triple through XYZ twice is what turned it
+        // into invented numbers.
+        if self.space.is_some_and(|carried| carried.space == space) {
+            return self.clone();
+        }
         let channels = of_xyz_d65(space, self.xyz());
         let powerless = self
             .space

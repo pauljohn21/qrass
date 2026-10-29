@@ -22,8 +22,11 @@ impl Color {
     pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Self {
         // A colour in its own colour space has no hsl axes stored, and deriving them from the empty byte
         // triple would answer `complement(color(srgb …))` with a colour read off zeros. Leaving it as it came
-        // is the honest half of this: the Color-4 rule (`named/powered*` in `color/complement.hrx`) needs the
-        // conversion route, not a derivation from nothing.
+        // is the honest half of this: the Color-4 rule the corpus asks for is a conversion through the named
+        // space (`complement.hrx::space/missing/modern/different` writes
+        // `color.complement(color(srgb none 100 200), $space: oklch)` and expects converted channels, and
+        // `grayscale.hrx::modern/predefined` expects `color(xyz …)` to come out changed), which this slice
+        // has not built — so this echo is an **open defect**, recorded in `tasks.md` 9.9, not an answer.
         if self.is_spaced() {
             return self.clone();
         }
@@ -251,8 +254,8 @@ impl Color {
             // A colour in its **own colour space** stores no srgb bytes here, and reading the empty byte
             // triple would answer `rgb(0, 0, 0)` — a wrong value no pass count can see
             // (`tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`). Mixing across
-            // spaces needs the conversion in [`crate::color::space`] driven by a common space, which is the
-            // `color.mix` Color-4 work (`named/powered*` rows), not a guess in this function.
+            // spaces needs the conversion in [`crate::color::space`] driven by a common space, which is what
+            // `mix/named.hrx::polar_space` and `::rectangular_space` ask for; it is not a guess here.
             _ => (!colour.is_spaced()).then(|| colour.channels[index].byte()),
         };
         let [red, green, blue] = [0, 1, 2].map(|index| {

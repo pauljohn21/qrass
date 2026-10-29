@@ -139,6 +139,12 @@ fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
 /// computed `lab(45.3584412071% 20.7260166824 -57.206844096)` where the corpus says
 /// `lab(44.1210142293% 10.9543336098 -59.0857381981)` (`to_space/srgb/lab.hrx::middle`), while neutrals looked
 /// nearly right, which is how it would slip past a grey-only check.
+///
+/// The second half of that lesson, which this file initially broke again: **exactly one adaptation per
+/// route**. `to_xyz_d65` used to fold `XyzD50` here and then fold once more at its tail because the space's
+/// own white is `D50` — so an identity conversion `color(xyz-d50 0.2 0.4 0.8)` → `xyz-d50` computed
+/// `color(xyz-d50 1.0640412 …)`, the matrix applied twice to the same triple. A space whose numbers already
+/// are XYZ returns them untouched and lets the tail do the single move.
 pub fn adapt(xyz: [f64; 3], from: White, to: White) -> [f64; 3] {
     match (from, to) {
         (White::D50, White::D65) => apply(&BRADFORD, xyz),
@@ -242,7 +248,8 @@ pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
         Space::Oklab => oklab_to_xyz(channels),
         Space::Oklch => oklab_to_xyz(from_polar(channels)),
         Space::Xyz => return channels,
-        Space::XyzD50 => adapt(channels, White::D50, White::D65),
+        // Its own numbers, at D50: the tail `adapt` below is this space's one and only white-point move.
+        Space::XyzD50 => channels,
         other => {
             let transfer = other.transfer();
             let decoded = channels.map(|value| transfer.decode(value));
