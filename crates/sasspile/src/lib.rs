@@ -27,6 +27,7 @@ mod lexer;
 mod loops;
 mod operations;
 mod phases;
+mod scope;
 mod selector;
 mod trace;
 mod unit;

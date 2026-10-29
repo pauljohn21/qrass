@@ -53,20 +53,49 @@ async fn body_declarations_keep_their_order_within_each_iteration() {
     );
 }
 
-/// The boundary the reader will not cross: a bound that is not an integer literal leaves the header
-/// unrecognised, so no iteration is invented. `$limit` (a variable) is `to_scope`'s situation; `1.5` is
-/// `error/from_float`'s, where the corpus wants `1.5 is not an int.` — until that diagnostic exists the
-/// program must keep its pre-loop behaviour rather than guess a range.
+/// A **reference** bound is read. `for.hrx::to_scope` writes `@for $i from 1 through $limit` and states in
+/// its own comment that re-binding `$limit` inside the body does not move the end of the walk, so the range
+/// is decided once at the header. The expansion this produces inside a rule is already pinned by value for
+/// the literal spelling (`…::inclusive_forward/scss`), so what is asserted here is the **equality of the two
+/// spellings** rather than a literal this compiler invented for a shape the fixture writes differently.
 #[tokio::test]
-async fn a_non_literal_bound_is_not_read_as_a_range() {
-    let err = compile("$limit: 3;\na { @for $i from 1 through $limit { b: $i; } }")
-        .await
-        .expect_err("a variable bound is not evaluated into a range");
-    assert_eq!(err.message, "Undefined variable.");
-    // A float bound reads the same way: `1.5` is not an integer, so no range is invented and the body is
-    // left un-expanded — which surfaces as the unresolved `$i`. The corpus asks for
-    // `Error: 1.5 is not an int.` (`for.hrx::error/from_float`); emitting that message is P7 work, and
-    // until then this assertion documents that the loop does **not** guess a range from it.
+async fn a_reference_bound_reads_the_same_range_as_the_literal_it_holds() {
+    let literal = css("a { @for $i from 1 through 3 { b: $i; } }").await;
+    let reference = css("$limit: 3;\na { @for $i from 1 through $limit { b: $i; } }").await;
+    assert_eq!(literal, reference);
+}
+
+/// A body that holds a block settles **one rule per iteration**: `directives/for/for.hrx::to_scope`.
+/// Both the input and the expected CSS below are copied verbatim from that archive section, including the
+/// `through $limit` bound and the body's own `$limit: 2` — the case states in its comment that the walk is
+/// decided once at the header, yet four iterations is also the only in-scope evidence that a reference bound
+/// is read at all.
+///
+/// Blank lines are dropped on both sides before comparing. That is the conformance harness's own basis
+/// (`tests/hrx.rs`'s `norm`, which does not judge a rule's text on blank lines); the empty line the fixture
+/// prints *between* rules is a formatting law this compiler does not emit yet and is not asserted here.
+#[tokio::test]
+async fn a_body_block_settles_one_rule_per_iteration() {
+    let unrolled = |text: &str| {
+        text.lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let got = css(
+        "$limit: 4;\n@for $i from 1 through $limit {\n  $limit: 2;\n  a {\n    limit: $limit;\n    i: $i;\n  }\n}",
+    )
+    .await;
+    let want = "a {\n  limit: 2;\n  i: 1;\n}\n\na {\n  limit: 2;\n  i: 2;\n}\n\na {\n  limit: 2;\n  i: 3;\n}\n\na {\n  limit: 2;\n  i: 4;\n}\n";
+    assert_eq!(unrolled(&got), unrolled(want));
+}
+
+/// The boundary the reader still will not cross: a bound that is **not an integer** leaves the header
+/// unrecognised, so no range is invented. `1.5` is `error/from_float`'s case, where the corpus wants
+/// `Error: 1.5 is not an int.` — emitting that message is P7 work, and until then the program keeps its
+/// pre-loop behaviour rather than guessing a range or guessing a number out of a fractional bound.
+#[tokio::test]
+async fn a_fractional_bound_is_not_read_as_a_range() {
     let float = compile("a { @for $i from 1.5 through 2 { b: $i; } }")
         .await
         .expect_err("a float bound is not read as an integer range");

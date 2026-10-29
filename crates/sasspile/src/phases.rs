@@ -20,8 +20,9 @@ use rxrust::observable::{CoreObservable, ObservableType};
 use rxrust::observer::Observer;
 
 use crate::SassError;
-use crate::exec::{State, StyleRule};
+use crate::exec::State;
 use crate::lexer::{Event, LexAcc, MsgAcc, Tok};
+use crate::scope::StyleRule;
 use crate::trace::Phase;
 
 // The phase handle each observer carries is `crate::trace::Phase`: a span that lives as long as the
@@ -206,7 +207,8 @@ where
 }
 
 /// `Event → StyleRule`: the program state (`scopes`, `env`) lives in this observer and is moved by
-/// `&mut self` per event; only a rule the event settles is emitted. A fatal failure ends the stream
+/// `&mut self` per event; **0..N rules** per event go out through the sink `State::step` is handed — one
+/// `@for` closing emits one rule per iteration. A fatal failure ends the stream
 /// on the real `Err` channel (`Observer::error`), which is why the downstream observer is held as an
 /// `Option` and consumed with `take()` — terminate exactly once, the way the framework's own
 /// multi-source observers do it. Whether any kind is fatal today is the `FATAL` set in the crate root.
@@ -230,26 +232,29 @@ where
         if self.observer.is_none() {
             return; // already terminated on the Err channel
         }
-        // The phase span is entered only around `step`, so the declaration spans it opens nest inside
-        // it, and the guard is released before `close` moves the timing out.
-        let settled = {
-            let _current = self.timing.enter();
-            self.state.step(ev)
-        };
+        // The phase span is entered around the whole step, so the declaration spans it opens and the rules
+        // it emits all nest inside it; the guard is released before `close` moves the timing out.
         let ExecObserver {
             observer,
+            state,
             timing,
             items,
             ..
         } = self;
-        match settled {
-            Ok(Some(rule)) => {
+        let outcome = {
+            let _current = timing.enter();
+            // 0..N rules per event: closing a `@for` settles one rule per iteration, so `step` writes into
+            // this sink instead of returning a single rule (see `crate::exec::State::step`).
+            let mut emit = |rule: StyleRule| {
                 if let Some(downstream) = observer {
                     downstream.next(rule);
                     *items += 1;
                 }
-            }
-            Ok(None) => {}
+            };
+            state.step(ev, &mut emit)
+        };
+        match outcome {
+            Ok(()) => {}
             Err(err) => {
                 if let Some(terminated) = observer.take() {
                     timing.close(*items);
