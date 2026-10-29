@@ -21,10 +21,13 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2245/11,533**（19.5%，**实质通过 2080** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `space-model-v3`（2026-10-30：色彩空间模型 + `color()` 构造 +
-   `color.to-space` 一次 **+390**（`regress=0`，`changed=1471` 是那些行从逐字文本变成差约 0.1 的**数字**——
-   换算矩阵的常数精度未到 10 位有效数字，逐条证据与下一步在 `tasks.md` 9.9）；其前史：审查驱动的五批修复 `audit-closure`
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2285/11,533**（19.8%，**实质通过 2120** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `space-fixed`（2026-10-30：色彩空间模型 + `color()` 构造 +
+   `color.to-space` 共 **+430**（`regress=0`，意外错误仍 17）。`changed=1431` **不得笼统说成“离金样更近”**：
+   审计实测其中含两类**我的缺陷**——identity 转换走矩阵往返而发明数字（已修），以及 15 条
+   `error/non_legacy` 把空间色答成 `0%`/`1`/`rgb(85, 85, 85)`（`Color` 同时携 `space` 与
+   `Representation::Legacy`，未守卫的读路径拿空字节三元组作答——**开放缺陷**，逐条在 `tasks.md` 9.9）；
+   色度行仍差在 ~0.1 量级（矩阵常数只有 7–8 位，金样打 10 位）。其前史：审查驱动的五批修复 `audit-closure`
    **一条 pass 也没增加**，只消缺陷与重复真源；其后的 `@for` 一到多扇出让 `directives/for/for::to_scope`
    从 unexpected error 变实质通过（+1，无效错误 18→17），逐批读数与无金样律见 `tasks.md` 9.6/9.7/9.8）——9.8 那批把 `@for` 的边界交回结构相（`structure::MsgAcc` 发
    一个 owned `Event::For`，`Exec` 侧缓冲/游标/重放四符号归零），**同样一条 pass 也没增加**

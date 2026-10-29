@@ -1723,3 +1723,27 @@
         下一步（按金样校准，不许凭记忆报常数）：用 `to_space/srgb/xyz_d50.hrx` 的 white/gray/middle 三组
         已知输入输出反解 D65→D50 的 9 个系数（或用 CSS Color 4 公布的全精度表），并把 Lab 的除数白点改成
         由同一矩阵适应出来的白点（中性必然 100%）；逐空间推进，每步同时看 `diff` 与 `changed`。
+      • **`gc-auditor` 对本批的裁定与处置（已入提交 `8f5e946`）**：它推翻了我写下的两项宣称。
+        ① `to_xyz_d65` 对 `XyzD50` **先适应一次、尾部又适应一次**（该空间 `white()==D50`），而我注释里写着
+        “适应两次的错已消除”——注释不实：`to_space/xyz_d50/xyz_d50.hrx::middle` 得 `1.0640412` vs `0.2`。
+        现改为：数值已是 XYZ 的空间直接交出，尾巴那一次是唯一移动；`converted` 加 identity 短路（同空间原样
+        返回），否则 `::missing/x` 把 `color(xyz-d50 none 0.2 0.3)` 发明成数字。修后 `net` 从 390 到 **430**。
+        ② 我引的两条金样 `named/powered*` 是**发明的**（`grep -rl powered spec/core_functions/color/` = 0 个文件），
+        已换成逐字存在的 `complement.hrx::space/missing/modern/different`、`grayscale.hrx::modern/predefined`、
+        `mix/named.hrx::polar_space`。
+      • **两条开放缺陷（不得当作已交付，也不得用 +430 给它们背书）**：
+        (a) **同一事实写两处**：`Color` 携 `space: Option<InSpace>` 同时 `representation` 硬写 `Legacy`，
+        而我只守卫了四处读；承重的未守卫路径是 `writes_bytes`（`with_channel`/`with_hwb`/`hwb_of` 三次调用）、
+        `axes_of`→`hsl_channel`（`hue`/`saturation`/`lightness`）与无条件返回的 `alpha()`。实测：
+        `color/saturation::error/non_legacy` 与 `color/alpha::error/non_legacy` 等 **15 行**金样要
+        `Error: … only supported for legacy colors. …`，我答 `0%` / `1` / `rgb(85, 85, 85)`（后一条来
+        自 `in_space` 留空的全零字节）。正解是把空间做成**一个判据**（two-arm 枚举或给 `Representation`
+        加一个携带 `Space` 的变体），而非继续补点状守卫；附带：`color::Space` 与
+        `builtins/color/modify.rs::Space{Nothing,Bytes,Hwb,Axes}` 同名异义，合并时一并解决。
+        (b) `ops::transform_axes` 对空间色 `return self.clone()`（**回显比拒更坏**：它把输入当成算过的结果
+        输出，而同批其余三处选的是拒）；应当跟 `with_axes` 同政策返 `Option`，由调用点 `ok_or_else` 落成拒。
+        审计还指出一个**量具盲区**：`{saturate,darken,lighten,desaturate,fade_in,fade_out}::error/non_legacy`
+        这 6 行在两侧详情都是 `no expected output`（`tests/hrx.rs` 的 `(Ok(_), None, None)` 分支），
+        所以上述形状变化对 `changed` 隐形——要补的是让该分支也把 `got` 存进详情（归入 P7 错误工作前的量具项）。
+      • 流程缺口如实记：上面“第一次拓宽 `operand_expr` 造成 `regress=2`”那次测量**没入库**（`ledger runs` 里
+        `space-model` 就是它，但我当时未将它的 `regress=2` 作可复查记录引用）；依据必须留在库里才可驳。
