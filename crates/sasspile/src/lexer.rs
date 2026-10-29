@@ -191,6 +191,13 @@ impl LexAcc {
             // Inside a quoted string the character is content: a backslash escapes the next one, the
             // matching quote ends the literal, and `$` must not be read as a variable reference
             // (`core_functions/selector/extend/simple/pseudo/arg::class/equal`).
+            //
+            // Making the literal one lexeme (so a `}`/`;`/`,` inside it stops reaching the structural arms)
+            // was attempted twice on this branch and is **not** done: the second attempt measured
+            // `net=1 changed=70` with unexpected errors `17 → 39` and it broke
+            // `tests/lexer.rs::dollar_inside_a_quoted_string_is_text`, because `#` is ambiguous inside a
+            // literal (a lone `#` is text, `#{` opens SassScript) and deciding that needs the pending-`#`
+            // state to cover the *whole* run up to the `{`, not one character. See `tasks.md` 9.8.
             if self.escaped {
                 self.escaped = false;
             } else if ch == '\\' {

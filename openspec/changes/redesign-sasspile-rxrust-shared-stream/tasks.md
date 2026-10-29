@@ -1669,8 +1669,16 @@
         外一律 `buf.push` 并 `return`，一个串就是一个词素。**已实探并量过：`for-structure-cut` → `string-one-lexeme`
         = `regress=1 net=1 changed=18`，意外错误 17→18**，不满足 `regress=0` 提交条件，故**已回退**。
         回退后本批重盘读数不变（`structure-cut-closed` 对两个 base 均 `regress=0 net=0 changed=0`）。
-        下一轮开工前提：**先补量具再改行为**——`ledger` 只有 `import|diff|changed|runs|failures|passed`，
-        无法点名“哪一条由绿变红”（禁 shell 集合运算），需先加 `ledger regressed <a> <b>`，再逐条对金样裁决。
+        **第二次尝试（补上“插值开着时不是串文本”后）实测：`regress=0 net=1`（`css/custom_properties/strings::` 转绿，
+        `pass_substantive` 1690→1691）但 `changed=70`、意外错误 17→39，并弄红
+        `tests/lexer.rs::dollar_inside_a_quoted_string_is_text`、新增第 7 处 `} else if`（债计数闸当场拦住）
+        —— +1 条 pass 换 22 条新意外错误，不满足提交条件，**已回退**（run `string-reverted-check` 对
+        `structure-cut-closed` 复验为 `regress=0 net=0 changed=0`）。难点：串里的 `#` 是歧义的（孤 `#` 是文本、
+        `#{` 开 SassScript），要把 pending-`#` 做成覆盖到 `{` 为止的状态，而不是一字符判断。
+      • **更正上一版的两个说法**（都是未查就断言）：① “`ledger` 点不出哪条由绿变红、需先补 `regressed <a> <b>`”——
+        错：`diff_runs` 早已返回带失败详情的 `regress` 列表，CLI 逐条打印 `REGRESS <key> | <detail>`，本次就是靠它
+        一眼定位到 `core_functions/string/unique_id::is_unique`。② 真正需要的是把 **`ledger changed` 当必跑项**（已写进
+        rust.md 门禁）：上面这条若无 `changed`，会被当成“净数 +1，可提交”而漏掉 70 条形状倒退。
         结构相里**不得**加“看穿字符串”的判据（那违反 `Tok::MemberVar` 那条律：消费方不得比生产方更懂词法）。
       • 伪规则这一选择已说出口而非藏住：“不执行的 `@for` = Open(head)+body+Close”现在只有一份
         （`structure::as_block`，`finish` 与 `unroll` 的 decline 支共用）；它把头部当选择器输出，

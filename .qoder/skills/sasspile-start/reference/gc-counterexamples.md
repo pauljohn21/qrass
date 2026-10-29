@@ -74,9 +74,11 @@
   即 rust.md 里唯余的 **0′.5**）。**把选型说成限制 = 把“不想改形态”伪装成“框架不让”**，正是本仓反复记的那类自解；
   上报真实代价，不自造机制。
   同形状的另一条债在词法粒度：引号内的 `}`/`;`/`,` 仍被发成独立 `Tok::Punct`，实测 `a { b: "}"; c: 1 }` 整条丢掉
-  `c: 1`，`@for … { a: "}" b: 2; }` 输出为空。修法在生产侧（一个串＝一个词素，护住 `"#{…}"`）：已试过并量得
-  `regress=1 changed=18`（意外错误 17→18），因不满足 `regress=0` 而**已回退**；开工前需先给 `ledger` 补
-  `regressed <a> <b>`（现只有 `import|diff|changed|runs|failures|passed`，点不出哪条由绿变红），详见 `tasks.md` 9.8。
+  `c: 1`。修法在生产侧（一个串＝一个词素），**已试过两次均未过关**：第二次 `regress=0 net=1` 但
+  `changed=70`、意外错误 17→39，并弄红 `dollar_inside_a_quoted_string_is_text`——难点是串里的 `#` 歧义
+  （孤 `#` 是文本、`#{` 是 SassScript），要把 pending-`#` 做成覆盖到 `{` 为止的状态。详细读数见 `tasks.md` 9.8。
+  上一版这里写的“先补 `ledger regressed <a> <b>` 才能开工”**是未查源码就断言工具缺失**（`ledger diff` 早就会逐条打
+  `REGRESS <key> | <detail>`）；真正需要的是把 `ledger changed` 当必跑项——上面这条若无它，看起来就是“+1 可提交”。
   **不许**在结构相里加“看穿字符串”的判据（那是让消费方比生产方更懂词法，同 `Tok::MemberVar` 那条律）。
   验收不变：`for.hrx` 那些行必须在新形状下继续绿（**量出来，不是假定**）。
 - **排序代替时机**：为输出顺序维护 `order`/序号 + `sort_by_key` → 先问规范里的**发射时刻**（实例：`sass-spec/css/style_rule`
