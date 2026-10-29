@@ -554,7 +554,7 @@ git commit -m "docs(rules): shorten the always-on contract and move the counter-
 
 **裁决（ledger 里的 `Ruling:` 全量，逐条附代价）**
 
-1. **`no-else-if-chain` 不在本计划落地**——rust.md 禁的是链，现存 7 处 `} else if` 是**存量债**（审查者纠正了我"它们合法"的错误说法），重构生产码超出本计划"不碰 `crates/sasspile/src`"的范围。改为 `defence_fitness::the_deferred_branch_gate_stays_recorded`：闸落地却没更新记录、或债数变化（整树计数 == 7），测试即红。代价：这一条教条由测试守着而不是 lint 守着。
+1. **`no-else-if-chain` 不在本计划落地**——rust.md 禁的是链，`} else if` 是**存量债**（审查者纠正了我"它们合法"的错误说法），重构生产码超出本计划"不碰 `crates/sasspile/src`"的范围。改为 `defence_fitness::the_deferred_branch_gate_stays_recorded` 对整树做可失败计数，**具体数字只住在那条测试里**（本行原先写死 "7 处 / 计数 == 7"，于 2026-10-29 成为第二份真源并因一处还债而失真，已改为指针）。代价：这一条教条由测试守着而不是 lint 守着。
 2. **闸清单从引擎派生 + 钉死数量**（`SUBSTRING_BANS`/`AND_BANS`/`LINE_START_BANS`/`FILE_RULE_IDS` 改 pub）。代价：新增闸必须同步更新被钉住的数字，这是有意为之的摩擦。
 3. **`single-table` 取消按文件名豁免**，改为"定义 `pub const UNITS` 的那个文件"。代价：判据稍宽，靠"名字绑定到值"的相关性把 `matches!` 与纯名称数组排除在下界之外。
 4. **计划点名的 `reference/evidence-discipline.md` 不单独建档**，内容并入 `tooling-redlines.md`。代价：计划文本比现实多一个文件名（已在本节说明，不留悬空指针）。

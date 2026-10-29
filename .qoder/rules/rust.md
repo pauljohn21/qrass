@@ -10,8 +10,8 @@ alwaysApply: true
 ## 🧭 新会话起手（先读这几处再写码，否则必返工）
 1. `docs/rxrust-source-analysis/`（rc.6 逐行取证，01–09；**09** = 取消/锁/终止投递次序不变量 + “库自带注释与实现不一致”清单）；
 2. `.qoder/skills/rxrust-reactive/SKILL.md`（动手前“先选动词”清单 + 本仓库踩过的 GC 形态）里的
-   「Single sources already fixed here」表——**六条已定死的单一
-   真源**（单位表/比较/色彩 route/无单位拒语/打印律/`Tok::MemberVar`）；新增第二份副本就是回归本身，先合并。
+   「Single sources already fixed here」表——已定死的单一真源清单（本文件不再复述条目与条数，
+   以免变成第二份真源；表就是唯一入处，写 helper 前查它）。
 3. `sasspile-start` skill（已落地）：起手四步必须实跑命令并**逐字复述读数**（`ledger runs`、
    意外错误计数、`sasslint` 命中数、`openspec status`）；细则在它自己的 `reference/` 三份里。设计文档
    `docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md` 的 S1+S2 已实施（两条新闸
@@ -22,7 +22,9 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1854/11,533**（16.1%，**实质通过 1689** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `number-shells`。**diff 的 base 只准用本节点名的当前 run**，
+   A/B 记录 = `reports/hrx.db` 里的具名 run `audit-closure`（2026-10-29 全量审查驱动的五批修复后；数字与本段
+   上一基线 `number-shells` 完全相同，那五批**一条 pass 也没增加**，只消缺陷与重复真源，逐批读数与三条无金样
+   的律记在 `tasks.md` 9.6）。**diff 的 base 只准用本节点名的当前 run**，
    库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把

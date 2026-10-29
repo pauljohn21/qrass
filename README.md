@@ -14,11 +14,11 @@ reduce_initial → into_future`. There is no materialized AST walked by recursio
 
 ## Workspace
 
-| Crate | Role | Size (measured 2026-10-28) |
+| Crate | Role | Size (measured 2026-10-29) |
 | --- | --- | --- |
-| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 30 `src/*.rs` (all levels), 8,519 lines, 28 test targets |
+| `crates/sasspile` | the compiler — **library only, no CLI**; one public exit | 30 `src/*.rs` (all levels), 8,606 lines, 29 test targets |
 | `crates/ledger` | the A/B record: named runs of hrx snapshots in one SQLite table set, `ledger diff` → `regress`, `ledger changed` → failure-shape | 1,255 lines (src 662 + tests 593) |
-| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 1,191 lines (src 500 + tests) |
+| `crates/sasslint` | deterministic gate for this project's hard rules (+ `sasslint-mcp` bin) | 1,202 lines (src 500 + tests) |
 
 Source layout of the compiler: `lib.rs` (the single chain), `phases.rs` (the four kernels),
 `lexer.rs`, `exec.rs`, `expr.rs`, `value.rs`, `selector.rs`, `env.rs`, plus the module directories
@@ -73,8 +73,10 @@ cases — that is decided by `ledger diff <base> <run>` requiring **`regress = 0
 empty — legitimately correct (Sass really emits nothing there), but also what a compiler that produces
 nothing scores, so they prove nothing about a feature. The audit that found this: `directives/{if,for,while}`
 showed 39 “passing” cases, **all 39** with empty expectations, i.e. `@if`/`@each`/`@for` were
-implemented nowhere despite `tasks.md` claiming otherwise (now corrected, and `@for` over literal integer
-ranges has since been built and moves 8 real cases). The harness reports both numbers on every run.
+implemented nowhere despite `tasks.md` claiming otherwise (now corrected; `@for` over literal integer ranges
+has since been built, its rows pinned by value in `tests/loops.rs` straight from `directives/for/for.hrx` —
+how many cases it moves is a `ledger` reading, not a number this file repeats). The harness reports both
+numbers on every run.
 
 ## Conformance authority
 

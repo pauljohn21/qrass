@@ -157,6 +157,8 @@ for an existing one before writing a helper:
 | "must have no units" refusal | `builtins/math.rs::unitless` | per-function wording drift |
 | number printing | `value.rs::format_number` (10 decimal places, sign of `-0` kept) + `Unit::calc_product` for non-finite values | `Unit::calc_form` prints `NaNdeg`; two printing laws was the bug |
 | a name with a module prefix | `lexer::Tok::MemberVar` (decided at the character that starts `$`) | split `Word("math.")`+`Var("pi")` cannot be re-joined downstream: `math.$pi`, `math . $pi` and `5.$pi` are indistinguishable |
+| how much one lexeme moves the bracket depth | `lexer::Tok::net`, folded over a run by `brackets::depth_of` | five copies of one law, and the argument-cut copy lacked the `Punct('(')` arm — a standalone group's `(` counted 0 while its `)` counted `-1`, so a comma inside `( … )` could read as top-level. No corpus row distinguishes the old reading from the new one (`changed=0`), which is exactly why the law sits on the lexeme instead of in each consumer |
+| a hue is periodic | `axes::axes_to_rgb` (sector from `(hue / 60).rem_euclid(6.0)`) with an angle argument folded at the read by `color::angle_of` | the whiteness/blackness branch added two already-folded hues, handed the conversion 410 and took the **last** sector instead of 90's — green and blue came out swapped; the same file already folded with `rem_euclid(2.0)`, so the wrap was known and only partially applied |
 
 Related discipline that is not about rxrust but is measured here: **quote a number only from the command that
 printed it**, and **a zero from an instrument pointed at the wrong place is not a finding** (`.hrx` files are

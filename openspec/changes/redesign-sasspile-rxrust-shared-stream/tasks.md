@@ -1535,8 +1535,10 @@
       未落地闸的债记录）；`.qoder/agents/gc-auditor.md`（只读审查者，finding 必须带 `file:line` + 金样 case，
       禁提"放松闸/改名绕闸/先记 TODO"）；`.qoder/skills/sasspile-start/`（起手四步实跑 + 逐字复述 + 三份
       按需 reference）；`.qoder/rules/rust.md` 474 → 85 行（三节整段搬出留指针，基线仍是唯一副本）。
-      **`no-else-if-chain` 未落地并记为裁决**：现存 7 处 `} else if` 按 rust.md 是**存量债**而非合法形状，
-      重构生产码超出该计划范围；改为整树计数 == 7 的可失败记录，闸落地或债数变化都会红。
+      **`no-else-if-chain` 未落地并记为裁决**：`} else if` 链按 rust.md 是**存量债**而非合法形状，
+      重构生产码超出该计划范围；改为 `defence_fitness::the_deferred_branch_gate_stays_recorded` 的整树计数可失败记录——
+      **债的数字只住在那条测试里，本文件与 plan 都不复述它**（2026-10-29 起本文件曾写死计数，成了第二份真源并很快为假）。
+      记录随债务下降而如实更新（已付：`loops::for_loop` 的方向词阶梯）；闸落地或数字变动都会红。
       **读数**：`cargo test --workspace --no-fail-fast` exit=0、182 passed / 0 failed；`clippy -D warnings`
       exit=0；`sasslint count=0`；hrx `pass=1841 / substantive=1676` 与 `regress=0 net=0`（证明确实行为无涉）。
       计划末尾「实施结果与遗留」记有 7 条裁决与本计划自身三次复发的 F5（README 曾写 clippy clean 而 HEAD 已红）。
@@ -1569,3 +1571,32 @@
         冲突）并补录本会话 8 起实例；新建“裸全局名必须晚于 P4.2”的决策记忆。
       本条不代替 9.4：本轮跑了 `sasspile-start` 要的四步并复述了读数、也触发了 `gc-auditor`（带
       `file:line` 的 finding 逐条核实），但这些都是**同一会话内**的行为，不能自证冷启动。
+
+- [x] 9.6 **全量代码审查驱动的五批修复（2026-10-29，基线 a22a95f / run number-shells）**：
+      `CodeReview` + `gc-auditor` 对 `crates/sasspile/src` 全量审查后落地。改动只消缺陷与重复真源，
+      **一条 pass 也没增加**（`number-shells → audit-closure` = `regress=0 net=0 changed=0`），
+      不得当收益记录：
+      • 括号深度律 5 份→1 份，定在词素上 `lexer::Tok::net`（旧 `calls::depth_of` 缺 `Punct('(')` 分支）；
+        `operations::net_depth`、`merge_calls` 内联闭包、`expr::protected` 内联 match 均删除。
+      • hue 周期律只留转换处：`axes::axes_to_rgb` 扇区改 `(hue/60).rem_euclid(6.0)`（`second` 仍取 mod 2，
+        6 是 2 的倍数故对在圈内的入参恒等）；一度同时写的 `modify::route` Hwb/Shift 折返经实测不承重，已删。
+      • `@for` 区间不再物化：`Vec<i64>` → `loops::Walk`（首值/个数/步长，checked 运算），`exec::replay` 消费；
+        循环体内嵌套块的静默丢弃改在判定处（`Event::Open` 的 inert 分支）发 `warn!`。
+      • `expr.rs` 506→473 行（`protected`/`has_dynamic` 归 `operations`），src 已无 >500 行文件；
+        三处文档谎称修正（`lib.rs`/`env.rs` 的 `scan_map`+`order` 叙述、`exec.rs` 两处 `@each` 并称）。
+      • 诊断面补全：`Phase::new(stage, module)`、`compile` span 带 `id`（实测四条 phase span 均含
+        `stage`/`module`/`items`/`elapsed_ms`）；`trace.rs` 逐面写明 `module`/`id` 的指称，warn 的选择器
+        改放 `dropped`/`inside`；变参空列表的两处 `.expect` 下沉为 `builtins::at_least_one` owner 产 Err。
+      **三条无金样的律（只登记为未被语料钉住，不得当已验收能力引用）**：
+      1. 越圈的 hue 进 `axes_to_rgb`——语料 5 行（`adjust/hsl`、`change/hsl`、`adjust_hue/above_max`、
+         `change/{lch,oklch}::hue/*`）全部在读入时由 `angle_of` 折返，从不把 360+ 交给转换；
+         守卫是 `tests/hue_periodicity.rs` 的两支等价断言（回退 src 即红，已实测），绝对值靠 `color_adjust.rs`。
+      2. 独立 `(` 排在分隔符前——`core_functions/list/join/empty.hrx::both/*` 的 27 行全被计量、全未求值
+         （callee 无签名⇒逐字兜底），故新律与被它替换的旧计数**无任何读数能区分**（`changed=0`）。
+      3. `@for` 极端区间（`to i64::MIN`、万亿级 span）——语料无此类行；惰性化后不再分配失败，但巨大区间
+         仍按次数耗（这是 `@for` 语义本价，不声称修好了 DoS）；warn 的触发也无法被任何 in-scope 行演示。
+      **仍开放**：`@for` 的 body 捕获→重放未改成 design.md:88 的内核内 `flat_map` 扇出——body 事件在流上晚于
+      header 到达，真扇出需先定“扇出住哪个内核”（不自造机制，待单独决策）；`exec.rs` 现 496 行，下次动它必先拆。
+      读数：`ledger runs` 内 `depth-law`/`hue-wraps`/`one-net`/`for-walk-lazy`/`diagnostics-fields`/`audit-closure`
+      均为 `1854/11533`、`pass_substantive=1689`、意外错误 `18`；空库复算两两轮（head2/final2、head3/final3）
+      均 `regress=0 net=0 changed=0`（双侧 fails=9679 非零）；`sasslint count=0`；`cargo test --workspace` exit=0。

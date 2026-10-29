@@ -74,7 +74,7 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
 
 新增权威文档：`docs/rxrust-source-analysis/09-cancellation-and-terminal-ordering.md`（取消/锁/终止投递次序
 不变量 + rc.6 “自带注释与实现不一致”清单）。
-防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（85 行 always-on 契约，另有 `codegraph.md` 39 行）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
+防回归入口：`README.md`「Anti-GC red lines」、`.qoder/rules/rust.md`（always-on 契约，另有 `codegraph.md`）、`.qoder/skills/sasspile-start/`（起手式与按需加载的反例索引/工具红线/移植现状）、`.qoder/agents/gc-auditor.md`（新鲜上下文审查）。
 待做（tasks.md）：0′.3 真 `Err = SassError` 通道、0′.6 四条 sasslint 机器闸、0′.7 `Selector`/`PropName` 结构化。
 
 > ⚠️ 上面这行已过期，以下面一节为准（不作历史改写，只加校正）。
@@ -120,7 +120,9 @@ core_functions、css at-rules、directives、variables 作用域),产出**覆盖
   ③ 含常量的乘法**先试 `arithmetic` 再回落插值**，回落安全由 `operand_expr` 的窄读法保证 |
 | “一张表一份规则”只在文档里说说 | 已用实现固定：换算表只剩 `unit::UNITS`（`unit::conversion`），`math.rs`
   自带的十位小数长度表已删；比较只剩 `math.rs::compare`/`compare_named`（同一规则、两种消息）；
-  色彩三族共用 `color/modify.rs::route(given, writing)` × `Space`；无单位拒语只有 `builtins/math.rs::unitless` |
+  色彩三族共用 `color/modify.rs::route(given, writing)` × `Space`；无单位拒语只有 `builtins/math.rs::unitless`。
+  **本行不是清单，也不维护清单**——单一真源的唯一表在 `.qoder/skills/rxrust-reactive/SKILL.md`「Single sources
+  already fixed here」（2026-10-29 又把括号深度律定到 `lexer::Tok::net`、hue 周期律定到 `axes::axes_to_rgb`）。 |
 
 防 GC 的下一层防线（跨会话）已写成设计：`docs/superpowers/specs/2026-10-28-cross-session-anti-gc-regression-design.md`
 ——五层（不依赖记忆的硬闸 / 钩子 / 子代理 / MCP 单真源 / 可分发插件），每层写明能拦什么、拦不住什么、

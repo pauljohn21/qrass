@@ -311,3 +311,12 @@
 架构结论**不得**凭记忆重推；已作废方向（逐行教程、`crates/docsizer`）不得重启——docsizer 已从 workspace
 成员里删除（再引用会直接弄坏构建），其教程 change 与 `docs/rxrust-from-scratch/` 仅作历史。
 
+## 全量代码审查驱动的五批修复（2026-10-29）——不新增能力，只消缺陷与重复真源
+
+本段只指路，不复述读数（基线数字唯一副本在 `.qoder/rules/rust.md` §基线，逐批读数与三条无金样的律在
+`tasks.md` 9.6）：括号深度律收成 `lexer::Tok::net` 一份、hue 周期律只留 `axes::axes_to_rgb` 一处折返、
+`@for` 区间不再物化（`loops::Walk`）、`expr.rs` 拆回门槛内、阶段 span 补 `module` 且 `compile` span 带 `id`。
+**它们没让任何一行 hrx 变绿**（`regress=0 net=0 changed=0`），所以不得当作能力引用。
+仍未做：`@for` 的 body 捕获→重放→内核内 `flat_map` 扇出（design.md:88）需先定“扇出住哪个内核”；
+块级 `Env` 作用域（tasks 3.6/4.1）、`calc.rs` 的 `.ok()` 与 `expr.rs` 的 `?` 判据不一、design.md:47 的全局 fold pass 均未动。
+
