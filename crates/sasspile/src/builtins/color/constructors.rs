@@ -4,7 +4,7 @@
 
 use crate::SassError;
 use crate::builtins::Builtin;
-use crate::color::Color;
+use crate::color::{Color, Space};
 use crate::value::Value;
 
 /// `rgb(18, 52, 86)` → `rgb(18, 52, 86)`, `rgb(256, 0, 0, 0.5)` → `rgba(255, 0, 0, 0.5)`, and
@@ -199,4 +199,71 @@ fn finished(built: Option<Color>) -> Result<Value, SassError> {
     built
         .map(Value::Color)
         .ok_or_else(|| SassError::new("not a colour this slice can build"))
+}
+
+/// CSS Color 4's `color()` syntax: `color(srgb 0.2 0.4 0.8)` → itself, `color(srgb 0.1 0.2 0.3 / 0.4)` keeps
+/// the alpha, `color(srgb none 0.2 0.3)` keeps a **powerless** channel as data (`Color::in_space`), and the
+/// space name is matched case-insensitively (`color/color/no_alpha.hrx::case` writes `color(sRGB …)` and
+/// reads back `srgb`). The name plus three channels arrive as one space-separated list, the same shape `rgb`
+/// reads (`rgb/one_arg/no_alpha.hrx`), with the alpha behind a `/` (`rgb/one_arg/alpha.hrx`).
+///
+/// A relative colour — `color(from #aaa srgb r g b)` — is **not** this slice: the first component is the word
+/// `from`, and the corpus says that whole call stays a string (`color/color/relative_color.hrx`), so declining
+/// here answers it correctly rather than by luck.
+pub(super) static COLOR_SPACE: Builtin = Builtin {
+    name: "color",
+    params: &["channels"],
+    optional: &[],
+    variadic: true,
+    labelled: None,
+    apply: in_space,
+};
+
+/// The space name and the three channels, read as written. A unit that is not `deg` or `%` is not a colour
+/// channel at all (`color(rgb …)` would be a `px` quantity), so the call declines to its text rather than
+/// inventing a number the error-message work (P7) has not stated.
+fn in_space(args: Vec<Value>) -> Result<Value, SassError> {
+    let decline = || SassError::new("not a colour space this slice can build");
+    let (parts, alpha) = match args.as_slice() {
+        [Value::Space(parts)] => (parts.as_slice(), 1.0),
+        [Value::Slash(list)] => match list.as_slice() {
+            [Value::Space(parts), given] => (parts.as_slice(), alpha(given).ok_or_else(decline)?),
+            _ => return Err(decline()),
+        },
+        _ => return Err(decline()),
+    };
+    let [name, channels @ ..] = parts else {
+        return Err(decline());
+    };
+    // The name is a bare word by the time it reaches here; an interpolation or a quoted string is not a space.
+    let Value::Raw(text) = name else {
+        return Err(decline());
+    };
+    let Some(space) = Space::parse(text) else {
+        return Err(decline());
+    };
+    let [red, green, blue] = channels else {
+        return Err(decline());
+    };
+    let read = |value: &Value| match value {
+        // `none` is a channel that carries no value, kept as `None` — the print and the conversion both read
+        // that back (`to_space/srgb/lab.hrx::missing/*`).
+        Value::Raw(text) if text.eq_ignore_ascii_case("none") => Some(None),
+        Value::Number(number, unit) => {
+            let scaled = if unit.single() == Some("%") {
+                *number / crate::color::percent_scale(space)
+            } else {
+                *number
+            };
+            (unit.is_unitless() || matches!(unit.single(), Some("%") | Some("deg")))
+                .then_some(Some(scaled))
+        }
+        _ => None,
+    };
+    let channels = [
+        read(red).ok_or_else(decline)?,
+        read(green).ok_or_else(decline)?,
+        read(blue).ok_or_else(decline)?,
+    ];
+    Ok(Value::Color(Color::in_space(space, channels, alpha)))
 }

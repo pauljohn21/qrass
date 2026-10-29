@@ -16,9 +16,11 @@ use crate::value::Value;
 mod amount;
 mod constructors;
 mod modify;
+mod transfer;
 
-use constructors::{COLOR_HWB, HSL, HSLA, HWB, RGB, RGBA};
+use constructors::{COLOR_HWB, COLOR_SPACE, HSL, HSLA, HWB, RGB, RGBA};
 use modify::{COLOR_ADJUST, COLOR_CHANGE, COLOR_SCALE, SCALE_COLOR};
+use transfer::COLOR_TO_SPACE;
 
 /// This domain's registrations.
 pub(super) static COLORS: &[&Builtin] = &[
@@ -48,6 +50,8 @@ pub(super) static COLORS: &[&Builtin] = &[
     &DESATURATE,
     &ADJUST_HUE,
     &COLOR_MIX,
+    &COLOR_SPACE,
+    &COLOR_TO_SPACE,
 ];
 
 /// `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)`.

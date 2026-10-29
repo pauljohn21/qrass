@@ -42,9 +42,13 @@
 
 use crate::value::Value;
 
+mod matrix;
 mod ops;
 mod read;
+mod space;
 mod text;
+
+pub use space::{InSpace, Space, percent_scale};
 
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
 /// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
@@ -196,6 +200,11 @@ pub struct Color {
     /// chroma rotates the hue. `None` everywhere else, so nothing about a constructed or adjusted colour
     /// changes.
     authored: Option<[f64; 3]>,
+    /// The colour's **own colour space**, when it was built by `color(…)` or moved by `color.to-space`.
+    /// `None` means the channels above are the srgb-family bytes or the hsl/hwb axes, which is every colour
+    /// the pre-Color-4 laws in this file decide — so adding a space changes nothing for them. When it is
+    /// `Some`, [`space`] owns both the reading ([`Color::xyz`]) and the printing.
+    space: Option<InSpace>,
 }
 
 impl Color {
@@ -219,6 +228,7 @@ impl Color {
             alpha: clamp_alpha(alpha),
             // Constructed from written channels, so there is no separate authored triple.
             authored: None,
+            space: None,
             // Decided **after** clamping, because a clamped percentage is no longer a percentage
             // ([`Channel::clamped`]): `rgb(100.1% 0 0)` has no percent channel left and so prints
             // `rgb(255, 0, 0)` rather than the all-percent form.
@@ -265,6 +275,7 @@ impl Color {
         }
         .map(|color| Self {
             authored: None,
+            space: None,
             representation: Representation::Hex,
             ..color
         })
@@ -298,6 +309,7 @@ impl Color {
         )
         .map(|color| Self {
             authored: None,
+            space: None,
             representation: Representation::Named,
             ..color
         })
@@ -362,6 +374,7 @@ impl Color {
             ],
             alpha: clamp_alpha(alpha),
             authored: None,
+            space: None,
             representation: Representation::Hwb,
         })
     }
@@ -404,6 +417,7 @@ impl Color {
             ],
             alpha: clamp_alpha(alpha),
             authored: None,
+            space: None,
             representation: Representation::Hsl,
         })
     }

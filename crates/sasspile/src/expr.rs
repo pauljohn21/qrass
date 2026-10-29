@@ -288,7 +288,7 @@ pub(crate) fn space_run(toks: &[Tok], env: &Env) -> Option<Expr> {
         .map(|group| {
             let values = group
                 .iter()
-                .map(|part| operand_expr(part, env))
+                .map(|part| list_operand(part, env))
                 .collect::<Option<Vec<Expr>>>()?;
             match values.len() {
                 1 => values.into_iter().next(),
@@ -304,6 +304,28 @@ pub(crate) fn space_run(toks: &[Tok], env: &Env) -> Option<Expr> {
         1 if matches!(read.as_slice(), [Expr::Space(..)]) => read.into_iter().next(),
         _ => None,
     }
+}
+
+/// One component of a **space run**. Arithmetic reads its operands with [`operand_expr`], where a bare word
+/// is not a number and the run declines; a list is a different law — CSS Color 4's `color(srgb 0.2 0.4 0.8)`
+/// and a font stack carry bare words as components, and Sass reads one as an unquoted string. Keeping this
+/// reading apart is what protects the arithmetic one: `operators/plus::syntax/whitespace/both` writes `c + d`
+/// and expects the concatenation `cd`, which only the existing operand path produces, so widening
+/// [`operand_expr`] itself regressed that pair.
+pub(crate) fn list_operand(toks: &[Tok], env: &Env) -> Option<Expr> {
+    operand_expr(toks, env).or_else(|| {
+        let meaningful = toks
+            .iter()
+            .filter(|tok| !matches!(tok, Tok::Space(_)))
+            .collect::<Vec<&Tok>>();
+        // A word carrying a paren is a call this slice has not read (`url(…`), not a string.
+        match meaningful.as_slice() {
+            [Tok::Word(word)] if !word.is_empty() && !word.contains('(') => {
+                Some(Expr::Text(word.clone()))
+            }
+            _ => None,
+        }
+    })
 }
 
 /// A call argument's lexemes with every `/` released as its own operator: `Word("1/1px")` becomes

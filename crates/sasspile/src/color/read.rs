@@ -16,6 +16,13 @@ impl Color {
     /// [`Self::hsl_channel`] serves. `hsl` → `rgb` therefore has no golden to be written against, while
     /// the reverse direction does and is implemented.
     pub fn byte(&self, index: usize) -> Option<f64> {
+        // A colour in its **own colour space** has no srgb bytes until something converts it, and
+        // `Color::in_space` leaves the byte triple empty — so a space colour declines a bare `color.red(…)`
+        // rather than answering `0`. `color.channel(…, "red", $space: srgb)` is the read that should serve
+        // this, and it needs the conversion below; it is not guessed here.
+        if self.space.is_some() {
+            return None;
+        }
         match self.representation {
             Representation::Legacy
             | Representation::Percent

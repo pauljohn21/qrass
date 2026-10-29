@@ -192,6 +192,14 @@ impl Color {
 
     /// The CSS text.
     pub fn to_css(&self) -> String {
+        // A colour that carries its own colour space prints **in that space and nowhere else**: the hex /
+        // keyword / `rgb(…)` / `hsl(…)` laws below are srgb-era ones, and letting them decide a
+        // `lab` or `display-p3` colour would answer a question the corpus never asks. Forms pinned by
+        // `core_functions/color/to_space/srgb/*.hrx`: `color(display-p3 …)`, `lab(44.1210142293% … )`,
+        // `lch(… 280.5032243387deg)`, with an alpha after a `/` and `none` for a powerless channel.
+        if let Some(carried) = &self.space {
+            return super::space::print(carried.space, carried.channels, self.alpha);
+        }
         let byte = |value: u32| format!("{value:02x}");
         match self.representation {
             // **An out-of-gamut colour prints in the hsl form**, whatever space it was created in:

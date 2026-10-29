@@ -20,6 +20,13 @@ impl Color {
     /// `color.grayscale` is the same entry with saturation pinned to zero, which is why it no longer needs
     /// its own path.
     pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Self {
+        // A colour in its own colour space has no hsl axes stored, and deriving them from the empty byte
+        // triple would answer `complement(color(srgb …))` with a colour read off zeros. Leaving it as it came
+        // is the honest half of this: the Color-4 rule (`named/powered*` in `color/complement.hrx`) needs the
+        // conversion route, not a derivation from nothing.
+        if self.is_spaced() {
+            return self.clone();
+        }
         let [hue, saturation, lightness] = change(self.axes_of());
         let axes = [
             hue.rem_euclid(360.0),
@@ -72,6 +79,7 @@ impl Color {
                     // A `hwb` colour moved through the axes becomes an ordinary hsl value; there is no
                     // “as written” triple behind it beyond these axes, which `axes_of` already returns.
                     authored: None,
+                    space: None,
                 }
             }
             _ => Self::from_axes(self, axes),
@@ -88,6 +96,11 @@ impl Color {
     /// `None` for a `hwb`-created colour: it stores whiteness and blackness, and no fixture says what
     /// writing hsl axes into it means, so the call declines instead of inventing a round trip.
     pub fn with_axes(&self, write: impl FnOnce([f64; 3]) -> [f64; 3]) -> Option<Self> {
+        // Same reason as in [`Self::transform_axes`]: writing hsl axes onto a colour that carries its own
+        // space would silently throw that space away and print srgb bytes.
+        if self.is_spaced() {
+            return None;
+        }
         match self.representation {
             Representation::Hwb => None,
             // The axes are the value, so they go straight back in — hue as a plain number of degrees and
@@ -114,6 +127,7 @@ impl Color {
                     // The channels *are* the axes for an hsl colour, so there is nothing extra to remember:
                     // an out-of-gamut hsl value prints from `axes_of`, which returns exactly these.
                     authored: None,
+                    space: None,
                 })
             }
             // An `rgb`-family colour keeps its own representation and gains the bytes the new axes imply;
@@ -134,6 +148,7 @@ impl Color {
                     // back from the implied bytes changes it when they fall outside the gamut
                     // (`color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)`, `change/hsl.hrx`).
                     authored: Some(axes),
+                    space: None,
                 })
             }
         }
@@ -159,6 +174,7 @@ impl Color {
             alpha: self.alpha,
             representation: self.representation,
             authored: Some(axes),
+            space: None,
         })
     }
 
@@ -201,6 +217,7 @@ impl Color {
             // The axes are re-derived from these bytes on demand, which is exact while they stay in the
             // gamut — and `transform_axes` clamps, so they do.
             authored: None,
+            space: None,
         }
     }
 
@@ -231,7 +248,12 @@ impl Color {
             + 0.5;
         let channel = |colour: &Color, index: usize| match colour.representation {
             Representation::Hsl | Representation::Hwb => None,
-            _ => Some(colour.channels[index].byte()),
+            // A colour in its **own colour space** stores no srgb bytes here, and reading the empty byte
+            // triple would answer `rgb(0, 0, 0)` — a wrong value no pass count can see
+            // (`tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`). Mixing across
+            // spaces needs the conversion in [`crate::color::space`] driven by a common space, which is the
+            // `color.mix` Color-4 work (`named/powered*` rows), not a guess in this function.
+            _ => (!colour.is_spaced()).then(|| colour.channels[index].byte()),
         };
         let [red, green, blue] = [0, 1, 2].map(|index| {
             let value = channel(first, index)? * ratio + channel(second, index)? * (1.0 - ratio);
@@ -245,6 +267,7 @@ impl Color {
             alpha: (first.alpha + second.alpha) / 2.0,
             representation: first.representation,
             authored: None,
+            space: None,
         })
     }
 }
