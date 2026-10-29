@@ -1692,3 +1692,34 @@
         齐平；空库复算现跑现引（见下条）；`sasslint count=0`；`cargo test --workspace --no-fail-fast` exit=0（48 组）；
         src 无 >500 行文件（`lexer.rs` 396、`structure.rs` 161、`exec.rs` 471）。**这批一条 pass 也没增加**，
         它换的是分解，不得当收益记录。
+
+- [x] 9.9 **色彩空间模型 + `color()` + `color.to-space`（2026-10-30，基线 run `structure-cut-closed`）**：
+      整体复盘后的杠杆 —— `core_functions/color/to_space` 3101 条失败（9678 的 32%），`got` 全是逐字源码，
+      即整个 Color-4 空间模型缺失。**一次 +390**：
+      • 新 `color/space.rs`（`Space` 13 个空间 + `InSpace{space, channels:[Option<f64>;3]}` + 打印）与
+        `color/matrix.rs`（每空间 primaries 矩阵 / 传递函数 / D50↔D65；3×3 逆阵**现算不抄表**）——换算只走
+        一条路：任何空间 → XYZ(D65) → 目标空间。
+      • `Color` 加一个 owned 字段 `space: Option<InSpace>`（13 处构造点由编译器逐个逼出 `space: None`）；
+        `Some` 时打印与读数归 `space`/`matrix`，`None` 时既有 srgb/hsl/hwb 那 2080 条律一字不动地继续生效。
+      • 新内置：`color`（`color(srgb 0.2 0.4 0.8 [/ a])`，`none` 存成 `None`，相对色彩 `from` 按金样拒绝）与
+        `color.to-space`（`rgb`/`hsl` 目标回落到既有 `Representation`；`hwb` 因金样走 `@use` mixin 而拒）。
+      • 词法粒度（第 5 次实证）：`color(srgb …)` 的参数原先整串成为 `Value::Raw("srgb 0.2 0.4 0.8")`，
+        构造子收不到结构。正解**不是**在构造子里重扫文本，而是给 space run 单独一个成分读法
+        `expr::list_operand`（裸词＝未加引号字符串）；第一次把这条塞进 `operand_expr` 本身，立即让
+        `operators/{plus,minus}::syntax/whitespace/both` 两条由绿变红（`regress=2`），收回后 `regress=0`。
+      • 空间色进入 srgb 时代操作会**静默读零字节**：`color.mix(color(display-p3 …), …)` 实测答 `rgb(0, 0, 0)`
+        （被 `tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb` 当场抓住）。已在
+        `read::byte`/`ops::mixed`/`ops::with_axes`/`ops::transform_axes` 四处拒，不是记录债务顶替。
+      • 读数（现跑）：`ledger diff structure-cut-closed space-model-v3` = **`regress=0 net=390`**（pass
+        1855→**2245**，`pass_substantive` 1690→**2080**），`changed=1471`，意外错误仍 **17**，`sasslint count=0`，
+        `cargo test --workspace --no-fail-fast` exit=0（48 组）；`space-model`/`space-model-v2` 是同一批收紧前的
+        两次实量（前者 `regress=2`，**不得当 base**）。
+      • **未完成的那半，带证据**：金样打印 10 位有效数字，而我手里的 primaries/Bradford 常数只有 7–8 位，
+        色度行因此差在 0.1 量级：`color(srgb 0.2 0.4 0.8)` 我算 `lab(44.1955759025% 10.7410355059
+        -58.6786940468)`，金样是 `lab(44.1210142293% 10.9543336098 -59.0857381981)`（`to_space/srgb/lab::middle`）；
+        中性行还出浮点尘埃（`white` 我算 `lab(100.1300567349% -0.5136316312 0.5596816194)` vs `lab(100% 0 0)`）。
+        中途一个实质错误已改：先在 `BRADFORD`（已含白点位移）上**再乘一次白点比例**，等于适应两次，
+        `middle` 的 `a` 差到 10（45.36/20.73 vs 44.12/10.95）；换成纯矩阵乘后退到 0.1 量级。
+        下一步（按金样校准，不许凭记忆报常数）：用 `to_space/srgb/xyz_d50.hrx` 的 white/gray/middle 三组
+        已知输入输出反解 D65→D50 的 9 个系数（或用 CSS Color 4 公布的全精度表），并把 Lab 的除数白点改成
+        由同一矩阵适应出来的白点（中性必然 100%）；逐空间推进，每步同时看 `diff` 与 `changed`。

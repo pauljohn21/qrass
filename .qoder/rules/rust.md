@@ -21,8 +21,10 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1855/11,533**（16.1%，**实质通过 1690** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `structure-cut-closed`（2026-10-29：审查驱动的五批修复 `audit-closure`
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2245/11,533**（19.5%，**实质通过 2080** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `space-model-v3`（2026-10-30：色彩空间模型 + `color()` 构造 +
+   `color.to-space` 一次 **+390**（`regress=0`，`changed=1471` 是那些行从逐字文本变成差约 0.1 的**数字**——
+   换算矩阵的常数精度未到 10 位有效数字，逐条证据与下一步在 `tasks.md` 9.9）；其前史：审查驱动的五批修复 `audit-closure`
    **一条 pass 也没增加**，只消缺陷与重复真源；其后的 `@for` 一到多扇出让 `directives/for/for::to_scope`
    从 unexpected error 变实质通过（+1，无效错误 18→17），逐批读数与无金样律见 `tasks.md` 9.6/9.7/9.8）——9.8 那批把 `@for` 的边界交回结构相（`structure::MsgAcc` 发
    一个 owned `Event::For`，`Exec` 侧缓冲/游标/重放四符号归零），**同样一条 pass 也没增加**
