@@ -90,7 +90,7 @@ pub(super) static MATH_HYPOT: Builtin = Builtin {
         let (first_value, first_unit) = numbers
             .first()
             .cloned()
-            .expect("variadic arity is checked by `evaluate`");
+            .ok_or_else(crate::builtins::at_least_one)?;
         let on_base =
             |value: f64, unit: &super::Unit| value * unit.single().and_then(to_base).unwrap_or(1.0);
         let squared = numbers

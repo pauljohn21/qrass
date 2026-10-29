@@ -38,6 +38,26 @@ pub enum Tok {
     Silent(String),
 }
 
+impl Tok {
+    /// How much this lexeme moves the bracket depth — **the** statement of that law, written on the lexeme
+    /// itself so no consumer can restate it: a word carries its own balance, which is why `Word("calc(")`
+    /// opens one level and a self-closing `Word("url(x)")` nets to zero, and a bracket that stands on its own
+    /// counts exactly once too. A group argument is that standalone bracket, and the corpus has 27 rows of it
+    /// (`core_functions/list/join/empty.hrx::both/*` spells `list.join((), …)`); all 27 are measured and none
+    /// is evaluated yet — that callee has no signature, so the run keeps its text — which is to say **no
+    /// reading distinguishes this law from the one it replaced**. It is shared with the consumers in
+    /// [`crate::brackets`], [`crate::operations`] and [`crate::expr`] because two answers for one fact is how
+    /// the argument cut drifted apart from the bracket balance the same module already computed.
+    pub(crate) fn net(&self) -> i32 {
+        match self {
+            Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
+            Tok::Punct('(') => 1,
+            Tok::Punct(')') => -1,
+            _ => 0,
+        }
+    }
+}
+
 /// A structural event produced by the delimiter fold.
 #[derive(Debug, Clone)]
 pub enum Event {

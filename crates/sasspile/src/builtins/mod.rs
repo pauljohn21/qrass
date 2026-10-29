@@ -149,16 +149,14 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
     if builtin.variadic {
         // A variadic that declares **no** names takes every argument positionally, so an empty call has no
         // parameter to name in its message: `At least one argument must be passed.`
-        // (`core_functions/math/{hypot,max,min}.hrx::error/too_few_args`). One that does declare names lets
+        // (`core_functions/math/{min,max}.hrx::error/too_few_args`, `core_functions/math/hypot.hrx::
+        // error/zero_args` — `hypot` names that case differently). One that does declare names lets
         // the empty call through to its body, because the body knows which parameter is missing —
         // `color.change()` reports `Missing argument $color.` (`change/error/args.hrx::too_few`) and
         // `saturate()` reports `Missing argument $amount.` (`saturate.hrx::error/too_few_args`), neither of
         // which this generic message could say.
         if given.is_empty() && builtin.params.is_empty() && builtin.optional.is_empty() {
-            return Err(SassError::typed(
-                ErrorKind::MissingArgument,
-                "At least one argument must be passed.",
-            ));
+            return Err(at_least_one());
         }
         if builtin.params.is_empty() && builtin.optional.is_empty() {
             return given
@@ -257,6 +255,19 @@ pub fn evaluate(name: &str, given: Vec<(Option<String>, Value)>) -> Result<Value
         // The positional view every existing body reads.
         None => (builtin.apply)(Given::values(given)),
     }
+}
+
+/// `Error: At least one argument must be passed.` — the floor of a variadic that declares **no** names,
+/// which is the only shape the guard in [`evaluate`] can reach; a variadic with declared names reports the
+/// parameter it is missing instead, and its rows live on that guard's comment rather than being copied here.
+/// Owned at that owner so a body never has to assert the floor to itself: the two that read their first
+/// argument used to `expect` it, which would turn a future signature change (`optional: &["numbers"]` on
+/// such a variadic) into a panic instead of this message.
+pub(super) fn at_least_one() -> SassError {
+    SassError::typed(
+        ErrorKind::MissingArgument,
+        "At least one argument must be passed.",
+    )
 }
 
 /// `Error: Missing argument $number2.` — the first parameter left without a value.

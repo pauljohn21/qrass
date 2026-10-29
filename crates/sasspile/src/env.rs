@@ -1,7 +1,7 @@
-//! Env — the **owned** lexical environment carried inside the exec accumulator (design §1:
-//! `Acc = { scopes, env, chain_taken, order }`). It is plain data moved through `scan_map`,
-//! never shared mutable state behind a handle: the accumulator owns it, and expression
-//! evaluation only ever borrows it.
+//! Env — the **owned** lexical environment the `Exec` kernel carries. It is one half of
+//! [`crate::exec::State`] (`{ scopes, env }`), which lives inside the kernel's observer and moves forward
+//! through `&mut self`; it is never shared mutable state behind a handle, and expression evaluation only
+//! ever borrows it.
 //!
 //! P1 keeps one flat layer, which is what a top-level `$var: value` binding needs. Block
 //! scoping, `!global`, `!default` and the dynamic scope of `@mixin`/`@function` bodies are

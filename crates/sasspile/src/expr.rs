@@ -13,7 +13,7 @@ use crate::SassError;
 use crate::calls::Argument;
 use crate::env::Env;
 use crate::lexer::{Tok, canon, render, token_text};
-use crate::operations::{arithmetic, concatenation, number_lexeme};
+use crate::operations::{arithmetic, concatenation, has_dynamic, number_lexeme, protected};
 use crate::unit::Unit;
 use crate::value::Value;
 
@@ -67,34 +67,6 @@ pub enum Expr {
     Calculation(Value),
 }
 
-/// A value that may not be arithmetic at all: a slash, star or percent anywhere in a lexeme is a CSS
-/// separator (or a percentage unit) until the value algebra covers them.
-///
-/// **Inside brackets is not the same context.** A `/` that sits inside a `calc( … )` belongs to that
-/// calculation, which is why `calc(1/2px + 1/4px) * 1px` must be readable as a multiplication of a
-/// calculation by a number (`values/calculation/calc/operator/units::denominators` → `0.75`). The depth is
-/// counted as data over the run, so `font: 12px/1.5`, `grid: 1/2` and a bare `a {b: 1/2}` — none of which
-/// holds a bracket — keep being protected exactly as before.
-fn protected(toks: &[Tok]) -> bool {
-    let seeded = (false, 0i32);
-    let (found, _) = toks.iter().fold(seeded, |(found, depth), tok| {
-        let net = match tok {
-            Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
-            Tok::Punct('(') => 1,
-            Tok::Punct(')') => -1,
-            _ => 0,
-        };
-        let outside = depth == 0 && net == 0;
-        let separator = match tok {
-            Tok::Word(word) => word.contains(['/', '*', '%']),
-            Tok::Interp(inner) => protected(inner),
-            _ => false,
-        };
-        (found || (outside && separator), (depth + net).max(0))
-    });
-    found
-}
-
 /// Sass's **special** calls, matched on the base name after a vendor prefix: their arguments are
 /// plain CSS, where `+`/`-` are not arithmetic and an **unbound** `$x` is just text rather than an
 /// error (`css/functions/special/prefixed/lowercase::calc/script_like` keeps `-a-calc($c)`; the same
@@ -130,11 +102,6 @@ pub fn special_call(toks: &[Tok]) -> bool {
     }) || toks.windows(2).any(|pair| {
         matches!(pair[0], Tok::Punct(':')) && matches!(&pair[1], Tok::Word(w) if w.ends_with('('))
     })
-}
-
-fn has_dynamic(toks: &[Tok]) -> bool {
-    toks.iter()
-        .any(|tok| matches!(tok, Tok::Var(_) | Tok::MemberVar(..) | Tok::Interp(_)))
 }
 
 /// Whether a run **passes named arguments** — `f(1, $w: 30%)`, `color.hwb($hue: 180, …)`. There the `$w`

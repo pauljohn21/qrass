@@ -258,9 +258,7 @@ fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
             )),
         })
         .collect::<Result<Vec<(f64, Unit)>, SassError>>()?;
-    let (head, tail) = numbers
-        .split_first()
-        .expect("variadic arity is checked by `evaluate`");
+    let (head, tail) = numbers.split_first().ok_or_else(super::at_least_one)?;
     tail.iter()
         .try_fold(head.clone(), |best, candidate| {
             comparable(&best, candidate).map(|(left, right)| {

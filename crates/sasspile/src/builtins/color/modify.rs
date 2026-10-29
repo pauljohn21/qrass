@@ -380,13 +380,22 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
             // (`#993333` with `$blackness: 40%` came out `#555555` instead of `#333333`,
             // `…::blackness/high`), because the shift then added what was already there.
             //
-            // The hue sits at index 0 and is left alone: under `scale` a call naming it is already refused
-            // above, so its share is zero and `scale_toward(hue, 0.0, …)` returns it unchanged.
+            // The hue sits at index 0 and is **not** folded here: a `scale` naming it is refused above, so its
+            // share is zero and `scale_toward(hue, 0.0, …)` returns the current value; a `set` writes the value
+            // `angle_of` already folded at the read; and a `shift` that passes 360 is wrapped by the conversion
+            // it is handed to ([`crate::axes::axes_to_rgb`]) — one fold serving every caller rather than one
+            // per writing.
             let applied = |index: usize, name: &str| match writing {
                 Writing::Set => keep(&reads, name, current[index]),
                 Writing::Shift => current[index] + step(&reads, name),
                 Writing::Scale => scale_toward(current[index], step(&reads, name), 0.0, 100.0),
             };
+            // What that leaves asymmetric is recorded here, not settled: the axes branch below folds a shifted
+            // hue *before storing it*, so a past-a-turn sum reaches [`Color::with_hwb`] raw and
+            // [`Color::with_axes`] folded, and only `authored` — the out-of-gamut hsl print — could show the
+            // difference. No row can: none adds a nonzero hue to a colour whose own hue is nonzero
+            // (`adjust/hsl.hrx`/`adjust/hwb.hrx` start at `red` or `black`, and `blue` is added `0`), and
+            // `color::text`'s `out_of_gamut` matches the authored triple on saturation and lightness alone.
             colour
                 .with_hwb(
                     applied(0, "hue"),

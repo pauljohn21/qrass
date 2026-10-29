@@ -57,7 +57,8 @@ struct Scope {
     /// `#{1 + 1}` → `2`), so this suppresses fatality only. (`css/plain/function.hrx` states the same
     /// bodies through `@use "plain"`; those cases still fail for want of the P5 loader, not here.)
     plain_css: bool,
-    /// `@for`/`@each` loop captured for replay; `None` for every other block.
+    /// `@for` loop captured for replay (`loops::for_loop` recognises that header and nothing else — an
+    /// `@each` keeps today's behaviour); `None` for every other block.
     loop_: Option<ForLoop>,
     /// This block is the body of a **callable declaration** (`@mixin name(…)` / `@function name(…)`),
     /// which Sass does not *execute* at the place it is written: nothing is evaluated, nothing is bound
@@ -108,6 +109,19 @@ impl State {
                 let inert = self.in_inert()
                     || self.in_loop()
                     || (!plain_css && callable_declaration(&head));
+                // A block opened *inside a loop body* is the one shape where execution emits less CSS than
+                // the source held: its declarations go to the inert arm below and the rule never settles.
+                // That is said here, where the loss is decided — a missing rule leaves no trace in a pass
+                // count, and 11,533 rows cannot see a line that was never produced.
+                if !self.in_inert() && self.in_loop() {
+                    tracing::warn!(
+                        stage = "exec",
+                        module = "exec",
+                        dropped = %child.to_css(),
+                        inside = %self.scope_id(),
+                        "a block inside a loop body is dropped until 3.2b emits a rule per iteration"
+                    );
+                }
                 // Neither a callable declaration nor a loop is a CSS block: opening one must not flush the
                 // enclosing rule's pending declarations — `a { b: 0; @for $i from 1 to 2 {b: $i} }` is one
                 // rule with `b: 0; b: 1`.
@@ -205,16 +219,17 @@ impl State {
     /// A `try_for_each` over owned iteration values, not a cursor-driven loop: the range is data, the
     /// body is data, and the state moves forward exactly as it would for declarations written there.
     fn replay(&mut self, scope: Scope) -> Result<(), SassError> {
-        let Some(ForLoop { var, values, body }) = scope.loop_ else {
+        let Some(ForLoop { var, walk, body }) = scope.loop_ else {
             return Ok(());
         };
-        values.into_iter().try_for_each(|value| {
+        walk.values().try_for_each(|value| {
             self.env
                 .bind(&var, Value::Number(value as f64, Unit::unitless()));
             body.iter().try_for_each(|event| match event {
                 Event::Decl { prop, value } => self.declare(prop, value),
                 // A nested block inside a loop body is dropped: replaying it needs a rule emitted per
-                // iteration, which is 3.2b (it stays captured, so nothing leaks out half-evaluated).
+                // iteration, which is 3.2b. It is announced where the loss is actually decided — at the
+                // `Event::Open` that marks the block inert — so nothing is reported twice here.
                 Event::Open(_) | Event::Close => Ok(()),
             })
         })
@@ -361,7 +376,7 @@ impl State {
     /// every other lexeme stays exactly as written, and a literal `&` lexeme becomes a `Piece::Parent`.
     ///
     /// Sass has no bare variable reference in a head, and a head is not always a selector — an
-    /// `@for`/`@each` header *binds* its `$i`, so looking a bare `$var` up here turned
+    /// A `@for` header *binds* its `$i`, so looking a bare `$var` up here turned
     /// `sass-spec/directives/for/whitespace.hrx`'s `@for $i from … {}` into an "Undefined variable"
     /// (measured: that one over-reach accounted for ~47 of the 60 regressions when `UndefinedVariable`
     /// was made fatal). Lexemes must also never be read as numbers (`.2xl` is an identifier).

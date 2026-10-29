@@ -22,6 +22,36 @@ use crate::lexer::Tok;
 /// The operand spans of a split run: index ranges into the lexemes the caller already holds.
 pub(crate) type Spans = Vec<(usize, usize)>;
 
+/// A value that may not be arithmetic at all: a slash, star or percent anywhere in a lexeme is a CSS
+/// separator (or a percentage unit) until the value algebra covers them.
+///
+/// **Inside brackets is not the same context.** A `/` that sits inside a `calc( … )` belongs to that
+/// calculation, which is why `calc(1/2px + 1/4px) * 1px` must be readable as a multiplication of a
+/// calculation by a number (`values/calculation/calc/operator/units::denominators` → `0.75`). The depth is
+/// counted as data over the run, so `font: 12px/1.5`, `grid: 1/2` and a bare `a {b: 1/2}` — none of which
+/// holds a bracket — keep being protected exactly as before.
+pub(crate) fn protected(toks: &[Tok]) -> bool {
+    let seeded = (false, 0i32);
+    let (found, _) = toks.iter().fold(seeded, |(found, depth), tok| {
+        let net = tok.net();
+        let outside = depth == 0 && net == 0;
+        let separator = match tok {
+            Tok::Word(word) => word.contains(['/', '*', '%']),
+            Tok::Interp(inner) => protected(inner),
+            _ => false,
+        };
+        (found || (outside && separator), (depth + net).max(0))
+    });
+    found
+}
+
+/// Whether a run holds anything that only a live environment can answer — a reference, a module constant
+/// or an interpolation. This is the shape test [`crate::expr`] consults before spending an evaluation.
+pub(crate) fn has_dynamic(toks: &[Tok]) -> bool {
+    toks.iter()
+        .any(|tok| matches!(tok, Tok::Var(_) | Tok::MemberVar(..) | Tok::Interp(_)))
+}
+
 /// A run cut at its top-level operators: the operand spans, and the operator between each pair.
 /// `None` means "not an operation we read" — no top-level operator at all, so a lone number or a CSS call
 /// is left to the other readers.
@@ -31,14 +61,14 @@ pub(crate) fn split(toks: &[Tok]) -> Option<(Spans, Vec<BinOp>)> {
             .enumerate()
             .fold((Vec::<(usize, BinOp)>::new(), 0i32), |acc, (index, tok)| {
                 let (mut cuts, depth) = acc;
-                let net = net_depth(tok);
+                let balance = tok.net();
                 if depth == 0
-                    && net == 0
+                    && balance == 0
                     && let Some(op) = operator(toks, index)
                 {
                     cuts.push((index, op));
                 }
-                (cuts, depth + net)
+                (cuts, depth + balance)
             });
     let operators = cuts.iter().map(|(_, op)| *op).collect::<Vec<BinOp>>();
     let spans = cuts
@@ -52,17 +82,6 @@ pub(crate) fn split(toks: &[Tok]) -> Option<(Spans, Vec<BinOp>)> {
         })
         .collect::<Spans>();
     (!operators.is_empty()).then_some((spans, operators))
-}
-
-/// One lexeme's contribution to the bracket depth: a standalone bracket, or one glued inside a word
-/// (`Word("math.div(6")` opens, `Word("3px)")` closes).
-fn net_depth(tok: &Tok) -> i32 {
-    match tok {
-        Tok::Punct('(') => 1,
-        Tok::Punct(')') => -1,
-        Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
-        _ => 0,
-    }
 }
 
 /// The operator at this position of the run. `+`/`-` need whitespace on **both** sides or they are not
@@ -232,7 +251,6 @@ fn whole_wrap(text: &str) -> Option<&str> {
     (balanced == 0).then_some(inner)
 }
 
-/// Numbers joined by `+`/`-`/`*`, left-associative with multiplication binding tighter; a lone number
 /// Operands joined by `+`/`-`/`*`/`/`: the operands are read first (a number, a call, a calculation), then
 /// the flat span list is folded twice — once inside each additive piece for `*` and `/`, once over the
 /// pieces. A lone number counts (it is what a `$var: 5px` binding needs, and what

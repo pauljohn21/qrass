@@ -140,14 +140,15 @@ pub(crate) fn top_level_groups(toks: &[Tok]) -> Vec<Vec<Tok>> {
 }
 
 /// The same cut at any separator: the groups of lexemes between top-level `is_separator` tokens. Depth is
-/// counted as data over the group being built, so a separator inside `var(--a, b)` or `calc(1 / 2)` never
-/// cuts. `cut_at(.., |tok| matches!(tok, Tok::Space(_)))` is how a space-separated argument
-/// (`rgb(18 52 86)`) becomes three token runs — see [`crate::expr::space_run`].
+/// counted as data over the group being built, on the one bracket law ([`crate::lexer::Tok::net`]), so a
+/// separator inside `var(--a, b)` or `calc(1 / 2)` never cuts. `cut_at(.., |tok| matches!(tok,
+/// Tok::Space(_)))` is how a space-separated argument (`rgb(18 52 86)`) becomes three token runs — see
+/// [`crate::expr::space_run`].
 pub(crate) fn cut_at(toks: &[Tok], is_separator: impl Fn(&Tok) -> bool) -> Vec<Vec<Tok>> {
     let (groups, current) = toks.iter().fold(
         (Vec::<Vec<Tok>>::new(), Vec::<Tok>::new()),
         |(mut groups, mut current), tok| {
-            if is_separator(tok) && depth_of(&current) == 0 {
+            if is_separator(tok) && crate::brackets::depth_of(&current) == 0 {
                 groups.push(std::mem::take(&mut current));
             } else {
                 current.push(tok.clone());
@@ -156,15 +157,6 @@ pub(crate) fn cut_at(toks: &[Tok], is_separator: impl Fn(&Tok) -> bool) -> Vec<V
         },
     );
     groups.into_iter().chain([current]).collect()
-}
-
-/// How many parentheses a partial argument has opened and not yet closed.
-fn depth_of(toks: &[Tok]) -> i32 {
-    toks.iter().fold(0, |depth, tok| match tok {
-        Tok::Word(word) if word.ends_with('(') => depth + 1,
-        Tok::Punct(')') => depth - 1,
-        _ => depth,
-    })
 }
 
 /// A single argument: peel a leading `$label:` (a name, not a reference) off the front.

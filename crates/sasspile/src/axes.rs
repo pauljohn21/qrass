@@ -44,9 +44,21 @@ pub(crate) fn axes_to_rgb(hue: f64, saturation: f64, lightness: f64) -> [f64; 3]
     let saturation = saturation / 100.0;
     let lightness = lightness / 100.0;
     let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
-    let second = (hue / 60.0).rem_euclid(2.0) - 1.0;
+    // The hue is periodic, so the sector is chosen from its position *inside the turn*: an angle that
+    // reaches this conversion past 360 belongs to the sector of `hue mod 360`, and matching on the raw
+    // quotient would send 450 to the last arm instead of 90's. The corpus states that wrap in three rows that
+    // all answer 540 with `aqua` (`adjust/hsl.hrx::hue/arg_above_max`, `change/hsl.hrx::hue/above_max`,
+    // `adjust_hue/above_max.hrx`) and in two that state it with other numbers (`change/lch.hrx::hue/above_max`
+    // 400deg → 40deg, `…::hue/negative` -20deg → 340deg; `change/oklch.hrx::hue/above_max` likewise). Every
+    // one of them folds the angle on the way in, at `color::angle_of`, so none hands **this** function the
+    // past-a-turn value: the caller that does is the whiteness/blackness branch of
+    // [`crate::builtins::color::modify`], which adds two already-folded hues and reaches 720.
+    let sector = (hue / 60.0).rem_euclid(6.0);
+    // Six sectors, two per `second`: folding the turn first changes nothing here, because 6 is a
+    // multiple of 2 — the reading stays identical for every hue the callers used to hand over.
+    let second = sector.rem_euclid(2.0) - 1.0;
     let intermediate = chroma * (1.0 - second.abs());
-    let matched = match hue / 60.0 {
+    let matched = match sector {
         h if h < 1.0 => [chroma, intermediate, 0.0],
         h if h < 2.0 => [intermediate, chroma, 0.0],
         h if h < 3.0 => [0.0, chroma, intermediate],

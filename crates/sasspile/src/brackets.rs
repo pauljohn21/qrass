@@ -127,19 +127,12 @@ pub(crate) fn builtin_call(word: &str) -> bool {
         .is_some_and(|name| crate::builtins::signature(name).is_some())
 }
 
-/// Evaluate the run when it is exactly **one** builtin call: a head lexeme ending at `(` and a balanced
-/// argument list closing at the last lexeme, with nothing else around it. A body that does not evaluate
-/// declines the calculation — the same answer the caller gave before this module existed.
 /// One pass that folds a call and its balanced argument list into a single `Word` lexeme, so
-/// `1 + var(--c)` is two operands and an operator. Depth is counted as data, and a run whose call never
-/// closes inside this argument is left as it came — the chain then declines and the source text stands.
+/// `1 + var(--c)` is two operands and an operator. Depth is counted as data on [`Tok::net`], and a run whose call
+/// never closes inside this argument is left as it came — the chain then declines and the source text
+/// stands. Whether a finished run is *exactly one builtin call* worth evaluating is a different question and
+/// is answered in [`crate::calls::known_call`], not here.
 pub(crate) fn merge_calls(run: &[Tok]) -> Vec<Tok> {
-    let net = |tok: &Tok| match tok {
-        Tok::Punct('(') => 1,
-        Tok::Punct(')') => -1,
-        Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
-        _ => 0,
-    };
     let head = |index: usize| {
         matches!(&run[index], Tok::Word(word)
             if word.ends_with('(') && !is_calculation_call(word) && !builtin_call(word))
@@ -159,7 +152,7 @@ pub(crate) fn merge_calls(run: &[Tok]) -> Vec<Tok> {
                 let closed = run[index..]
                     .iter()
                     .scan(0i32, |depth, inner| {
-                        *depth += net(inner);
+                        *depth += inner.net();
                         Some(*depth)
                     })
                     .position(|depth| depth == 0);
@@ -335,25 +328,24 @@ pub(crate) fn close_index(run: &[Tok]) -> Option<usize> {
     run.iter()
         .enumerate()
         .skip(1)
-        .scan(delta(run.first()), |depth, (offset, lexeme)| {
-            *depth += delta(Some(lexeme));
-            Some((*depth, offset))
-        })
+        .scan(
+            run.first().map_or(0, Tok::net),
+            |depth, (offset, lexeme)| {
+                *depth += lexeme.net();
+                Some((*depth, offset))
+            },
+        )
         .find(|(depth, _)| *depth <= 0)
         .map(|(_, offset)| offset)
 }
 
-/// How much one lexeme moves the bracket depth. A word contributes its own balance, which is why
-/// `Word("calc(")` opens one level and a self-closing `Word("url(x)")` nets to zero.
-fn delta(lexeme: Option<&Tok>) -> i32 {
-    match lexeme {
-        Some(Tok::Word(word)) => {
-            word.matches('(').count() as i32 - word.matches(')').count() as i32
-        }
-        Some(Tok::Punct('(')) => 1,
-        Some(Tok::Punct(')')) => -1,
-        _ => 0,
-    }
+/// How many parentheses this run has opened and not yet closed: [`Tok::net`] folded over it, so a separator
+/// inside a group never reads as top-level. Folding the per-lexeme balance is what makes this agree with
+/// [`close_index`] over the same run; the two readings differ on a lexeme that closes a bracket it never
+/// opened (`Word("3px)")` — `-1` here against the `0` an "ends with `(`" count gives), and no corpus row
+/// distinguishes them, so agreeing with the module's own bracket balance is the reason for the choice.
+pub(crate) fn depth_of(toks: &[Tok]) -> i32 {
+    toks.iter().fold(0, |depth, tok| depth + tok.net())
 }
 
 /// Re-cut a run so every bracket owns its place; non-word lexemes are carried unchanged.

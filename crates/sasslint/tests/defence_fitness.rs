@@ -169,6 +169,17 @@ fn branch(items: Vec<Item>) { items.into_iter().filter(|item| item.keep) }
 /// and delete this test, which fails if either half of the record stops being true. The count walks the
 /// whole tree, so a new chain in a file nobody listed here cannot hide behind a hardcoded file list;
 /// it counts the `} else if` spelling, which is what the engine's own branch chain looks like.
+///
+/// The number only ever moves **down**: paying a site off is recorded here with its reason (2026-10-29:
+/// `loops::for_loop`'s `through`/`to` ladder became a search over the two words, 7 → 6), and adding one
+/// is a doctrine violation the assertion catches. Implementing `no-else-if-chain` before the debt
+/// reaches zero would flag the tree and invite skipping those sites, which is relaxing the gate. The six
+/// still standing are not one kind of thing: five are classifiers whose replacement must be measured
+/// against rows (`color/read.rs:109`'s space choice, `builtins/math.rs:114`'s unit choice, and the
+/// character dispatch at `lexer.rs:199/201/206`), and the sixth is a shape branch on a fold's accumulator —
+/// `expr::space_run` asking whether a group is open yet — which no category table expresses, so it needs
+/// its decomposition reconsidered rather than a rewrite that only moves the ladder where this needle
+/// cannot see it.
 #[test]
 fn the_deferred_branch_gate_stays_recorded() {
     assert!(
@@ -187,7 +198,7 @@ fn the_deferred_branch_gate_stays_recorded() {
         })
         .sum::<usize>();
     assert_eq!(
-        counted, 7,
+        counted, 6,
         "the recorded else-if debt changed size ({counted}): either some sites were reworked \
          (implement the gate and remove this record) or new ones were added (a doctrine violation \
          that must be fixed, not counted)"

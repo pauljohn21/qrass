@@ -110,7 +110,7 @@ where
         let wrapped = context.transform(|observer| LexerObserver {
             observer,
             acc: LexAcc::default(),
-            timing: Phase::new("lex"),
+            timing: Phase::new("lex", "lexer"),
             items: 0,
         });
         source.subscribe(wrapped)
@@ -198,7 +198,7 @@ where
         let wrapped = context.transform(|observer| StructurizeObserver {
             observer,
             acc: MsgAcc::default(),
-            timing: Phase::new("structure"),
+            timing: Phase::new("structure", "lexer"),
             items: 0,
         });
         source.subscribe(wrapped)
@@ -305,7 +305,7 @@ where
         let wrapped = context.transform(|observer| ExecObserver {
             observer: Some(observer),
             state: State::default(),
-            timing: Phase::new("exec"),
+            timing: Phase::new("exec", "exec"),
             items: 0,
         });
         source.subscribe(wrapped)
@@ -390,7 +390,7 @@ where
         let Render { source } = self;
         let wrapped = context.transform(|observer| RenderObserver {
             observer,
-            timing: Phase::new("render"),
+            timing: Phase::new("render", "exec"),
             items: 0,
         });
         source.subscribe(wrapped)

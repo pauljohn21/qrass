@@ -1,6 +1,7 @@
 //! sasspile — a clean-room SCSS→CSS compiler architected as a **PUSH (rxrust) stream**: a
-//! source pushes owned values *forward* through operators (`from_iter → scan_map → flat_map →
-//! filter → collect → into_future`), and is **never** pulled/walked as a materialized AST.
+//! source pushes owned values *forward* through the phase kernels (`from_iter → transform ×
+//! Lexer/Structurize/Exec/Render → reduce_initial → into_future`), and is **never**
+//! pulled/walked as a materialized AST.
 //!
 //! This crate was reset to a from-scratch skeleton after adopting the push doctrine
 //! (`dart-sass = pull / rxrust = push`). The old pull-shaped code (parse→AST→recursive walk)
@@ -179,8 +180,11 @@ impl std::error::Error for SassError {}
 /// is subscribed (`merge_all` drops what a queued inner emits while it waits). CSS text appears
 /// only at the single terminal.
 pub async fn compile(content: impl Into<String>) -> Result<String, SassError> {
-    let _span = tracing::info_span!("compile").entered();
-    let resolved = Shared::from_iter(content.into().chars().collect::<Vec<char>>())
+    let program = content.into();
+    // The `id` that names which program a log line belongs to lives here, because a phase span has no
+    // identity beyond its stage; the four phase spans nest inside this one and inherit it.
+    let _span = tracing::info_span!("compile", id = %trace::source_label(&program)).entered();
+    let resolved = Shared::from_iter(program.chars().collect::<Vec<char>>())
         .transform(|source| Lexer { source })
         .transform(|source| Structurize { source })
         .transform(|source| Exec { source })
