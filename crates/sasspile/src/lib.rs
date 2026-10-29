@@ -29,6 +29,7 @@ mod operations;
 mod phases;
 mod scope;
 mod selector;
+mod structure;
 mod trace;
 mod unit;
 mod value;

@@ -1,11 +1,16 @@
-//! Lexer — the two owned accumulator **values** behind the `Lexer`/`Structurize` phase kernels
-//! (`crate::phases`). Each is a forward fold step over a single character or token; the
-//! `#{}`/interp depth is *data* inside the accumulator, never a call stack.
+//! Lexer — the owned accumulator **value** behind the `Lexer` phase kernel (`crate::phases`): a forward fold
+//! step over a single character. The `#{}`/interp depth is *data* inside the accumulator, never a call stack,
+//! and a lexeme is the finest thing any later phase may reason about — `math.$pi` is one [`Tok::MemberVar`]
+//! rather than two pieces a consumer has to re-join.
 //!
-//! They hand their output to an **emit sink** (`&mut dyn FnMut(..)`) that the kernel drives with
-//! `observer.next(..)`, so a `char → 0..N Tok` / `Tok → 0..N Event` fan-out is emitted item by
-//! item. There is deliberately no returned `Vec`: batching a phase's output and flattening it
-//! again downstream was the non-framework shape this refactor removes.
+//! [`Emit`], the sink a kernel installs, is defined here because every phase uses it: the kernel drives it
+//! with `observer.next(..)`, so a `char → 0..N Tok` fan-out is emitted item by item. There is deliberately no
+//! returned `Vec`: batching a phase's output and flattening it again downstream was the non-framework shape
+//! this refactor removes. The next phase, `Tok → 0..N Event`, is [`crate::structure`].
+//!
+//! One gap in the lexeme law is open and recorded, not glossed: a quoted string is still **not** one lexeme,
+//! so a `}`/`;`/`,` sitting inside one is emitted as a structural `Punct` and the phases below read it as real
+//! (`tasks.md` 9.8 states the measured cost and the fix).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
@@ -56,14 +61,6 @@ impl Tok {
             _ => 0,
         }
     }
-}
-
-/// A structural event produced by the delimiter fold.
-#[derive(Debug, Clone)]
-pub enum Event {
-    Open(Vec<Tok>),
-    Decl { prop: Vec<Tok>, value: Vec<Tok> },
-    Close,
 }
 
 /// The sink a kernel installs for its downstream observer: `FnMut(Item)` that moves each
@@ -311,41 +308,6 @@ impl LexAcc {
                 self.buf.push(quote);
             }
             c => self.buf.push(c),
-        }
-    }
-}
-
-/// First structural pass: `Tok → Event` on delimiters only (no tree). Own accumulator.
-#[derive(Default)]
-pub struct MsgAcc {
-    run: Vec<Tok>,
-}
-
-impl MsgAcc {
-    /// Feed one token, emitting 0..N structural events into `emit`.
-    pub fn feed(&mut self, tok: Tok, emit: Emit<'_, Event>) {
-        match tok {
-            Tok::Punct('{') => {
-                emit(Event::Open(std::mem::take(&mut self.run)));
-            }
-            Tok::Punct(';') => self.push_decl(emit),
-            Tok::Punct('}') => {
-                self.push_decl(emit);
-                emit(Event::Close);
-            }
-            other => self.run.push(other),
-        }
-    }
-
-    fn push_decl(&mut self, emit: Emit<'_, Event>) {
-        let run = std::mem::take(&mut self.run);
-        if let Some(colon) = run.iter().position(|t| matches!(t, Tok::Punct(':'))) {
-            let prop = run[..colon].to_vec();
-            let value = run[colon + 1..].to_vec();
-            let non_empty = render(&prop).chars().any(|c| !c.is_whitespace());
-            if non_empty {
-                emit(Event::Decl { prop, value });
-            }
         }
     }
 }

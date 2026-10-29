@@ -1,33 +1,28 @@
 //! Recognising and enumerating a `@for` header — the part of execution that decides *what a loop is*,
 //! kept apart from [`crate::exec`]'s job of moving one event into the flowing state.
 //!
-//! The body is carried on the open block as data (the same nesting-as-value the `scopes` stack already
-//! uses) and re-run per value, which is why the replay lives with the state and only this reading lives
-//! here. Naming it plainly: **"collect a body, then replay it" is on the banned list**
-//! (`.qoder/skills/sasspile-start/reference/gc-counterexamples.md`), and this is its standing instance.
-//! The fan-out itself is real — one closing event now emits one rule per iteration — but the vehicle is not
-//! yet design.md §3's `flat_map` over a body sub-stream, because that needs `Structurize` to hand the body
-//! up as one owned value. Recorded as open in `tasks.md` 9.7, not written here as finished.
+//! **Nothing here holds a loop's body.** The phase that owns the braces ([`crate::structure::MsgAcc`]) cuts
+//! the body out and hands it up as one owned [`crate::structure::Event`], so the two facts this module
+//! states — *is this header a `@for`* ([`is_for`]) and *what range does it name* ([`for_loop`]) — are both
+//! decided on lexemes. That division takes the **buffer** and the **count of blocks still to close** out of
+//! the executor; it does not yet take out the re-feeding of a body per pass, which `exec::State::unroll`
+//! states as the standing difference from design.md line 88's `flat_map`(一项 → body 子流) rather than
+//! hiding it behind a claim that the difference is gone.
 //!
 //! The interval *is* data: [`Walk`] carries it as three numbers and generates it on demand.
 
 use crate::SassError;
 use crate::brackets;
 use crate::env::Env;
-use crate::lexer::{Event, Tok};
+use crate::lexer::Tok;
 use crate::value::Value;
 
-/// A `@for` loop captured on the way in: the variable it binds, the interval it walks, and the body
-/// events held for one pass per value.
+/// A `@for` header that was read: the variable it binds and the interval it walks. The body is **not** part
+/// of this value — it arrives beside it, cut out by the delimiter phase.
 #[derive(Debug, Clone)]
 pub(crate) struct ForLoop {
     pub(crate) var: String,
     pub(crate) walk: Walk,
-    pub(crate) body: Vec<Event>,
-    /// How many blocks captured in `body` are still open. Events arrive one at a time and a body block's
-    /// `Close` looks exactly like the loop's own `Close` unless something counts them, so this is the depth
-    /// as data — the same shape `brackets::Run{level}` and `calc` carry — not a cursor driving a traversal.
-    pub(crate) open: i32,
 }
 
 /// The interval a `@for` walks, as **three numbers** — its first value, how many there are, and the step.
@@ -63,6 +58,26 @@ impl Walk {
     }
 }
 
+/// Is this lexeme the `@for` keyword? The one test both readers share: [`is_for`] asks it of the first
+/// lexeme of a header (the question the structural phase can answer), [`for_loop`] asks it of the header it
+/// is reading. Two spellings of this comparison is how one phase could cut out a body the other then
+/// declines to run.
+fn for_keyword(word: &str) -> bool {
+    word.eq_ignore_ascii_case("@for")
+}
+
+/// Does this block head **name a `@for`**? The same first-lexeme test [`for_loop`] applies, asked at the
+/// weaker question the structural phase needs: it cannot know whether the bounds are readable (that needs
+/// the environment, which lives in the executor), only that the block is written as a loop — so a header
+/// [`for_loop`] declines is still cut out and then handed back as the ordinary block it was.
+pub(crate) fn is_for(toks: &[Tok]) -> bool {
+    let head = brackets::meaningful(toks);
+    let [Tok::Word(word), ..] = head.as_slice() else {
+        return false;
+    };
+    for_keyword(word)
+}
+
 /// Recognise **`@for $i from <bound> through|to <bound>`** and nothing else, decided on lexemes: `@for`,
 /// a variable, `from`, a bound, a direction word, a bound. Any other shape (`@each`, a nested
 /// parenthesised header, a bound that is not an integer) returns `None` and keeps today's behaviour, so the
@@ -75,10 +90,7 @@ impl Walk {
 /// Goldens: `directives/for/for.hrx::{inclusive_forward/scss, exclusive_forward, inclusive_backward,
 /// negative_to_positive, empty/scss, to_scope}`.
 pub(crate) fn for_loop(toks: &[Tok], env: &Env) -> Result<Option<ForLoop>, SassError> {
-    let header: Vec<&Tok> = toks
-        .iter()
-        .filter(|tok| !brackets::is_layout(tok))
-        .collect();
+    let header = brackets::meaningful(toks);
     let [
         Tok::Word(keyword),
         Tok::Var(var),
@@ -88,7 +100,7 @@ pub(crate) fn for_loop(toks: &[Tok], env: &Env) -> Result<Option<ForLoop>, SassE
     else {
         return Ok(None);
     };
-    if !keyword.eq_ignore_ascii_case("@for") || !from_kw.eq_ignore_ascii_case("from") {
+    if !for_keyword(keyword) || !from_kw.eq_ignore_ascii_case("from") {
         return Ok(None);
     }
     // The direction word is searched for rather than assumed to sit at a fixed offset, so a bound that is
@@ -109,8 +121,6 @@ pub(crate) fn for_loop(toks: &[Tok], env: &Env) -> Result<Option<ForLoop>, SassE
     Ok(Walk::bounded(first, last, inclusive).map(|walk| ForLoop {
         var: var.clone(),
         walk,
-        body: Vec::new(),
-        open: 0,
     }))
 }
 

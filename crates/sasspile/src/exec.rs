@@ -8,18 +8,20 @@
 //! Nothing is smuggled alongside a declaration either (no per-decl `Arc<Env>` snapshot), so a
 //! declaration is still evaluated at the position it appears — Sass's document-order semantics.
 //!
-//! Nesting depth is data inside this value (`scopes`) — the block stack is walked forward, never re-entered
-//! per iteration; the only recursion is `step` → [`replay`] → `step` over a captured body, which nests as
-//! deeply as the body's own blocks and not as deeply as the loop count. No observable type appears here,
+//! Nesting depth is data inside this value (`scopes`), never a call stack. The one recursion is `step`
+//! re-entering itself over a `@for` body that [`crate::structure::MsgAcc`] cut out at the braces: it goes as
+//! deep as the source nests loops and never as deep as a loop counts. No observable type appears here,
 //! because `compile` (crate root) owns the one operator chain.
 
 use crate::ErrorKind;
+use crate::brackets;
 use crate::env::Env;
 use crate::expr::{self, Expr};
-use crate::lexer::{Event, Tok, render, render_raw, token_text, without_flags};
+use crate::lexer::{Tok, render, render_raw, token_text, without_flags};
 use crate::loops::{ForLoop, for_loop};
 use crate::scope::{Scope, StyleRule};
 use crate::selector::{Piece, PropName, Selector};
+use crate::structure::{Event, as_block};
 use crate::trace;
 use crate::unit::Unit;
 use crate::value::Value;
@@ -50,40 +52,30 @@ impl State {
     /// channel; whether a given kind is fatal or stays a verbatim fallback is decided by
     /// `SassError::is_fatal` (see the `FATAL` set in the crate root and P0′.3b).
     ///
-    /// **0..N per event** is why this takes an emit sink rather than returning one rule: closing a `@for`
-    /// settles one rule *per iteration* when its body holds a block (`directives/for/for.hrx::to_scope`
-    /// asks for four `a { … }` rules from one closing event). The sink is the same carrier the `Lexer` and
-    /// `Structurize` phases use ([`crate::lexer::Emit`], driven with `observer.next(..)`).
+    /// **0..N per event** is why this takes an emit sink rather than returning one rule: a `@for` settles
+    /// one rule *per iteration* when its body holds a block (`directives/for/for.hrx::to_scope` asks for
+    /// four `a { … }` rules from one event). The sink is the same carrier the `Lexer` and `Structurize`
+    /// phases use ([`crate::lexer::Emit`], driven with `observer.next(..)`).
     ///
-    /// What is **not** yet the design's shape: the loop's body is still collected as data and re-run per
-    /// value ([`replay`]), which [`crate::loops`] and the counterexample index name as the standing instance
-    /// of "collect a body then replay it". The fan-out is real (the emission count is), the vehicle is not a
-    /// `flat_map` over a body sub-stream yet — that needs Structurize to hand the body up as one owned
-    /// value, and it is recorded as open rather than written here as done.
+    /// What this phase no longer does is *find out where a loop ends* — [`crate::structure::MsgAcc`] owns the
+    /// braces and hands the body up as one owned [`Event::For`], so there is no buffer here, no count of
+    /// blocks still to close, and no loop-shaped scope.
+    ///
+    /// What it **still** does is said, not sold: expanding one `For` into N passes over its body is written
+    /// here as an iteration over generated values plus a re-feed (`unroll` → `pass` → `step`) with one `Vec`
+    /// clone per pass. design.md line 88 asks for `内核内 flat_map(一项 → body 子流)`, and **that verb exists**
+    /// in rc.6: `flat_map` is `Map` + `MergeAll` and the inner observable carries its own `Context`
+    /// (`docs/rxrust-source-analysis/05-operators.md`, which also warns that `merge_all` above one
+    /// concurrent slot drops what a queued inner emits — so order would need `concat_map`). So this is an
+    /// **unmade choice, not a framework limit**: taking it means `State` stops being a field of this observer
+    /// and becomes the accumulator the stream carries — the standing 0′.5 item (`C::RcMut`/`C::RcCell`), or a
+    /// `scan`-owned value. That is a phase-shape decision, reported as such in `tasks.md` 9.8 instead of being
+    /// quietly kept or dressed up as a limitation.
     pub fn step(
         &mut self,
         ev: Event,
         emit: crate::lexer::Emit<'_, StyleRule>,
     ) -> Result<(), SassError> {
-        // A block whose innermost open scope is a `@for` is **collecting its body**: whatever follows the
-        // header belongs to that body, so it is carried as owned data on the scope (`Scope::loop_`) and
-        // re-run once per value when the loop closes. That is the same nesting-as-value the `scopes` stack
-        // already uses — a loop is one item fanned out into one pass over its body per value, not a tree
-        // being walked, and nothing is dropped on the way (a dropped block used to emit less CSS than the
-        // source held, which no pass count can see).
-        //
-        // The one event that is *not* body is the loop's own `Close`, and it looks identical to a body
-        // block's `Close` unless the captured blocks are counted (`loops::ForLoop::open`, depth as data).
-        let ends_loop = matches!(&ev, Event::Close)
-            && self
-                .scopes
-                .last()
-                .and_then(|scope| scope.loop_.as_ref())
-                .is_some_and(|loop_| loop_.open == 0);
-        if self.in_loop() && !ends_loop {
-            self.capture(ev);
-            return Ok(());
-        }
         match ev {
             Event::Open(head) => {
                 let parent = self
@@ -95,15 +87,11 @@ impl State {
                 let text = child.to_css();
                 // A nested block inherits the contexts of the block around it: it is still inside that body.
                 let plain_css = self.in_plain_css() || plain_css_body(&text);
-                let loop_ = (!self.in_inert() && !plain_css)
-                    .then(|| for_loop(&head, &self.env))
-                    .transpose()?
-                    .flatten();
                 let inert = self.in_inert() || (!plain_css && callable_declaration(&head));
-                // Neither a callable declaration nor a loop is a CSS block: opening one must not flush the
-                // enclosing rule's pending declarations — `a { b: 0; @for $i from 1 to 2 {b: $i} }` is one
-                // rule with `b: 0; b: 1`.
-                if !inert && loop_.is_none() {
+                // A callable declaration is not a CSS block: opening one must not flush the enclosing rule's
+                // pending declarations. A `@for` does not either, and it no longer reaches this arm at all —
+                // the delimiter phase hands it up as `Event::For`, handled below.
+                if !inert {
                     self.settle_top().map(emit);
                 }
                 self.scopes.push(Scope {
@@ -111,7 +99,6 @@ impl State {
                     decls: Vec::new(),
                     plain_css,
                     inert,
-                    loop_,
                 });
                 Ok(())
             }
@@ -124,33 +111,70 @@ impl State {
                 }
                 self.declare(&prop, &value)
             }
-            Event::Close => match self.scopes.pop() {
-                Some(scope) if scope.loop_.is_some() => replay(self, scope, emit),
-                scope => {
-                    Self::settled(scope).map(emit);
-                    Ok(())
-                }
-            },
+            Event::Close => {
+                Self::settled(self.scopes.pop()).map(emit);
+                Ok(())
+            }
+            Event::For { head, body } => self.unroll(head, body, emit),
         }
     }
 
-    /// Carry one event on the innermost loop's body, keeping the count of blocks captured but not yet
-    /// closed. The body is owned data (`Vec<Event>`) held by the open block — the same shape as the
-    /// `scopes` stack it sits on — and it is re-run through [`State::step`], never walked as a tree.
-    fn capture(&mut self, ev: Event) {
-        let depth = match &ev {
-            Event::Open(_) => 1,
-            Event::Close => -1,
-            Event::Decl { .. } => 0,
+    /// One `@for` in, one pass over its body per generated value out.
+    ///
+    /// The extent is decided upstream: [`crate::structure::MsgAcc`] cut the body out at the braces and sent it
+    /// as one owned value, so this only binds and re-feeds. Each pass goes through the **same** [`State::step`]
+    /// the source's own events take, which is why a body of declarations lands in the pending run of the
+    /// block the loop sat in (`directives/for/for.hrx::inclusive_forward/scss` → one `a` rule holding
+    /// `b: 1 … b: 5`) while a body holding a block settles one rule per iteration (`…::to_scope` → four
+    /// `a { limit: 2; i: <n> }` rules, document order). A nested `@for` is just a `For` event inside the body,
+    /// so the recursion follows the source's nesting and never the iteration count.
+    ///
+    /// A header the reader declines — a bound it will not read, a body that must stay inert CSS — takes the
+    /// shape of an ordinary block (`structure::as_block`): opened with its header as the block's text, fed,
+    /// closed. Nothing of it is dropped, and the choice is **not** a corpus answer: the header reading as a
+    /// selector is why `directives/for/for.hrx::unit/same` and `…::error/from_float` stay red (1.3/P3.2 and
+    /// P7 own those answers).
+    ///
+    /// One consequence is stated rather than hidden: a binding made inside the body writes the one flat layer
+    /// of [`Env`], so it stays visible after the loop ends. Nothing measures that either way: the scoping
+    /// fixtures (`sass-spec/spec/non_conformant/scope/for.hrx`, `spec/libsass/variable-scoping/`) sit in the
+    /// directories `tests/hrx.rs` excludes by policy, so they are not among the 11,533 rows and state no
+    /// reading here — which is why this is **this compiler's present shape, not a Sass law**. Block scoping is
+    /// task 3.6.
+    fn unroll(
+        &mut self,
+        head: Vec<Tok>,
+        body: Vec<Event>,
+        emit: crate::lexer::Emit<'_, StyleRule>,
+    ) -> Result<(), SassError> {
+        let walk = (!self.in_inert() && !self.in_plain_css())
+            .then(|| for_loop(&head, &self.env))
+            .transpose()?
+            .flatten();
+        let Some(ForLoop { var, walk }) = walk else {
+            return as_block(head, body)
+                .into_iter()
+                .try_for_each(|ev| self.step(ev, emit));
         };
-        if let Some(loop_) = self
-            .scopes
-            .last_mut()
-            .and_then(|scope| scope.loop_.as_mut())
-        {
-            loop_.body.push(ev);
-            loop_.open += depth;
-        }
+        // The loop variable is bound once per value and the body moves through the same step; the binding is
+        // a declaration in the flowing environment, not a frame pushed onto a traversal.
+        walk.values().try_for_each(|value| {
+            self.env
+                .bind(&var, Value::Number(value as f64, Unit::unitless()));
+            self.pass(body.clone(), emit)
+        })
+    }
+
+    /// One pass of a loop body: its events move into `step` in the order the source wrote them, and each rule
+    /// they settle goes out through the sink as it is decided. This is the kernel's own 0..N emission, the
+    /// vehicle [`crate::lexer::LexAcc::feed`] uses for a character that becomes several tokens — not a `Vec`
+    /// of rules collected to be flattened downstream.
+    fn pass(
+        &mut self,
+        body: Vec<Event>,
+        emit: crate::lexer::Emit<'_, StyleRule>,
+    ) -> Result<(), SassError> {
+        body.into_iter().try_for_each(|ev| self.step(ev, emit))
     }
 
     /// One declaration where it appears: a binding updates the flowing environment, a property joins the
@@ -197,13 +221,6 @@ impl State {
         Ok(())
     }
 
-    /// Is the innermost open block a loop being captured for replay?
-    fn in_loop(&self) -> bool {
-        self.scopes
-            .last()
-            .is_some_and(|scope| scope.loop_.is_some())
-    }
-
     /// Is the innermost open block a plain-CSS at-rule body?
     fn in_plain_css(&self) -> bool {
         self.scopes.last().is_some_and(|scope| scope.plain_css)
@@ -226,8 +243,6 @@ impl State {
             decls: std::mem::take(&mut top.decls),
             plain_css: top.plain_css,
             inert: top.inert,
-            // The flushed run is a rule, never a loop: only an open block captures a body.
-            loop_: None,
         }))
     }
 
@@ -390,42 +405,6 @@ impl State {
     }
 }
 
-/// Close a `@for`: bind the loop variable to each value in turn and re-run the captured body through the
-/// **same** [`State::step`] the source's own events take, so a body of declarations lands in the pending run
-/// of the block the loop sat in (`directives/for/for.hrx::inclusive_forward/scss` → one `a` rule holding
-/// `b: 1 … b: 5`), while a body holding a block settles **one rule per iteration**
-/// (`…::to_scope` → four `a { limit: 2; i: <n> }` rules, document order, because each pass through the body
-/// opens and closes that block again).
-///
-/// A `try_for_each` over generated values with the fan-out handed to the emit sink — not a cursor-driven
-/// loop and not a `Vec` of rules flattened later. It is a free function because `step` re-enters it for a
-/// nested loop, and two mutable borrows of one `State` in a closure stack is exactly the shape the borrow
-/// checker should refuse.
-///
-/// One consequence is stated rather than hidden: a binding made inside the body writes the one flat layer
-/// of [`Env`], so it stays visible after the loop ends. The corpus has no in-scope row for that (`the
-/// scoping fixtures live under the excluded `libsass*` directories, and both of their opposite claims are
-/// currently red), so this is **this compiler's present shape, not a Sass law** — block scoping is task 3.6.
-fn replay(
-    state: &mut State,
-    scope: Scope,
-    emit: crate::lexer::Emit<'_, StyleRule>,
-) -> Result<(), SassError> {
-    let Some(ForLoop {
-        var, walk, body, ..
-    }) = scope.loop_
-    else {
-        return Ok(());
-    };
-    walk.values().try_for_each(|value| {
-        state
-            .env
-            .bind(&var, Value::Number(value as f64, Unit::unitless()));
-        body.iter()
-            .try_for_each(|event| state.step(event.clone(), emit))
-    })
-}
-
 /// What a call that its builtin declined becomes: the run rendered the way an unknown callee's text is,
 /// i.e. through [`expr::interpolated`], which keeps every lexeme verbatim and resolves only its **variable
 /// reads** — that is what `saturate($c)` needs (`saturate.hrx::css_overload/with_sass_var`).
@@ -482,11 +461,8 @@ fn plain_css_body(text: &str) -> bool {
 /// is a plain-CSS at-rule (`css/function.hrx`), whose body *is* emitted CSS, so mistaking it for a Sass
 /// declaration would delete working rules.
 fn callable_declaration(toks: &[Tok]) -> bool {
-    let mut meaningful = toks
-        .iter()
-        .filter(|tok| !matches!(tok, Tok::Space(_) | Tok::Silent(_)));
-    let (Some(Tok::Word(keyword)), Some(Tok::Word(name))) = (meaningful.next(), meaningful.next())
-    else {
+    let words = brackets::meaningful(toks);
+    let [Tok::Word(keyword), Tok::Word(name), ..] = words.as_slice() else {
         return false;
     };
     let declares =

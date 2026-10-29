@@ -1,12 +1,14 @@
 //! The two **owned data values** the `Exec` kernel carries: one open block and one settled rule.
 //!
 //! They live apart from [`crate::exec`]'s forward step so that what execution *holds* is readable on its
-//! own: a block is a selector plus its pending declaration run plus whatever the block *is* (plain CSS, a
-//! callable body, a loop whose body is still being collected); a rule is a selector plus one declaration
-//! run. Nesting depth is this data (`State::scopes` in [`crate::exec`]), never a call stack, and no
-//! observable type appears here.
+//! own: a block is a selector plus its pending declaration run plus whatever the block *is* (plain CSS or a
+//! callable body); a rule is a selector plus one declaration run. Nesting depth is this data
+//! (`State::scopes` in [`crate::exec`]), never a call stack, and no observable type appears here.
+//!
+//! A block holds **no loop state**. A `@for` is cut out by the phase that owns the braces
+//! ([`crate::structure::MsgAcc`]) and reaches execution as one finished event, so nothing here grows fields to
+//! buffer a body or count blocks that still have to close.
 
-use crate::loops::ForLoop;
 use crate::selector::{PropName, Selector};
 use crate::value::Value;
 
@@ -45,11 +47,6 @@ pub(crate) struct Scope {
     /// `#{1 + 1}` → `2`), so this suppresses fatality only. (`css/plain/function.hrx` states the same
     /// bodies through `@use "plain"`; those cases still fail for want of the P5 loader, not here.)
     pub(crate) plain_css: bool,
-    /// `@for` loop whose body is still being collected (`loops::for_loop` recognises that header and
-    /// nothing else — an `@each` keeps today's behaviour); `None` for every other block. While one is the
-    /// innermost open block, the events that follow are its **body**, so they are carried here as data and
-    /// re-run per value on `Close` rather than reaching the block stack.
-    pub(crate) loop_: Option<ForLoop>,
     /// This block is the body of a **callable declaration** (`@mixin name(…)` / `@function name(…)`),
     /// which Sass does not *execute* at the place it is written: nothing is evaluated, nothing is bound
     /// into the surrounding environment, and no rule comes out. Invoking it (`@include` / a call) is what

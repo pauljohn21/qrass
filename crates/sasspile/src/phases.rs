@@ -21,8 +21,9 @@ use rxrust::observer::Observer;
 
 use crate::SassError;
 use crate::exec::State;
-use crate::lexer::{Event, LexAcc, MsgAcc, Tok};
+use crate::lexer::{LexAcc, Tok};
 use crate::scope::StyleRule;
+use crate::structure::{Event, MsgAcc};
 use crate::trace::Phase;
 
 // The phase handle each observer carries is `crate::trace::Phase`: a span that lives as long as the
@@ -163,12 +164,22 @@ where
     fn complete(self) {
         let StructurizeObserver {
             observer,
+            mut acc,
             mut timing,
-            items,
+            mut items,
             ..
         } = self;
+        // A `@for` that the input never closed must still reach the executor as the blocks it reached: this
+        // phase used to emit an `Open` for every `{`, so dropping an unclosed run would silently lose CSS
+        // that no pass count can see (`MsgAcc::finish`). The events leave through the same sink `feed` uses
+        // and count as this phase's items.
+        let mut downstream = observer;
+        acc.finish(&mut |event| {
+            downstream.next(event);
+            items += 1;
+        });
         timing.close(items);
-        observer.complete();
+        downstream.complete();
     }
 
     fn is_closed(&self) -> bool {
