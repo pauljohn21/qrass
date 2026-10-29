@@ -249,13 +249,23 @@
       **修正上一轮的错引**：我写的 `values/strings/**（129 条失败）` 两处都不对——该路径是**文件**
       `values/strings.hrx`（入基线 4 条，现均 FAIL：`new-line/*` 需要“串内裸换行报 parse 错”与引号态转换），
       而 129 是 `values/numbers` 的数。串类函数在 `core_functions/string/*`（153 条失败）。
-- [ ] 1.2d **剩余 93 条假错的真实归属（逐条分桶而来，不是策略问题而是能力缺失）**：
-      • 36 条 = **模块变量未加载**：`@use "sass:math"` 后的 `math.$pi`/`math.$e`（归 P5.1）；
-      • 31 条 = **可调用体在声明处被求值**：`@mixin add_two($v) {b: $v + 2}` 未调用也应不报错（✅ 已由 4.0 解开，
-        本轮实测无效错误 93 → 64）；
-      • 14 条 = **循环变量未绑定**：`@for $i from …` 里的 `$i` 头部已不查（P0′.3b-1）但循环体未绑定（归 P3.2）；
-      • 12 条 = 其他，待逐条再看。
-      注：这些**不得用“兜底不报错”抹平**（铁律禁），只能按归属把特征实现掉。
+- [x] 1.2d **无效错误的逐条归属（本项只交付归属；修掉它们分属其它任务）**：
+      历史链 **93 → 64**（4.0）→ **实测 17 条**（2026-10-29，run `for-fan-out-final`，
+      `ledger failures <run> "unexpected error" --count`）。旧三桶已空：36 条模块变量（`math.$pi` 成词素）、
+      31 条可调用体（✅ 4.0）、14 条循环变量（✅ 9.7 的 `@for` 扇出，`to_scope` 已转实质通过）——
+      把“93/64”当现状就是拿旧数当证据。17 条全是 `Undefined variable.`，**桶名由各自 input 定而非错误文本**：
+      • 10 条 = `if()`/`and`/`or` 惰性短路未实现（`expressions/if/short_circuit::clause/{and,or,root}/*`
+        与 `::value/{unmatched,after_matched}`，按原文数 3+3+2+2=10）。如 `clause/and/css` 写
+        `a {b: if(sass(false) and css(#{$undefined}): c)}` 期望**空输出**（已核 input），右边根本不该被求值。
+        归 **P1.8**；形状按铁律是 `filter` + 随流 move 的不可变分支值。这些多为**空期望**，修完看 `pass_substantive`。
+      • 4 条 = `@for` 界限带单位（`for::unit/{same,compatible,from_unitless,to_unitless}`）：`unit/same` 要
+        `1px through 5px` **展开并保留单位**（9.7 已在 `loops::integer` 注释里把它与只钉消息的 `error/*` 分开）
+        → 归 **1.3 + P3.2 剩余面**。
+      • 2 条 = `@content`/调用体作用域（`meta/get_mixin/content::scope/fall_through`、
+        `meta/keywords::forwarded/content`）→ 归 **P4.1/P4.2**。
+      • 1 条 = `@mixin` + `$args...` 变参 + `@each` + `@include`（`color/hsl/three_args/w3c/hue::`，input 已核）
+        → 归 **P3.3 + P4.1**；**不是色彩缺陷**，本轮差点误归。
+      铁律约束保留：**不得用“兜底不报错”抹平**，只能按归属把特征实现掉。
 - [ ] 1.3 **单位换算代数**(length/time/angle/…)+ 精度(`values/numbers/**`)
 - [x] 1.3b **无引号标识符的 `+` / `-` 拼接（已合入）**：`expr::concatenation` 是数字折叠之外的**另一条折叠**，
       由 `from_tokens` 在 `arithmetic` 返回 `None` 后 `or_else` 尝试。规则全由金样定：
