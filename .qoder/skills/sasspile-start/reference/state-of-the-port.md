@@ -320,3 +320,8 @@
 仍未做：`@for` 的 body 捕获→重放→内核内 `flat_map` 扇出（design.md:88）需先定“扇出住哪个内核”；
 块级 `Env` 作用域（tasks 3.6/4.1）、`calc.rs` 的 `.ok()` 与 `expr.rs` 的 `?` 判据不一、design.md:47 的全局 fold pass 均未动。
 
+已推进一步的（2026-10-29 9.7）：`@for` 的**一到多扇出本身已成立**——`step` 改接 `lexer::Emit` 汇口，
+体内含块时每轮产一条规则，金样 `directives/for/for.hrx::to_scope` 从 unexpected error 转为实质通过
+（`pass_substantive` 1689→1690、意外错误 18→17）；仍开放的是**载体**（收集后重放，见上反例索引）。
+逐条开放项与读数在 `tasks.md` 9.7。
+

@@ -1600,3 +1600,31 @@
       读数：`ledger runs` 内 `depth-law`/`hue-wraps`/`one-net`/`for-walk-lazy`/`diagnostics-fields`/`audit-closure`
       均为 `1854/11533`、`pass_substantive=1689`、意外错误 `18`；空库复算两两轮（head2/final2、head3/final3）
       均 `regress=0 net=0 changed=0`（双侧 fails=9679 非零）；`sasslint count=0`；`cargo test --workspace` exit=0。
+
+- [x] 9.7 **`@for` 一到多扇出（2026-10-29，金样 `directives/for/for.hrx::to_scope`）**：一事件 0..N 条规则。
+      • `exec::State::step` 改为接 `lexer::Emit<'_, StyleRule>` 汇口（与 Lexer/Structurize 同一载体），
+        `phases::ExecObserver::next` 提供该汇口；`StyleRule`/`Scope` 两个 owned 值拆进新 `scope.rs`
+        （`exec.rs` 477 行，src 仍无 >500 行）。
+      • 循环体的事件（含嵌套块 Open/Close）不再被标 inert 丢弃，而是收集在 `Scope::loop_` 上作为 owned 数据；
+        关闭时 `exec::replay`（自由函数，避开同一 `State` 双重可变 borrow）逐值把 body 重新过一遍 `step`，
+        所以体内是声明时落入外层待定声明段、体内是块时**每轮产一条规则**；`to_scope` 转实质通过，
+        其意外错误（`Undefined variable.`）从 18 降到 17。
+      • 界限可是引用（`through $limit`）：`env.get` 失败**不再被 `.ok()` 吞掉**（那是本日被审计第四次
+        点名的同一形），致命错上抛真 Err 通道；非整数界（`1.5`/`4px`/`"4"`/`4e0`）仍 decline，
+        且 `error/*`（钉消息）与 `unit/same`（钉“带单位界要展开且保留单位”）两条语料证据在注释里分开写。
+      ** auditor 判为仍开放、本次未动（不得当已修）**：（a）“收集 body 再重放”仍是 `gc-counterexamples.md`
+      点名的现存实例，真 `flat_map`（一项→body 子流）需 `Structurize` 把 body 当一个 owned 值上交；
+      （b）`step`⇄`replay` 互递归与逐元素 `clone()`；（c）`ForLoop::open` 是手维护的“开了几个块”计数；
+      （d）体内绑定因 `Env` 只有一层而泄露到循环外（归 3.6，两侧互相矛盾的 scoping 语料在 excluded
+      `libsass*` 下且全红，所以它是本实现的现状而非 Sass 律）；（e）`to_scope/output.css` 规则间的空行
+      仍未产出（`norm()` 不判空行所以隐形），新测试已标出口径；（f）`in_declaration`（嵌套属性）仍红。
+      旧断言改写：`a_non_literal_bound_is_not_read_as_a_range` 把“变量界不读”钉成律（它自己的注释就承认
+      `$limit` 是 `to_scope` 的情形），现拆为“引用界与字面界相等”+“小数界仍 decline”+“to_scope 四条规则
+      逐字断言”三条（`tests/loops.rs` 共 6 条，全绿）。
+      读数（均带正向对照：同一 needle 在 base run 上必须有读数）：`ledger diff audit-closure for-fan-out-final`
+      = `regress=0 net=1`（fails 9679→9678）、`ledger changed …` = `changed=0`、意外错误 `17`；
+      空库复算逐字命令：`HRX_DB=<工作区绝对路径>/target/recheck4.db HRX_RUN=head4 cargo test -q -p sasspile --test hrx`
+      与同库 `HRX_RUN=work4 …`（head4 = 当时 HEAD 51443e8）→ `diff head4 work4` = `regress=0 net=1`、
+      `changed` = `changed=0`；`sasslint count=0`；`cargo test --workspace --no-fail-fast` exit=0（48 组）。
+      量具盲区如实记：`sasslint` 的签名（`Vec<Rule>`/`scan_map(`+`Vec<`/`flat_map(`+`from_iter(`/`.ok()`+`eval`
+      同行）覆盖不到“收集后重放”与不在同一行的 `.ok()?`，所以 `count=0` 不构成结构清白的证据。

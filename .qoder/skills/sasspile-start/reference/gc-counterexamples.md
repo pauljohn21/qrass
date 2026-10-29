@@ -57,8 +57,9 @@
 - **批量外壳**：`scan_map` 返 `Vec` + `flat_map(from_iter)`、把 body 收集后重放 → **每相写成真算子内核**
   （`struct Phase{source}` + `PhaseObserver{observer,state}` + `ObservableType`/`CoreObservable<C>`），
   在自己 `next` 里逐条 `observer.next(..)` 发 0..N 项；状态住 Observer、`Err` 保持泛型、不写死 `Rc`/`Arc`。
-  现存实例：`@for` 的 `exec::replay`（区间已不物化——`loops::Walk` 只携带三个数，但 body 仍是收集后重放）；
-  真扇出需先定“扇出住哪个内核”（body 事件在流上晚于 header），不自造机制——见 `tasks.md` 9.6 与 3.2b。
+  现存实例：`@for` 的 `exec::replay`（区间已不物化——`loops::Walk` 只携带三个数；扇出也已在发射层成立
+  ——`step` 接 `Emit` 汇口，体内含块时每轮一条规则，金样 `for.hrx::to_scope` 已绿）；但 body **仍是收集后重放**，
+  真 `flat_map`（一项→body 子流）需 `Structurize` 把 body 当一个 owned 值上交——那是阶段决策，不自造机制（`tasks.md` 9.7）。
 - **排序代替时机**：为输出顺序维护 `order`/序号 + `sort_by_key` → 先问规范里的**发射时刻**（实例：`sass-spec/css/style_rule`
   `declaration/interleaved/**` = 开子块冲刷父块待定声明段、闭块冲刷残余，一个块可出多条规则），改正后**删掉键**；
   `merge_all` 并发额度满会丢排队内层的发射，**排序救不回缺失元素**。纯 CPU 活包 `from_stream(stream::once(..))` = 假并发 → 串行或 `concat_map`/`concat_all`。

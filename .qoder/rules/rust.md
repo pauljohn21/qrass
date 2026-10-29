@@ -21,11 +21,12 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1854/11,533**（16.1%，**实质通过 1689** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `audit-closure`（2026-10-29 全量审查驱动的五批修复后；数字与本段
-   上一基线 `number-shells` 完全相同，那五批**一条 pass 也没增加**，只消缺陷与重复真源，逐批读数与三条无金样
-   的律记在 `tasks.md` 9.6）。**diff 的 base 只准用本节点名的当前 run**，
-   库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18**
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **1855/11,533**（16.1%，**实质通过 1690** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `for-fan-out-final`（2026-10-29：审查驱动的五批修复 `audit-closure`
+   **一条 pass 也没增加**，只消缺陷与重复真源；其后的 `@for` 一到多扇出让 `directives/for/for::to_scope`
+   从 unexpected error 变实质通过（+1，无效错误 18→17），逐批读数与无金样律见 `tasks.md` 9.6/9.7）。
+   **diff 的 base 只准用本节点名的当前 run**，
+   库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18** → **17**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。
