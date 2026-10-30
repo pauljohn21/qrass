@@ -1800,6 +1800,17 @@
         (c) `split_run` 只接了 `color()` 与函数式两路；`rgb`/`hsl`/`hwb` 的同形读法（constructors.rs:117/157/184）
             仍是副本，本批未合并（改它们会动已覆盖的 arity 行为）；“unquoted none”在 constructors.rs 与
             amount.rs 两处判据不同（大小写敏感 vs 不敏感），语料无 `NONE` 行可仲裁，已记为待决。
+      • **(a) 的性质已量到更硬的层面（2026-10-30 本次执行）**：oklab 不是“精度不够”，是**锥响应矩阵错**。
+        实测中性不变量失败：`to_space/srgb/oklab.hrx::gray` 金样 `oklab(59.8180730527% 0 0)`，本编译得
+        `oklab(60.8955100818% 0.1069420407 -0.0081568634)` —— 灰值得到非零 a/b。白点同理
+        （`…::white` 得 `101.8011897979% 0.1787788126 -0.0136361186` vs `oklab(100% 0 0)`）。
+        **正确的校准数据源是 `to_space/xyz/<space>.hrx`**（已核目录存在：a98_rgb / display_p3 /
+        display_p3_linear / hsl / hwb / lab / lch / oklab / oklch / prophoto_rgb / rec2020 / rgb / srgb /
+        srgb_linear / xyz / xyz_d50）：它的输入就是**裸 XYZ 三元组**，所以该空间自己的矩阵与传递曲线
+        跟 srgb primaries 完全隔离；每行给一组 (XYZ → 该空间通道) 方程，而 `white/gray/black` 行额外提供
+        **中性必须 a=b=0** 的自由校验。“先把 oklab 猜个更近的常数”不是修法，得逐空间从这些行解出来。
+      • 本轮只做到“定位 + 定方法”：求解与逐空间替表**未开工**，不得当作已交付；也不得拿 net=+180 当作
+        这 305 行已接金样更近的证据。
       • **流程事故（如实记）**：空库复算那条命令里我用了 `grep -c` 当链中环节，无匹配时退出码 1 直接
         中断了 `&&` 链 —— `git apply` 未执行而后续 `rm -f` 把唯一的 diff 副本删了，工作树回到 HEAD。
         本会话的改动靠 IDE 本地历史（`User/History/<hash>` 逐快照）按标记串选回并逐个复验：
