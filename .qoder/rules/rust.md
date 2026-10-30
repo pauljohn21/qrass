@@ -21,16 +21,19 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2478/11,533**（21.5%，**实质通过 2313** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-linear-route`（2026-10-30：oklab 正方向改走**线性 sRGB**、
-   逆方向改 `invert` 现算，**+13**（`regress=0`，13 条全在 `to_space/oklab/oklch` ↔ `to_space/oklch/oklab`
-   这对往返上，已由 `tests/color_space_round_trip.rs` 钉住）；其前一批 `space-scale-once`：`lab()/lch()/oklab()/oklch()` 函数式构造子
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2484/11,533**（21.5%，**实质通过 2319** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-solved-polar`（2026-10-30：cone 表**从语料解出**并回到
+   XYZ 域、oklab↔oklch / lab↔lch 同族不再走矩阵往返，**+6**（`regress=0`）。上一 run `oklab-linear-route` 把
+   正方向改走线性 sRGB —— **那条论断是错的**（域从来没错，错的是抄来的数字；该 detour 把白行推到
+   `101.9416634099%`，比原路线更远），数字与结论已由 `oklab-solved-polar` 取代；那一批靠逆阵现算拿到的
+   +13 条 oklab↔oklch 往返行仍然成立，由 `tests/color_space_round_trip.rs` 钉住）；其前一批 `space-scale-once`：`lab()/lch()/oklab()/oklch()` 函数式构造子
    + 把「颜色是不是自带空间」从**两个字段**收成**一个判据** `Representation::InSpace`，共 **+180**（`regress=0`）。
    `changed=816` **不得说成进步**：其中 oklab/oklch 族因换算路线未校准而把逐字文本变成了错数字
-   （白点不变量失败：`to_space/srgb/oklab.hrx::white` 现得 `oklab(101.9416634099% 0.1844594607 0.0072495212)`
-   而金样是 `oklab(100% 0 0)`；本批两条中性行**更远离**金样（上一批是 `101.8011897979%`），所以 `changed=545`
-   里只有 13 条转绿、其余是换了个错数字；cone 表的**数字本身**不是语料那张（语料要求行和相等，我抄的三行和为
-   1.3097/0.9984/0.9808）；`to_space/lab/srgb.hrx::middle` 差 ~1.5e-3）——**开放缺陷，方法与逐条数字在
+   （白点不变量已近得多但仍不等：`to_space/srgb/oklab.hrx::white` 得 `oklab(100.000000148% …)` 而金样是
+   `oklab(100% 0 0)`；残量 1e-9 来自 `OKLAB_LAB` 的十位数字，它限制了 cone 拟合的精度；本批两条中性行**更远离**金样（上一批是 `101.8011897979%`），所以 `changed=545`
+   里只有 13 条转绿、其余是换了个错数字；cone 表已改由语料行最小二乘解出（六行全拟合到 cone 1.2e-8 /
+   通道 7.6e-8，白点三锥相等到 1.4e-7），不再是我抄的三行和 1.3097/0.9984/0.9808 那张；
+   `to_space/lab/srgb.hrx::middle` 差 ~1.5e-3）——**开放缺陷，方法与逐条数字在
    `tasks.md` 9.11 与 `color/matrix.rs` 的常量文档**；另有数行期望输出是
    `color-mix(in oklab, …)`，本编译器根本发不出（与矩阵无关的独立能力缺口）；无效错误 17 → **19**
    （新增两条具名行 `change/unusual_numbers::{infinity,negative_infinity}/polar`，需 `calc()` 求值与 Color-4 `$space` 写入）。
