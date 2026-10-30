@@ -21,12 +21,18 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2465/11,533**（21.4%，**实质通过 2300** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `space-scale-once`（2026-10-30：`lab()/lch()/oklab()/oklch()` 函数式构造子
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2478/11,533**（21.5%，**实质通过 2313** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-linear-route`（2026-10-30：oklab 正方向改走**线性 sRGB**、
+   逆方向改 `invert` 现算，**+13**（`regress=0`，13 条全在 `to_space/oklab/oklch` ↔ `to_space/oklch/oklab`
+   这对往返上，已由 `tests/color_space_round_trip.rs` 钉住）；其前一批 `space-scale-once`：`lab()/lch()/oklab()/oklch()` 函数式构造子
    + 把「颜色是不是自带空间」从**两个字段**收成**一个判据** `Representation::InSpace`，共 **+180**（`regress=0`）。
    `changed=816` **不得说成进步**：其中 oklab/oklch 族因换算路线未校准而把逐字文本变成了错数字
-   （白点不变量失败：`to_space/srgb/oklab.hrx::white` 得 `oklab(101.8011897979% …)` 而金样是 `oklab(100% 0 0)`；
-   `to_space/lab/srgb.hrx::middle` 差 ~1.5e-3）——**开放缺陷，逐条在 `tasks.md` 9.11**；无效错误 17 → **19**
+   （白点不变量失败：`to_space/srgb/oklab.hrx::white` 现得 `oklab(101.9416634099% 0.1844594607 0.0072495212)`
+   而金样是 `oklab(100% 0 0)`；本批两条中性行**更远离**金样（上一批是 `101.8011897979%`），所以 `changed=545`
+   里只有 13 条转绿、其余是换了个错数字；cone 表的**数字本身**不是语料那张（语料要求行和相等，我抄的三行和为
+   1.3097/0.9984/0.9808）；`to_space/lab/srgb.hrx::middle` 差 ~1.5e-3）——**开放缺陷，方法与逐条数字在
+   `tasks.md` 9.11 与 `color/matrix.rs` 的常量文档**；另有数行期望输出是
+   `color-mix(in oklab, …)`，本编译器根本发不出（与矩阵无关的独立能力缺口）；无效错误 17 → **19**
    （新增两条具名行 `change/unusual_numbers::{infinity,negative_infinity}/polar`，需 `calc()` 求值与 Color-4 `$space` 写入）。
    其前史：色彩空间模型 + `color()` 构造 + `color.to-space` 共 **+430**（`regress=0`）；`changed=1431` **不得笼统说成“离金样更近”**：
    审计实测其中含两类**我的缺陷**——identity 转换走矩阵往返而发明数字（已修），以及 15 条
