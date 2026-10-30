@@ -9,3 +9,17 @@ rust-version = "1.99"
 
 [profile.release]
 opt-level = 3
+
+# `target/` grew to gigabytes here, and the causes are structural: 97 locked packages plus 44 build units
+# (the lib, three bins, the `trace_pipeline` example and 40 test files) each embedding full DWARF, and
+# `debug/incremental/`, which adds a generation per edit and never reclaims the old one.
+#
+# `line-tables-only` keeps the file:line that panics report — that comes from source-location metadata, not
+# DWARF — so the assert messages this project's debugging protocol cites still name a line; dependency
+# frames lose their variable and type layout, which nothing here inspects. Incremental stays on because
+# every measurement recompiles `sasspile`; `cargo clean -p sasspile` reclaims it when it outgrows its use.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
