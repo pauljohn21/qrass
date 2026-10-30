@@ -21,8 +21,18 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2484/11,533**（21.5%，**实质通过 2319** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-solved-polar-v2`（与 `oklab-solved-polar` 读数全等，
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2498/11,533**（21.7%，**实质通过 2333** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `calc-constants-final`（2026-10-30：CSS 的**计算常数**在壳内读数
+   （`calc(pi)` → `3.1415926536`、`calc(e * 2)` → `5.4365636569`），共 **+14**（`regress=0 changed=0`、无效错误仍 19），
+   守卫在 `tests/calculation.rs::calculation_constants_are_read_inside_the_shell`（已做阳性对照：撤掉判据即红）；
+   本批做了一个**不是律的选择**：非有限数（`infinity`/`NaN`）留在壳内。两个方向都量过：放开则
+   `regress=7 net=37`（7 行颜色行把 `color(srgb calc(infinity) 0 0)` 答成裸 `infinity`），保守则 `regress=0 net=14`
+   但把另一侧 23 行留在基线红态（`diff calc-constants calc-constants-final` 逐字要求夹紧：`color/degenerate::arg1/nan`
+   → `color(srgb 0 0 0)`、`out_of_gamut::hue/degenerate/positive_infinity` → `hsl(0, 100%, 50%)`）——**真正的判据在
+   颜色构造子的夹紧律**，不在壳层谓词，未推导前不得当律写（逐条叙述住在 `calculation::collapsible` 的 doc）；
+   同一律在颜色打印层仍缺席：`to_space/hwb/hsl::white` 得 `hsl(0, infinity%, 100%)` 而金样是 `hsl(0, 0%, 100%)`；
+   常数簇另有 5 行卡在能力上：2 行要 `==` 对算出的数、3 行要 `meta.type-of`）；其前一批 run
+   `oklab-solved-polar-v2`（与 `oklab-solved-polar` 读数全等，
    后者是 `unwrap_or_else` 改显式 `match` 前的入库；2026-10-30：cone 表**从语料解出**并回到
    XYZ 域、oklab↔oklch / lab↔lch 同族不再走矩阵往返，**+6**（`regress=0`）。上一 run `oklab-linear-route` 把
    正方向改走线性 sRGB —— **那条论断是错的**（域从来没错，错的是抄来的数字；该 detour 把白行推到
