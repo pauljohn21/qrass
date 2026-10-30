@@ -21,9 +21,14 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2285/11,533**（19.8%，**实质通过 2120** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `space-fixed`（2026-10-30：色彩空间模型 + `color()` 构造 +
-   `color.to-space` 共 **+430**（`regress=0`，意外错误仍 17）。`changed=1431` **不得笼统说成“离金样更近”**：
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2465/11,533**（21.4%，**实质通过 2300** + 空期望蒙对 165；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `space-scale-once`（2026-10-30：`lab()/lch()/oklab()/oklch()` 函数式构造子
+   + 把「颜色是不是自带空间」从**两个字段**收成**一个判据** `Representation::InSpace`，共 **+180**（`regress=0`）。
+   `changed=816` **不得说成进步**：其中 oklab/oklch 族因换算路线未校准而把逐字文本变成了错数字
+   （白点不变量失败：`to_space/srgb/oklab.hrx::white` 得 `oklab(101.8011897979% …)` 而金样是 `oklab(100% 0 0)`；
+   `to_space/lab/srgb.hrx::middle` 差 ~1.5e-3）——**开放缺陷，逐条在 `tasks.md` 9.11**；无效错误 17 → **19**
+   （新增两条具名行 `change/unusual_numbers::{infinity,negative_infinity}/polar`，需 `calc()` 求值与 Color-4 `$space` 写入）。
+   其前史：色彩空间模型 + `color()` 构造 + `color.to-space` 共 **+430**（`regress=0`）；`changed=1431` **不得笼统说成“离金样更近”**：
    审计实测其中含两类**我的缺陷**——identity 转换走矩阵往返而发明数字（已修），以及 15 条
    `error/non_legacy` 把空间色答成 `0%`/`1`/`rgb(85, 85, 85)`（`Color` 同时携 `space` 与
    `Representation::Legacy`，未守卫的读路径拿空字节三元组作答——**开放缺陷**，逐条在 `tasks.md` 9.9）；
@@ -35,7 +40,7 @@ alwaysApply: true
       动词在 rc.6 里存在（`flat_map` = `Map` + `MergeAll`，内层自带 `Context`；保序用 `concat_map`），缺的是把
       `State` 从观察者字段做成流携带的累加子这个**选型**（即本文件唯余的 0′.5）。
    **diff 的 base 只准用本节点名的当前 run**，
-   库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18** → **17**
+   库里其余 run（`ledger runs` 里除它之外的每一个，含上一基线名与已回退批次的作 废读数）一律不得当 base；无效错误长期基线 53 → **20** → **18** → **17** → **19**
    （那 33 行全部是 `math.$pi` 这类带命名空间的引用被当成未绑定变量报成 `Undefined variable.`，
    本轮把它做成词素后消失；曾因定长 arity 把
    Microsoft-filter 重载报成致命错而变成 55，靠 `ledger failures … --count` 拦下）。

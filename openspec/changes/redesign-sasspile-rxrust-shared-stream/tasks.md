@@ -1763,6 +1763,50 @@
         验收：`regress=0` 且 15 行 `error/non_legacy` 的 `got` 从数值变回逐字文本（`ledger changed` 看得到），
         `net` 不要求上升（金样要的是错文本，那是 P7）；**不得用 +430 给这类结构结论背书**。
 
+- [x] 9.11 **函数式色彩构造子 + 「空间」收成一判据（2026-10-30，基线 run `space-fixed`）**：
+      按 9.10 的排序推 Color-4（`to_space/` 在基线占 2716 行）。
+      • `Representation::InSpace(InSpace)` 取代 `Color.space: Option<InSpace>` 字段（`Representation` 的 `Eq`
+        降为 `PartialEq`，因 InSpace 载 `f64`）；消掉 13 行 `space: None,`。**实测收益**：上一段记的
+        「未守卫读路径拿空字节三元组作答」那一类答数消失 —— `ledger failures <run> "85, 85, 85" --count`
+        从 **3 → 0**；而 `non_legacy` 针（包含 error 行与逐字行）两版均为 **31**，即错数字变回了
+        逐字文本，金样要的错文本仍属 P7（上一段写的「15 行」是把 needle 命中数当行数的旧估计）。
+      • 新内置 `lab()/lch()/oklab()/oklch()`：`color()` 的 run 读法抽成共享件 `split_run`/`channel`/`build`。
+      • `axes_of` 改 `Option`（`InSpace => None`）；`transform_axes`/`with_axes` 随之拒；`to_css` 把空间臂
+        写成 match 的首臂（不是入口 guard），`byte`/`mixed` 各自显式列臂。`stored_axes`/`hwb_axes`/
+        `axes` 三个 helper 由 `axes_of` 与打印/换算共用（复审已确认不是第二份 dispatch）。
+      • **复审（gc-auditor）推翻的三条**（均为我的实错，已改）：
+        ① `is_functional` 同时承担“调用形式/后缀/百分除数”三件事，导致 oklab 的 L 量级律写在三处且互斥
+        （`oklab(100% 0 0)` 被存成 `L=100`，转换出 1e5 量级发明数字，占 changed 的 305 行）——现收成一个判据
+        `Space::percent_full`，读时除它、打印时乘它。
+        ② 我在 `modify.rs` 入口加又撤销的 blanket 拒，注释里写的「42 行」是不可复算的读数（该 guard 未入库），
+        已换成两条具名金样（`scale/error/polar.hrx::lch`、`scale/error/units/oklch.hrx::wrong/lightness`）。
+        ③ `ops.rs` 注释把「空间色拒答」说成语料已在行使的路径——实测 `ledger failures <run> "no legacy axes" --count` = **0**：
+        这些行更早地在 `$space:` 未声明为参数时就在绑定处拒了，注释已改为如实说法（前置项：把 `$space:`
+        做成那些访问器的参数）。
+      • **读数**：`ledger diff space-fixed space-scale-once` = `regress=0 net=180`（pass 2285→2465，
+        `pass_substantive` 2120→**2300**）；`ledger changed` = **816**；无效错误 17→**19**（两条具名行
+        `change/unusual_numbers::{infinity,negative_infinity}/polar`）；`cargo test --workspace` exit=0（49 组）、
+        `sasslint count=0`、无 >500 行文件、`cargo fmt --check` exit=0。
+      • **未做（不得当作已交付）**：
+        (a) **换算校准** —— 白点不变量失败：`to_space/srgb/oklab.hrx::white` 得 `oklab(101.8011897979% …)`
+            而金样是 `oklab(100% 0 0)`；`to_space/lab/srgb.hrx::middle` 差 ~1.5e-3。这不是“多拄几位常数”：
+            中性行必须回 100/0/0，失败说明 BRADFORD 与 srgb primaries 的版本/推导与语料 oracle 不一致。
+            可解途径（金样已给独立三元组）：`to_space/srgb/xyz.hrx::missing/{red,green,blue}` 三行的输入在
+            解码后线性无关，每输出通道 3 方程 3 未知，能直接解出语料自己的矩阵列。
+        (b) lab/lch/oklab/oklch 的 **arity 错文本**一条也没实现（实测：`lab/error.hrx::too_few_args`、
+            `too_many_args`、`list/too_few_channels`、`list/too_many_channels` 均为逐字；`variadic: true` +
+            `params: &["channels"]` 使空参不进 `at_least_one` 守卫、多参不进 `too_many` 守卫）——
+            需给 `Builtin` 一条“variadic 但最少 N 个成分”的判据，不得由 net=+180 代答。
+        (c) `split_run` 只接了 `color()` 与函数式两路；`rgb`/`hsl`/`hwb` 的同形读法（constructors.rs:117/157/184）
+            仍是副本，本批未合并（改它们会动已覆盖的 arity 行为）；“unquoted none”在 constructors.rs 与
+            amount.rs 两处判据不同（大小写敏感 vs 不敏感），语料无 `NONE` 行可仲裁，已记为待决。
+      • **流程事故（如实记）**：空库复算那条命令里我用了 `grep -c` 当链中环节，无匹配时退出码 1 直接
+        中断了 `&&` 链 —— `git apply` 未执行而后续 `rm -f` 把唯一的 diff 副本删了，工作树回到 HEAD。
+        本会话的改动靠 IDE 本地历史（`User/History/<hash>` 逐快照）按标记串选回并逐个复验：
+        `ledger diff functional-spaces-final functional-spaces-restored` = `regress=0 net=0`（同形）。
+        正解：**不得用带退出码的 grep 当链环节**（用 `|| true` 或分号），且**先提交再测量**，
+        不要只在未提交的工作树里持有一个大批改动。
+
 - [x] 9.10 **全局优先级工具 `ledger capability <run>`（2026-10-30）——终止“按我最后碰到的 needle 排序”**：
       本会话的失败模式是 测一条→修一条→被审计推翻→回退→记账，每轮都在磨手上那个缺陷。
       根因不是纪律，是**没有一张“每行被哪条能力挡住”的表**，所以我只能用目录分布（“color 有 5732 行红”）
