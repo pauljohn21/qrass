@@ -242,7 +242,7 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
             // A bound number with a compound unit is calculation-only too: decline rather than print a
             // bare `1(px*rad)^-1` outside any `calc( … )`.
             Ok(Value::Number(_, unit)) if !unit.is_plain() => Outcome::Opaque,
-            Ok(value) => Outcome::Kept(value.to_css()),
+            Ok(value) => Outcome::Kept(inside(&value)),
             Err(_) => Outcome::Opaque,
         };
     }
@@ -263,7 +263,7 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
         calc::Reading::Value(value) if collapsible(&value) => Outcome::Collapsed(value),
         // Everything else prints inside the shell — a chain that stopped at an incompatible step, a
         // compound unit (`1 / 1px / 1rad`), or a resolved interpolation (`calc(#{1px + 2px})` → `3px`).
-        calc::Reading::Value(value) => Outcome::Kept(value.to_css()),
+        calc::Reading::Value(value) => Outcome::Kept(inside(&value)),
         // A chain that did not collapse out of the shell still keeps the number it reached.
         calc::Reading::Expression(content) => Outcome::Folded(content),
     }
@@ -273,8 +273,39 @@ fn classify(toks: Vec<Tok>, env: &Env) -> Outcome {
 /// calculation (see [`Unit::is_plain`]). A `Raw` never qualifies, and that one boundary is what keeps the
 /// already-green cases of this cluster green (`calc(foobar)`, `calc(c())`, `calc(var(--c))`,
 /// `calc(#{1px + 2px})`, `calc((#{1px + 2px}))`).
+///
+/// The `spelled` test is a **conservative choice, not a derived law**, and the corpus rejects a blanket
+/// version of it: `core_functions/color/color/degenerate::arg1/nan` writes `color(srgb calc(NaN) 0 0)` and
+/// answers `color(srgb 0 0 0)`, and `core_functions/color/hsl/four_args/out_of_gamut::hue/degenerate/
+/// positive_infinity` answers `hsl(calc(infinity), 100%, 50%)` as `hsl(0, 100%, 50%)` — those magnitudes
+/// *do* leave the shell, because the consumer clamps them to a finite bound. Both alternatives were
+/// measured, neither is clean: without this test `ledger diff oklab-solved-polar-v2 calc-constants` reads
+/// `regress=7 net=37` (seven rows print a bare `infinity` / `infinity%` where the archive keeps the shell,
+/// e.g. `…::arg1/positive_infinity` and `out_of_gamut::lightness/degenerate/positive_infinity`), with it
+/// `… calc-constants-final` reads `regress=0 net=14` and the 23 clamp-shaped rows that version turned green
+/// go back to red **in their baseline shape** (`ledger changed` reads 0 against
+/// `oklab-solved-polar-v2`, `ledger diff calc-constants calc-constants-v2` reads `regress=23 net=7`).
+/// The rule that actually decides per channel — which of `NaN`, `+∞`, `−∞` collapses, and against which
+/// bound it clamps — belongs to the colour constructors' clamp law, not to this shell predicate; deriving
+/// it is the open work those 23 rows name, and until then this file refuses rather than prints a value no
+/// row attests.
 fn collapsible(value: &Value) -> bool {
-    matches!(value, Value::Bool(..) | Value::Number(..)) && value.is_plain()
+    let spelled = match value {
+        Value::Number(number, _) => number.is_finite(),
+        _ => true,
+    };
+    matches!(value, Value::Bool(..) | Value::Number(..)) && value.is_plain() && spelled
+}
+
+/// The text a value takes **inside** a calculation shell. A magnitude with no plain-CSS spelling is written
+/// in the unit's own calculation form ([`Unit::calc_form`], which already produces `infinity * 1%`), because
+/// [`crate::value::Value::to_css`] would supply its `calc( … )` wrapper and the shell would wrap it a second
+/// time into `calc(calc(infinity))`. Everything else keeps its CSS text.
+fn inside(value: &Value) -> String {
+    match value {
+        Value::Number(number, unit) if !number.is_finite() => unit.calc_form(*number),
+        other => other.to_css(),
+    }
 }
 
 /// The readable parts of an argument list, joined the way the corpus separates them (`, `).

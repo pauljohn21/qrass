@@ -50,11 +50,20 @@ pub(super) static MATHS: &[&Builtin] = &[
 /// * `math.$max-number` → the 309 digits of the largest finite double, and
 ///   `math.$min-number * 1e300 * 1e39` → `4940656458412465`, which makes `$min-number` the **smallest
 ///   denormal** (`f64::from_bits(1)` = 4.9406564584124654e-324), not `MIN_POSITIVE`.
-pub(super) fn constant(name: &str) -> Option<f64> {
+///
+/// `infinity` and `nan` are the same two doubles the **calculation** surface reads (`calc(infinity)`,
+/// `calc(NaN)` — `values/calculation/calc/constant.hrx`); they sit here rather than in a second table so no
+/// number in this crate is written down twice. What is **not** attested is the module-variable spelling of
+/// these two: no in-scope row writes `math.$infinity` or `math.$NaN` (measured over `sass-spec/spec`: zero
+/// files), so their reach through [`super::module_value`] is a side effect of the shared table, not a
+/// delivered feature.
+pub(crate) fn constant(name: &str) -> Option<f64> {
     Some(match name {
         "pi" => std::f64::consts::PI,
         "e" => std::f64::consts::E,
         "epsilon" => f64::EPSILON,
+        "infinity" => f64::INFINITY,
+        "nan" => f64::NAN,
         "max-safe-integer" => 9_007_199_254_740_991.0,
         "min-safe-integer" => -9_007_199_254_740_991.0,
         "max-number" => f64::MAX,

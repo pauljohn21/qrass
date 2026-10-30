@@ -289,11 +289,17 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
     match tok {
         Tok::Word(word) => Some(match crate::operations::number_lexeme(word) {
             Some((value, unit)) => number(value, &Unit::named(unit)),
-            None => Content {
-                folded: None,
-                printed: (*word).clone(),
-                precedence: 3,
-            },
+            // A word that is not a number may still be one of CSS's **calculation constants**; anything else
+            // is the unknown identifier the corpus keeps written (`…::constant/undefined/alone` answers
+            // `calc(c)` with `calc(c)`).
+            None => constant(word).map_or_else(
+                || Content {
+                    folded: None,
+                    printed: (*word).clone(),
+                    precedence: 3,
+                },
+                |value| number(value, &Unit::unitless()),
+            ),
         }),
         // A bound name resolves through the environment. A bound **calculation** enters as the content it
         // already is — folded value, printed form and precedence — which is what lets
@@ -336,6 +342,30 @@ fn number(value: f64, unit: &Unit) -> Content {
         printed: unit.calc_form(value),
         precedence: 3,
     }
+}
+
+/// A word that names one of CSS's four calculation constants, case-insensitively, with a sign glued to it:
+/// `values/calculation/calc/constant.hrx` reads `calc(pi)` → `3.1415926536`, `calc(pI)` the same, `calc(e)`
+/// → `2.7182818285`, `calc(infinity)` and `calc(NaN)` back as their own shells (a non-finite number has no
+/// plain-CSS spelling — [`crate::value::Value::to_css`] wraps it), and `calc(-infinity)` keeps the sign.
+///
+/// The **numbers are not repeated here**: they come through [`crate::builtins::module_value`], the same door
+/// the `math.$pi` arm of [`leaf`] reads, so `pi` has one value in this crate. What this file owns is the
+/// **list of names**, and it is deliberately narrower than that table: the table also carries `epsilon` and
+/// `max-safe-integer`, and no golden puts those inside a calculation, so `calc(epsilon)` stays the unknown
+/// identifier `…::constant/undefined/alone` says it is.
+fn constant(word: &str) -> Option<f64> {
+    let (sign, name) = word
+        .strip_prefix('-')
+        .map_or((1.0, word), |tail| (-1.0, tail));
+    ["pi", "e", "infinity", "nan"]
+        .into_iter()
+        .find(|spell| name.eq_ignore_ascii_case(spell))
+        .and_then(|_| crate::builtins::module_value("math", &name.to_ascii_lowercase()))
+        .and_then(|value| match value {
+            Value::Number(number, _) => Some(number * sign),
+            _ => None,
+        })
 }
 
 /// Join two terms: fold the value when both sides are numbers and the unit law agrees, and write the text

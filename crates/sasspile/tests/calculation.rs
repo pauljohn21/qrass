@@ -337,3 +337,36 @@ async fn an_unbound_variable_inside_a_calc_is_not_fatal() {
         "calc($undefined + 1px)"
     );
 }
+
+/// CSS's calculation **constants**, copied case-for-case from `values/calculation/calc/constant.hrx`:
+/// `pi/alone` (`calc(pi)` → `3.1415926536`), `pi/case_insensitive` (`calc(pI)` same), `e/math/simplified`
+/// (`calc(e * 2)` → `5.4365636569`), `pi/math/unsimplified` (`calc(pi * (1% + 1px))` →
+/// `calc(3.1415926536 * (1% + 1px))`), `infinity/case_insensitive`, `minus_infinity/case_insensitive`
+/// (`calc(-iNfInItY)` → `calc(-infinity)`) and `nan/case_insensitive` (`calc(nan)` → `calc(NaN)`).
+///
+/// Those last three also hold the boundary this batch **chose**, which is not visible anywhere in the
+/// constant cluster: a non-finite magnitude stays inside its shell, so `color(srgb calc(infinity) 0 0)` comes
+/// back verbatim (`core_functions/color/color/degenerate::arg1/positive_infinity`) instead of becoming a
+/// colour with a bare `infinity` channel. The choice is measured both ways and its price is stated where the
+/// code lives — [`crate::calculation::collapsible`]'s doc names the rows that want the opposite
+/// (`…::arg1/nan` → `color(srgb 0 0 0)`, `hsl/four_args/out_of_gamut::hue/degenerate/positive_infinity` →
+/// `hsl(0, 100%, 50%)`, `…::saturation/degenerate/nan` → `hsl(0, 0%, 50%)`) and the 23 clamp-shaped rows the
+/// refusal leaves red. This file does not restate those numbers.
+#[tokio::test]
+async fn calculation_constants_are_read_inside_the_shell() {
+    assert_eq!(value("a {b: calc(pi)}").await, "3.1415926536");
+    assert_eq!(value("a {b: calc(pI)}").await, "3.1415926536");
+    assert_eq!(value("a {b: calc(e * 2)}").await, "5.4365636569");
+    assert_eq!(
+        value("a {b: calc(pi * (1% + 1px))}").await,
+        "calc(3.1415926536 * (1% + 1px))"
+    );
+    assert_eq!(value("a {b: calc(InFiNiTy)}").await, "calc(infinity)");
+    assert_eq!(value("a {b: calc(-iNfInItY)}").await, "calc(-infinity)");
+    assert_eq!(value("a {b: calc(nan)}").await, "calc(NaN)");
+    // The refusal a colour constructor inherits from the shell staying put.
+    assert_eq!(
+        value("a {b: color(srgb calc(infinity) 0 0)}").await,
+        "color(srgb calc(infinity) 0 0)"
+    );
+}

@@ -232,8 +232,22 @@ impl Unit {
     /// its own `1`, because a compound unit has no plain-CSS spelling and the fixtures show the product
     /// form (`values/numbers/units/multiple.hrx`: `calc(1px * 1rad)`, `calc(1 / 1px / 1rad)`,
     /// `calc(1px * 1rad / 1ms / 1Hz)`).
+    ///
+    /// A magnitude that is **not finite** has no plain-CSS spelling either, so it takes [`calc_product`] too:
+    /// gluing `infinity` onto a unit prints `infinitypx`, which is not a CSS number, where the corpus writes
+    /// `calc(1% + infinity * 1px)` (`values/calculation/calc/constant.hrx::precedence/after_plus`) and
+    /// `calc(NaN * 1deg)` (`core_functions/math/asin.hrx::greater_than_one`).
+    ///
+    /// Said plainly so the next reader does not over-read this: the **colour** printers do not come through
+    /// here. `Color::legacy`/`Channel`/`space::print` write `format_number(…) + "%"` directly, so the same
+    /// bare `infinity%` is still printed there — measured as `core_functions/color/to_space/hwb/hsl::white`,
+    /// which got `hsl(0, infinity%, 100%)` against the archive's `hsl(0, 0%, 100%)`. One law, one home, is
+    /// still open work on that side.
     pub fn calc_form(&self, value: f64) -> String {
         let magnitude = crate::value::format_number(value);
+        if !value.is_finite() {
+            return self.calc_product(&magnitude);
+        }
         let with = |prefix: &str, unit: &str| format!("{prefix}{unit}");
         let head = match self.numerator.split_first() {
             Some((first, rest)) => std::iter::once(with(&magnitude, first))
