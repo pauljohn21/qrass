@@ -4,9 +4,8 @@
 //! `oklab`, print an `oklch`, and back — and thirteen of those rows were red for a reason that no amount of
 //! matrix calibration would fix: `color/matrix.rs` carried the forward cone matrix *and* a hand-copied
 //! inverse, and the two disagreed. A colour that went out and came back did not come back as it went in.
-//! The inverse is now computed from the forward table (in the same batch that routed the forward direction
-//! through linear sRGB, since neither half is a round trip on its own), which is the only way this stays true
-//! when the digits change.
+//! The inverse is now computed from the forward table, so the pair is mutual by construction — whatever
+//! digits either table carries, a round trip cannot corrupt the value again.
 //!
 //! What this file deliberately does **not** pin: the absolute oklab↔XYZ numbers. `to_space/srgb/oklab.hrx`
 //! answers `color(srgb 0.5 0.5 0.5)` with `oklab(59.8180730527% 0 0)` and this compiler still prints a

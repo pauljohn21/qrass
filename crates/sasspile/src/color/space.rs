@@ -14,7 +14,7 @@
 //! to `xyz-d50` is `color(xyz-d50 0.9642956764 1 0.8251046025)`,
 //! `to_space/srgb/xyz_d50.hrx::white`).
 
-use super::matrix::{of_xyz_d65, to_xyz_d65};
+use super::matrix::{from_polar, of_xyz_d65, to_polar, to_xyz_d65};
 use crate::value::format_number;
 
 /// The spaces this compiler can carry and convert. `rgb`/`hsl`/`hwb` are absent on purpose: those targets are
@@ -339,7 +339,25 @@ impl Color {
                 return self.clone();
             }
         }
-        let channels = of_xyz_d65(space, self.xyz());
+        // **A rectangular/polar pair is one triple, not a conversion.** `oklab` ↔ `oklch` and `lab` ↔ `lch`
+        // share every channel and differ only in how the last two are written, so no matrix is involved. The
+        // archive shows this directly: `to_space/oklab/oklch.hrx::missing/b` writes
+        // `color.to-space(oklab(10% 0.2 none), oklch)` and answers `oklch(10% 0.2 0deg)` — lightness and chroma
+        // carried over digit for digit. Sending that through XYZ cannot reproduce it: the round trip leaves the
+        // exactly-zero channel at ±1e-17, and a negative residue makes `atan2` fold to `359.999…deg`, which
+        // prints as `360deg`. That is how one row went red when the cone table was corrected.
+        let polar_pair = |carried: InSpace| {
+            let triple = carried.channels.map(|value| value.unwrap_or_default());
+            match (carried.space, space) {
+                (Space::Oklab, Space::Oklch) | (Space::Lab, Space::Lch) => Some(to_polar(triple)),
+                (Space::Oklch, Space::Oklab) | (Space::Lch, Space::Lab) => Some(from_polar(triple)),
+                _ => None,
+            }
+        };
+        let channels = match carried.and_then(polar_pair) {
+            Some(triple) => triple,
+            None => of_xyz_d65(space, self.xyz()),
+        };
         // A `none` in every channel is a colour with no power at all, and it stays powerless
         // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`).
         let powerless =
