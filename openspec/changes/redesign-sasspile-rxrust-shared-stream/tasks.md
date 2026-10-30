@@ -1747,3 +1747,18 @@
         所以上述形状变化对 `changed` 隐形——要补的是让该分支也把 `got` 存进详情（归入 P7 错误工作前的量具项）。
       • 流程缺口如实记：上面“第一次拓宽 `operand_expr` 造成 `regress=2`”那次测量**没入库**（`ledger runs` 里
         `space-model` 就是它，但我当时未将它的 `regress=2` 作可复查记录引用）；依据必须留在库里才可驳。
+      • **9.9(a) 的开工清单（本轮已改到一半、因预算耗尽而回退到 `8608f1d`，未入任何仓库记录之外代码）**：
+        目标是把“这个颜色的通道是不是 srgb 字节”从**两个字段**（`space` + `Representation::Legacy`）改成
+        **一个判据**。已验证能编译的部分：`Representation::InSpace(InSpace)` 变体（需同时把 derive 的 `Eq`
+        降为 `PartialEq`，因为 `InSpace` 载 `f64`），删 `Color.space` 字段与 13 行 `space: None,`，
+        `in_space` 写变体，`carried()`/`is_spaced()` 改为读判据，`text.rs::to_css` 用 `match &self.representation`
+        的第一个臂打印，`read.rs::byte` 加 `InSpace(..) => None` 臂。
+        **待做的四步（编译器已列出确切点位）**：① `ops.rs::axes_of` 改 `-> Option<[f64; 3]>` 并加
+        `InSpace(..) => None`（这是 15 行 `error/non_legacy` 答 `0%`/`1` 的那条读路）；② `transform_axes` 改
+        `-> Option<Self>`，它的三个臂（ops.rs:60、133 等）包 `Some(…)`，`with_axes` 的 `write(self.axes_of())`
+        加 `?` 并删点状 `is_spaced` 守卫；③ `read.rs::hsl_channel` 改成 `self.axes_of().and_then(|axes|
+        axes.get(index).copied())`；④ `color/space.rs::xyz` 的 `Hsl|Hwb` 臂与 `builtins/color/mod.rs:345/359`
+        两个调用点适应新签名（后者要沿 `transform(args, …)` / `colour_and_amount` 这个共用入口落成**拒**，
+        不得用 `unwrap_or` 或 `self.clone()` 回显凑平编译——那只是把假值换成假“没变化”）。
+        验收：`regress=0` 且 15 行 `error/non_legacy` 的 `got` 从数值变回逐字文本（`ledger changed` 看得到），
+        `net` 不要求上升（金样要的是错文本，那是 P7）；**不得用 +430 给这类结构结论背书**。
