@@ -114,23 +114,7 @@ impl Space {
     /// spaces whose channels already are (or are derived from) XYZ.
     pub(super) fn matrix(self) -> Option<&'static [[f64; 3]; 3]> {
         match self {
-            Self::Srgb | Self::SrgbLinear => Some(&[
-                [
-                    0.412_390_799_265_934,
-                    0.357_584_339_383_837,
-                    0.180_480_788_401_814,
-                ],
-                [
-                    0.212_639_005_871_520,
-                    0.715_168_678_767_736,
-                    0.072_192_315_360_733,
-                ],
-                [
-                    0.019_330_818_715_591,
-                    0.119_194_779_794_625,
-                    0.950_532_152_249_660,
-                ],
-            ]),
+            Self::Srgb | Self::SrgbLinear => Some(&super::matrix::SRGB_PRIMARIES),
             Self::DisplayP3 | Self::DisplayP3Linear => Some(&[
                 [
                     0.486_570_948_648_212,

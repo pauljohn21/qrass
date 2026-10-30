@@ -199,33 +199,82 @@ fn lab_to_xyz(lab: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// D65-referenced XYZ → `oklab`, whose LMS cube roots are the whole definition.
-fn xyz_to_oklab(xyz: [f64; 3]) -> [f64; 3] {
-    let cone = [
-        0.818_933_010_1 * xyz[0] + 0.361_866_742_4 * xyz[1] + 0.128_859_713_6 * xyz[2],
-        0.032_984_543_6 * xyz[0] + 0.929_316_420_8 * xyz[1] + 0.036_145_668_7 * xyz[2],
-        0.048_200_301_8 * xyz[0] + 0.015_660_887_9 * xyz[1] + 0.916_906_934_1 * xyz[2],
-    ];
-    let root = cone.map(|value| sp(value, 1.0 / 3.0));
+/// The linear-sRGB → XYZ (D65) primaries table, named so the `oklab` route can reach it without the
+/// fallible accessor. It lives here rather than in [`super::space`] because this file is the home of the
+/// numeric tables; [`super::space::Space::matrix`] hands the same const out, so there is still one copy.
+pub(super) const SRGB_PRIMARIES: [[f64; 3]; 3] = [
     [
-        0.210_454_255_3 * root[0] + 0.793_617_785_0 * root[1] - 0.004_072_046_9 * root[2],
-        1.977_998_495_1 * root[0] - 2.428_592_205_0 * root[1] + 0.450_593_709_3 * root[2],
-        0.025_904_037_1 * root[0] + 0.782_771_766_3 * root[1] - 0.808_675_766_4 * root[2],
-    ]
+        0.412_390_799_265_934,
+        0.357_584_339_383_837,
+        0.180_480_788_401_814,
+    ],
+    [
+        0.212_639_005_871_520,
+        0.715_168_678_767_736,
+        0.072_192_315_360_733,
+    ],
+    [
+        0.019_330_818_715_591,
+        0.119_194_779_794_625,
+        0.950_532_152_249_660,
+    ],
+];
+
+/// `oklab`'s cone response, defined on **linear sRGB** — not on XYZ.
+///
+/// Applying this table to XYZ is what made a white print `oklab(101.8011897979% 0.1787788126 -0.0136361186)`
+/// instead of `oklab(100% 0 0)` (`to_space/srgb/oklab.hrx::white`): its rows sum to 1.3097 / 0.9984 / 0.9808,
+/// so three equal channels cannot give three equal cones, and equal cones are exactly what a neutral has to
+/// have — which is also why the corpus answers `oklab(59.8180730527% 0 0)` for `color(srgb 0.5 0.5 0.5)`
+/// (`…::gray`, a = b = 0 exactly). The route below is therefore XYZ (D65) → linear sRGB → this matrix, and
+/// only one direction is written down: [`invert`] produces the other, because the hand-copied inverse that
+/// used to sit here disagreed with the forward table — its **second** row carried `0.1116806229` where this
+/// table's own inverse is `1.092975889` — so a colour sent out and read back did not come back as it went in.
+/// That round trip is what the 13 rows of `to_space/oklab/oklch` and `to_space/oklch/oklab` measure, and they
+/// went green at `regress=0` (`core_functions/color/to_space/oklab/oklch::middle` and twelve siblings); both
+/// halves of this batch made it, since a round trip needs one table and an inverse of it, not either alone.
+/// `tests/color_space_round_trip.rs` pins it so a second copied table cannot come back quietly.
+///
+/// **Still wrong, said plainly because the next reader must not take this table as calibrated:** the corpus's
+/// cone matrix must have **equal row sums** (the two neutral rows above pin that), and these digits do not —
+/// `to_space/srgb/oklab.hrx::white` prints `oklab(101.9416634099% 0.1844594607 0.0072495212)` and `…::gray`
+/// prints `oklab(60.9795386897% 0.110340095 0.0043365239)` against the archive's `oklab(59.8180730527% 0 0)`.
+/// Both readings are **further** from the golden than the run before this batch (`101.8011897979% …` and
+/// `60.8955100818% 0.1069420407 -0.0081568634`), so this file's 545 changed rows are not progress: 13 turned
+/// green, the rest got a different wrong number, and every row that crosses to or from a non-polar space
+/// (`to_space/oklab/srgb`, `to_space/srgb/oklab`, `to_space/xyz/oklab`, and the same for `oklch`) stays red —
+/// several of those expect `color-mix(in oklab, …)` output, which this compiler cannot emit at all.
+/// The nine cone entries can be solved from the archive's plain-output rows the way `invert` now recovers
+/// the other direction, but that has not been done here, and no row count is evidence that it was; the
+/// calibration target is not only equal row sums, because [`OKLAB_LAB`]'s second and third rows must sum to
+/// zero as well or a neutral prints a residue instead of the archive's literal `0`.
+const OKLAB_CONE: [[f64; 3]; 3] = [
+    [0.818_933_010_1, 0.361_866_742_4, 0.128_859_713_6],
+    [0.032_984_543_6, 0.929_316_420_8, 0.036_145_668_7],
+    [0.048_200_301_8, 0.015_660_887_9, 0.916_906_934_1],
+];
+
+/// `oklab`'s LMS-cube-root → lightness/chroma/hue matrix; its inverse is computed, not copied. Its rows sum
+/// to 0.9999999934, -0.0000000006 and 0.000000037 — the first is lightness as the cone root, the other two
+/// are what makes an equal-cone colour print `a = b = 0`, and at these magnitudes it prints a residue near
+/// 1e-8 instead of the archive's literal `0` (`to_space/srgb/oklab.hrx::gray`).
+const OKLAB_LAB: [[f64; 3]; 3] = [
+    [0.210_454_255_3, 0.793_617_785_0, -0.004_072_046_9],
+    [1.977_998_495_1, -2.428_592_205_0, 0.450_593_709_3],
+    [0.025_904_037_1, 0.782_771_766_3, -0.808_675_766_4],
+];
+
+/// XYZ (D65) → `oklab`, through the linear sRGB the space is defined on.
+fn xyz_to_oklab(xyz: [f64; 3]) -> [f64; 3] {
+    let linear = apply(&invert(&SRGB_PRIMARIES), xyz);
+    let root = apply(&OKLAB_CONE, linear).map(|value| sp(value, 1.0 / 3.0));
+    apply(&OKLAB_LAB, root)
 }
 
 fn oklab_to_xyz(oklab: [f64; 3]) -> [f64; 3] {
-    let root = [
-        oklab[0] + 0.396_337_777_4 * oklab[1] + 0.215_803_757_3 * oklab[2],
-        oklab[0] - 0.105_561_345_8 * oklab[1] - 0.063_854_172_8 * oklab[2],
-        oklab[0] - 0.089_484_177_5 * oklab[1] - 1.291_485_548_0 * oklab[2],
-    ];
-    let cone = root.map(|value| sp(value, 3.0));
-    [
-        1.226_879_873_4 * cone[0] - 1.386_668_417_4 * cone[1] + 0.367_874_353_5 * cone[2],
-        -0.040_575_762_6 * cone[0] + 0.111_680_622_9 * cone[1] - 0.068_116_547_0 * cone[2],
-        -0.076_372_910_0 * cone[0] - 0.423_851_940_9 * cone[1] + 1.524_968_906_0 * cone[2],
-    ]
+    let root = apply(&invert(&OKLAB_LAB), oklab);
+    let linear = apply(&invert(&OKLAB_CONE), root.map(|value| sp(value, 3.0)));
+    apply(&SRGB_PRIMARIES, linear)
 }
 
 /// Cartesian lightness/chroma/hue, with the hue folded into a turn (`lch(… 280.5032243387deg)`).
