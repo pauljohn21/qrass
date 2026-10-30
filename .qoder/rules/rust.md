@@ -22,7 +22,8 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2484/11,533**（21.5%，**实质通过 2319** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-solved-polar`（2026-10-30：cone 表**从语料解出**并回到
+   A/B 记录 = `reports/hrx.db` 里的具名 run `oklab-solved-polar-v2`（与 `oklab-solved-polar` 读数全等，
+   后者是 `unwrap_or_else` 改显式 `match` 前的入库；2026-10-30：cone 表**从语料解出**并回到
    XYZ 域、oklab↔oklch / lab↔lch 同族不再走矩阵往返，**+6**（`regress=0`）。上一 run `oklab-linear-route` 把
    正方向改走线性 sRGB —— **那条论断是错的**（域从来没错，错的是抄来的数字；该 detour 把白行推到
    `101.9416634099%`，比原路线更远），数字与结论已由 `oklab-solved-polar` 取代；那一批靠逆阵现算拿到的
