@@ -214,6 +214,24 @@ impl Space {
     pub(super) fn is_functional(self) -> bool {
         !matches!(self, Self::Lab | Self::Lch | Self::Oklab | Self::Oklch)
     }
+
+    /// The number a **full-scale percentage** names in this space's lightness: `lab`/`lch` state lightness on
+    /// a `0–100` scale, so their `50%` *is* `50` (`to_space/srgb/lab.hrx::middle` reads `lab(44.1210142293% …)`
+    /// and prints the same number it holds), while every other space is a fraction of one, so `100%` is `1`
+    /// (`to_space/oklab/srgb.hrx::white` reads `oklab(100% 0 0)` and wants `color(srgb 1 1 1)`;
+    /// `to_space/srgb/oklab.hrx::white` wants `oklab(100% 0 0)` back for white).
+    ///
+    /// This is **one** law with both directions read from it: the argument parser divides by it (in
+    /// `builtins/color/constructors.rs`) and [`print`] multiplies by it before writing the `%`. It was
+    /// written three times before — the print suffix, this divisor, and the matrix's `0–1` domain — and the
+    /// three disagreed for `oklab`/`oklch`, turning `oklab(100% 0 0)` into `L = 100` and a conversion into
+    /// numbers of order `1e5`.
+    pub fn percent_full(self) -> f64 {
+        match self {
+            Self::Lab | Self::Lch => 1.0,
+            _ => 100.0,
+        }
+    }
 }
 
 /// One channel as printed: `none` for a powerless one, otherwise the number the corpus's printer yields.
@@ -241,7 +259,19 @@ pub fn print(space: Space, channels: [Option<f64>; 3], alpha: f64) -> String {
     };
     let body = [0, 1, 2]
         .iter()
-        .map(|index| channel(channels[*index], suffixes[*index]))
+        .map(|index| {
+            // A percentage channel is written back on the space's own scale — `L = 1` of `oklab` is `100%`,
+            // `L = 44.1210142293` of `lab` is `44.1210142293%` — through the same [`Space::percent_full`] the
+            // reading divides by, so the two directions of one law cannot drift apart again.
+            let scaled = channels[*index].map(|value| {
+                if suffixes[*index] == "%" {
+                    value * space.percent_full()
+                } else {
+                    value
+                }
+            });
+            channel(scaled, suffixes[*index])
+        })
         .collect::<Vec<String>>()
         .join(" ");
     let alpha_part = if alpha < 1.0 {
@@ -258,17 +288,10 @@ pub fn print(space: Space, channels: [Option<f64>; 3], alpha: f64) -> String {
 
 use super::{Channel, Color, Representation};
 
-/// How a percentage argument scales into this space's channel: the `0–1` spaces (`color(srgb 50% …)` is
-/// `0.5`) divide by a hundred, while `lab`/`lch`/`oklab`/`oklch` print their first channel as a percentage of
-/// the very number they hold (`lab(50% …)` is `L = 50`).
-pub fn percent_scale(space: Space) -> f64 {
-    if space.is_functional() { 100.0 } else { 1.0 }
-}
-
 impl Color {
-    /// A colour **in its own space**: the channels travel as written (with `none` kept as `None`), and the
-    /// bytes/hsl axes the struct also carries stay empty because every read of a space colour goes through
-    /// [`Color::xyz`] and every print through [`print`].
+    /// A colour **in its own space**: the space and its channels travel as one value inside
+    /// `Representation::InSpace` (with `none` kept as `None`), and the byte/hsl-axis triple stays empty
+    /// because every read of such a colour goes through [`Color::xyz`] and every print through [`print`].
     pub fn in_space(space: Space, channels: [Option<f64>; 3], alpha: f64) -> Self {
         let zero = |value: f64| Channel {
             value,
@@ -277,9 +300,8 @@ impl Color {
         Self {
             channels: [zero(0.0), zero(0.0), zero(0.0)],
             alpha: crate::color::clamp_alpha(alpha),
-            representation: Representation::Legacy,
+            representation: Representation::InSpace(InSpace { space, channels }),
             authored: None,
-            space: Some(InSpace { space, channels }),
         }
     }
 
@@ -290,18 +312,28 @@ impl Color {
     /// of the srgb transfer curve, which is why `#3366cc` and `color(srgb 0.2 0.4 0.8)` convert to the same
     /// `lab` (`to_space/srgb/lab.hrx::middle`).
     pub fn xyz(&self) -> [f64; 3] {
-        let bytes = match &self.space {
-            Some(carried) => {
-                let numbers = carried.channels.map(|value| value.unwrap_or(0.0));
-                return to_xyz_d65(carried.space, numbers);
+        let bytes = match self.representation {
+            Representation::InSpace(carried) => {
+                return to_xyz_d65(
+                    carried.space,
+                    carried.channels.map(|value| value.unwrap_or(0.0)),
+                );
             }
-            None => match self.representation {
-                Representation::Hsl | Representation::Hwb => {
-                    let axes = self.axes_of();
-                    crate::axes::axes_to_rgb(axes[0], axes[1], axes[2])
-                }
-                _ => self.channels.map(|channel| channel.byte()),
-            },
+            // Each of these two reads its own axes through the one helper that states how (`stored_axes` for
+            // what `hsl` wrote, `hwb_axes` for the derivation a `hwb` colour implies) — a colour that carries
+            // a space cannot reach here, so no zero-filled triple is ever read as bytes.
+            Representation::Hsl => {
+                let [hue, saturation, lightness] = self.stored_axes();
+                crate::axes::axes_to_rgb(hue, saturation, lightness)
+            }
+            Representation::Hwb => {
+                let [hue, saturation, lightness] = self.hwb_axes();
+                crate::axes::axes_to_rgb(hue, saturation, lightness)
+            }
+            Representation::Legacy
+            | Representation::Percent
+            | Representation::Hex
+            | Representation::Named => self.channels.map(|channel| channel.byte()),
         };
         to_xyz_d65(Space::Srgb, bytes.map(|byte| byte / 255.0))
     }
@@ -314,23 +346,25 @@ impl Color {
         // ones were `none` by way of a matrix round trip: `to_space/xyz_d50/xyz_d50.hrx::missing/x` keeps
         // `color(xyz-d50 none 0.2 0.3)` verbatim, and running the triple through XYZ twice is what turned it
         // into invented numbers.
-        if self.space.is_some_and(|carried| carried.space == space) {
-            return self.clone();
+        let carried = match self.representation {
+            Representation::InSpace(carried) => Some(carried),
+            _ => None,
+        };
+        if let Some(existing) = carried {
+            if existing.space == space {
+                return self.clone();
+            }
         }
         let channels = of_xyz_d65(space, self.xyz());
-        let powerless = self
-            .space
-            .is_some_and(|carried| carried.channels.iter().all(Option::is_none));
+        // A `none` in every channel is a colour with no power at all, and it stays powerless
+        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`).
+        let powerless =
+            carried.is_some_and(|existing| existing.channels.iter().all(Option::is_none));
         Self::in_space(
             space,
             channels.map(|value| (!powerless).then_some(value)),
             self.alpha,
         )
-    }
-
-    /// Whether this colour carries a colour space of its own (`color(…)` or the result of a conversion).
-    pub fn is_spaced(&self) -> bool {
-        self.space.is_some()
     }
 
     /// The colour as a **legacy srgb** colour, which is what `color.to-space($c, rgb)` asks for. The form is
@@ -347,7 +381,6 @@ impl Color {
             alpha: self.alpha,
             representation: Representation::Hex,
             authored: None,
-            space: None,
         }
     }
 
@@ -374,7 +407,6 @@ impl Color {
             alpha: self.alpha,
             representation: Representation::Hsl,
             authored: None,
-            space: None,
         }
     }
 }

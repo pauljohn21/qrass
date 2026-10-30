@@ -48,7 +48,7 @@ mod read;
 mod space;
 mod text;
 
-pub use space::{InSpace, Space, percent_scale};
+pub use space::{InSpace, Space};
 
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
 /// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
@@ -163,7 +163,11 @@ impl Channel {
 }
 
 /// The form a colour was created in, which decides how it prints.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Eq` is dropped for the [`Representation::InSpace`] variant: a colour in its own space carries `f64`
+/// channels, and pretending they form a total equivalence would be a second claim about floats that nothing
+/// in the corpus makes. `PartialEq` is all any caller here has ever asked for.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Representation {
     /// `rgb(18, 52, 86)` — the legacy comma form, channels as numbers
     Legacy,
@@ -185,6 +189,15 @@ pub enum Representation {
     /// what the colour *is*, which is why `color.channel(…, "whiteness", $space: hwb)` can read them back
     /// (`channel/hwb.hrx`) and why a plain hsl colour cannot.
     Hwb,
+    /// The colour **is** its space channels: built by `color(…)` or moved by `color.to-space`. This is a
+    /// variant of the representation rather than a second field beside it, because one fact must have one
+    /// judge. With `space: Option<InSpace>` sitting next to `representation`, every read that looked only at
+    /// the representation saw `Legacy` and answered a `display-p3` colour off the empty byte triple — the
+    /// measurement named 15 `non_legacy` rows printed as `0%`, `1` or `rgb(85, 85, 85)`, and the corpus
+    /// answers them with an error instead (`hue.hrx::error/non_legacy`: "color.hue() is only supported for
+    /// legacy colors"). Now a consumer that matches on the representation must say what a space colour means
+    /// to it, or the build fails.
+    InSpace(InSpace),
 }
 
 /// A colour value.
@@ -200,11 +213,6 @@ pub struct Color {
     /// chroma rotates the hue. `None` everywhere else, so nothing about a constructed or adjusted colour
     /// changes.
     authored: Option<[f64; 3]>,
-    /// The colour's **own colour space**, when it was built by `color(…)` or moved by `color.to-space`.
-    /// `None` means the channels above are the srgb-family bytes or the hsl/hwb axes, which is every colour
-    /// the pre-Color-4 laws in this file decide — so adding a space changes nothing for them. When it is
-    /// `Some`, [`space`] owns both the reading ([`Color::xyz`]) and the printing.
-    space: Option<InSpace>,
 }
 
 impl Color {
@@ -228,7 +236,6 @@ impl Color {
             alpha: clamp_alpha(alpha),
             // Constructed from written channels, so there is no separate authored triple.
             authored: None,
-            space: None,
             // Decided **after** clamping, because a clamped percentage is no longer a percentage
             // ([`Channel::clamped`]): `rgb(100.1% 0 0)` has no percent channel left and so prints
             // `rgb(255, 0, 0)` rather than the all-percent form.
@@ -275,7 +282,6 @@ impl Color {
         }
         .map(|color| Self {
             authored: None,
-            space: None,
             representation: Representation::Hex,
             ..color
         })
@@ -309,7 +315,6 @@ impl Color {
         )
         .map(|color| Self {
             authored: None,
-            space: None,
             representation: Representation::Named,
             ..color
         })
@@ -374,7 +379,6 @@ impl Color {
             ],
             alpha: clamp_alpha(alpha),
             authored: None,
-            space: None,
             representation: Representation::Hwb,
         })
     }
@@ -417,7 +421,6 @@ impl Color {
             ],
             alpha: clamp_alpha(alpha),
             authored: None,
-            space: None,
             representation: Representation::Hsl,
         })
     }

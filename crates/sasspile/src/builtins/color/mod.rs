@@ -18,7 +18,7 @@ mod constructors;
 mod modify;
 mod transfer;
 
-use constructors::{COLOR_HWB, COLOR_SPACE, HSL, HSLA, HWB, RGB, RGBA};
+use constructors::{COLOR_HWB, COLOR_SPACE, HSL, HSLA, HWB, LAB, LCH, OKLAB, OKLCH, RGB, RGBA};
 use modify::{COLOR_ADJUST, COLOR_CHANGE, COLOR_SCALE, SCALE_COLOR};
 use transfer::COLOR_TO_SPACE;
 
@@ -52,6 +52,10 @@ pub(super) static COLORS: &[&Builtin] = &[
     &COLOR_MIX,
     &COLOR_SPACE,
     &COLOR_TO_SPACE,
+    &LAB,
+    &LCH,
+    &OKLAB,
+    &OKLCH,
 ];
 
 /// `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)`.
@@ -355,9 +359,10 @@ fn adjusted(args: Vec<Value>, change: fn([f64; 3], f64) -> [f64; 3]) -> Result<V
         return Err(super::missing("amount".to_string()));
     }
     match colour_and_amount(&args) {
-        Some((color, amount)) => Ok(Value::Color(
-            color.transform_axes(|axes| change(axes, amount)),
-        )),
+        Some((color, amount)) => color
+            .transform_axes(|axes| change(axes, amount))
+            .map(Value::Color)
+            .ok_or_else(no_legacy_axes),
         None => Err(SassError::new("not a colour-and-amount call")),
     }
 }
@@ -382,13 +387,24 @@ fn colour_and_amount(args: &[Value]) -> Option<(Color, f64)> {
 /// One colour in, one colour out, with the same argument judgement the accessors make: arguments that all
 /// read as colours are a colour call (so a wrong count is reported), and anything else — `grayscale(10%)`,
 /// the CSS filter — declines and prints as written.
-fn transform(args: Vec<Value>, change: impl Fn(&Color) -> Color) -> Result<Value, SassError> {
+fn transform(
+    args: Vec<Value>,
+    change: impl Fn(&Color) -> Option<Color>,
+) -> Result<Value, SassError> {
     match access(&args) {
-        Access::Colour(color) => Ok(Value::Color(change(&color))),
+        Access::Colour(color) => change(&color).map(Value::Color).ok_or_else(no_legacy_axes),
         Access::NotAColour => Err(SassError::new("not a colour this slice can transform")),
         Access::TooFew => Err(super::missing("color".to_string())),
         Access::TooMany(passed) => Err(super::too_many(1, passed)),
     }
+}
+
+/// The one decline reason shared by [`transform`] and [`adjusted`]: the call names a legacy axis operation and
+/// the colour carries its own colour space, whose hsl axes this slice has not derived (`tasks.md` 9.9 keeps it
+/// as an open defect). A second copy of this message would be two answers for one fact, which is what the
+/// single-source rule is about.
+pub(super) fn no_legacy_axes() -> SassError {
+    SassError::new("no legacy axes for a colour in its own colour space")
 }
 
 /// The shape every accessor shares: read one number out of the colour argument and print it with the unit

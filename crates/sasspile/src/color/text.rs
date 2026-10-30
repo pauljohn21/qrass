@@ -192,16 +192,18 @@ impl Color {
 
     /// The CSS text.
     pub fn to_css(&self) -> String {
-        // A colour that carries its own colour space prints **in that space and nowhere else**: the hex /
-        // keyword / `rgb(…)` / `hsl(…)` laws below are srgb-era ones, and letting them decide a
-        // `lab` or `display-p3` colour would answer a question the corpus never asks. Forms pinned by
-        // `core_functions/color/to_space/srgb/*.hrx`: `color(display-p3 …)`, `lab(44.1210142293% … )`,
-        // `lch(… 280.5032243387deg)`, with an alpha after a `/` and `none` for a powerless channel.
-        if let Some(carried) = &self.space {
-            return super::space::print(carried.space, carried.channels, self.alpha);
-        }
+        // A colour that carries its own colour space prints **in that space and nowhere else**: every law
+        // below is an srgb-era one, and letting them decide a `lab` or `display-p3` colour would answer a
+        // question the corpus never asks. It is an arm of this match rather than a guard above it so that
+        // adding a representation cannot quietly fall through to a printer that has no business knowing it.
+        // Forms pinned by `core_functions/color/to_space/srgb/*.hrx`: `color(display-p3 …)`,
+        // `lab(44.1210142293% … )`, `lch(… 280.5032243387deg)`, an alpha after a `/`, `none` for a powerless
+        // channel.
         let byte = |value: u32| format!("{value:02x}");
         match self.representation {
+            Representation::InSpace(carried) => {
+                super::space::print(carried.space, carried.channels, self.alpha)
+            }
             // **An out-of-gamut colour prints in the hsl form**, whatever space it was created in:
             // `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
             // `color.change(black, $green: -50)` → `hsl(120, 100%, -9.8039215686%)`
@@ -221,7 +223,9 @@ impl Color {
                 // swallowed failure.
                 match self.authored {
                     Some(axes) => self.hsl_text(axes),
-                    None => self.hsl_text(self.axes_of()),
+                    // This arm is reached only by the four byte-storing representations (a space colour took
+                    // the arm above), so the bytes law is the total read here — no `None` to talk past.
+                    None => self.hsl_text(self.axes()),
                 }
             }
             Representation::Hex => {
@@ -266,7 +270,7 @@ impl Color {
             // Hue is a bare number and the other two always carry a `%`; the name still follows the alpha
             // exactly as the `hsl/four_args/alpha.hrx` rows show (`100%` alpha → `hsl(…)`, `0%` →
             // `hsla(…, 0)`).
-            Representation::Hsl => self.hsl_text(self.axes_of()),
+            Representation::Hsl => self.hsl_text(self.stored_axes()),
             // A `hwb` colour prints in the hsl form the corpus gives it: `hwb(0deg, 30%, 40%)` →
             // `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), while the value keeps its
             // whiteness and blackness for `color.channel(.., $space: hwb)` to read back.
@@ -278,7 +282,7 @@ impl Color {
             // stated anywhere in the corpus, so this is recorded per fixture rather than generalised, and
             // `mix`/`adjust` results keep their own origin instead of inheriting it.
             Representation::Hwb => {
-                let axes = self.axes_of();
+                let axes = self.hwb_axes();
                 let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
                 let whole = rgb.iter().all(|value| value.fract() == 0.0);
                 let bytes = rgb.map(|value| value.round() as u32);

@@ -293,6 +293,20 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
     if let Some(foreign) = amount::mixed_channel(&channels) {
         return Err(foreign);
     }
+    // A colour in its own colour space is refused by the **write itself**, further down: `Color::with_axes`
+    // reads its axes through [`Color::axes_of`], which answers `None` for `Representation::InSpace`, and
+    // `Color::with_hwb` asks [`Color::writes_bytes`], which answers `false` for it; either way the call declines
+    // to its text. It is deliberately not a guard at this entry. An experiment with one placed before the
+    // channel reads was measured and reverted, and the reason is stated by rows rather than by a count that no
+    // recorded run can reproduce any more: `scale/error/polar.hrx::lch` writes
+    // `color.scale(lch(50% 30% 180deg), $hue: 10%)` and its golden **is** `Error: $hue: Channel isn't
+    // scalable.`, and `scale/error/units/oklch.hrx::wrong/lightness` writes
+    // `color.scale(lch(30% 70% 200deg), $lightness: 1px)` expecting `Error: $lightness: Expected 1px to have
+    // unit "%".` — a blanket refusal answers neither, because the message comes from reading the argument. The
+    // cost of letting the reading run is recorded in `tasks.md` 9.9: two rows
+    // (`change/unusual_numbers::{infinity,negative_infinity}/polar`) report
+    // `$hue: calc(infinity) is not a number or unquoted "none"` where the corpus expects `lch(50% 150 0deg)`,
+    // because `calc()` to a number and the Color-4 `$space` write are both unbuilt.
     // `$alpha:` is read **before** the "nothing else named" refusal below, because the corpus reports a bad
     // alpha even for a call that names nothing else: `color.change(red, $alpha: c)` →
     // `Error: $alpha: c is not a number or unquoted "none".` (`change/error/type.hrx::alpha`, and

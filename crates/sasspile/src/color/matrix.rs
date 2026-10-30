@@ -6,9 +6,12 @@
 
 use super::space::{Space, Transfer, White};
 
-/// The two reference whites, as the cone math reads them.
-/// `l = 0.964295676…`-style white points, as the cone math reads them.
-const D65: [f64; 3] = [0.950_455_938_644_184, 1.0, 1.089_057_772_410_216_8];
+/// The D50 reference white, as the cone math reads it.
+///
+/// Only D50 is written down: the D65 side never needs its own triple, because the D50→D65 move is the one
+/// matrix below and the corpus's own D65 white (`to_space/srgb/xyz.hrx::white` answers
+/// `color(xyz 0.9504559271 1 1.0890577508)`) comes out of applying it to the srgb primaries. A second
+/// hand-copied white is a second answer for one fact — the constant that used to sit here was never read.
 const D50: [f64; 3] = [0.964_295_675_687_546, 1.0, 0.825_104_602_578_703];
 
 /// Bradford cone-response matrix (D65-adapted form, as CSS Color 4 states it).
@@ -243,8 +246,12 @@ fn from_polar(lch: [f64; 3]) -> [f64; 3] {
 pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
     let white = space.white();
     let xyz = match space {
-        Space::Lab => xyz_to_lab(channels),
-        Space::Lch => xyz_to_lab(from_polar(channels)),
+        // The **inverse** curve: these channels are already Lab, so they go to XYZ. The sibling branch in
+        // [`of_xyz_d65`] is the forward one. This pair was inverted here once (the branch called
+        // `xyz_to_lab`, and `lab_to_xyz` sat unused — the dead-code warning was the finding), which a chained
+        // conversion hits as soon as a `lab` colour is read: `color.to-space(color.to-space(#abc, lab), srgb)`.
+        Space::Lab => lab_to_xyz(channels),
+        Space::Lch => lab_to_xyz(from_polar(channels)),
         Space::Oklab => oklab_to_xyz(channels),
         Space::Oklch => oklab_to_xyz(from_polar(channels)),
         Space::Xyz => return channels,

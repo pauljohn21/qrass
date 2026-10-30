@@ -224,14 +224,7 @@ pub(super) static COLOR_SPACE: Builtin = Builtin {
 /// inventing a number the error-message work (P7) has not stated.
 fn in_space(args: Vec<Value>) -> Result<Value, SassError> {
     let decline = || SassError::new("not a colour space this slice can build");
-    let (parts, alpha) = match args.as_slice() {
-        [Value::Space(parts)] => (parts.as_slice(), 1.0),
-        [Value::Slash(list)] => match list.as_slice() {
-            [Value::Space(parts), given] => (parts.as_slice(), alpha(given).ok_or_else(decline)?),
-            _ => return Err(decline()),
-        },
-        _ => return Err(decline()),
-    };
+    let (parts, given) = split_run(&args).ok_or_else(decline)?;
     let [name, channels @ ..] = parts else {
         return Err(decline());
     };
@@ -239,19 +232,36 @@ fn in_space(args: Vec<Value>) -> Result<Value, SassError> {
     let Value::Raw(text) = name else {
         return Err(decline());
     };
-    let Some(space) = Space::parse(text) else {
-        return Err(decline());
-    };
-    let [red, green, blue] = channels else {
-        return Err(decline());
-    };
-    let read = |value: &Value| match value {
-        // `none` is a channel that carries no value, kept as `None` — the print and the conversion both read
-        // that back (`to_space/srgb/lab.hrx::missing/*`).
+    let space = Space::parse(text).ok_or_else(decline)?;
+    build(space, channels, given).ok_or_else(decline)
+}
+
+/// One space run, in whichever of its two shapes it arrives: a bare list of components, or the list with an
+/// alpha behind a `/`. Owned here because `color(…)` and the functional forms (`lab(…)`, `lch(…)`, …) are the
+/// same run — only the space's *name* differs in where it comes from — and "a slash carries the alpha" must
+/// not be stated twice.
+fn split_run(args: &[Value]) -> Option<(&[Value], f64)> {
+    match args {
+        [Value::Space(parts)] => Some((parts.as_slice(), 1.0)),
+        [Value::Slash(list)] => {
+            let [Value::Space(parts), given] = list.as_slice() else {
+                return None;
+            };
+            Some((parts.as_slice(), alpha(given)?))
+        }
+        _ => None,
+    }
+}
+
+/// One channel of a run: `none` stays a powerless channel as data, and a number keeps the unit law the
+/// space implies (`lab(50% …)` is `L = 50`, `oklab(100% …)` is `L = 1`, `color(srgb 50% …)` is `0.5` —
+/// [`Space::percent_full`] is the one place that says which, and the printer multiplies by the same number).
+fn channel(value: &Value, space: Space) -> Option<Option<f64>> {
+    match value {
         Value::Raw(text) if text.eq_ignore_ascii_case("none") => Some(None),
         Value::Number(number, unit) => {
             let scaled = if unit.single() == Some("%") {
-                *number / crate::color::percent_scale(space)
+                *number / space.percent_full()
             } else {
                 *number
             };
@@ -259,11 +269,87 @@ fn in_space(args: Vec<Value>) -> Result<Value, SassError> {
                 .then_some(Some(scaled))
         }
         _ => None,
+    }
+}
+
+/// Three channels plus the alpha, into a colour that carries its own space. Anything the run cannot read
+/// declines the whole call — a `1px` quantity, a fourth component, an interpolation where a number sits.
+fn build(space: Space, parts: &[Value], alpha: f64) -> Option<Value> {
+    let [first, second, third] = parts else {
+        return None;
     };
     let channels = [
-        read(red).ok_or_else(decline)?,
-        read(green).ok_or_else(decline)?,
-        read(blue).ok_or_else(decline)?,
+        channel(first, space)?,
+        channel(second, space)?,
+        channel(third, space)?,
     ];
-    Ok(Value::Color(Color::in_space(space, channels, alpha)))
+    Some(Value::Color(Color::in_space(space, channels, alpha)))
 }
+
+/// CSS Color 4's **functional** forms — `lab(50% 50 -75)`, `lch(44.12% 60.09 280.5deg)`, `oklab(…)`, `oklch(…)`.
+/// They name their own space, so the run is exactly the three channels and the alpha, and every law behind
+/// that reading is the one `color(…)` already uses ([`split_run`], [`channel`], [`build]).
+///
+/// These are **not legacy colours**, which is what the corpus tests: `to_space/lab/srgb.hrx::middle` writes
+/// `color.to-space(lab(50% 50 -75), srgb)` and answers `color(srgb 0.5529242775 0.3381978942 0.9794902605)`,
+/// while `hue.hrx::error/non_legacy` refuses `color.hue(lch(0% 0 0deg))` outright — a colour built here prints
+/// in its own space and declines the byte/axis accessors through `Representation::InSpace`.
+fn functional(args: Vec<Value>, space: Space) -> Result<Value, SassError> {
+    let decline = || SassError::new("not a colour space this slice can build");
+    let (parts, alpha) = split_run(&args).ok_or_else(decline)?;
+    build(space, parts, alpha).ok_or_else(decline)
+}
+
+fn lab(args: Vec<Value>) -> Result<Value, SassError> {
+    functional(args, Space::Lab)
+}
+
+fn lch(args: Vec<Value>) -> Result<Value, SassError> {
+    functional(args, Space::Lch)
+}
+
+fn oklab(args: Vec<Value>) -> Result<Value, SassError> {
+    functional(args, Space::Oklab)
+}
+
+fn oklch(args: Vec<Value>) -> Result<Value, SassError> {
+    functional(args, Space::Oklch)
+}
+
+/// The four functional colour spaces, registered separately because a `Builtin` carries a fn pointer and the
+/// only difference between them is which space its run names.
+pub(super) static LAB: Builtin = Builtin {
+    name: "lab",
+    params: &["channels"],
+    optional: &[],
+    variadic: true,
+    labelled: None,
+    apply: lab,
+};
+
+pub(super) static LCH: Builtin = Builtin {
+    name: "lch",
+    params: &["channels"],
+    optional: &[],
+    variadic: true,
+    labelled: None,
+    apply: lch,
+};
+
+pub(super) static OKLAB: Builtin = Builtin {
+    name: "oklab",
+    params: &["channels"],
+    optional: &[],
+    variadic: true,
+    labelled: None,
+    apply: oklab,
+};
+
+pub(super) static OKLCH: Builtin = Builtin {
+    name: "oklch",
+    params: &["channels"],
+    optional: &[],
+    variadic: true,
+    labelled: None,
+    apply: oklch,
+};

@@ -16,13 +16,6 @@ impl Color {
     /// [`Self::hsl_channel`] serves. `hsl` → `rgb` therefore has no golden to be written against, while
     /// the reverse direction does and is implemented.
     pub fn byte(&self, index: usize) -> Option<f64> {
-        // A colour in its **own colour space** has no srgb bytes until something converts it, and
-        // `Color::in_space` leaves the byte triple empty — so a space colour declines a bare `color.red(…)`
-        // rather than answering `0`. `color.channel(…, "red", $space: srgb)` is the read that should serve
-        // this, and it needs the conversion below; it is not guessed here.
-        if self.space.is_some() {
-            return None;
-        }
         match self.representation {
             Representation::Legacy
             | Representation::Percent
@@ -32,6 +25,12 @@ impl Color {
                 .get(index)
                 .map(|channel: &Channel| channel.byte().round()),
             Representation::Hsl | Representation::Hwb => None,
+            // A colour in its own space has no srgb bytes until something converts it, so a bare
+            // `color.red(color(srgb …))` declines to its text rather than answering off the triple that the
+            // space colour leaves empty. The read that should serve it is
+            // `color.channel(…, "red", $space: srgb)`, which needs the conversion route wired into the
+            // accessor — not guessed here.
+            Representation::InSpace(..) => None,
         }
     }
 
@@ -55,13 +54,9 @@ impl Color {
     pub fn channel(&self, name: &str, space: Option<&str>) -> Option<Value> {
         let number = |value: f64| Value::Number(value, crate::unit::Unit::unitless());
         let percent = |value: f64| Value::Number(value, crate::unit::Unit::named("%"));
-        let rgb_space = matches!(
-            self.representation,
-            Representation::Legacy
-                | Representation::Percent
-                | Representation::Hex
-                | Representation::Named
-        );
+        // Which representations hold `0–255` bytes is judged once, by [`Color::writes_bytes`]; restating the
+        // variant list here is how a later variant would answer bytes it does not store.
+        let rgb_space = self.writes_bytes();
         match name {
             "red" | "green" | "blue" => {
                 let index = match name {
@@ -164,13 +159,17 @@ impl Color {
     }
 
     /// One axis of the colour, wherever it is stored: the channels themselves for an `hsl` colour, the
-    /// [`crate::axes`] round trip for a colour held in another space.
+    /// [`crate::axes`] round trip for a colour held in another legacy space.
     ///
-    /// The converted reading is what the corpus asks for, row by row: `color.lightness(#abcdef)` →
-    /// `80.3921568627%` is `(239 + 171)/2` of 255 and `color.saturation(#abcdef)` → `68%` is
-    /// `68/(510-410)`, both from `modules/color/*.hrx`. These three rows are why the conversion is safe to
-    /// read here; an `hsl` colour's own axes are already stored, so no round trip is taken for them.
+    /// `None` for a colour in its own colour space — the corpus wants an error there, not a number
+    /// (`hue.hrx::error/non_legacy`, `saturation.hrx::error/non_legacy`, `lightness.hrx::error/non_legacy`),
+    /// and the refusal is stated once by [`Color::axes_of`] rather than by this accessor remembering to ask.
+    ///
+    /// For the legacy families the converted reading is what the corpus asks for, row by row:
+    /// `color.lightness(#abcdef)` → `80.3921568627%` is `(239 + 171)/2` of 255 and
+    /// `color.saturation(#abcdef)` → `68%` is `68/(510-410)`, both from `modules/color/*.hrx`. Those rows are
+    /// why a round trip is safe here; an `hsl` colour's own axes are already stored, so none is taken for it.
     pub(super) fn hsl_channel(&self, index: usize) -> Option<f64> {
-        self.axes_of().get(index).copied()
+        self.axes_of().and_then(|axes| axes.get(index).copied())
     }
 }

@@ -2,6 +2,10 @@
 name = "ledger"
 version = "0.1.0"
 edition = "2024"
+# The `capability` binary (src/bin/) made `cargo run -p ledger` ambiguous, which broke the mandated
+# starting ritual (`cargo run -q -p ledger -- runs …`). One named default keeps every existing invocation
+# working while the second binary stays reachable through `--bin capability`.
+default-run = "ledger"
 license = "MIT"
 description = "SQLite ledger for sass-spec A/B snapshots (replaces per-round reports/*.tsv sprawl)"
 

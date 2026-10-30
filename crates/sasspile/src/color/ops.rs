@@ -19,24 +19,27 @@ impl Color {
     ///
     /// `color.grayscale` is the same entry with saturation pinned to zero, which is why it no longer needs
     /// its own path.
-    pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Self {
-        // A colour in its own colour space has no hsl axes stored, and deriving them from the empty byte
-        // triple would answer `complement(color(srgb …))` with a colour read off zeros. Leaving it as it came
-        // is the honest half of this: the Color-4 rule the corpus asks for is a conversion through the named
-        // space (`complement.hrx::space/missing/modern/different` writes
+    pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Option<Self> {
+        // A colour in its own space is refused **by this judge**, which answers `None` for
+        // `Representation::InSpace`: deriving axes from the byte triple it does not carry answered
+        // `complement(color(srgb …))` with zeros, and echoing the input back claimed the operation had
+        // happened. The Color-4 rule the corpus asks for is a conversion through the named space
+        // (`complement.hrx::space/missing/modern/different` writes
         // `color.complement(color(srgb none 100 200), $space: oklch)` and expects converted channels, and
-        // `grayscale.hrx::modern/predefined` expects `color(xyz …)` to come out changed), which this slice
-        // has not built — so this echo is an **open defect**, recorded in `tasks.md` 9.9, not an answer.
-        if self.is_spaced() {
-            return self.clone();
-        }
-        let [hue, saturation, lightness] = change(self.axes_of());
+        // `grayscale.hrx::modern/predefined` expects `color(xyz …)` to come out changed), which this slice has
+        // not built. Said plainly, because the distinction matters to the next reader: **no corpus row reaches
+        // this refusal today** — those calls already decline at argument binding, because `$space:` is not a
+        // declared parameter of them (`builtins/mod.rs` reports the unknown label and the call keeps its text),
+        // so the error this path returns has zero measured hits. Making `$space:` a parameter of the
+        // Color-4 accessors is the precondition for the refusal ever being exercised; `tasks.md` 9.9 keeps it
+        // open.
+        let [hue, saturation, lightness] = change(self.axes_of()?);
         let axes = [
             hue.rem_euclid(360.0),
             saturation.clamp(0.0, 100.0),
             lightness.clamp(0.0, 100.0),
         ];
-        match self.representation {
+        Some(match self.representation {
             Representation::Hsl => Self {
                 channels: [
                     Channel {
@@ -82,11 +85,14 @@ impl Color {
                     // A `hwb` colour moved through the axes becomes an ordinary hsl value; there is no
                     // “as written” triple behind it beyond these axes, which `axes_of` already returns.
                     authored: None,
-                    space: None,
                 }
             }
+            // Named, not folded into `_`: unreachable through the `?` above, and a future variant must not
+            // fall into the bytes path silently — that silence is how a space colour came to print
+            // `rgb(0, 0, 0)`.
+            Representation::InSpace(..) => return None,
             _ => Self::from_axes(self, axes),
-        }
+        })
     }
 
     /// The same colour with its **hsl axes written, without clamping** — `color.change`'s law, which is
@@ -99,17 +105,15 @@ impl Color {
     /// `None` for a `hwb`-created colour: it stores whiteness and blackness, and no fixture says what
     /// writing hsl axes into it means, so the call declines instead of inventing a round trip.
     pub fn with_axes(&self, write: impl FnOnce([f64; 3]) -> [f64; 3]) -> Option<Self> {
-        // Same reason as in [`Self::transform_axes`]: writing hsl axes onto a colour that carries its own
-        // space would silently throw that space away and print srgb bytes.
-        if self.is_spaced() {
-            return None;
-        }
+        // The same refusal as [`Self::transform_axes`], stated once by [`Color::axes_of`]: writing hsl axes onto
+        // a colour that carries its own space would silently throw that space away and print srgb bytes.
+        let current = self.axes_of()?;
         match self.representation {
             Representation::Hwb => None,
             // The axes are the value, so they go straight back in — hue as a plain number of degrees and
             // the other two as percentages, exactly as [`Color::hsl`] stores them.
             Representation::Hsl => {
-                let [hue, saturation, lightness] = write(self.axes_of());
+                let [hue, saturation, lightness] = write(current);
                 Some(Self {
                     channels: [
                         Channel {
@@ -130,14 +134,13 @@ impl Color {
                     // The channels *are* the axes for an hsl colour, so there is nothing extra to remember:
                     // an out-of-gamut hsl value prints from `axes_of`, which returns exactly these.
                     authored: None,
-                    space: None,
                 })
             }
             // An `rgb`-family colour keeps its own representation and gains the bytes the new axes imply;
             // `to_css` then decides between numbers, percentages, hex, a keyword and — for axes outside the
             // gamut, which is what makes 120% visible — the hsl form.
             _ => {
-                let axes = write(self.axes_of());
+                let axes = write(current);
                 let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
                 Some(Self {
                     channels: rgb.map(|value| Channel {
@@ -151,7 +154,6 @@ impl Color {
                     // back from the implied bytes changes it when they fall outside the gamut
                     // (`color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)`, `change/hsl.hrx`).
                     authored: Some(axes),
-                    space: None,
                 })
             }
         }
@@ -177,31 +179,48 @@ impl Color {
             alpha: self.alpha,
             representation: self.representation,
             authored: Some(axes),
-            space: None,
         })
     }
 
-    /// The colour's axes: the stored ones when it is held in hsl, otherwise the round trip
-    /// ([`crate::axes`]) of its channels. `pub(super)` because [`super::Color::hsl_channel`] reads the same
-    /// axes an operation writes — one path, so an accessor and a `darken` cannot disagree about a colour's
-    /// lightness.
-    pub(super) fn axes_of(&self) -> [f64; 3] {
+    /// The colour's axes: the stored ones when it is held in hsl, the derived ones for a `hwb` colour,
+    /// otherwise the round trip ([`crate::axes`]) of its channels. `pub(super)` because
+    /// [`super::Color::hsl_channel`] reads the same axes an operation writes — one path, so an accessor and a
+    /// `darken` cannot disagree about a colour's lightness.
+    ///
+    /// **`None` for a colour in its own colour space**, and that is the whole point of the variant: such a
+    /// colour stores no hsl axes, so the legacy accessors have no number to hand back and decline to their
+    /// text — which is what the corpus asks for (`hue.hrx::error/non_legacy` answers
+    /// `color.hue(lch(0% 0 0deg))` with "only supported for legacy colors", not a hue). Reading the empty byte
+    /// triple instead is what produced `0%` and `rgb(85, 85, 85)` on 15 rows.
+    pub(super) fn axes_of(&self) -> Option<[f64; 3]> {
         match self.representation {
-            Representation::Hsl => self.channels.map(|channel| channel.value),
-            // A `hwb` colour's hsl axes are derived, not stored: `hwb(0deg, 30%, 40%)` is asked for as
-            // `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), and `color.channel` reads that
-            // same hue back (`channel/hwb.hrx::local/hue`).
-            Representation::Hwb => {
-                let [hue, whiteness, blackness] = self.channels.map(|channel| channel.value);
-                crate::axes::hwb_to_hsl(hue, whiteness, blackness)
-            }
-            _ => self.axes(),
+            Representation::Hsl => Some(self.stored_axes()),
+            Representation::Hwb => Some(self.hwb_axes()),
+            Representation::InSpace(..) => None,
+            Representation::Legacy
+            | Representation::Percent
+            | Representation::Hex
+            | Representation::Named => Some(self.axes()),
         }
+    }
+
+    /// The triple a colour **stores as written**: for `hsl` the hsl axes, for `hwb` hue/whiteness/blackness.
+    /// One statement, shared by [`Color::axes_of`] and the printer, so neither restates the reading.
+    pub(super) fn stored_axes(&self) -> [f64; 3] {
+        self.channels.map(|channel| channel.value)
+    }
+
+    /// A `hwb` colour's hsl axes, derived, not stored: `hwb(0deg, 30%, 40%)` is asked for as
+    /// `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), and `color.channel` reads that same hue
+    /// back (`channel/hwb.hrx::local/hue`). Shared by [`Color::axes_of`] and the printer for the same reason.
+    pub(super) fn hwb_axes(&self) -> [f64; 3] {
+        let [hue, whiteness, blackness] = self.stored_axes();
+        crate::axes::hwb_to_hsl(hue, whiteness, blackness)
     }
 
     /// The hsl axes of an `rgb`-space colour, via [`crate::axes`] — the conversion is pure `f64` and is
     /// tested there on its own, so this only hands it the channel values.
-    fn axes(&self) -> [f64; 3] {
+    pub(super) fn axes(&self) -> [f64; 3] {
         let [red, green, blue] = self.channels.map(|channel| channel.byte());
         crate::axes::rgb_to_axes(red, green, blue)
     }
@@ -220,7 +239,6 @@ impl Color {
             // The axes are re-derived from these bytes on demand, which is exact while they stay in the
             // gamut — and `transform_axes` clamps, so they do.
             authored: None,
-            space: None,
         }
     }
 
@@ -249,14 +267,14 @@ impl Color {
             (tilt + span) / (1.0 + tilt * span)
         } / 2.0
             + 0.5;
-        let channel = |colour: &Color, index: usize| match colour.representation {
-            Representation::Hsl | Representation::Hwb => None,
-            // A colour in its **own colour space** stores no srgb bytes here, and reading the empty byte
-            // triple would answer `rgb(0, 0, 0)` — a wrong value no pass count can see
+        let channel = |colour: &Color, index: usize| {
+            // [`Color::writes_bytes`] is the one judge of which representations store `0–255` bytes, so an
+            // `hsl`/`hwb` colour and a colour in its own space both answer `None` here: reading the byte triple
+            // the latter leaves behind would answer `rgb(0, 0, 0)` — a wrong value no pass count can see
             // (`tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`). Mixing across
             // spaces needs the conversion in [`crate::color::space`] driven by a common space, which is what
             // `mix/named.hrx::polar_space` and `::rectangular_space` ask for; it is not a guess here.
-            _ => (!colour.is_spaced()).then(|| colour.channels[index].byte()),
+            colour.writes_bytes().then(|| colour.channels[index].byte())
         };
         let [red, green, blue] = [0, 1, 2].map(|index| {
             let value = channel(first, index)? * ratio + channel(second, index)? * (1.0 - ratio);
@@ -270,7 +288,6 @@ impl Color {
             alpha: (first.alpha + second.alpha) / 2.0,
             representation: first.representation,
             authored: None,
-            space: None,
         })
     }
 }
