@@ -21,11 +21,19 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2822/11,533**（24.5%，**实质通过 2657** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `display-p3-solved-final`（2026-11-03：display-p3 的 Z 输出行后两项从语料解出，
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2918/11,533**（25.3%，**实质通过 2753** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `a98-curve-and-table`（2026-11-03：**`a98-rgb` 的传递曲线方向被反接**
+   ——`Transfer::A98` 用 `1/2.19921` 解码、`2.19921` 编码，而语料是 `linear = printed^(563/256)`；指数本身也取整错了。
+   分开它们的是“在该假设下拟合后的残差”，而量具现在会直接判：`hypothesis_holds=false` 时 **exit 4**（候选与残差表只住
+   在 `tasks.md` 9.17，这里不拷数字）；同一探针证明 `prophoto-rgb` 的方向本来就是对的。
+   矩阵按 9.16 的“只覆盖能分辨的项”重解（仅 `[0][0]` 保留发表值），**`regress=0 net=96`**；本会话四批累计
+   **`regress=0 net=420`**，无效错误仍 19，空库复算同读数；`ledger shift`：`changed=177 closer=160 farther=3
+   tie=0 error_expectation=0 shape_of_text=14`，**`farther=3` 具名**：`to_space/a98_rgb/hsl::{gray,white}`（金样中性，
+   色相由噪声决定——距离度量把无意义的色相算了进去）、`to_space/a98_rgb/rec2020::out_of_range/far`）。
+   守卫 `tests/color_a98.rs`。其前一批 run `display-p3-solved-final`（2026-11-03：display-p3 的 Z 输出行后两项从语料解出，
    **`regress=0 net=165`**；其余七项因“拟合差不过自己的逐项散布”而保留转录值——整表换成拟合值实测 `net=136`，
    从另一侧拟合的整表 `net=168` 但破 `regress=0` 于 `to_space/display_p3_linear/srgb.hrx::out_of_range/far`；
-   本会话三批累计 `regress=0 net=324`，无效错误仍 19，空库复算同读数；`ledger shift`：
+   到该批为止三批累计 `regress=0 net=324`，无效错误仍 19，空库复算同读数；`ledger shift`：
    `changed=321 closer=241 farther=63 tie=1 error_expectation=0 shape_of_text=16`，**`farther=63` 全为“两侧之一带未校准族”**
    ——旧抄表的两个错原本部分抵消，不得把它当 `net` 的反面证据）。其前一批 run `missing-rectangular-v2`（同日本会话：`none` 缺通道在
    **索引对齐族**（rgb 系 + `xyz`/`xyz-d50`）之间按位置传播，`regress=0 net=44`；`ledger shift` 报
