@@ -24,13 +24,14 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
         Space::DisplayP3 | Space::DisplayP3Linear => Some(&[
             // `display-p3`'s Z-output-row's last two entries are the archive's, read off
             // `cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz`; the other seven
-            // entries are still the transcribed ones, and that split is a measurement rather than a taste —
-            // the instrument fits one relation from both files (`<src>/<dst>.hrx` and `<dst>/<src>.hrx`) and
-            // prints, per entry, how far the two fits disagree. For this matrix that noise floor runs
-            // `1.8e-11`…`2.6e-10`: `[2][1]` and `[2][2]` miss the transcription by `5.1e-9` and `6.9e-9`
-            // (36× and 393× their spread), while `[0][1]` misses by `5.3e-11` against a `2.6e-10` spread, so
-            // the fit has no standing to call that digit wrong. Replacing the whole fitted matrix anyway
-            // measured worse — `tasks.md` 9.16 has both readings.
+            // entries are still the transcribed ones, and that split is a measurement rather than a taste.
+            // What the instrument prints is the fit and, per entry, how far its two independent directions
+            // disagree - the noise floor of one digit, `1.8e-11`…`2.6e-10` here. An entry may only be replaced
+            // where the transcription misses the fit by **more** than its own spread; the three deltas that
+            // decided this row (`5.1e-9`, `6.9e-9`, and `5.3e-11` for `[0][1]`, which stayed) are recorded in
+            // `tasks.md` 9.16, where the transcribed values were still in the tree to subtract - the
+            // instrument itself never prints that difference. Replacing the whole fitted matrix anyway
+            // measured worse; both readings are in the same entry.
             [
                 0.486_570_948_648_212,
                 0.265_667_693_169_093,
@@ -74,11 +75,15 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
         Space::ProphotoRgb => Some(&[
             // Fitted from `to_space/prophoto_rgb/xyz.hrx` under `linear = printed^1.8`: re-measure with
             // `cargo run -q -p sasspile --example calibrate_space -- prophoto_rgb xyz 1.8` and read the
-            // caveats in `tasks.md` 9.18 — in particular that the archive's prophoto channels never drop below
-            // `0.1`, so this space's *linear segment* (`|channel| < 1/16`) is exercised by no row the fit saw.
+            // caveats in `tasks.md` 9.18. Scoped exactly, because the unscoped claim is false: **the rows this
+            // fit read** (prophoto-rgb as the *source*) never print a channel below `0.1`, so the decode segment
+            // (`|channel| < 1/16`) is exercised by none of them; prophoto as a *target* does print smaller
+            // (`to_space/oklch/prophoto_rgb.hrx::missing/x` has `0.0010727236`), and those are what constrain
+            // the encode segment (`1/512` in `super::matrix`).
             //
             // All nine entries missed the transcription by more than their own spreads, so the table is the
-            // archive's whole: worst `[0][0]`, a `4.2e-2` miss that printed
+            // archive's whole. The largest entry delta is `[0][0]` at `4.2e-2`; composed onto the archive's own
+            // white row that shows as a `3.4e-2` miss, which printed
             // `color(xyz 0.9845637886 0.9989843031 1.089497388)` for the row the archive states as
             // `color(xyz 0.9504559271 1 1.0890577508)` (`to_space/prophoto_rgb/xyz.hrx::white`). It lands on
             // the D65 white by itself, which is why `Space::white()` no longer adapts this space a second time.
@@ -99,9 +104,14 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
             ],
         ]),
         Space::Rec2020 => Some(&[
-            // Still the transcribed table: rec2020's transfer carries an offset (`α = 1.09929682680944`),
-            // so a pure-power hypothesis is refused outright by the instrument's verdict rather than fitted and
-            // believed — `tasks.md` 9.17 records that measurement (`-- rec2020 xyz 2.2` → 2.4e8× its resolution).
+            // Still the transcribed table. Two separate things are wrong here and they must not be merged:
+            // * its transfer carries an offset (`α = 1.09929682680944`), so a pure-power hypothesis is judged
+            //   **not to hold** by the instrument (`-- rec2020 xyz 2.2` → `2.4e8×` its resolution, exit 4;
+            //   `tasks.md` 9.17) - that one needs a different fit;
+            // * the table itself disagrees with a curve-free fact the archive states: `color(rec2020 1 1 1)` is
+            //   `color(xyz 0.9504559271 1 1.0890577508)` (`to_space/rec2020/xyz.hrx::white`, red in run
+            //   `prophoto-solved-v2` with got `… 0.9999999304 … 1.0890577507`), i.e. the transcribed row sums
+            //   miss the white this space declares by `7e-8`. No curve hypothesis is needed to see that.
             [
                 0.636_958_048_301_291,
                 0.144_616_903_586_043,

@@ -7,8 +7,9 @@
 //! `to_space/prophoto_rgb/xyz.hrx` — see `tasks.md` 9.18 for the numbers and the segment caveat) lands on the
 //! D65 white by itself: `to_space/prophoto_rgb/xyz.hrx::white` states
 //! `color(xyz 0.9504559271 1 1.0890577508)`, and the composed pair used to answer
-//! `color(xyz 0.9845637886 0.9989843031 1.089497388)` — a `4.2e-2` miss on a channel the archive reads at
-//! the tenth decimal.
+//! `color(xyz 0.9845637886 0.9989843031 1.089497388)` — a `3.4e-2` miss in X on a row the archive reads at the
+//! tenth decimal. (The `4.2e-2` figure belongs to the `[0][0]` entry itself, not to this row; the two are
+//! different objects and were conflated in an earlier draft of this file.)
 //!
 //! Every one of the nine entries missed the transcription by more than its own two-direction spread, so the
 //! whole table is the archive's now; `white()` therefore lists only `xyz-d50`, `lab` and `lch` as D50, and the

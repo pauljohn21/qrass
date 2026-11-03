@@ -45,8 +45,9 @@ use crate::value::Value;
 mod matrix;
 mod ops;
 /// The primaries tables, split out of [`space`] when those tables and their provenance pushed that file past
-/// the line budget. Each table says which command measured it; the readings behind a fitted digit live once,
-/// in `openspec/…/tasks.md` for that batch.
+/// the line budget. Four are literal tables here and the fifth (`srgb`) is a delegation to the constant in
+/// [`color::matrix`]; each one that was **fitted** names the command that measured it, and the readings behind
+/// a fitted digit live once, in `openspec/…/tasks.md` for that batch.
 mod primaries;
 mod read;
 mod space;

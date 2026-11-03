@@ -13,8 +13,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Which side of a pair is printed through a transfer curve. A **binary fact, so it is a value**: the first
-/// version carried it as `"from"`/`"to"` string labels, compared by equality in three places, where a typo
-/// was indistinguishable from a correct reading at compile time.
+/// version carried it as `"from"`/`"to"` string labels compared by equality in three places, where a typo was
+/// indistinguishable from a correct reading at compile time. The gain is exactly that — the swaps and
+/// branches below can now match on the variants, so adding a third side fails to compile instead of silently
+/// falling through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
     From,
@@ -118,6 +120,12 @@ pub fn readings(
             let input = triple(&input, &space_name(from))?;
             let output = triple(&output, &space_name(to))?;
             let (printed_input, printed_output) = (input, output);
+            // The same signed power as `src/color/matrix.rs`'s `sp`, and deliberately a **second copy**:
+            // `sp` is private to the colour module, and this file must stay able to linearise a row under an
+            // exponent the library does not (yet) claim. The rule that keeps this honest is the one stated in
+            // `examples/calibrate_space.rs` about the duplicated `invert` - readings may be produced with it,
+            // but a number in the library is never copied back from here. If `sp` and this ever disagree, the
+            // fit's rows stop reproducing, which is what `verdict` is for.
             let power = |channels: [f64; 3], exponent: f64| {
                 channels.map(|channel| {
                     if channel == 0.0 {
@@ -128,11 +136,11 @@ pub fn readings(
                 })
             };
             let (input, output) = match curved {
-                Some(hypothesis) if hypothesis.side == Side::From => {
-                    (power(input, hypothesis.exponent), output)
-                }
-                Some(hypothesis) => (input, power(output, hypothesis.exponent)),
                 None => (input, output),
+                Some(hypothesis) => match hypothesis.side {
+                    Side::From => (power(input, hypothesis.exponent), output),
+                    Side::To => (input, power(output, hypothesis.exponent)),
+                },
             };
             Some(Reading {
                 case,

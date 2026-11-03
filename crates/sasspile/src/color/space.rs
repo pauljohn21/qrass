@@ -131,15 +131,33 @@ impl Space {
         super::primaries::table(self)
     }
 
+    /// Which white point the conversion routes this space through. Every variant is named on purpose: a
+    /// `_ => White::D65` fallback is the same shape this file elsewhere rejects (`unwrap_or(&BRADFORD)`, see
+    /// [`Self::primaries`]) — it would answer for a variant added later without ever being asked.
+    ///
+    /// For the five spaces with a primaries table this is **not** an independent fact: the table's own row
+    /// sums are its white, and the archive states them curve-free (`color(<space> 1 1 1)` survives any
+    /// transfer, since a power fixes 0 and 1). `to_space/*/xyz.hrx::white` is therefore the test of this
+    /// function, and one table currently disagrees with the white declared here:
+    /// `to_space/rec2020/xyz.hrx::white` prints `color(xyz 0.9504559271 1 1.0890577508)` while the
+    /// transcribed rec2020 row sums reach `color(xyz 0.9504559271 0.9999999304 1.0890577507)` — a `7e-8` defect
+    /// in the **table**, which must not be filed under "rec2020's curve hypothesis is unresolved".
     pub(super) fn white(self) -> White {
         match self {
             Self::XyzD50 | Self::Lab | Self::Lch => White::D50,
-            // `prophoto-rgb` is listed as D65 even though the pigment's reference white is D50, because the
-            // table below **already lands on the D65 white** - that is what the archive's rows say
-            // (`to_space/prophoto_rgb/xyz.hrx::white`) and what the fit reproduces. Declaring it D50 as well
-            // would adapt a second time, which is precisely the mistake this function's other arm exists to
-            // avoid; the white point belongs to the table, and here it is measured, not asserted.
-            _ => White::D65,
+            // `prophoto-rgb` is D65 here even though the pigment's reference white is D50, because the fitted
+            // table lands on the D65 white by itself (`to_space/prophoto_rgb/xyz.hrx::white`); declaring it D50
+            // as well would adapt a second time. The white travels with the table.
+            Self::Srgb
+            | Self::SrgbLinear
+            | Self::DisplayP3
+            | Self::DisplayP3Linear
+            | Self::A98Rgb
+            | Self::ProphotoRgb
+            | Self::Rec2020
+            | Self::Xyz
+            | Self::Oklab
+            | Self::Oklch => White::D65,
         }
     }
 
