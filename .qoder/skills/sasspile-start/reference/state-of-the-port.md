@@ -344,8 +344,16 @@ BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为�
   `rec2020`/`display_p3*` 在 `space.rs::matrix` 里的表与金样差到 7%（`to_space/xyz/display_p3.hrx::white`
   得 `1.0670616622 0.9807650128 0.9623860263`，金样 `1 1 1`）。下一批按同一方法从
   `to_space/xyz/<space>_linear.hrx` 解（线性传递⇒仍是纯线性，不沾曲线），而不是“多拄几位”。
-• **下一刀已经量成“只差一个能力”**：`missing/*`（全库 `ledger failures <run> "missing/" --count` = 945）里，
-  矩形族行的数字部分**已逐位对上**，缺的只是按位置传播 `none`（金样已集齐三条律：矩形族按位传播、
-  派生族按 `0` 代入、全缺则全缺）。前置是 `color::Channel{value,percent}` 要能携带“缺”——
-  这是值模型改动，不是开关；`InSpace.channels` 已经是 `[Option<f64>;3]`。
+• **缺通道已经拆成四块，其中一块已落（9.15）**：索引对齐族（`srgb`/`srgb-linear`/`display-p3*`/`a98-rgb`/
+  `prophoto-rgb`/`rec2020`/`xyz`/`xyz-d50`）之间**按位置保留 `none`**（缺者仍作为 `0` 入算术），**任一侧**为派生族时
+  代入 `0`，全缺则全缺——但 **`hsl` 形体例外**：它没有印 `none` 的手段，所以
+  `to_space/srgb/hsl.hrx::missing/all` 答 `hsl(0, 0%, 0%)` 而不是 `hsl(none none none)`。注意“目标为派生”方向的行
+  仍红在第十位（那是 9.14 的天花板，不是本律验过了）。判据入口是一个 `Space::is_derived()`（一族划分只写一次，
+  `is_functional` 与缺通道传播都读它，因为“两个臂列表就是一个划分的两个答案”）。
+  **剩下三块不得当作已做**：(a) 源为 legacy 形式时要 `color::Channel` 能携带“缺”（值模型改动，230 行）；
+  (b) polar 对——**不是“金样互斥”**而是“22 行里 20 行合一条候选律，只有 `to_space/lch/lab.hrx::missing/{lightness,non_hue}`
+  两行破律”（破的是 `lab` 自己，`oklch` 同形合律），逐行在 `tasks.md` 9.15；
+  (d) **`hwb` 目标有裸金样，不是“没定形体”**：`to_space/hwb/hwb.hrx` 不用 mixin，`::in_range`→`hsl(0, 55.5555555556%, 45%)`
+  而 `::missing/non_hue`→`hwb(10deg none none)`，“带不带缺”决定形体是语料自己的区分；而
+  `builtins/color/transfer.rs` 现在根本不接 `hwb` 目标，它的那句“靠 mixin 打印”只对 `to_space/srgb/hwb.hrx` 成立。
 

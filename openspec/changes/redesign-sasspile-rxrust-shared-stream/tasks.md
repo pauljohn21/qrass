@@ -1924,3 +1924,78 @@
         使子模块任何 git 写操作失败，已删。**教训入 `tooling-redlines.md`：脏状态必须先证明是字节级还是过滤器级，
         再决定说什么**（本次是我在同一个会话里第三次把“量具的输出形状”当成“世界的形状”）。
 
+- [x] 9.15 **`none` 缺通道在索引对齐族之间按位置传播（2026-11-03，基线 run `adaptation-white-final`）**：
+      接 9.14 的 ④——那一刀已量成“只差一个能力”，本批把它落下。
+      • **读数**：`ledger diff adaptation-white-final missing-rectangular` = **`regress=0 net=44`**
+        （2613→2657，23.0%，实质 2492，空期望 165，skipped 1264）；无效错误 **19 → 19**；空库复算同读数。
+        **审查后的终树重录为 `missing-rectangular-v2`，与前者逐读数全等**（`ledger diff calc-constants-final
+        missing-rectangular-v2` = `regress=0 net=159`，即本会话三批累计），往后引读数一律用这个名字。
+        `missing/` 家族从 913 红行降到 869（恰好等于 net，无兼带）。`ledger shift` 定侧：
+        `changed=169 closer=0 farther=0 tie=0 error_expectation=0 shape_of_text=169` ——
+        **169 行全落在 shape 类**。但不得拿那两个 0 当“测得没动距离”：`crates/ledger/src/shift_impl.rs` 里
+        shape 与 distance 是**互斥分支**，进 shape 的行根本不算法距离，所以它们是**未测**；而其中确有行的数字
+        被改动（`to_space/srgb/xyz.hrx::missing/red` 的第 0 位从发明的 `0.0250559706` 变成金样的 `none`）。
+        **本批前的说法“没动任何距离、报 0 就是 0”已被审查推翻并改成本句**——量具能分辨“更近/更远”只对
+        同形状的行成立，把它读成全局证据又是一个“量具输出形状当成世界形状”的案场。
+      • **三条律，各自有具名金样**（逐条从 `to_space/**` 读，不是推的）：
+        ① 索引对齐族（`srgb`/`srgb-linear`/`display-p3`/`display-p3-linear`/`a98-rgb`/`prophoto-rgb`/`rec2020`/
+          `xyz`/`xyz-d50`）之间按位置保留 `none`，且缺者仍参入算术为 `0`——
+          `to_space/xyz_d50/xyz.hrx::missing/x` 得 `color(xyz none 0.208311512 0.395008248)`，而后两个数字
+          **就是本批之前已经逐字相同的那两个**（只缺 `none`）；
+        ② **任一侧为派生族（lab/lch/oklab/oklch）就不传播**，三元组变成三个数——实现里的条件就是这一条，
+          不是“只看目标”。它目前的绿行只来自**源为派生**方向（`to_space/lab/srgb.hrx::missing/lightness` 答
+          `color(srgb 0.1653748669 -0.0646023407 -0.1599982587)`）；**目标为派生**的方向语料也有行（
+          `to_space/srgb/lab.hrx::missing/red` 要 `… -7.7361660103 …`），但本树得 `… -7.7361660069 …`，
+          仍红在第十位——那是 9.14 的天花板，不是本律验过了；
+        ③ 全缺则全缺，**但 `hsl` 形体例外**：`to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`、
+          `to_space/srgb/oklab.hrx::missing/all` → `oklab(none none none)`，而
+          `to_space/srgb/hsl.hrx::missing/all` → `hsl(0, 0%, 0%)`（`hsl` 形体没有印 `none` 的手段）。
+          **`hwb` 目标不是同一个故事**（见下面 (d)）：它有自己的裸金样。
+        守卫 `tests/color_missing_channels.rs`（三行都跑 `compile`，不钉内部）。阳性对照 = 本批前这些行全红，
+        而它们的数字部分当时已逐字对得上（`ledger failures adaptation-white-final` 存库 got 逐字可比）。
+      • **审查（gc-auditor）推翻的四处本批自己的说法**（全部已改入上面的句子，不是加 TODO）：
+        ① “`closer=0 farther=0` 即没动任何距离”是对量具的过度解读（shape 与 distance 互斥分支，那些行未算距离）；
+        ② 律②被写成“只看目标”，而实现的条件是“任一侧为派生族”，且它引的行其实是反方向的证据；
+        ③ “polar 三行两两互斥”不成立（22 行里 20 行合律，2 行破）；
+        ④ “`hwb` 目标无金样定它的形体”不成立（`to_space/hwb/hwb.hrx` 不用 mixin，7 行裸金样）。
+        另修：同一事实在四处成文且两处已过时（`InSpace` doc、`converted` doc 的“单 `none` 打数字”）、
+        “缺者入算术为 0”写了三遍（现已收成一个 `InSpace::filled()`）、`is_derived` 的 doc 把不读它的
+        `percent_full` 列为自己的后果（已删；它自己只分 `Lab|Lch`，把 oklab/oklch 归进去会打坏百分率）。
+
+      • **闸当场拦下一个写法**：第一版用 `std::array::from_fn(|index| …)` 做逐位掩蔽，`sasslint` 的
+        `no-from-fn-driver` 直接报 `count=1`，而 `crates/sasslint/tests/defence_fitness.rs` 的
+        `the_production_tree_is_clean` 跟着红——**没有改闸、没有改规则，改了写法**（数组解构 + `Option::map`，
+        不引入索引簿记）。第 11 次证明这些闸只靠“跑一下”不会主动被打断，得真跑。
+      • **未做（不得当作已交付）**：
+        (a) **源为 legacy 形式的缺通道**——`to_space/rgb/srgb.hrx::missing/red`（`rgb(none 20 30)` →
+            `color(srgb none 0.0784313725 0.1176470588)`）与 `to_space/hsl/**::missing/*`（96 行）要
+            `color::Channel{value,percent}` 能携带“缺”：这是值模型改动（现在只有 `InSpace` 能），不是开关；
+            同一改动也是 `hsl(none 20% 30%)` 能按原形体回写的前置。
+        (b) **polar 对（lab↔lch、oklab↔oklch）故意没碰**，但原因不是“金样不自洽到无法读”——本批先写成
+            “三行两两互斥”已被审查推翻，现按逐行复算重写：四份归档共 **22 条 `missing/*`**
+            （lab/lch 5、lch/lab 6、oklab/oklch 5、oklch/oklab 6），其中 **20 条同合一条候选律**：
+            光按位携带，派生通道只在其**全部**依赖都缺时才 `none`（如 `lab(10% none 30)` →
+            `lch(10% 30 90deg)`、`lab(10% none none)` → `lch(10% none none)`、`lch(10% none 30deg)` →
+            `lab(10% 0 0)`、`oklch(none none 10deg)` → `oklab(none 0 0)`）。**破律的只有 2 行**，都在
+            `lch` → `lab`：`to_space/lch/lab.hrx::missing/lightness`（`lch(none 20 30deg)` →
+            `lab(none none none)`）与 `…::missing/non_hue`（`lch(none none 10deg)` → `lab(none none none)`），
+            而 `oklch` 的同形两行却合律——所以破的是 `lab` 自己而不是极坐标代数。未推出这 2 行前不落，
+            因为按 20 行写规则就是静默发明那 2 行；本批对它们的行为是“代入 0”，仍红。
+        (c) `missing/` 剩下 869 行的堆成分。**口径与命令写在这里**（不写口径的计数就是第二个真值）：
+            `cargo run -q -p ledger -- failures missing-rectangular "missing/"` 取 key，按
+            下面这个**顺序**分桶（顺序换了数就变，这不是巧合而是定义）：非 `to_space` 78 行（在
+            `to_gamut`/`change` 等路径上），`to_space/` 下 791 行：**源为 legacy（hsl 96 + hwb 80 + rgb 54）= 230**
+            → 即 (a)；**目标为 legacy 形体 = 133（hwb 58、rgb 40、hsl 35）**→ 即 (d)；**同族 polar 对 = 10**
+            → 即 (b)；**任一侧带未校准 primaries = 305**→ 属 9.14 的下一个战役；**跨族派生↔派生 = 113**
+            （如 `lab→oklab`、`oklch→lch`，过 XYZ 那一条，既属 (b) 的律也属精度天花板，未拆）。
+            下一步因此不是“一条而是四块”：走 (a) 得 230（需值模型改动）、走 primaries 得 305（方法已由 9.14
+            建立：从 `to_space/xyz/<space>_linear.hrx` 解），不得拿“先碰哪个”当优先级。
+        (d) **`hwb` 目标现在根本不接，但它的形体是有裸金样的**（本批先写成“无金样定它的形体”是错的）：
+            `to_space/hwb/hwb.hrx` 整件不用 `@include`（该文件 `grep -c "@include"` = 0），
+            `::in_range` 写 `hsl(0, 55.5555555556%, 45%)`、`::out_of_range` 写 `hsl(200, 11.1111111111%, 212.5%)`，
+            而 `::missing/non_hue` 写 `hwb(10deg none none)`、`::missing/all` 写 `hwb(none none none)`。
+            同一份归档里“不带缺就用 hsl 形体、带缺就用 hwb 形体”是语料自己的区分，不是我的选择；
+            `builtins/color/transfer.rs:44-45` 那句“fixtures that convert to it print through a module mixin”
+            只对 `to_space/srgb/hwb.hrx` 成立，不得当作对整个 `hwb` 目标的理由。本批没动它（(d) 的 58 行仍红），
+            但它现在被具名而不是被一句“没金样”盖掉。
+

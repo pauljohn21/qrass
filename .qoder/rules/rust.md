@@ -21,8 +21,27 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2613/11,533**（22.66%，**实质通过 2448** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `adaptation-white-final`（2026-11-03：白点适应表**从语料解出** + D50 参考白改为**导出**，
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2657/11,533**（23.0%，**实质通过 2492** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `missing-rectangular-v2`（`missing-rectangular` 是审查前那一树的读数，两者全等；
+   2026-11-03：`none` 缺通道在**索引对齐族**（rgb 系 + `xyz`/`xyz-d50`）之间
+   按位置传播，**`regress=0 net=44`**（2613→2657）；`ledger shift` 定侧：`changed=169 closer=0 farther=0 error_expectation=0 shape_of_text=169`
+   —— 169 行**全部落在 shape 类**。注意这两个 0 的含义（量具源码 `shift_impl.rs` 里 shape 与 distance 是互斥分支）：
+   对这些行它**没算**距离，所以“closer=0 farther=0”是**未测**不是“测得没动”（不得拿它当“没动任何数字”的证据）；
+   无效错误仍 19，空库复算同读数）。
+   三条律各自有金样：矩形族按位传播且缺者仍`0`代入算术（`to_space/xyz_d50/xyz.hrx::missing/x` 得 `color(xyz none 0.208311512 0.395008248)`，
+   后两个数字与传播前已逐字相同的两个一致）、**任一侧为派生族**时不传播而代以 `0`（绿行只来自派生**源**：
+   `to_space/lab/srgb.hrx::missing/lightness` 打三个数；派生**目标**方向仍红在第十位，属 9.14 的天花板）、
+   全缺则全缺但 **`hsl` 形体例外**（`to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`，
+   `to_space/srgb/hsl.hrx::missing/all` → `hsl(0, 0%, 0%)`）。守卫 `tests/color_missing_channels.rs`。
+   **未做（不得当作已交付，也不能说成“只剩两条”）**：`missing/` 仍红 869 = `to_space/` 下 791 + 其余路径 78；
+   前者按桶看是四块：源为 legacy 形式 230 行（要 `color::Channel{value,percent}` 能携带“缺”，值模型改动）、
+   目标为 `hwb`/`rgb`/`hsl` 形体 83 行（**其中 `hwb` 目标是有裸金样的**：`to_space/hwb/hwb.hrx` 整件不用 mixin，
+   `::missing/non_hue` 写 `hwb(10deg none none)`、`::in_range` 却写 `hsl(0, 55.5555555556%, 45%)`，
+   而 `transfer.rs` 现在根本不接 `hwb` 目标）、派生↔派生跨族 36 行、以及索引对齐族内因 primaries 未校准而数字本身就错的其余行；
+   **polar 对（lab↔lch、oklab↔oklch）22 行里有 20 行合同一条候选律**（光按位携带；派生通道仅在其依赖全缺时才 `none`），
+   只剩 `to_space/lch/lab.hrx::missing/{lightness,non_hue}` 两行破律（oklch 同形反而合律）——所以破的是 `lab` 自己，
+   不是“三行两两互斥”；未推出前不落。
+   其前一批 run `adaptation-white-final`（2026-11-03：白点适应表**从语料解出** + D50 参考白改为**导出**，
    合计 **`regress=0 net=115`**，无效错误 **19 → 19**，空库复算同读数）。两刀：`adaptation-solved`（`regress=0 net=62`）——`color/matrix.rs`
    的 `BRADFORD` 原是 CSS Color 4 散文的 7 位抄表，语料算的不是它（抄表行和 `0.9957009 0.9993688 1.3289869`，金样 `0.9956342097 1.0026671299 1.3221722918`，
    最差单项 `6.9e-3`），现由 `cargo run -q -p sasspile --example calibrate_space` **从磁盘读 `to_space/xyz_d50/xyz.hrx`** 解出（对未参与求解的行残差 `5.0e-11`
@@ -32,11 +51,12 @@ alwaysApply: true
    `cargo run -q -p ledger --bin shift -- <base> <run>` 把它分为 `closer=555 farther=101 tie=0 error_expectation=0 shape_of_text=185`，并**具名**后两类；
    `farther=101` 中 96 条的某一侧带着尚未校准的 primaries（`a98_rgb`/`prophoto_rgb`/`rec2020`/`display_p3*`：旧抄表的两个错误原本部分抵消），其余 5 条
    具名在 `tasks.md` 9.14。**本批的精度天花板（不得再猜）**：表来在十位小数 ⇒ 每元素 `~5e-11`，由它反解的一侧仍有三行差最后一名（`to_space/xyz/xyz_d50.hrx::gray`、
-   `…::out_of_range/far`、`to_space/srgb/xyz_d50.hrx::white`）——这三行**故意不入守卫**。下一刀已被量成“只差一个能力”：`shape_of_text` 里 123 条期望含 `none` 通道，
-   且**它们的数字部分已经逐位对上**（`to_space/xyz_d50/srgb::missing/y` 得 `0.4444955555 -0.3279464385 0.6863615753`，金样要 `0.4444955555 none 0.6863615754`）
-   ⇒ 缺的是按位置传播 `none`（矩形族之间）、目标为派生族时按 `0` 代入、全缺则全缺（金样：`to_space/hsl/srgb.hrx::missing/all` → `color(srgb none none none)`、
-   `to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`、`to_space/hsl/hsl.hrx::missing/hue` → `hsl(none 20% 30%)`）；前置：`InSpace.channels` 已是
-   `[Option<f64>;3]`，`color::Channel{value,percent}` 还不是；其前一批 run `calc-constants-final`（2026-10-30：CSS 的**计算常数**在壳内读数
+   `…::out_of_range/far`、`to_space/srgb/xyz_d50.hrx::white`）——这三行**故意不入守卫**。当时量到的“只差一个能力”已由本批头部的
+   `missing-rectangular` 落下索引对齐族那一刀（剩下的按本节上面的四个桶分：legacy 源缺通道、目标为 legacy 形体、
+   跨族派生、polar 破律的两行）；
+   当时的金样根据仍成立（`to_space/hsl/srgb.hrx::missing/all` → `color(srgb none none none)`、
+   `to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`、`to_space/hsl/hsl.hrx::missing/hue` → `hsl(none 20% 30%)`），
+   而前置只完成了一半：`InSpace.channels` 早就是 `[Option<f64>;3]`，`color::Channel{value,percent}` 还不是。其前一批 run `calc-constants-final`（2026-10-30：CSS 的**计算常数**在壳内读数
    （`calc(pi)` → `3.1415926536`、`calc(e * 2)` → `5.4365636569`），共 **+14**（`regress=0 changed=0`、无效错误仍 19），
    守卫在 `tests/calculation.rs::calculation_constants_are_read_inside_the_shell`（已做阳性对照：撤掉判据即红）；
    本批做了一个**不是律的选择**：非有限数（`infinity`/`NaN`）留在壳内。两个方向都量过：放开则
