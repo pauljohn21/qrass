@@ -6,19 +6,62 @@
 
 use super::space::{Space, Transfer, White};
 
-/// The D50 reference white, as the cone math reads it.
+/// The D50 reference white, **derived rather than copied**: the srgb primaries applied to `(1, 1, 1)` are
+/// the archive's D65 white (`to_space/srgb/xyz.hrx::white` prints `color(xyz 0.9504559271 1 1.0890577508)`)
+/// and the adaptation below carries that onto D50. `xyz_to_lab` therefore divides by the very triple the
+/// adaptation lands on, so a neutral is neutral **by construction**.
 ///
-/// Only D50 is written down: the D65 side never needs its own triple, because the D50→D65 move is the one
-/// matrix below and the corpus's own D65 white (`to_space/srgb/xyz.hrx::white` answers
-/// `color(xyz 0.9504559271 1 1.0890577508)`) comes out of applying it to the srgb primaries. A second
-/// hand-copied white is a second answer for one fact — the constant that used to sit here was never read.
-const D50: [f64; 3] = [0.964_295_675_687_546, 1.0, 0.825_104_602_578_703];
+/// The transcribed `[0.964295675687546, 1.0, 0.825104602578703]` this replaced sat `8.3e-10` off the derived
+/// `X`, and that alone printed `lab(100.0000000018% 0.0000001274 0.0000000081)` for `color(srgb 1 1 1)` where
+/// the corpus states `lab(100% 0 0)` (`to_space/srgb/lab.hrx::white`): `a = 500 · (fx − fy)` turns a `1e-10`
+/// white mismatch into a `1.4e-7` chroma. Two literals for one white was also the second answer the file's
+/// own header forbids — the D65 side never needed its own triple, so neither does this one.
+fn d50() -> [f64; 3] {
+    adapt(
+        SRGB_PRIMARIES.map(|row| row.iter().sum::<f64>()),
+        White::D65,
+        White::D50,
+    )
+}
 
-/// Bradford cone-response matrix (D65-adapted form, as CSS Color 4 states it).
+/// Bradford-type white-point matrix, D50 → D65, **solved out of the archive** rather than transcribed.
+///
+/// What used to sit here were the digits the CSS Color 4 prose prints (`0.9555766 -0.0230393 0.0631636 …`).
+/// The corpus does not compute with them: its D50→D65 row sums are `0.9956342097 1.0026671299 1.3221722918`
+/// (`to_space/xyz_d50/xyz.hrx::white`) while the copied table summed to `0.9957009 0.9993688 1.3289869` —
+/// worst entry off by `6.9e-3` (`1.3303659262` against `1.3372652`). Neutrals barely noticed; anything
+/// reaching D50 did, which is every `lab`, `lch` and `xyz-d50` conversion.
+///
+/// `cargo run -q -p sasspile --example calibrate_space` reads `to_space/xyz_d50/xyz.hrx` from disk and
+/// solves this table: `out_of_range/far` (`color(xyz-d50 -999999 0 0)`) states the first column at the
+/// archive's full resolution, and the `white` + `out_of_range/near` pair — determinant `1.6` — states the
+/// other two. Worst residual over the rows **not** used by the solve is `5.0e-11`, which is the half-step
+/// of the archive's tenth decimal place, so the table matches the corpus as closely as the corpus can be
+/// read. `tests/color_adaptation.rs` pins rows from both directions of the pair.
+///
+/// The ceiling this route cannot pass, measured rather than asserted: a table fitted to rows printed at ten
+/// decimal places is knowable to about `5e-11` per entry, so the **derived** side of the pair keeps three
+/// rows red by one unit in that last place — `to_space/xyz/xyz_d50.hrx::gray` (archive `0.5014942182`, we
+/// print `0.5014942183`), `to_space/xyz/xyz_d50.hrx::out_of_range/far` (worst channel archive
+/// `−29627.7791422469`, we print `−29627.7791449956`: `2.75e-6` absolute, `9.3e-11` relative), and
+/// `to_space/srgb/xyz_d50.hrx::white` (archive `0.9642956764`, we print `0.9642956765`). Anything claiming
+/// better digits than that from these fixtures is reading a number the archive never printed.
 const BRADFORD: [[f64; 3]; 3] = [
-    [0.955_576_6, -0.023_039_3, 0.063_163_6],
-    [-0.028_289_5, 1.006_652_5, 0.021_005_8],
-    [0.012_298_2, -0.020_576_5, 1.337_265_2],
+    [
+        0.955_473_421_488_075_2,
+        -0.023_098_454_977_640_986,
+        0.063_259_243_189_565_8,
+    ],
+    [
+        -0.028_369_709_333_863_534,
+        1.009_995_398_000_994_1,
+        0.021_041_441_232_869_385,
+    ],
+    [
+        0.012_314_014_864_481_963,
+        -0.020_507_649_308_403_597,
+        1.330_365_926_243_921_6,
+    ],
 ];
 
 /// The CIE epsilon/kappa pair the Lab curves are defined with.
@@ -176,12 +219,14 @@ fn lab_inverse(f: f64) -> f64 {
 
 /// D50-referenced XYZ → `lab`.
 fn xyz_to_lab(xyz_d50: [f64; 3]) -> [f64; 3] {
-    let f = |index: usize| lab_f(xyz_d50[index] / D50[index]);
+    let white = d50();
+    let f = |index: usize| lab_f(xyz_d50[index] / white[index]);
     let (fx, fy, fz) = (f(0), f(1), f(2));
     [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
 }
 
 fn lab_to_xyz(lab: [f64; 3]) -> [f64; 3] {
+    let white = d50();
     let fy = (lab[0] + 16.0) / 116.0;
     let fx = fy + lab[1] / 500.0;
     let fz = fy - lab[2] / 200.0;
@@ -193,9 +238,9 @@ fn lab_to_xyz(lab: [f64; 3]) -> [f64; 3] {
         lab[0] / LAB_KAPPA
     };
     [
-        lab_inverse(fx) * D50[0],
-        y * D50[1],
-        lab_inverse(fz) * D50[2],
+        lab_inverse(fx) * white[0],
+        y * white[1],
+        lab_inverse(fz) * white[2],
     ]
 }
 
@@ -308,7 +353,7 @@ pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
         other => {
             let transfer = other.transfer();
             let decoded = channels.map(|value| transfer.decode(value));
-            apply(other.matrix().unwrap_or(&BRADFORD), decoded)
+            apply(other.primaries(), decoded)
         }
     };
     adapt(xyz, white, White::D65)
@@ -325,7 +370,7 @@ pub fn of_xyz_d65(space: Space, xyz: [f64; 3]) -> [f64; 3] {
         Space::Oklch => to_polar(xyz_to_oklab(xyz)),
         other => {
             let in_white = adapt(xyz, White::D65, other.white());
-            let linear = apply(&invert(other.matrix().unwrap_or(&BRADFORD)), in_white);
+            let linear = apply(&invert(other.primaries()), in_white);
             let transfer = other.transfer();
             linear.map(|value| transfer.encode(value))
         }

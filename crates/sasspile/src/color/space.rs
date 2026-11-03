@@ -182,6 +182,16 @@ impl Space {
         }
     }
 
+    /// The primaries table of a space whose channels **are** RGB-like. [`Self::matrix`] is an `Option`
+    /// because the rest (`xyz`, `xyz-d50`, `lab`, `lch`, `oklab`, `oklch`) answer with their own math in
+    /// [`super::matrix`] and never reach here; the fallback this replaces (`unwrap_or(&BRADFORD)`) answered
+    /// a missing table by using the white-point matrix as if it were primaries — a number no fixture
+    /// states, and one that would have gone unnoticed if a variant were added without its arm.
+    pub(super) fn primaries(self) -> &'static [[f64; 3]; 3] {
+        self.matrix()
+            .expect("a space that reaches the primaries arm has a primaries table")
+    }
+
     pub(super) fn transfer(self) -> Transfer {
         match self {
             Self::Srgb | Self::DisplayP3 => Transfer::Srgb,
