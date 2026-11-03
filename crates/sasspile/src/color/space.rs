@@ -123,98 +123,22 @@ impl Space {
         }
     }
 
-    /// The primaries matrix, linear-light of this space to XYZ **at the space's own white**. `None` for the
-    /// spaces whose channels already are (or are derived from) XYZ.
+    /// The primaries matrix, linear-light of this space to XYZ **at the white the table itself lands on**.
+    /// `None` for the spaces whose channels already are (or are derived from) XYZ. The tables and the
+    /// provenance of every fitted digit live in [`super::primaries`], which is a separate file because these
+    /// tables plus those notes pushed this one past the line limit.
     pub(super) fn matrix(self) -> Option<&'static [[f64; 3]; 3]> {
-        match self {
-            Self::Srgb | Self::SrgbLinear => Some(&super::matrix::SRGB_PRIMARIES),
-            // `display-p3`'s Z-output-row's last two entries are the archive's, read off
-            // `cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz`; the other seven
-            // entries are still the transcribed ones, and that split is a measurement rather than a taste.
-            // The instrument fits the same relation from both files (`<src>/<dst>.hrx` and `<dst>/<src>.hrx`)
-            // and prints, per entry, how far the two fits disagree — for this matrix that noise floor runs
-            // `1.8e-11`…`2.6e-10`. An entry may only be replaced where the transcription misses the fit by
-            // **more** than that: `[2][1]` misses by `5.1e-9` against a spread of `1.4e-10` (36×) and
-            // `[2][2]` by `6.9e-9` against `1.8e-11` (393×), while `[0][1]` misses by `5.3e-11`, which is
-            // *less* than its own `2.6e-10` spread — so the fit has no standing to call that digit wrong and
-            // it kept its published value. Replacing the whole fitted matrix anyway measured worse: `net=136`
-            // for the fit-from-both-sides table against `net=165 regress=0` here, and the other fit direction
-            // reached `net=168` but broke `regress=0` on `to_space/display_p3_linear/srgb.hrx::out_of_range/far`
-            // (`-362.9953097598` against the archive's `-362.9953097609`), because a `-999999` input turns the
-            // fit's `1e-10` noise into a visible digit. `165` rows ride on this pair of entries.
-            Self::DisplayP3 | Self::DisplayP3Linear => Some(&[
-                [
-                    0.486_570_948_648_212,
-                    0.265_667_693_169_093,
-                    0.198_217_285_234_362,
-                ],
-                [
-                    0.228_974_564_069_775,
-                    0.691_738_521_836_506,
-                    0.079_286_914_093_745,
-                ],
-                [0.0, 0.045_113_381_937_499_92, 1.043_944_368_862_499_9],
-            ]),
-            Self::A98Rgb => Some(&[
-                // Fitted from `to_space/a98_rgb/xyz.hrx` under the surviving curve hypothesis; re-measure
-                // with `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz 2.19921875` and
-                // read the why in `tasks.md` 9.17 (one place, because the same numbers copied into a second
-                // file are how this repository keeps acquiring a second answer).
-                //
-                // Only `[0][0]` is kept from the transcription: every other entry misses the fit by more than
-                // that entry's own two-direction spread, and the Z output row is the worst of them - it is why
-                // the old table failed the archive's own white invariant. `to_space/a98_rgb/xyz.hrx::white`
-                // states `color(xyz 0.9504559271 1 1.0890577508)`, which that row now reproduces and previously
-                // answered `color(xyz 0.9521708788 1.0000000001 1.0506135487)` (run `display-p3-solved-final`).
-                [
-                    0.576_669_042_910_13,
-                    0.185_558_237_964_962_82,
-                    0.188_228_646_224_906_43,
-                ],
-                [
-                    0.297_344_975_250_536_2,
-                    0.627_363_566_245_409_3,
-                    0.075_291_458_504_054_44,
-                ],
-                [
-                    0.027_031_361_386_412_37,
-                    0.070_688_852_583_802_32,
-                    0.991_337_536_829_785_1,
-                ],
-            ]),
-            Self::ProphotoRgb => Some(&[
-                [
-                    0.797_760_489_672_548,
-                    0.137_194_907_788_244,
-                    0.065_037_549_835_993,
-                ],
-                [
-                    0.288_071_128_224_072,
-                    0.711_835_993_922_564,
-                    0.000_089_931_689_853,
-                ],
-                [0.0, 0.0, 0.825_104_602_595_398],
-            ]),
-            Self::Rec2020 => Some(&[
-                [
-                    0.636_958_048_301_291,
-                    0.144_616_903_586_043,
-                    0.168_880_975_164_172,
-                ],
-                [
-                    0.262_703_970_245_312,
-                    0.677_998_271_772_319,
-                    0.059_297_688_361_440,
-                ],
-                [0.0, 0.028_072_693_049_087, 1.060_985_057_639_950],
-            ]),
-            _ => None,
-        }
+        super::primaries::table(self)
     }
 
     pub(super) fn white(self) -> White {
         match self {
-            Self::ProphotoRgb | Self::XyzD50 | Self::Lab | Self::Lch => White::D50,
+            Self::XyzD50 | Self::Lab | Self::Lch => White::D50,
+            // `prophoto-rgb` is listed as D65 even though the pigment's reference white is D50, because the
+            // table below **already lands on the D65 white** - that is what the archive's rows say
+            // (`to_space/prophoto_rgb/xyz.hrx::white`) and what the fit reproduces. Declaring it D50 as well
+            // would adapt a second time, which is precisely the mistake this function's other arm exists to
+            // avoid; the white point belongs to the table, and here it is measured, not asserted.
             _ => White::D65,
         }
     }

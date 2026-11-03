@@ -34,7 +34,7 @@ use std::path::Path;
 #[path = "../tests/common/hrx_read.rs"]
 mod hrx_read;
 
-use crate::hrx_read::{Reading, readings, sections, triple};
+use crate::hrx_read::{Hypothesis, Reading, Side, readings, sections, triple};
 
 /// One archive reading lives in `hrx_read`; what is left here is the fit and its verdicts.
 
@@ -142,14 +142,30 @@ fn verdict(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (bool, f64) {
     })
 }
 
-/// The smallest nonzero magnitude this fit actually saw, **in the linearised space it fitted in** (so
-/// `prophoto-rgb`'s printed `0.1` arrives as `0.0158` under `1.8`). A piecewise curve (`prophoto-rgb`'s linear
-/// segment below `1/16` on the printed side, `rec2020`'s below `0.081/4.5`) is **not** constrained by rows
-/// that never enter that segment, and a residual cannot say otherwise — so this is printed beside the verdict
-/// instead of leaving the reader to re-derive which branches the archive's rows exercised. Compare it against
-/// the segment's own domain before reading it: printed-side thresholds need the printed minimum, which this
-/// file no longer shows.
-fn smallest_channel(rows: &[Reading]) -> f64 {
+/// The smallest nonzero **printed** channel on the curved side only. A piecewise transfer decides its branch on
+/// the printed value of its own channels (`prophoto-rgb` against `1/16`, `rec2020` against `0.081/4.5`), so
+/// this — not a pooled figure over both sides, and not the linearised value — is what says whether the segment
+/// branch was exercised by these rows at all. `None` when neither side is curved: there is no segment to have
+/// exercised. (A first version pooled both sides and reported prophoto's `0.0276` — that is an *XYZ output*,
+/// while the archive's prophoto channels never drop below `0.1`.)
+fn smallest_curved_printed(rows: &[Reading], curved: Option<Hypothesis>) -> Option<f64> {
+    let minimum = rows
+        .iter()
+        .flat_map(move |row| match curved {
+            Some(hypothesis) if hypothesis.side == Side::From => row.printed_input,
+            Some(_) => row.printed_output,
+            None => [0.0; 3],
+        })
+        .map(f64::abs)
+        .filter(|magnitude| *magnitude > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    (curved.is_some())
+        .then_some(minimum)
+        .filter(|_| minimum.is_finite())
+}
+
+/// The smallest nonzero channel in the linearised space the fit actually solved in.
+fn smallest_linear(rows: &[Reading]) -> f64 {
     rows.iter()
         .flat_map(|row| row.input.into_iter().chain(row.output))
         .map(f64::abs)
@@ -256,8 +272,14 @@ fn main() {
         gamma,
     ) {
         (true, true, None) => None,
-        (false, true, Some(exponent)) => Some(("from", exponent)),
-        (true, false, Some(exponent)) => Some(("to", exponent)),
+        (false, true, Some(exponent)) => Some(Hypothesis {
+            side: Side::From,
+            exponent,
+        }),
+        (true, false, Some(exponent)) => Some(Hypothesis {
+            side: Side::To,
+            exponent,
+        }),
         (true, true, Some(_)) => {
             tracing::error!(
                 "both sides are linear-printed; a third argument would imply a curve that is not there"
@@ -309,14 +331,30 @@ fn main() {
         dst.as_str(),
         src.as_str(),
         &mirrored,
-        curved_side.map(|(side, exponent)| (if side == "from" { "to" } else { "from" }, exponent)),
+        // The mirrored file swaps which side carries the curve; the enum makes that swap exhaustive.
+        curved_side.map(|hypothesis| Hypothesis {
+            side: match hypothesis.side {
+                Side::From => Side::To,
+                Side::To => Side::From,
+            },
+            exponent: hypothesis.exponent,
+        }),
     );
     let direct = solve(&back);
     let via_inverse = invert(&solved);
     tracing::info!(
         rows = rows.len(),
         from = %format!("{src}/{file}"),
-        hypothesis = curved_side.map_or("none (both sides linear)".to_string(), |(side, exponent)| format!("{side} side linearised as a signed power {exponent}")),
+        hypothesis = curved_side.map_or("none (both sides linear)".to_string(), |hypothesis| {
+            format!(
+                "{} side linearised as a signed power {}",
+                match hypothesis.side {
+                    Side::From => "input",
+                    Side::To => "output",
+                },
+                hypothesis.exponent
+            )
+        }),
         "archive rows read"
     );
     (0..3).for_each(|index| {
@@ -340,7 +378,8 @@ fn main() {
         residual = absolute,
         relative = relative,
         printed_magnitude = magnitude,
-        smallest_channel = smallest_channel(&rows),
+        smallest_curved_printed_channel = smallest_curved_printed(&rows, curved_side),
+        smallest_linear_channel = smallest_linear(&rows),
         hypothesis_holds = holds,
         worst_within_resolution_times = worst_ratio,
         "forward rows reproduced"
@@ -378,6 +417,9 @@ fn main() {
                 case: "srgb/xyz_d50.hrx::white".into(),
                 input: d50,
                 output: d65,
+                // This pair is linear on both sides, so the printed and linearised triples are the same.
+                printed_input: d50,
+                printed_output: d65,
             }],
         );
         tracing::info!(

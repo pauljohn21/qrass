@@ -44,6 +44,10 @@ use crate::value::Value;
 
 mod matrix;
 mod ops;
+/// The primaries tables, split out of [`space`] when those tables and their provenance pushed that file past
+/// the line budget. Each table says which command measured it; the readings behind a fitted digit live once,
+/// in `openspec/…/tasks.md` for that batch.
+mod primaries;
 mod read;
 mod space;
 mod text;

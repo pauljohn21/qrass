@@ -12,11 +12,35 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// One archive reading: the case name, the input triple, the printed output triple.
+/// Which side of a pair is printed through a transfer curve. A **binary fact, so it is a value**: the first
+/// version carried it as `"from"`/`"to"` string labels, compared by equality in three places, where a typo
+/// was indistinguishable from a correct reading at compile time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    From,
+    To,
+}
+
+/// A curve hypothesis under test: which side of a pair is curved, and with which **decode** exponent
+/// (`linear = printed^exponent`). The instrument never claims this is the archive's law — it fits under it and
+/// reports whether the result can be told from the archive's own rows.
+#[derive(Clone, Copy, Debug)]
+pub struct Hypothesis {
+    pub side: Side,
+    pub exponent: f64,
+}
+
+/// One archive reading: the case name, the input triple, the printed output triple, and **the same two
+/// triples before any linearisation**. The raw pair is kept because a piecewise transfer decides its branch
+/// on the printed value (`prophoto-rgb` compares `|channel|` to `1/16`, `rec2020` to `0.081/4.5`), while a fit
+/// runs on linearised ones — without both, "the segment branch was never exercised by these rows" would be a
+/// reader's inference rather than a printed fact.
 pub struct Reading {
     pub case: String,
     pub input: [f64; 3],
     pub output: [f64; 3],
+    pub printed_input: [f64; 3],
+    pub printed_output: [f64; 3],
 }
 
 /// `<===> <case>/input.scss` … `<===>` — the section convention the archive is written in. A bare
@@ -83,7 +107,7 @@ pub fn readings(
     from: &str,
     to: &str,
     file: &str,
-    curved: Option<(&str, f64)>,
+    curved: Option<Hypothesis>,
 ) -> Vec<Reading> {
     let path = spec.join(from).join(file);
     let text = std::fs::read_to_string(&path)
@@ -93,6 +117,7 @@ pub fn readings(
         .filter_map(|(case, [input, output])| {
             let input = triple(&input, &space_name(from))?;
             let output = triple(&output, &space_name(to))?;
+            let (printed_input, printed_output) = (input, output);
             let power = |channels: [f64; 3], exponent: f64| {
                 channels.map(|channel| {
                     if channel == 0.0 {
@@ -103,14 +128,18 @@ pub fn readings(
                 })
             };
             let (input, output) = match curved {
-                Some(("from", exponent)) => (power(input, exponent), output),
-                Some(("to", exponent)) => (input, power(output, exponent)),
-                _ => (input, output),
+                Some(hypothesis) if hypothesis.side == Side::From => {
+                    (power(input, hypothesis.exponent), output)
+                }
+                Some(hypothesis) => (input, power(output, hypothesis.exponent)),
+                None => (input, output),
             };
             Some(Reading {
                 case,
                 input,
                 output,
+                printed_input,
+                printed_output,
             })
         })
         .collect()
