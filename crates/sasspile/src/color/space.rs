@@ -125,6 +125,20 @@ impl Space {
     pub(super) fn matrix(self) -> Option<&'static [[f64; 3]; 3]> {
         match self {
             Self::Srgb | Self::SrgbLinear => Some(&super::matrix::SRGB_PRIMARIES),
+            // `display-p3`'s Z-output-row's last two entries are the archive's, read off
+            // `cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz`; the other seven
+            // entries are still the transcribed ones, and that split is a measurement rather than a taste.
+            // The instrument fits the same relation from both files (`<src>/<dst>.hrx` and `<dst>/<src>.hrx`)
+            // and prints, per entry, how far the two fits disagree — for this matrix that noise floor runs
+            // `1.8e-11`…`2.6e-10`. An entry may only be replaced where the transcription misses the fit by
+            // **more** than that: `[2][1]` misses by `5.1e-9` against a spread of `1.4e-10` (36×) and
+            // `[2][2]` by `6.9e-9` against `1.8e-11` (393×), while `[0][1]` misses by `5.3e-11`, which is
+            // *less* than its own `2.6e-10` spread — so the fit has no standing to call that digit wrong and
+            // it kept its published value. Replacing the whole fitted matrix anyway measured worse: `net=136`
+            // for the fit-from-both-sides table against `net=165 regress=0` here, and the other fit direction
+            // reached `net=168` but broke `regress=0` on `to_space/display_p3_linear/srgb.hrx::out_of_range/far`
+            // (`-362.9953097598` against the archive's `-362.9953097609`), because a `-999999` input turns the
+            // fit's `1e-10` noise into a visible digit. `165` rows ride on this pair of entries.
             Self::DisplayP3 | Self::DisplayP3Linear => Some(&[
                 [
                     0.486_570_948_648_212,
@@ -136,7 +150,7 @@ impl Space {
                     0.691_738_521_836_506,
                     0.079_286_914_093_745,
                 ],
-                [0.0, 0.045_113_376_859_663, 1.043_944_361_990_867],
+                [0.0, 0.045_113_381_937_499_92, 1.043_944_368_862_499_9],
             ]),
             Self::A98Rgb => Some(&[
                 [

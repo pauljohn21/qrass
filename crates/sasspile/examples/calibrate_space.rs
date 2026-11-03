@@ -1,25 +1,26 @@
-//! A calibration instrument for the colour-space tables: it reads the archive's **own** `xyz ↔ xyz-d50`
-//! rows and solves the white-point adaptation out of them, so the digits in
-//! [`sasspile`'s table](../sasspile/src/color/matrix.rs) come from a re-runnable measurement instead of
+//! A calibration instrument for the colour-space tables: it reads the archive's **own** rows for one
+//! *linear* pair of spaces and solves the matrix between them, so the digits in
+//! [`sasspile`'s tables](../sasspile/src/color/matrix.rs) come from a re-runnable measurement instead of
 //! from what I last transcribed.
 //!
 //! ```text
-//! cargo run -q -p sasspile --example calibrate_space
+//! cargo run -q -p sasspile --example calibrate_space -- xyz_d50 xyz        # the white-point adaptation
+//! cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz
 //! ```
 //!
-//! Why this pair and not some other: `xyz` and `xyz-d50` carry the same kind of number with no transfer
-//! curve between them, so one row of the archive states a linear equation and three well-spread rows pin
-//! three unknowns exactly. Every other space in `to_space/**` puts a curve (or a cone root) in the way, so
-//! a least-squares fit there would be fitting the wrong shape — which is precisely how a hand-copied
-//! primaries table kept being defended by rows it could not have produced.
+//! Only a **linear** pair is accepted, and the rule is executed: both names must be one of `xyz`,
+//! `xyz-d50`, `srgb-linear` or `display-p3-linear`, because those are the spaces whose channels are printed
+//! as the matrix's own output — no transfer curve, no cone root in between. Any other pair is refused
+//! rather than fitted, because a fitted matrix for a curved relation prints exactly like evidence. (The
+//! first version of this instrument only said this in prose, and `-- display_p3 xyz` cheerfully produced
+//! a table with a `1.6e7` residual.)
 //!
-//! The instrument does two things and reports both:
-//! * it solves the D50→D65 matrix from `to_space/xyz_d50/xyz.hrx` and gives the residual against **every**
-//!   concrete row of that file, including the rows the solve did not use;
-//! * it applies that solved matrix **backwards** to `to_space/xyz/xyz_d50.hrx` — each of those rows says
-//!   `color(xyz …)` became `color(xyz-d50 …)`, so multiplying its output by the forward table must return
-//!   its input. That is the archive's own round trip, checked without ever writing down a second table
-//!   ([`crate::color::matrix`] keeps exactly one direction and computes the other).
+//! For an accepted pair it reports:
+//! * the matrix fitted from `to_space/<src>/<dst>.hrx`, and its residual against **every** concrete row of
+//!   that file, including the rows the fit did not use;
+//! * the same relation fitted from `to_space/<dst>/<src>.hrx`, and **per entry how far the two directions
+//!   disagree** — that spread is this instrument's noise floor for one digit, which is the number that
+//!   decides whether a fit may override a transcribed digit at all;
 //!
 //! Numbers are read at the archive's resolution, and that resolution is **not** one constant: the corpus
 //! prints ten decimal places, so a channel near `1` is known to ±5e-11 while a channel near `-999999` is
@@ -162,25 +163,27 @@ fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
 /// The worst `|predicted - printed|` over a set of rows, reported **per channel** together with that same
 /// channel's relative miss and printed magnitude. Taking the two maxima independently would let a `1e-5`
 /// miss on a `-999999` channel borrow the relative error of a `0.5` channel — a rounding story told as
-/// though it were one.
-fn residual(matrix: &[[f64; 3]; 3], rows: &[Reading], forward: bool) -> (String, f64, f64, f64) {
+/// though it were one. A channel the archive printed as `0` has no relative miss to report, so the row is
+/// named for its absolute miss and the share is left at `0`: an `inf` in that field reads as a measurement
+/// and is not one.
+fn residual(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (String, f64, f64, f64) {
     rows.iter()
         .flat_map(|row| {
-            let (input, output) = if forward {
-                (row.input, row.output)
-            } else {
-                (row.output, row.input)
-            };
-            apply(matrix, input)
+            apply(matrix, row.input)
                 .into_iter()
-                .zip(output)
+                .zip(row.output)
                 .map(move |(predicted, printed)| {
                     let error = (predicted - printed).abs();
+                    let magnitude = printed.abs();
                     (
                         row.case.clone(),
                         error,
-                        error / printed.abs(),
-                        printed.abs(),
+                        if magnitude == 0.0 {
+                            0.0
+                        } else {
+                            error / magnitude
+                        },
+                        magnitude,
                     )
                 })
         })
@@ -209,35 +212,71 @@ fn whites(spec: &Path) -> ([f64; 3], [f64; 3]) {
 
 fn main() {
     tracing_bridge::init();
-    // One span for the whole measurement, so the reading says which archive it was taken against and how
-    // long it took; the events below live inside it.
+    // One span for the whole measurement, so the reading says which archive and which pair it was taken
+    // against and how long it took; the events below live inside it.
     let started = std::time::Instant::now();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    // No default pair: a run that silently fell back to `xyz_d50 → xyz` would hand the next reader a
+    // correct-looking answer to a question they never asked.
+    let Some([src, dst]) = (argv.len() == 2).then(|| [&argv[0], &argv[1]]) else {
+        tracing::error!(
+            args = argv.len(),
+            usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst>",
+            "exactly two space names, each of: xyz, xyz_d50, srgb_linear, display_p3_linear"
+        );
+        std::process::exit(2);
+    };
+    // The selection rule, executed rather than only stated: these are the spaces whose channels are printed
+    // with no transfer curve and no cone root between them. Fitting any other pair would print a matrix for
+    // a relation that is not linear, and that output would look exactly like evidence.
+    const LINEAR: [&str; 4] = ["xyz", "xyz_d50", "srgb_linear", "display_p3_linear"];
+    [src, dst].iter().for_each(|name| {
+        if !LINEAR.contains(&name.as_str()) {
+            tracing::error!(
+                name = %name,
+                allowed = ?LINEAR,
+                "not a linear-printed space: its channels go through a transfer curve or a cone root, so no matrix can be solved from its rows"
+            );
+            std::process::exit(3);
+        }
+    });
     let spec = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../sass-spec/spec/core_functions/color/to_space");
     let span = tracing::info_span!(
         "calibrate",
-        stage = "adaptation",
+        stage = "linear-pair",
         module = "color",
+        pair = %format!("{src} → {dst}"),
         archive = %spec.display()
     );
     let _guard = span.enter();
-    let rows = readings(&spec, "xyz_d50", "xyz", "xyz.hrx");
+    let file = format!("{dst}.hrx");
+    let mirrored = format!("{src}.hrx");
+    let rows = readings(&spec, src.as_str(), dst.as_str(), &file);
     let solved = solve(&rows);
-    tracing::info!(
-        rows = rows.len(),
-        from = "xyz_d50/xyz.hrx",
-        "archive rows read (the `black` row is 0 → 0 and carries no information)"
-    );
-    solved.iter().enumerate().for_each(|(index, row)| {
+    // The same relation fitted from the mirrored file's own rows. Both directions of one matrix are then
+    // measured twice, and the gap between the two readings **is** the instrument's per-entry noise. That is
+    // the number that decides whether a fit may override a transcribed digit; a row residual answers a
+    // different question and would let one entry's error borrow another's precision.
+    let back = readings(&spec, dst.as_str(), src.as_str(), &mirrored);
+    let direct = solve(&back);
+    let via_inverse = invert(&solved);
+    tracing::info!(rows = rows.len(), from = %format!("{src}/{file}"), "archive rows read");
+    (0..3).for_each(|index| {
+        let (fitted, mirrored_fit, inverted) = (solved[index], direct[index], via_inverse[index]);
+        let spread = |column: usize| (mirrored_fit[column] - inverted[column]).abs();
         tracing::info!(
             entry = index,
-            first = row[0],
-            second = row[1],
-            third = row[2],
-            "solved D50→D65 row"
+            fitted_first = fitted[0],
+            fitted_second = fitted[1],
+            fitted_third = fitted[2],
+            spread_first = spread(0),
+            spread_second = spread(1),
+            spread_third = spread(2),
+            "this output row as fitted from `<src>/<dst>.hrx`, and per entry how far the same row sits from the mirrored fit (that spread is the noise floor of a digit here)"
         );
     });
-    let (case, absolute, relative, magnitude) = residual(&solved, &rows, true);
+    let (case, absolute, relative, magnitude) = residual(&solved, &rows);
     tracing::info!(
         worst_case = %case,
         residual = absolute,
@@ -245,46 +284,68 @@ fn main() {
         printed_magnitude = magnitude,
         "forward rows reproduced"
     );
-    let back = readings(&spec, "xyz", "xyz_d50", "xyz_d50.hrx");
-    let (case, absolute, relative, magnitude) = residual(&solved, &back, false);
+    let (case, absolute, relative, magnitude) = residual(&direct, &back);
     tracing::info!(
         rows = back.len(),
         worst_case = %case,
         residual = absolute,
         relative = relative,
         printed_magnitude = magnitude,
-        "applying the same table backwards to xyz/xyz_d50.hrx — the archive's own round trip"
+        from = %format!("{dst}/{mirrored}"),
+        "mirrored rows reproduced by their own fit"
     );
-    // The archive states both reference whites; the table must carry one onto the other. The miss here is
-    // a **compound** of two print roundings — the whites are read at the tenth decimal and the table was
-    // solved from rows read at the tenth decimal — so it sits above the `5e-11` half-step rather than
-    // contradicting it.
-    let (d65, d50) = whites(&spec);
-    let (case, absolute, relative, magnitude) = residual(
-        &solved,
-        &[Reading {
-            case: "srgb/xyz_d50.hrx::white".into(),
-            input: d50,
-            output: d65,
-        }],
-        true,
-    );
-    tracing::info!(
-        d65_white = ?d65,
-        d50_white = ?d50,
-        worst_case = %case,
-        residual = absolute,
-        relative = relative,
-        printed_magnitude = magnitude,
-        "the table applied to the archive's D50 white must land on its D65 white"
-    );
-    // The white the library should hold: the table read backwards, applied to the archive's D65 white. This
-    // is the one place the `lab` divisor comes from, so it is printed rather than remembered.
-    tracing::info!(d50_derived = ?backwards(&solved, d65), "table⁻¹ applied to the archive's D65 white");
+    // Only the white-point pair has a third statement in the archive to check against: it also prints both
+    // reference whites, and the table must carry one onto the other. The miss there is a **compound** of two
+    // print roundings (the whites are read at the tenth decimal as well), so it sits above the `5e-11`
+    // half-step without contradicting it.
+    if (src.as_str(), dst.as_str()) == ("xyz_d50", "xyz") {
+        let (d65, d50) = whites(&spec);
+        let (case, absolute, relative, magnitude) = residual(
+            &solved,
+            &[Reading {
+                case: "srgb/xyz_d50.hrx::white".into(),
+                input: d50,
+                output: d65,
+            }],
+        );
+        tracing::info!(
+            d65_white = ?d65,
+            d50_white = ?d50,
+            worst_case = %case,
+            residual = absolute,
+            relative = relative,
+            printed_magnitude = magnitude,
+            "the table applied to the archive's D50 white must land on its D65 white"
+        );
+        // The white the library should hold: the mirrored fit applied to the archive's D65 white. This is the
+        // one place the `lab` divisor comes from, so it is printed rather than remembered.
+        tracing::info!(
+            d50_derived = ?apply(&direct, d65),
+            "D50 derived from the archive's own D65 white"
+        );
+    }
     tracing::info!(
         elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
         "done"
     );
+}
+
+/// A 3×3 inverse by cofactors over the determinant, so the instrument can line the two directions of one
+/// fit up against each other and print their per-entry spread. The library computes its own inverse the
+/// same way (`matrix::invert`, private to it); this exists only to compare readings, never to produce a
+/// table the library then copies from in the other direction.
+fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let cofactor = |row: usize, column: usize| -> f64 {
+        let rest = |skip: usize| -> Vec<usize> { (0..3).filter(|index| *index != skip).collect() };
+        let (rows, columns) = (rest(row), rest(column));
+        let minor = m[rows[0]][columns[0]] * m[rows[1]][columns[1]]
+            - m[rows[0]][columns[1]] * m[rows[1]][columns[0]];
+        let sign = if (row + column) % 2 == 0 { 1.0 } else { -1.0 };
+        sign * minor
+    };
+    let whole = det(*m);
+    // Adjugate over the determinant: entry (i, j) is the cofactor of (j, i).
+    std::array::from_fn(|i| std::array::from_fn(|j| cofactor(j, i) / whole))
 }
 
 /// A determinant of a 3×3 written as rows.
@@ -292,27 +353,6 @@ fn det(m: [[f64; 3]; 3]) -> f64 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
-}
-
-/// Cramer's rule on one column, so the backwards white needs no inverse matrix written down here either.
-fn backwards(matrix: &[[f64; 3]; 3], target: [f64; 3]) -> [f64; 3] {
-    let whole = det(*matrix);
-    (0..3)
-        .map(|column| {
-            let swapped: [[f64; 3]; 3] = std::array::from_fn(|row| {
-                std::array::from_fn(|place| {
-                    if place == column {
-                        target[row]
-                    } else {
-                        matrix[row][place]
-                    }
-                })
-            });
-            det(swapped) / whole
-        })
-        .collect::<Vec<f64>>()
-        .try_into()
-        .expect("three channels")
 }
 
 #[path = "../tests/common/tracing_bridge.rs"]
