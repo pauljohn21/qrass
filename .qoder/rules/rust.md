@@ -21,8 +21,16 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2918/11,533**（25.3%，**实质通过 2753** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `a98-curve-and-table`（2026-11-03：**`a98-rgb` 的传递曲线方向被反接**
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3028/11,533**（26.3%，**实质通过 2863** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `prophoto-solved-v2`（2026-11-03：`prophoto-rgb` 的 primaries 整表改为从
+   `to_space/prophoto_rgb/xyz.hrx` 拟合（九项均超出自身逐项散布），而拟合出的表**自身就落在 D65 白上**，故
+   `Space::white()` 不再把该空间归入 D50——白点由表携带，不再两处各自声明（该白行改前差 `4.2e-2`）。
+   **`regress=0 net=110`**；本会话五批累计 **`regress=0 net=530`**，无效错误仍 19，空库复算同读数；
+   `ledger shift`：`changed=173 closer=151 farther=10 tie=0 error_expectation=0 shape_of_text=12`，**`farther=10` 全部含
+   `rec2020`**（那家的表仍是抄的，两边错原本互相抵消）。量具新增两个读数：`smallest_curved_printed_channel`（实测
+   prophoto `0.1 > 1/16` ⇒ **解码分段支零约束**，不得拿残差当“分段也对了”）与把“哪侧带曲线”收为枚举。
+    primaries 表因此拆到 `color/primaries.rs`（`space.rs` 曾到 503 行）。守卫 `tests/color_prophoto.rs`。
+   其前一批 run `a98-curve-and-table`（2026-11-03：**`a98-rgb` 的传递曲线方向被反接**
    ——`Transfer::A98` 用 `1/2.19921` 解码、`2.19921` 编码，而语料是 `linear = printed^(563/256)`；指数本身也取整错了。
    分开它们的是“在该假设下拟合后的残差”，而量具现在会直接判：`hypothesis_holds=false` 时 **exit 4**（候选与残差表只住
    在 `tasks.md` 9.17，这里不拷数字）；同一探针证明 `prophoto-rgb` 的方向本来就是对的。

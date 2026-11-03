@@ -2104,3 +2104,32 @@
         `signed_power` 与一份“哪些空间线性印出”的表（与 `Space::transfer()` 不同分区），收口要把库的 Transfer 露给工具；
         `a98_rgb → 其余空间` 的行仍红在别家的表上（如 `to_space/a98_rgb/srgb::white`、`to_space/a98_rgb/lab::white`）。
 
+- [x] 9.18 **`prophoto-rgb`：表归表、白点归表（2026-11-03，基线 run `a98-curve-and-table`）**：同一方法的下一个空间，
+      顺带修了一个“两个地方各自声明白点”的结构问题。
+      • **读数**：`ledger diff a98-curve-and-table prophoto-solved-v2` = **`regress=0 net=110`**（2918→3028，26.3%，
+        实质 2863；空期望 165、skipped 1264；无效错误仍 19；空库复算同读数）；本会话五批累计
+        `ledger diff calc-constants-final prophoto-solved-v2` = **`regress=0 net=530`**。`prophoto-solved-v2` 是
+        拆文件后的终树 run，与 `prophoto-solved` 逐读数全等（`regress=0 net=0`）。
+        `ledger shift`：`changed=173 closer=151 farther=10 tie=0 error_expectation=0 shape_of_text=12`；
+        **`farther=10` 全部含 `rec2020`**（命令：shift 输出取 FARTHER 行后 `grep -c rec2020` = 10/10）——
+        rec2020 的表仍是抄的，旧抄表的错与新修好的 prophoto 错原本互相抵消。另：量具在 `1.8` 下两侧
+        各自拟合的残差为正向 `4.9259e-11` / 反向 `7.6574e-11`（均在语料分辨率内）。
+      • **白点不再有两处声明**：`Space::white()` 以前把 `ProphotoRgb` 归入 D50，而表又是另一套参考；拟合出的
+        表**自身就落在 D65 白上**（`to_space/prophoto_rgb/xyz.hrx::white` 直接验证，改前 got
+        `color(xyz 0.9845637886 0.9989843031 1.089497388)` vs 金样 `color(xyz 0.9504559271 1 1.0890577508)`，
+        差 `4.2e-2`），所以 `ProphotoRgb` 从 D50 臂移除：白点由表携带，不再由一个平行常数声称。九项全部超出
+        自身散布，整表换为语料的。
+      • **本批新增两个读数，是为了不再靠人推**：
+        ① “分段支到底有没有被触发”从推测变成字段——`smallest_curved_printed_channel`（只看曲线侧的**打印**值）。
+           实测 prophoto 为 `0.1`，大于 `1/16` ⇒ **解码的分段支零约束**；第一版把两侧混起来报成了 `0.0276`，
+           而那是 XYZ 输出侧的值，读上去像覆盖其实不是（写进了字段 doc）。
+        ② “哪一侧带曲线”从 `"from"/"to"` 字符串收为 `Side`/`Hypothesis` 值：字符串版本在三处用相等比较定分流，
+           改成枚举时编译器立刻报出 `non-exhaustive patterns`——即它本来就不封得住写错的标签（审的同一项 finding）。
+      • **拆文件**：prophoto 的出处注释把 `space.rs` 顶到 503 行，破 500 硬线；五张 primaries 表连同出处搬到新文件
+        `color/primaries.rs`（119 行，`matrix()` 改为委派），`space.rs` 回到 409 行。拆完重测：`prophoto-solved` vs
+        `prophoto-solved-v2` = `regress=0 net=0`，确认拆分行为无变。
+        过程中我自己写错过一次：拄表时把 a98 的 `[2][0]` 误填成了 prophoto 的 `0.0039…`，编译前核对数字才改回
+        `0.02703136138641237`——同一批里手抄数字的第二例，下一例应当由命令递而不是由人拄。
+      • **未做**：`rec2020`（需带 `α` 偏移的假设，纯幂已被 verdict 拒）；prophoto 的分段支（语料无 `|channel| < 1/16`
+        的行，需另找证据或接受这个盲区）；`xyz/prophoto_rgb::white` 这类差末位 1 的行（天花板，已具名不钉）。
+
