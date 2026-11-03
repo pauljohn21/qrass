@@ -328,3 +328,24 @@ BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为�
 而 `flat_map` 这个动词在 rc.6 里存在，所以这是**未做的选型**（`State` 改为流携带的累加子 = 0′.5），
 不得说成框架限制。逐条开放项与读数在 `tasks.md` 9.7/9.8。
 
+## 色彩空档拆到“常数层”（2026-11-03，9.14）——常数不得再靠手抄
+
+• **白点适应表与参考白现在都只有一个来源**。`BRADFORD`（D50→D65）由
+  `cargo run -q -p sasspile --example calibrate_space` 从 `to_space/xyz_d50/xyz.hrx` 解出（第一列走
+  `out_of_range/far` 的 `1e6` 输入⇒元素可知到 `~1e-16`；另两列走 `white`+`out_of_range/near`，行列式 `1.6`；
+  第一版用 `(0.1 0.2 0.3)`/`(0.2 0.4 0.8)` 这一对，行列式 `0.04`，把语料自身的 `5e-11` 打印舍入放大四十倍，已换）。
+  `D50` 不再是字面量而是 `d50()` 导出（srgb primaries 行和 → 反解适应），所以**中性是构造性事实**；
+  本批之前它单独把 `to_space/srgb/lab.hrx::white` 的色度顶到 `1.274e-7`。
+• **剩下的是精度天花板，不是数学缺口**：十位小数的行只能给出每元素 `~5e-11` 的表，所以由它反解的一侧
+  仍有三行差最后一名（具名在 `tasks.md` 9.14 与 `tests/color_adaptation.rs` 头部）；它们**故意不入守卫**。
+  拿它们当“进步”或当“已接金样”都不准；拿它们当“下一批还要改适应该表”也不准——要么找到语料能支持更高
+  条件的行（全仓 `to_space/**` 里只有 X 通道有 `1e6` 量级的行），要么就接受这个界。
+• ** primaries 表仍是手抄的**（本批未碰，而 `farther=101` 里 96 条就是它）：`a98_rgb`/`prophoto_rgb`/
+  `rec2020`/`display_p3*` 在 `space.rs::matrix` 里的表与金样差到 7%（`to_space/xyz/display_p3.hrx::white`
+  得 `1.0670616622 0.9807650128 0.9623860263`，金样 `1 1 1`）。下一批按同一方法从
+  `to_space/xyz/<space>_linear.hrx` 解（线性传递⇒仍是纯线性，不沾曲线），而不是“多拄几位”。
+• **下一刀已经量成“只差一个能力”**：`missing/*`（全库 `ledger failures <run> "missing/" --count` = 945）里，
+  矩形族行的数字部分**已逐位对上**，缺的只是按位置传播 `none`（金样已集齐三条律：矩形族按位传播、
+  派生族按 `0` 代入、全缺则全缺）。前置是 `color::Channel{value,percent}` 要能携带“缺”——
+  这是值模型改动，不是开关；`InSpace.channels` 已经是 `[Option<f64>;3]`。
+

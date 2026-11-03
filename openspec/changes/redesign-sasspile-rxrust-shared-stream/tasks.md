@@ -1552,10 +1552,18 @@
       **读数**：`cargo test --workspace --no-fail-fast` exit=0、182 passed / 0 failed；`clippy -D warnings`
       exit=0；`sasslint count=0`；hrx `pass=1841 / substantive=1676` 与 `regress=0 net=0`（证明确实行为无涉）。
       计划末尾「实施结果与遗留」记有 7 条裁决与本计划自身三次复发的 F5（README 曾写 clippy clean 而 HEAD 已红）。
-- [ ] 9.4 **冷启动三次实测（尚未跑，新会话的第一件事）**：全新上下文只说「继续 sasspile」，三次都必须
+- [ ] 9.4 **冷启动三次实测（尚未跑，新会话的第一件事）**：全新上下文只说「 继续 sasspile」，三次都必须
       先跑 `sasspile-start`、复述数字与 `ledger runs` 逐字相同、批次后触发 `gc-auditor` 且 finding 带引用。
       本计划无法对自己诚实完成这一条（它就是被检验的对象）。通过后再开 S3（`crates/guard` MCP）→
       S4（插件）→ S5（hook，需批准改宿主设置）的各自计划。
+      • **第一次实测已跑（2026-11-03，会话以一句「继续」开场）**：起手四步全跑，复述与命令输出逐字同
+        （`calc-constants-final` 2498/11533 21.66%；现跑 hrx 得 `pass_substantive=2333`/`pass_empty_expectation=165`；
+        无效错误 19；`sasslint count=0`；`openspec status` 五 artifact 全 done）——**复述环节成立**。
+        收尾也触发了 `gc-auditor`，10 条 finding 全带 `file:line`，其中六条是我的实错（未测量的数字当读数写进
+        注释、把精度归因给错的那个常数、量具两个误差分量跨通道借位、诊断工具无 span、幻影脏状态未验证就上报、
+        删历史记录与 feat 混批）——已逐条修或重写；读数入 9.14。
+        **但本条不得标成已通过**：它要的是“同一句子三次”，本轮只完成第一次；本轮暴露的新风险已入
+        `tooling-redlines.md`（脏状态先分字节级/过滤器级；`ledger shift` 的口径）与 9.14。
 
 - [x] 9.5 **文档与记忆的收敛（2026-10-28 壳路批结束后）**：把本轮新增的读数/定律/顺序约束写回
       “起手就会读到”的那几份，并把它们在各处留下的**副本**改成指针（记忆与文档都不再当第二份真值）：
@@ -1811,20 +1819,6 @@
         **中性必须 a=b=0** 的自由校验。“先把 oklab 猜个更近的常数”不是修法，得逐空间从这些行解出来。
       • 本轮只做到“定位 + 定方法”：求解与逐空间替表**未开工**，不得当作已交付；也不得拿 net=+180 当作
         这 305 行已接金样更近的证据。
-      • **求解已经跑过一次（2026-10-30，结果比“抄错常数”更硬）**：临时测试用 `to_space/xyz/oklab.hrx`
-        的 `gray`/`middle`/`out_of_range/near` 三行（输入为裸 XYZ，行列式 0.12）反解出锥响应矩阵，并验证
-        它在 D65 白点上回三个相等的 cone（中性不变量成立）。解出的行与我抄的差别是**结构性**的：
-        第一行第三项应为**负号**（我写了正），第三行应为 `0.0482 / 0.2642 / 0.6335`（我写了
-        `0.0482 / 0.0157 / 0.9169` —— 那两个数属于**逆矩阵**）。据此替表后实测：
-        `regress=0 net=0`、`changed=285` —— 中性量级错消失了，但 10 位精度的金样仍差 ~1e-5 量，
-        精确断言的守卫因此是红的。**已回退**（不留红测试、也不以 net=0 的替表入库），
-        工作树复验为 `regress=0 net=0`、49 组绿、`sasslint count=0`。
-      • **残余阻塞点的两种可能，下轮先判别而不是直接替表**：① 三行条件数不够（10 位数据经
-        `a=-3.24` 这种大值三次方放大）——改用 `to_space/xyz/oklab.hrx::missing/{x,y,z}` 或
-        多行最小二乘可得 ~1e-10 条件；② 语料的 oklab 入口在我这里多了一步（`of_xyz_d65` 对 Oklab
-        走 `adapt(D65→D65)` 恒等，若它实际先转到 D50 再回，就会留下一个与常数无关的系统偏差）。
-        判别方法很便宜：用解出的矩阵去算**未参与求解的第四行**（`to_space/xyz/oklab.hrx::black` 以外的行），
-        若差在 1e-9 量是①，若仍差 1e-5 量是②。
       • **流程事故（如实记）**：空库复算那条命令里我用了 `grep -c` 当链中环节，无匹配时退出码 1 直接
         中断了 `&&` 链 —— `git apply` 未执行而后续 `rm -f` 把唯一的 diff 副本删了，工作树回到 HEAD。
         本会话的改动靠 IDE 本地历史（`User/History/<hash>` 逐快照）按标记串选回并逐个复验：
@@ -1853,3 +1847,80 @@
         ③ `calc()` 这 334 行（sole 最高、与颜色无关、风险最小）作为**不干扰主线的手术区**；
         ④ 模块家族（`@use/@forward/@import/@include`）归拢成一个战役做，因为它们的 sole 分散但加起来可观，
         分开做只会重复碰同一批障碍。
+
+- [x] 9.12 **`oklab-solved-polar`（2026-10-30，入库的两批同名 run `oklab-solved-polar` / `-v2`）**：本条补记，因为
+      当时只把读数写进了 `.qoder/rules/rust.md` 的基线节，逐条证据没有入本文件（9.13 同因）。
+      • cone 响应矩阵**从语料解出**并回到 XYZ 域；oklab↔oklch / lab↔lch 同族不再走矩阵往返（`space.rs::converted`
+        的 `polar_pair`）。读数（本会话对库里旧 run 现算，非引用旧摘要）：
+        `ledger diff oklab-linear-route oklab-solved-polar` = **`regress=0 net=6`**（`fails 9055→9049`，2478→2484）；
+        上一批 `oklab-linear-route` 的论断（“域错了”）**是错的**——错的从来是抄来的数字，线性 sRGB 绕行把白行
+        推到 `101.9416634099%`，比原路线更远，已撤回。
+      • 同批另做了一件不是特征的事：`invert` 取代手抄逆阵，`tests/color_space_round_trip.rs` 钉住往返不变量。
+
+- [x] 9.13 **`calc-constants-final`（2026-10-30）CSS 计算常数在壳内读数**。读数（本会话现算）：
+      `ledger diff oklab-solved-polar-v2 calc-constants-final` = **`regress=0 net=14`**（2484→2498，实质 2333），
+      无效错误仍 19。
+      • `calc(pi)` → `3.1415926536`、`calc(e * 2)` → `5.4365636569`；守卫 `tests/calculation.rs::
+        calculation_constants_are_read_inside_the_shell`（做过阳性对照：撤掉判据即红）。
+      • **这是一条“选择”而不是“律”**：非有限数（`infinity`/`NaN`）留在壳内。两个方向都量过——
+        `ledger diff calc-constants-final calc-constants`（放开的一侧）= **`regress=7 net=23`**，
+        即放开多拿 23 行但把 7 行颜色答错（`color(srgb calc(infinity) 0 0)` 被答成裸 `infinity`）；
+        保守一侧（入库）`regress=0 net=14`，代价是把另一侧 23 行留在红态。
+        **订正**：本文件与 `rust.md` 原先写的“放开则 `regress=7 net=37`”里那个 `37` 对不上库里任何一条现算
+        读数（`calc-constants` 2514 与 `calc-constants-final` 2498 相差 16 = 23−7），已按实测写成 `net=23`。
+        守卫要求夹紧的两行：`color/degenerate::arg1/nan` → `color(srgb 0 0 0)`、
+        `out_of_gamut::hue/degenerate/positive_infinity` → `hsl(0, 100%, 50%)`——**真正的判据在颜色构造子的
+        夹紧律**，未逐条推导前不得当律写。
+
+- [x] 9.14 **白点适应表从语料解出 + D50 参考白改为导出（2026-11-03，基线 run `calc-constants-final`）**：
+      按 9.10 的排序推 ①，先落它的前提——把常数从“我记得”变成“金样量得出”。分两刀，各自入库一个具名 run。
+      • **第一刀 `adaptation-solved`（`regress=0 net=62`，2498→2560，实质 2333→2395）**：`color/matrix.rs` 的
+        `BRADFORD`（D50→D65）原是 CSS Color 4 散文里的 7 位抄表；语料算的不是它。抄表行和
+        `0.9957009 0.9993688 1.3289869`，金样行和 `0.9956342097 1.0026671299 1.3221722918`
+        （`to_space/xyz_d50/xyz.hrx::white`），最差单项差 `6.9e-3`（`1.3372652` 对 `1.3303659262`）。
+        新量具 `cargo run -q -p sasspile --example calibrate_space` **从磁盘读语料**解表：第一列由
+        `out_of_range/far`（输入 `-999999 0 0`）给出，另两列由 `white`+`out_of_range/near`（行列式 `1.6`）给出；
+        解出表对**未参与求解**的行的最差残差 `5.0000004e-11`（`gray` 通道，打印量级 `0.501333565`），
+        即语料第十位小数的一半步——量具同时打**每通道**的绝对/相对误差与打印量级（第一版把两者当独立最大值取，
+        被审查指出“一个通道的绝对误差借另一个通道的量级说话”，已改）。
+        守卫 `tests/color_adaptation.rs`：正解 8 行 + 反解 6 行 + 白行对照。
+      • **第二刀 `white-derived`（`regress=0 net=53`，2560→2613，实质 2448）**：`D50` 字面量
+        `[0.964295675687546, 1.0, 0.825104602578703]` 也是抄的，且与适应表实际落到的三元组差 `8.3e-10`；
+        `xyz_to_lab` 的 `500·(fx−fy)` 把它放大成 `1.4e-7` 色度——这正是 `to_space/srgb/lab.hrx::white` 从
+        `lab(100.0000000018% 0.0000001274 0.0000000081)` 变成 `lab(100% 0 0)` 的全部原因。现在参考白由
+        `d50()` 导出（srgb primaries 行和 → 适应表反解），**中性成为构造性事实**，且这一事实只剩一处来源。
+        合计 `ledger diff calc-constants-final adaptation-white-final` = **`regress=0 net=115`**
+        （2613/11533，22.7%，实质 2448，空期望 165，skipped 1264）；无效错误 **19 → 19**；空库复算同读数。
+      • **`ledger changed` 只能定性到“变了”，本批补上了它缺的那条读数**：新
+        `cargo run -q -p ledger --bin shift -- <base> <run> [前缀] [--db 路径]`，走 `ledger::changed_details`
+        不写裸 SQL，把每条 CHANGED 判为 `closer`/`farther`/`tie`/`error_expectation`/`shape_of_text`，
+        并**具名**列出后两类（`crates/ledger/tests/shift_split.rs` 是它的阳性对照：同一批数据既能让它说“更近”
+        也能让它说“更远”，符号翻转算距离而不是算 kind 变化）。本批实测：
+        `changed=841 closer=555 farther=101 tie=0 error_expectation=0 shape_of_text=185`。
+        **`farther=101` 不得被 `net=115` 吸收**：其中 96 条的某一侧带着尚未校准的 primaries
+        （`a98_rgb`/`prophoto_rgb`/`rec2020`/`display_p3*`）——旧抄表的两个错误原本部分抵消，修好一个就露出另一个；
+        其余 5 条具名：`to_space/lab/hsl::out_of_range/far`、`to_space/lab/rgb::out_of_range/far`（`1e15` 量级放大）、
+        `to_space/xyz_d50/{hsl,lab,lch}::missing/x`（`none` 被答成数字，属下面第 ④ 条）。
+      • **本批量到的精度天花板（写下来是为了下一批不再猜）**：表是从十位小数的行解出的，每元素只能知道到
+        `~5e-11`，所以由它**反解**出来的一侧有三行仍差最后一名——`to_space/xyz/xyz_d50.hrx::gray`
+        （金样 `0.5014942182` / 我 `0.5014942183`）、`…::out_of_range/far`（最差通道金样 `−29627.7791422469` /
+        我 `−29627.7791449956`，绝对 `2.75e-6`、相对 `9.3e-11`）、`to_space/srgb/xyz_d50.hrx::white`
+        （`0.9642956764` / `0.9642956765`）。这三行**故意不入守卫**：钉我自己的答案等于把错误写成要求。
+      • **④ 未做（不得当作已交付，且本批已把它量成“只差一个能力”）**：`shape_of_text=185` 里 123 条的期望含
+        `none` 通道、44 条期望是 `color-mix(in …)`（本编译器发不出）、8 条目标为 legacy `rgb` 形体。
+        关键实测：**这些 `missing/*` 行的数字部分已经逐位对上**，只差 `none` 的传播——
+        `to_space/xyz_d50/srgb::missing/y` 得 `color(srgb 0.4444955555 -0.3279464385 0.6863615753)`，
+        金样要 `color(srgb 0.4444955555 none 0.6863615754)`。所以“缺通道”这一族不再被校准挡住，
+        它需要的是：矩形族（rgb 系 + xyz/xyz-d50）之间按位置传播 `none`、任一目标为派生族时按 `0` 代入、
+        全缺则全缺（金样：`to_space/hsl/srgb.hrx::missing/all` → `color(srgb none none none)`，
+        `to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`；`to_space/hsl/hsl.hrx::missing/hue` →
+        `hsl(none 20% 30%)` 同一形体保留）。现存 `InSpace.channels: [Option<f64>;3]` 已有这个形状，
+        `Channel{value,percent}` 还没有——这是它的真正前置。
+      • **流程事故与修正（本批自己的）**：接手时发现 `sass-spec` 有 239 个 `.hrx` 显示为 modified，我第一反应是
+        “语料被改写了”并这样上报——错。`git diff --ignore-cr-at-eol` 只剩 1 个文件，而
+        `git hash-object --no-filters` 证明 **239 个全部与 HEAD blob 逐字节相同**：`.gitattributes` 的
+        `*.hrx text eol=lf` 对上上游本就带 CRLF 的文件，制造出永久幻影脏状态；那“1 行真差异”也是同一条规范化
+        （blob 里是 `^M^M`，规范化只削掉一个）。另外 `sass-spec/.git/index.lock` 是 10-30 留下的 0 字节陈锁，
+        使子模块任何 git 写操作失败，已删。**教训入 `tooling-redlines.md`：脏状态必须先证明是字节级还是过滤器级，
+        再决定说什么**（本次是我在同一个会话里第三次把“量具的输出形状”当成“世界的形状”）。
+

@@ -79,6 +79,32 @@
 该读数自带 `fails_a`/`fails_b`（簇内两侧失败行数），用来区分“无形状变化”与“该簇根本没命中”；
 它自己的阳性对照在 `crates/ledger/tests/changed_details.rs`（自比 = 0、同详情簇 = 0 但 totals=1/1）。
 
+### 📐 `ledger shift`：`changed` 仍然欠的那一条“方向”读数（2026-11-03 新增）
+
+`changed` 只说“变了”，不说“离金样更近还是更远”。而“`changed` 太大所以逐条看不完”从来不是借口——
+本项目已经两次栽在把 `changed` 当进步上（9.11 的 `changed=816`、本轮的 `farther=101`）。所以方差成为命令：
+`cargo run -q -p ledger --bin shift -- <base> <run> [簇前缀] [--db 路径]`，走 `ledger::changed_details`
+不写裸 SQL，把每行判为 `closer`/`farther`/`tie`/`error_expectation`/`shape_of_text`，并**具名**列出后两类。
+口径：先把数字掩成 `#` 比“形状”，形状相同才按位置求 `Σ|got−want|` 比距离；符号**属于**数字，
+所以“翻符号”是一个大距离而不是 kind 变化。阳性对照 `crates/ledger/tests/shift_split.rs`（同一批数据必须
+既能说“更近”也能说“更远”，否则这条读数又是一个会静默失效的量具）。**两个易陷阱**：
+`tracing` 的字段名带 ANSI 转义，用 `awk '{print $6}'` 取 key 再 `sed 's/^key=//'`，别拿 `.*key=` 去 `sed`；
+“更近的 96 条 vs 未校准 primaries”这类归因 **得再跑一次分组计数**，不得凭眼看命名空间。
+
+### 🧭 `git status` 脏状态：先分清“字节级”还是“过滤器级”（2026-11-03 实错）
+
+接手时 `sass-spec` 报 **239 个 `.hrx` modified**（`git diff --stat` = 3073+/3073−），我当场把它上报成
+“金样语料被改写了”——**错**。两条命令就能定死它：
+- `git diff --ignore-cr-at-eol --stat` → 只剩 1 个文件；
+- `git hash-object --no-filters <file>` 对比 `git ls-files -s <file>` 的 blob 哈希 → **239 个全等**。
+
+真正原因是 `.gitattributes` 的 `*.hrx text eol=lf` 遇上游本就带 CRLF 的文件，制造出**永久幻影脏状态**；
+那“1 行真差异”也是同一条规范化（blob 里是 `\r\r\n`，规范化只削一个 `\r`），不是谁改了内容。
+**红线**：对语料/金样的任何“被改了”结论， MUST 先给 `--no-filters` 哈希比对；`git diff` 的输出是
+**经过 filter 的**，拿它当字节证据就是又一次“把量具的输出形状当成世界的形状”。
+另：`git checkout -- .` 静默失败先查 `.git/index.lock`（本轮碰上 10-30 留下的 0 字节陈锁，使子模块
+任何 git 写操作失败；确认无 git 进程后删除即可）。
+
 ### 🔢 两条量法红线（2026-10-28 自查，两条都是我自己踩的）
 
 - **计数只能针对输出真实含有的字段/分隔符**。拿一个输出里根本不存在的分隔符去 `grep -c`，任何输入

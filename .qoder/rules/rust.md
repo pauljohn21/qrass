@@ -21,12 +21,27 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2498/11,533**（21.7%，**实质通过 2333** + 空期望蒙对 165；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `calc-constants-final`（2026-10-30：CSS 的**计算常数**在壳内读数
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2613/11,533**（22.66%，**实质通过 2448** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `adaptation-white-final`（2026-11-03：白点适应表**从语料解出** + D50 参考白改为**导出**，
+   合计 **`regress=0 net=115`**，无效错误 **19 → 19**，空库复算同读数）。两刀：`adaptation-solved`（`regress=0 net=62`）——`color/matrix.rs`
+   的 `BRADFORD` 原是 CSS Color 4 散文的 7 位抄表，语料算的不是它（抄表行和 `0.9957009 0.9993688 1.3289869`，金样 `0.9956342097 1.0026671299 1.3221722918`，
+   最差单项 `6.9e-3`），现由 `cargo run -q -p sasspile --example calibrate_space` **从磁盘读 `to_space/xyz_d50/xyz.hrx`** 解出（对未参与求解的行残差 `5.0e-11`
+   ＝语料第十位小数的一半步），守卫 `tests/color_adaptation.rs`；`white-derived`（`regress=0 net=53`）——手抄的 `D50` 字面量与适应表实际落到的三元组差 `8.3e-10`，
+   被 `xyz_to_lab` 的 `500·(fx−fy)` 放大成 `1.4e-7` 色度，改为 `d50()` 导出后 `to_space/srgb/lab.hrx::white` 从 `lab(100.0000000018% 0.0000001274 …)` 变成金样的
+   `lab(100% 0 0)`（**中性自此是构造性事实**，不再依赖第二个白字面量）。**`changed=841` 不得说成进步**：新量具
+   `cargo run -q -p ledger --bin shift -- <base> <run>` 把它分为 `closer=555 farther=101 tie=0 error_expectation=0 shape_of_text=185`，并**具名**后两类；
+   `farther=101` 中 96 条的某一侧带着尚未校准的 primaries（`a98_rgb`/`prophoto_rgb`/`rec2020`/`display_p3*`：旧抄表的两个错误原本部分抵消），其余 5 条
+   具名在 `tasks.md` 9.14。**本批的精度天花板（不得再猜）**：表来在十位小数 ⇒ 每元素 `~5e-11`，由它反解的一侧仍有三行差最后一名（`to_space/xyz/xyz_d50.hrx::gray`、
+   `…::out_of_range/far`、`to_space/srgb/xyz_d50.hrx::white`）——这三行**故意不入守卫**。下一刀已被量成“只差一个能力”：`shape_of_text` 里 123 条期望含 `none` 通道，
+   且**它们的数字部分已经逐位对上**（`to_space/xyz_d50/srgb::missing/y` 得 `0.4444955555 -0.3279464385 0.6863615753`，金样要 `0.4444955555 none 0.6863615754`）
+   ⇒ 缺的是按位置传播 `none`（矩形族之间）、目标为派生族时按 `0` 代入、全缺则全缺（金样：`to_space/hsl/srgb.hrx::missing/all` → `color(srgb none none none)`、
+   `to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`、`to_space/hsl/hsl.hrx::missing/hue` → `hsl(none 20% 30%)`）；前置：`InSpace.channels` 已是
+   `[Option<f64>;3]`，`color::Channel{value,percent}` 还不是；其前一批 run `calc-constants-final`（2026-10-30：CSS 的**计算常数**在壳内读数
    （`calc(pi)` → `3.1415926536`、`calc(e * 2)` → `5.4365636569`），共 **+14**（`regress=0 changed=0`、无效错误仍 19），
    守卫在 `tests/calculation.rs::calculation_constants_are_read_inside_the_shell`（已做阳性对照：撤掉判据即红）；
    本批做了一个**不是律的选择**：非有限数（`infinity`/`NaN`）留在壳内。两个方向都量过：放开则
-   `regress=7 net=37`（7 行颜色行把 `color(srgb calc(infinity) 0 0)` 答成裸 `infinity`），保守则 `regress=0 net=14`
+   `regress=7 net=23`（已现算订正：旧文写的 `net=37` 对不上库里任何一条读数；7 行颜色把
+   `color(srgb calc(infinity) 0 0)` 答成裸 `infinity`），保守则 `regress=0 net=14`
    但把另一侧 23 行留在基线红态（`diff calc-constants calc-constants-final` 逐字要求夹紧：`color/degenerate::arg1/nan`
    → `color(srgb 0 0 0)`、`out_of_gamut::hue/degenerate/positive_infinity` → `hsl(0, 100%, 50%)`）——**真正的判据在
    颜色构造子的夹紧律**，不在壳层谓词，未推导前不得当律写（逐条叙述住在 `calculation::collapsible` 的 doc）；
