@@ -38,12 +38,22 @@ pub enum Space {
 }
 
 /// A colour's own space and the channel values as it carries them. `None` is a `none` channel — powerless,
-/// which is data rather than a sentinel number, because `to-space` treats it as `0` for the maths while still
-/// answering `none` when nothing at all was given (`to_space/srgb/lab.hrx::missing/*`).
+/// which is data rather than a sentinel number, because the maths always needs a number while the answer
+/// sometimes has to say `none` back. How the two are reconciled is one question with one answer, in
+/// [`Color::converted`]; this type only carries the data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InSpace {
     pub space: Space,
     pub channels: [Option<f64>; 3],
+}
+
+impl InSpace {
+    /// The channels as the maths reads them: a powerless channel contributes `0`, which is what the archive
+    /// computes with (`to_space/srgb/xyz.hrx::missing/red` keeps the other two channels at the values `0` for
+    /// red gives). The one reading, because two spellings of it have already drifted apart once.
+    pub(super) fn filled(self) -> [f64; 3] {
+        self.channels.map(|value| value.unwrap_or(0.0))
+    }
 }
 
 /// Which white point a space's numbers are referenced to.
@@ -203,10 +213,23 @@ impl Space {
         }
     }
 
+    /// The **one** arm that separates the spaces whose channels are a lightness plus a derived pair
+    /// (`lab`/`lch`/`oklab`/`oklch`) from the ones whose channels are an index-aligned RGB-or-XYZ triple.
+    /// Two consequences hang off it, and the archive states each separately — they are listed here rather
+    /// than copied, because two arm lists is two answers for one partition:
+    /// * the derived spaces print with their own suffix ([`Self::is_functional`]);
+    /// * a `none` survives `color.to-space` **in the position it was written** only inside the
+    ///   index-aligned family — `to_space/srgb/xyz.hrx::missing/red` answers
+    ///   `color(xyz none 0.028962782 0.0735618977)`, while `to_space/srgb/lab.hrx::missing/red` answers
+    ///   `lab(19.2964565453% -7.7361660103 -20.488348653)` with the missing channel substituted ([`Color::converted`]).
+    fn is_derived(self) -> bool {
+        matches!(self, Self::Lab | Self::Lch | Self::Oklab | Self::Oklch)
+    }
+
     /// Whether this space's channels are a `color()` call's `r g b` (or `x y z`) triple printed as plain
     /// numbers, as against the `lab(…)`/`lch(…)` forms with their own suffixes.
     pub(super) fn is_functional(self) -> bool {
-        !matches!(self, Self::Lab | Self::Lch | Self::Oklab | Self::Oklch)
+        !self.is_derived()
     }
 
     /// The number a **full-scale percentage** names in this space's lightness: `lab`/`lch` state lightness on
@@ -308,10 +331,7 @@ impl Color {
     pub fn xyz(&self) -> [f64; 3] {
         let bytes = match self.representation {
             Representation::InSpace(carried) => {
-                return to_xyz_d65(
-                    carried.space,
-                    carried.channels.map(|value| value.unwrap_or(0.0)),
-                );
+                return to_xyz_d65(carried.space, carried.filled());
             }
             // Each of these two reads its own axes through the one helper that states how (`stored_axes` for
             // what `hsl` wrote, `hwb_axes` for the derivation a `hwb` colour implies) — a colour that carries
@@ -332,9 +352,10 @@ impl Color {
         to_xyz_d65(Space::Srgb, bytes.map(|byte| byte / 255.0))
     }
 
-    /// This colour's channels in `space`, for `color.to-space`. A `none` in every channel stays a `none` in
-    /// every channel (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`); a single `none`
-    /// contributes zero to the maths and prints as a number, which is what `::missing/red` shows.
+    /// This colour's channels in `space`, for `color.to-space`. A `none` is data, not a sentinel: the maths
+    /// always reads it as `0` ([`InSpace::filled`]), and what the **answer** prints is decided by the one
+    /// rule at the bottom of this function — the index-aligned family keeps it in the position it was
+    /// written, everything else substitutes.
     pub fn converted(&self, space: Space) -> Self {
         // **Same space, same numbers.** An identity conversion may neither re-round a channel nor decide which
         // ones were `none` by way of a matrix round trip: `to_space/xyz_d50/xyz_d50.hrx::missing/x` keeps
@@ -357,7 +378,7 @@ impl Color {
         // exactly-zero channel at ±1e-17, and a negative residue makes `atan2` fold to `359.999…deg`, which
         // prints as `360deg`. That is how one row went red when the cone table was corrected.
         let polar_pair = |carried: InSpace| {
-            let triple = carried.channels.map(|value| value.unwrap_or_default());
+            let triple = carried.filled();
             match (carried.space, space) {
                 (Space::Oklab, Space::Oklch) | (Space::Lab, Space::Lch) => Some(to_polar(triple)),
                 (Space::Oklch, Space::Oklab) | (Space::Lch, Space::Lab) => Some(from_polar(triple)),
@@ -368,15 +389,28 @@ impl Color {
             Some(triple) => triple,
             None => of_xyz_d65(space, self.xyz()),
         };
-        // A `none` in every channel is a colour with no power at all, and it stays powerless
-        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`).
-        let powerless =
-            carried.is_some_and(|existing| existing.channels.iter().all(Option::is_none));
-        Self::in_space(
-            space,
-            channels.map(|value| (!powerless).then_some(value)),
-            self.alpha,
-        )
+        let source = carried.map(|existing| existing.channels);
+        // **The index-aligned family keeps its `none` where it was written.** The missing channel still
+        // contributes `0` to the maths, and the archive's other two channels are the numbers `0` produces —
+        // `to_space/xyz/srgb.hrx::missing/x` prints `color(srgb none 0.6558430379 0.5622938017)`.
+        // Any other pair substitutes, so the same triple becomes three numbers; on the way into a
+        // rectangular space that substitution is green (`to_space/lab/srgb.hrx::missing/lightness`), while on
+        // the way into `lab`/`oklab` the rows are still red in the tenth decimal, which is the ceiling
+        // `tasks.md` 9.14 records and not this rule failing.
+        let same_family =
+            carried.is_some_and(|existing| !space.is_derived() && !existing.space.is_derived());
+        // A `none` in every channel is a colour with no power at all, and it stays powerless into a space
+        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`); a legacy `hsl` target has no
+        // way to print that and substitutes (`to_space/srgb/hsl.hrx::missing/all` answers `hsl(0, 0%, 0%)`).
+        let powerless = source.is_some_and(|given| given.iter().all(Option::is_none));
+        let triple = match source {
+            Some([first, second, third]) if same_family => {
+                let [low, mid, high] = channels;
+                [first.map(|_| low), second.map(|_| mid), third.map(|_| high)]
+            }
+            _ => channels.map(|value| (!powerless).then_some(value)),
+        };
+        Self::in_space(space, triple, self.alpha)
     }
 
     /// The colour as a **legacy srgb** colour, which is what `color.to-space($c, rgb)` asks for. The form is
