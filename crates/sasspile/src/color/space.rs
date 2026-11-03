@@ -69,7 +69,10 @@ pub(super) enum Transfer {
     Linear,
     /// srgb, and the same curve for `display-p3` (`color(display-p3 …)` channels).
     Srgb,
-    /// Pure gamma `2.19921` (`563/256`).
+    /// Pure gamma `563/256` from the printed channel to linear light. Stated as the fraction because the
+    /// rounded `2.19921` is not the archive's exponent — it is far enough away to move the tenth decimal
+    /// (`matrix.rs`'s `A98_GAMMA` is the only place the value is written; `tasks.md` 9.17 has the residuals
+    /// that separate the candidates).
     A98,
     /// Gamma `1.8` with the linear segment below `1/16`.
     Prophoto,
@@ -153,20 +156,30 @@ impl Space {
                 [0.0, 0.045_113_381_937_499_92, 1.043_944_368_862_499_9],
             ]),
             Self::A98Rgb => Some(&[
+                // Fitted from `to_space/a98_rgb/xyz.hrx` under the surviving curve hypothesis; re-measure
+                // with `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz 2.19921875` and
+                // read the why in `tasks.md` 9.17 (one place, because the same numbers copied into a second
+                // file are how this repository keeps acquiring a second answer).
+                //
+                // Only `[0][0]` is kept from the transcription: every other entry misses the fit by more than
+                // that entry's own two-direction spread, and the Z output row is the worst of them - it is why
+                // the old table failed the archive's own white invariant. `to_space/a98_rgb/xyz.hrx::white`
+                // states `color(xyz 0.9504559271 1 1.0890577508)`, which that row now reproduces and previously
+                // answered `color(xyz 0.9521708788 1.0000000001 1.0506135487)` (run `display-p3-solved-final`).
                 [
-                    0.576_669_042_910_130,
-                    0.186_614_468_906_882,
-                    0.188_887_366_974_017,
+                    0.576_669_042_910_13,
+                    0.185_558_237_964_962_82,
+                    0.188_228_646_224_906_43,
                 ],
                 [
-                    0.297_344_875_851_542,
-                    0.627_363_566_387_213,
-                    0.075_291_557_851_244,
+                    0.297_344_975_250_536_2,
+                    0.627_363_566_245_409_3,
+                    0.075_291_458_504_054_44,
                 ],
                 [
-                    0.027_031_362_253_985,
-                    0.070_605_520_089_455,
-                    0.952_976_666_330_321,
+                    0.027_031_361_386_412_37,
+                    0.070_688_852_583_802_32,
+                    0.991_337_536_829_785_1,
                 ],
             ]),
             Self::ProphotoRgb => Some(&[

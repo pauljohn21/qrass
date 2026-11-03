@@ -68,6 +68,21 @@ const BRADFORD: [[f64; 3]; 3] = [
 const LAB_EPSILON: f64 = 216.0 / 24_389.0;
 const LAB_KAPPA: f64 = 24_389.0 / 27.0;
 
+/// `a98-rgb`'s transfer, as the archive applies it: a **pure gamma of `563/256` from the printed channel to
+/// linear light**, so the printed value is the linear one raised to `256/563`.
+///
+/// Two things were wrong where this line sits, and the second is why they stayed invisible: the exponent was
+/// the rounded `2.19921` rather than `563/256`, and it was on the **wrong side** of the pair — this file
+/// decoded with `1/2.19921` and encoded with `2.19921`, the inverse of what the corpus computes
+/// (`Srgb` and `Rec2020` already put the larger exponent on decode; `A98` was the odd arm). A pair of
+/// reciprocal exponents looks symmetric because a curve fixes 0 and 1, so only a row converted through it
+/// tells them apart. The command that says so, and the residuals it printed for each candidate, are recorded
+/// once in `openspec/…/tasks.md` 9.17; re-run
+/// `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz <exponent>` to reproduce the verdict
+/// (`hypothesis_holds=false` exits non-zero, so a refuted exponent cannot be pasted back in by someone
+/// reading only the numbers).
+const A98_GAMMA: f64 = 563.0 / 256.0;
+
 /// A signed power: the corpus pushes negative and out-of-range channels through the same curve
 /// (`to_space/srgb/lab.hrx::out_of_range/near` converts `color(srgb -1 0.4 2)` and prints real numbers), so
 /// every transfer is defined on the whole line, not clamped into `[0, 1]` first.
@@ -91,7 +106,7 @@ impl Transfer {
                     sp(value.signum() * ((value.abs() + 0.055) / 1.055), 2.4)
                 }
             }
-            Self::A98 => sp(value, 1.0 / 2.199_21),
+            Self::A98 => sp(value, A98_GAMMA),
             Self::Prophoto => {
                 if value.abs() >= 1.0 / 16.0 {
                     sp(value, 1.8)
@@ -124,7 +139,7 @@ impl Transfer {
                     value.signum() * (1.055 * value.abs().powf(1.0 / 2.4) - 0.055)
                 }
             }
-            Self::A98 => sp(value, 2.199_21),
+            Self::A98 => sp(value, 1.0 / A98_GAMMA),
             Self::Prophoto => {
                 if value.abs() > 1.0 / 512.0 {
                     sp(value, 1.0 / 1.8)
