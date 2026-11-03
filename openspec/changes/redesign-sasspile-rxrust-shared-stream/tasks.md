@@ -1966,7 +1966,25 @@
         `no-from-fn-driver` 直接报 `count=1`，而 `crates/sasslint/tests/defence_fitness.rs` 的
         `the_production_tree_is_clean` 跟着红——**没有改闸、没有改规则，改了写法**（数组解构 + `Option::map`，
         不引入索引簿记）。第 11 次证明这些闸只靠“跑一下”不会主动被打断，得真跑。
-      • **未做（不得当作已交付）**：
+      • **本会话另一件必须记的事：上一批我把一个被自己截断的字段补全成了金样。**
+        `state-of-the-port.md` 里写的“display-p3 表与金样差到 7%（`to_space/xyz/display_p3.hrx::white`
+        金样 `1 1 1`）”**是伪造的期望值**：语料那行写的是 `1.067061664 0.9807650127 0.9623860213`，
+        本编译器得 `1.0670616622 0.9807650128 0.9623860263`——差在 `5e-9` 量级。成因：我当时用
+        `cut -c1-230` 截着看 `ledger failures` 的输出，`want` 被切掉后按“白输入该得白输出”补全了它
+        （而 `color(xyz 1 1 1)` 不是参考白）。现已由 `calibrate_space -- display_p3_linear xyz` 重量：
+        解出的表与现有表在 `[2][1]`、`[2][2]` 两项差 `5.0778e-9`/`6.8716e-9`（其余七项在这台仪器自身的
+        元素级噪声以内，见 9.16）。订正已入
+        `state-of-the-port.md`，红线已入 `tooling-redlines.md`（被截断的输出不是读数，宁可重跑）。
+      • **下一刀（legacy 源缺通道）的地形已量**：当前为红的 `to_space/{hsl,hwb,rgb}/**::missing/*` 按
+        **库里的 case 数**是 **230**（hsl 96 + hwb 80 + rgb 54，命令：`ledger failures <run> "to_space/<src>/"
+        | grep missing`）；其中金样全为具体数的（只需“接受 `none` 并代 `0`”，不改值模型）按
+        **另一种口径**——`grep -h -A5 "^<===> missing/.*/output.css" <src>/*.hrx | grep "^  b: "` 再按是否含
+        `none` 分——为 hsl 61、hwb 61、rgb 18（共 **140**），含 `none` 的为 35/19/34（共 **88**，要 `color::Channel`
+        能携带“缺”才能印）。**两个口径差 2 条**（rgb：54 vs 52 行可取到 `  b: `），那 2 条未被 grep 口径分类，
+        不得当作证据。但 `none` 在 legacy 构造子里还出现在 `to_gamut`、`change`、`invert`、`scale`、
+        `complement` 等上下文，那些行期望颜色值还是逐字保留，必须先逐行读完再定接受点——已记录的 decline 律
+        例子（`rgb(none 52 66)` 要保留实参内部空格）说明“处处接受”会碰已通过的行。
+      • **未做（不得当作已交付，共三块：(a) legacy 源、(b) polar 破律、(d) hwb 目标）**：
         (a) **源为 legacy 形式的缺通道**——`to_space/rgb/srgb.hrx::missing/red`（`rgb(none 20 30)` →
             `color(srgb none 0.0784313725 0.1176470588)`）与 `to_space/hsl/**::missing/*`（96 行）要
             `color::Channel{value,percent}` 能携带“缺”：这是值模型改动（现在只有 `InSpace` 能），不是开关；
@@ -1998,4 +2016,36 @@
             `builtins/color/transfer.rs:44-45` 那句“fixtures that convert to it print through a module mixin”
             只对 `to_space/srgb/hwb.hrx` 成立，不得当作对整个 `hwb` 目标的理由。本批没动它（(d) 的 58 行仍红），
             但它现在被具名而不是被一句“没金样”盖掉。
+
+- [x] 9.16 **display-p3 的 primaries 表：只覆盖仪器能分辨的那两项（2026-11-03，基线 run `missing-rectangular-v2`）**：
+      接 9.15 列出的“未校准 primaries”桶，先拿第一个有线性孪生文件的空间开刀。
+      • **读数**：`ledger diff missing-rectangular-v2 display-p3-solved-final` = **`regress=0 net=165`**
+        （2657→2822，24.5%，实质 2657，无效错误仍 19，空库复算同读数）；本会话三批累计
+        `ledger diff calc-constants-final display-p3-solved-final` = **`regress=0 net=324`**。
+        `ledger shift` 定侧：`changed=321 closer=241 farther=63 tie=1 error_expectation=0 shape_of_text=16`；
+        **`farther=63` 不得被 `net=165` 吸收**：逐条按目录分组后，这 63 行的两侧之一均带未校准族
+        （`display_p3*`/`rec2020`/`prophoto_rgb`/`a98_rgb`/`oklab*`），“两侧都无未校准族”的行为 **0**——
+        旧抄表的两个错误原本部分抵消，修好一个就露出另一个（与 9.14 的 `farther=101` 同一机制）。
+      • **表只换了 `[2][1]`、`[2][2]`，其余七项故意保留转录值——这是一条量出来的规则，不是审美**。
+        量具现在仍同一个线性对从两侧各拟合一次（`<src>/<dst>.hrx` 与 `<dst>/<src>.hrx`）并打印**逐项散布**，
+        该散布就是这台仪器在一个数字上的噪声底（本例 `1.8e-11`…`2.6e-10`）。只有转录值与拟合值之差**大于**
+        该项自身散布时才允许覆盖：`[2][1]` 差 `5.0778e-9`（散布 `1.4e-10`，36×）、`[2][2]` 差 `6.8716e-9`
+        （散布 `1.8e-11`，393×）→ 覆盖；`[0][1]` 差 `5.30016e-11` 而散布是 `2.5683e-10` → **拟合没资格说这个
+        数字错**，保留原值。整表换成拟合值实测更差：`net=136`；从另一侧拟合的整表能到 `net=168` 但破了
+        `regress=0`（唯一回归行 `to_space/display_p3_linear/srgb.hrx::out_of_range/far`，
+        got `-362.9953097598` 对金样 `-362.9953097609`）——`-999999` 量级输入把 `1e-10` 的拟合噪声放大成可见位。
+      • **审查（gc-auditor）推翻了本批初稿的四条，已逐条改**：
+        ① 我写的“七项差在 `1e-11`…`1e-15`”是又一次手减，且 `[0][1]` 实际差 `5.3e-11` 大于我自设的阈值
+        ——现改成“逐项散布当阈值”，且所有数字都由仪器打印（不再靠人减 16 位字面量）；
+        ② “整表替换测得更差（net=136 且一个回归）”是把两条 run 拼成了一条不存在的读数——实为
+        `net=136 regress=0` 与 `net=168 regress=1` 两条，已据实分开写；
+        ③ 量具的选律原先只写在注释里，实测 `-- display_p3 xyz` 会开心给出一张残差 `1.6e7` 的表——现在
+        不在四个线性空间名内就 `exit(3)`，参数数不为 2 就 `exit(2)`（不再默默回到默认对）；
+        ④ 示例里第三份求逆写法（Cramer）已删，反方向的表改为直接拟合（兼得逐项散布），`relative` 不再在被印
+        为 `0` 的通道上打 `inf`。另外本条初稿把出处命令写反（`-- xyz display_p3_linear`），已按实际那份改回来。
+      • **未做**：`a98_rgb`/`prophoto_rgb`/`rec2020` 在语料里**没有 `_linear` 孪生文件**（
+        `ls to_space/xyz/` 可验），所以它们的矩阵与曲线必须在同一个拟合里解，不是目只换两项；`display_p3`
+        侧仍有 16 行 `shape_of_text`（期望含 `none`，属 9.15 的 (a)/(d)）。守卫 `tests/color_display_p3.rs`：
+        六个金样行钉住（全为本批前红、现在绿），故意不钉 `to_space/xyz/display_p3.hrx::gray`
+        （金样 `0.7071783379` 对 我 `0.7071783378`，同一末位天花板）。
 

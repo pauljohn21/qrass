@@ -21,12 +21,15 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2657/11,533**（23.0%，**实质通过 2492** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `missing-rectangular-v2`（`missing-rectangular` 是审查前那一树的读数，两者全等；
-   2026-11-03：`none` 缺通道在**索引对齐族**（rgb 系 + `xyz`/`xyz-d50`）之间
-   按位置传播，**`regress=0 net=44`**（2613→2657）；`ledger shift` 定侧：`changed=169 closer=0 farther=0 error_expectation=0 shape_of_text=169`
-   —— 169 行**全部落在 shape 类**。注意这两个 0 的含义（量具源码 `shift_impl.rs` 里 shape 与 distance 是互斥分支）：
-   对这些行它**没算**距离，所以“closer=0 farther=0”是**未测**不是“测得没动”（不得拿它当“没动任何数字”的证据）；
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **2822/11,533**（24.5%，**实质通过 2657** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `display-p3-solved-final`（2026-11-03：display-p3 的 Z 输出行后两项从语料解出，
+   **`regress=0 net=165`**；其余七项因“拟合差不过自己的逐项散布”而保留转录值——整表换成拟合值实测 `net=136`，
+   从另一侧拟合的整表 `net=168` 但破 `regress=0` 于 `to_space/display_p3_linear/srgb.hrx::out_of_range/far`；
+   本会话三批累计 `regress=0 net=324`，无效错误仍 19，空库复算同读数；`ledger shift`：
+   `changed=321 closer=241 farther=63 tie=1 error_expectation=0 shape_of_text=16`，**`farther=63` 全为“两侧之一带未校准族”**
+   ——旧抄表的两个错原本部分抵消，不得把它当 `net` 的反面证据）。其前一批 run `missing-rectangular-v2`（同日本会话：`none` 缺通道在
+   **索引对齐族**（rgb 系 + `xyz`/`xyz-d50`）之间按位置传播，`regress=0 net=44`；`ledger shift` 报
+   `changed=169 … shape_of_text=169`——注意 shape 与 distance 在量具里是互斥分支，那 `closer=0 farther=0` 是**未测**而不是“没动”。
    无效错误仍 19，空库复算同读数）。
    三条律各自有金样：矩形族按位传播且缺者仍`0`代入算术（`to_space/xyz_d50/xyz.hrx::missing/x` 得 `color(xyz none 0.208311512 0.395008248)`，
    后两个数字与传播前已逐字相同的两个一致）、**任一侧为派生族**时不传播而代以 `0`（绿行只来自派生**源**：
