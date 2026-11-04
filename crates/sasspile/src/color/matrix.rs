@@ -128,6 +128,19 @@ const REC2020_GAMMA: f64 = 2.4;
 /// A signed power: the corpus pushes negative and out-of-range channels through the same curve
 /// (`to_space/srgb/lab.hrx::out_of_range/near` converts `color(srgb -1 0.4 2)` and prints real numbers), so
 /// every transfer is defined on the whole line, not clamped into `[0, 1]` first.
+///
+/// Which spaces keep a **linear segment** next to the power is measured per space, not inherited by analogy -
+/// the three answers differ, which is why one shared rule would have been wrong. The readings behind them
+/// (residuals, `regress`, `net`, `changed`) live once, in `openspec/…/tasks.md` 9.21; this states only the
+/// conclusions, because the same digits copied into a second file is how this repository keeps acquiring a
+/// second answer:
+/// * `srgb` - the `12.92` arms are **confirmed** (removing them loses rows on both sides of the reading: some
+///   `net`, and several more that stay red either way and only show in `changed`/`shift`); its shifted power is
+///   confirmed too. The **threshold** of the segment is a transcription - no row this instrument reads enters
+///   that region, and it cannot A/B a threshold anyway (see `tasks.md` 9.21).
+/// * `rec2020` - the `4.5×` arms are **rejected** on the encode side; the decode side stays unconstrained.
+/// * `prophoto-rgb` - the `1/16` arms **survive**, on `changed` evidence rather than on `net`.
+/// Guarded by `tests/color_srgb_segment.rs`, and the segment question for the other two by their own runs.
 fn sp(value: f64, exponent: f64) -> f64 {
     if value == 0.0 {
         0.0

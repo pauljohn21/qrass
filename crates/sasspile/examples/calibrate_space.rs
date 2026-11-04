@@ -7,13 +7,17 @@
 //! cargo run -q -p sasspile --example calibrate_space -- xyz_d50 xyz        # the white-point adaptation
 //! cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz
 //! cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz 2.19921875
+//! cargo run -q -p sasspile --example calibrate_space -- xyz rec2020 to 2.4 1.0
 //! ```
 //!
-//! A pair is admissible when at most one side is printed through a transfer curve, and then only with an
-//! explicit **decode exponent** (the third argument, meaning `linear = printed^exponent`): the exponent is a
-//! hypothesis under test, the fit runs on linearised readings, and [`verdict`] decides whether it held —
-//! a refuted one exits non-zero, because a fitted matrix for a relation that is not linear under that
-//! hypothesis prints exactly like evidence and is otherwise indistinguishable from a good one.
+//! A curve may be claimed for at most one side, and then only with an explicit **decode exponent** plus an
+//! optional **`alpha`** offset (`linear = ((printed + alpha - 1)/alpha)^exponent`; omit `alpha`, or pass `1.0`,
+//! for a pure gamma). The side defaults to the input (`<src>`); name it outright with `from`/`to` when the
+//! curve sits on the output. Either way the exponent is a hypothesis under test, the fit runs on linearised
+//! readings, and [`verdict`] decides whether it held - a refuted one exits non-zero, because a fitted matrix
+//! for a relation that is not linear under that hypothesis prints exactly like evidence and is otherwise
+//! indistinguishable from a good one. Which spaces are curve-free is **not** restated here: `tasks.md` 9.19
+//! records how a second list of that partition drifted from the library's own.
 //!
 //! For an accepted pair it reports:
 //! * the matrix fitted from `to_space/<src>/<dst>.hrx`, and its residual against **every** concrete row of
@@ -34,208 +38,21 @@ use std::path::Path;
 #[path = "../tests/common/hrx_read.rs"]
 mod hrx_read;
 
-use crate::hrx_read::{Hypothesis, Reading, Side, readings, sections, triple};
+/// The solve-and-judge half of this instrument, shared by `#[path]` like the reader above it: the example is
+/// arguments and reporting, nothing else.
+#[path = "../tests/common/fit.rs"]
+mod fit;
 
-/// One archive reading lives in `hrx_read`; what is left here is the fit and its verdicts.
-
-/// The first entry of one output row, straight off the `out_of_range/far` row, whose input is
-/// `(-999999, 0, 0)` in the archive's own print (and its linearised equivalent when one side is
-/// linearised): that single nonzero channel means the printed output **is** the entry times the input, so
-/// dividing recovers the entry at the row's full relative precision. The `1e6`-scale input is also why the
-/// far row, not `white`, is the tightest constraint on that column: the archive's own miss is a step in its
-/// last printed digit, and dividing by `1e6` shrinks it to about `1.2e-16` relative on the entry.
-fn entry_one(row: &Reading, index: usize) -> f64 {
-    assert!(
-        row.input[1] == 0.0 && row.input[2] == 0.0,
-        "the `out_of_range/far` row is only a column by itself when its other two channels are 0; got {:?}",
-        row.input
-    );
-    row.output[index] / row.input[0]
-}
-
-/// How far the fit's own noise may sit above the archive's resolution before the hypothesis behind it has to
-/// be called refuted. The floor per row is the coarser of the archive's tenth-decimal half-step and the
-/// floating-point step of the value it printed; the headroom of `16.0` is that floor multiplied by the
-/// **measured** worst entry spread of one fit against its mirror (`2.6e-10` over a `1.6e-11` half-step ≈ 16),
-/// which is what a single well-conditioned digit can drift by. A refuted hypothesis exits non-zero, so it
-/// cannot be pasted into a table by someone reading only the numbers.
-const RESOLUTION_HALF_STEP: f64 = 5e-11;
-const SPREAD_HEADROOM: f64 = 16.0;
-
-/// The other two entries of one output row, from the `white` and the `out_of_range/near` row. Those two are
-/// chosen for their **conditioning**, not for convenience: with the first entry known, `white` states
-/// `b + c` (its input is `(1,1,1)` whatever the print, since a curve fixes 0 and 1) and `near` states
-/// `n₁·b + n₂·c`, so the two separate only as far as `n₂ − n₁` allows — `1.6` for the archive's
-/// `(-1, 0.4, 2)`. The general form is kept because a **linearised** `near` input is no longer that triple.
-/// The `(0.1 0.2 0.3)`/`(0.2 0.4 0.8)` pair — the one a first attempt used — has `n₂ − n₁ = 0.04`, and the
-/// archive's `5e-11` print rounding divides through by that, putting `1.25e-9` on an entry whose every
-/// effect is read at the tenth decimal; the table it produced missed that decimal on rows of order one. Hence
-/// the floor below, which rejects `0.04` and keeps `1.6`.
-fn row_of(white: &Reading, near: &Reading, far: &Reading, index: usize) -> [f64; 3] {
-    let first = entry_one(far, index);
-    let sum = white.output[index] - first;
-    let &[n0, n1, n2] = &near.input;
-    let rest = near.output[index] - first * n0;
-    let denominator = n2 - n1;
-    assert!(
-        denominator.abs() >= 1.0,
-        "`white` and `out_of_range/near` separate the last two entries by only {denominator}, which would \
-         spread the archive's {RESOLUTION_HALF_STEP} print rounding over them by {}× — too ill-conditioned to read a digit from",
-        1.0 / denominator.abs()
-    );
-    let second = (sum * n2 - rest) / denominator;
-    let third = (rest - n1 * sum) / denominator;
-    [first, second, third]
-}
-
-/// The solved matrix, one output row at a time: the archive's `out_of_range/far` gives the first entry,
-/// `white` and `out_of_range/near` the other two, and every remaining concrete row is left for
-/// [`residual`] to check against.
-///
-/// Rows are found by **case name** rather than by their literal triples, because a linearised channel is no
-/// longer the number printed in the file (a first attempt looked up `[-1.0, 0.4, 2.0]` and panicked on
-/// `a98-rgb` for exactly that reason). It is **not** the case that every `to_space/**` file carries these
-/// three cases: `to_space/xyz_d50/a98_rgb.hrx` has only `in_range`, `out_of_range` and `missing/*`, and its
-/// `in_range` converts between two xyz-d50 colours, so it states no xyz_d50→a98-rgb relation at all. The
-/// panic message therefore prints the cases it did find, and a missing one is a wrong pair, not a broken
-/// archive.
-fn solve(rows: &[Reading]) -> [[f64; 3]; 3] {
-    let one = |case: &str| {
-        rows.iter().find(|row| row.case == case).unwrap_or_else(|| {
-            panic!(
-                "no `{case}` row in this file; its cases are {:?} — if the file is a different relation, the pair is wrong",
-                rows.iter()
-                    .map(|row| row.case.as_str())
-                    .collect::<Vec<&str>>()
-            )
-        })
-    };
-    let (white, near, far) = (
-        one("white"),
-        one("out_of_range/near"),
-        one("out_of_range/far"),
-    );
-    std::array::from_fn(|index| row_of(white, near, far, index))
-}
-
-/// Whether a fit's rows are reproduced within what the archive can express, given the hypothesis it was
-/// fitted under. This is a **verdict field** rather than a number to eyeball, because the instrument prints a
-/// plausible-looking matrix either way: a wrong exponent on a curved pair (`rec2020` under `2.2`, worst
-/// residual `0.19`) and a hypothesis that holds (`a98-rgb` under `563/256`, worst `5.0e-11`) otherwise differ
-/// by eight orders of magnitude in the same field name, and nothing in the earlier shape of this output told
-/// the reader which one they were holding. The bound per channel is the coarser of the archive's tenth-decimal
-/// half-step and the floating-point step of the value it printed, times [`SPREAD_HEADROOM`].
-fn verdict(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (bool, f64) {
-    rows.iter().fold((true, 0.0_f64), |(holds, worst), row| {
-        let (worst_here, holds_here) = apply(matrix, row.input)
-            .into_iter()
-            .zip(row.output)
-            .map(|(predicted, printed)| {
-                let floor = RESOLUTION_HALF_STEP.max(printed.abs() * f64::EPSILON * 2.0);
-                let ratio = (predicted - printed).abs() / (floor * SPREAD_HEADROOM);
-                (ratio, ratio <= 1.0)
-            })
-            .fold((0.0_f64, true), |seen, here| {
-                (seen.0.max(here.0), seen.1 && here.1)
-            });
-        (holds && holds_here, worst.max(worst_here))
-    })
-}
-
-/// The smallest nonzero **printed** channel on the curved side only. A piecewise transfer decides its branch on
-/// the printed value of its own channels (`prophoto-rgb` against `1/16` in `src/color/matrix.rs`), so
-/// this — not a pooled figure over both sides, and not the linearised value — is what says whether the segment
-/// branch was exercised by these rows at all. `None` when neither side is curved: there is no segment to have
-/// exercised. (A first version pooled both sides and reported prophoto's `0.0276` — that is an *XYZ output*,
-/// while the archive's prophoto channels never drop below `0.1`.)
-fn smallest_curved_printed(rows: &[Reading], curved: Option<Hypothesis>) -> Option<f64> {
-    let minimum = rows
-        .iter()
-        .flat_map(move |row| match curved {
-            Some(hypothesis) if hypothesis.side == Side::From => row.printed_input,
-            Some(_) => row.printed_output,
-            None => [0.0; 3],
-        })
-        .map(f64::abs)
-        .filter(|magnitude| *magnitude > 0.0)
-        .fold(f64::INFINITY, f64::min);
-    (curved.is_some())
-        .then_some(minimum)
-        .filter(|_| minimum.is_finite())
-}
-
-/// The smallest nonzero channel in the linearised space the fit actually solved in.
-fn smallest_linear(rows: &[Reading]) -> f64 {
-    rows.iter()
-        .flat_map(|row| row.input.into_iter().chain(row.output))
-        .map(f64::abs)
-        .filter(|magnitude| *magnitude > 0.0)
-        .fold(f64::INFINITY, f64::min)
-}
+use crate::fit::{
+    apply, invert, residual, smallest_curved_printed, smallest_linear, solve, verdict,
+};
+use crate::hrx_read::{Hypothesis, Reading, Side, readings, whites};
 
 fn parse_number(text: &str, what: &str) -> f64 {
     text.parse::<f64>().unwrap_or_else(|error| {
         tracing::error!(value = %text, e = %error, what = %what, "this argument must be a number");
         std::process::exit(2);
     })
-}
-
-fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
-    std::array::from_fn(|row| {
-        (0..3)
-            .map(|column| matrix[row][column] * vector[column])
-            .sum::<f64>()
-    })
-}
-
-/// The worst `|predicted - printed|` over a set of rows, reported **per channel** together with that same
-/// channel's relative miss and printed magnitude. Taking the two maxima independently would let a `1e-5`
-/// miss on a `-999999` channel borrow the relative error of a `0.5` channel — a rounding story told as
-/// though it were one. A channel the archive printed as `0` has no relative miss to report, so the row is
-/// named for its absolute miss and the share is left at `0`: an `inf` in that field reads as a measurement
-/// and is not one.
-fn residual(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (String, f64, f64, f64) {
-    rows.iter()
-        .flat_map(|row| {
-            apply(matrix, row.input)
-                .into_iter()
-                .zip(row.output)
-                .map(move |(predicted, printed)| {
-                    let error = (predicted - printed).abs();
-                    let magnitude = printed.abs();
-                    (
-                        row.case.clone(),
-                        error,
-                        if magnitude == 0.0 {
-                            0.0
-                        } else {
-                            error / magnitude
-                        },
-                        magnitude,
-                    )
-                })
-        })
-        .fold(
-            (String::from("<no rows>"), 0.0, 0.0, 0.0),
-            |seen, channel| if channel.1 > seen.1 { channel } else { seen },
-        )
-}
-
-/// The archive's two reference whites, read off the rows that print them: `to_space/srgb/xyz.hrx::white`
-/// and `to_space/srgb/xyz_d50.hrx::white`. Multiplying the D50 one by the solved table must land on the
-/// D65 one — the check that caught adapting twice.
-fn whites(spec: &Path) -> ([f64; 3], [f64; 3]) {
-    let one = |file: &str, name: &str| {
-        let path = spec.join("srgb").join(file);
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
-        sections(&text)
-            .into_iter()
-            .find(|(case, _)| case == "white")
-            .and_then(|(_, [_, output])| triple(&output, name))
-            .unwrap_or_else(|| panic!("{} has no `white` row", path.display()))
-    };
-    (one("xyz.hrx", "xyz"), one("xyz_d50.hrx", "xyz-d50"))
 }
 
 fn main() {
@@ -246,75 +63,71 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // No default pair: a run that silently fell back to `xyz_d50 → xyz` would hand the next reader a
     // correct-looking answer to a question they never asked.
-    let Some(([src, dst], gamma, alpha)) = (match argv.as_slice() {
-        [src, dst] => Some(([src, dst], None, None)),
-        [src, dst, gamma] => Some((
-            [src, dst],
-            Some(parse_number(gamma, "the hypothesised curve exponent")),
-            None,
-        )),
-        [src, dst, gamma, alpha] => Some((
-            [src, dst],
-            Some(parse_number(gamma, "the hypothesised curve exponent")),
-            Some(parse_number(alpha, "the hypothesised curve offset alpha")),
-        )),
-        _ => None,
-    }) else {
+    if argv.len() < 2 {
         tracing::error!(
             args = argv.len(),
-            usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst> [exponent] [alpha]",
-            "two space names, then the curve exponent, then the offset alpha for a shifted-power transfer"
+            usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst> [from|to] [exponent] [alpha]",
+            "two space names are required"
         );
         std::process::exit(2);
-    };
-    // A pair is admissible when at most one side needs a curve, and then only with an explicit exponent.
-    // Both sides curved is refused because one exponent cannot describe two curves. A *piecewise* space
-    // (`prophoto-rgb`, `rec2020`) may still be named as the curved side and will be fitted under whatever
-    // exponent is passed — this instrument cannot tell a pure power from a segmented curve, which is why
-    // [`verdict`] exists and why a failed hypothesis exits non-zero rather than leaving a plausible table on
-    // screen: `rec2020` fitted under `2.2` gives a worst residual of `0.19`, and only the verdict says that is
-    // not the archive's relation - whereas `2.4` with no offset holds (`tasks.md` 9.20 is what settled
-    // `rec2020`, not this refusal-by-name, which an earlier draft of this comment claimed and the measured run
-    // disproved).
-    const LINEAR: [&str; 4] = ["xyz", "xyz_d50", "srgb_linear", "display_p3_linear"];
-    let curved_side = match (
-        LINEAR.contains(&src.as_str()),
-        LINEAR.contains(&dst.as_str()),
-        gamma,
-    ) {
-        (true, true, None) => None,
-        (false, true, Some(exponent)) => Some(Hypothesis {
+    }
+    // Whether a pair is admissible is **not** decided by a list of names kept here — this file used to hold
+    // `const LINEAR: [&str; 4]`, and `tasks.md` 9.19/9.20 recorded it drifting from `Space::transfer()` (which
+    // answers curve-free for `lab`/`lch`/`oklab`/`oklch` too, and is not reachable from here without making the
+    // `color` module part of the crate's public surface - a decision this tool does not get to take silently).
+    // The archive decides instead: fit under whatever is claimed and let [`verdict`] refute it. Measured on the
+    // pairs this instrument has settled - a curved side fitted as if linear lands at `0.019`…`0.29` residual,
+    // eight to nine orders above the resolution bound, so refutation is loud rather than a table that looks fine.
+    //
+    // Forms: `<src> <dst>` (no curve claimed), or `<src> <dst> <exponent> [alpha]` for a curve on the **input**
+    // side, or `<src> <dst> from|to <exponent> [alpha]` to name the side outright. A *piecewise* space can be
+    // named as the curved side and gets fitted under whatever exponent is passed - one power cannot describe a
+    // segment, which is another reason the verdict, not a name list, is what settles a hypothesis
+    // (`tasks.md` 9.20 measured `-- rec2020 xyz 2.2` refuted at `2.4e8×` its resolution, exit 4).
+    let (src, dst) = (&argv[0], &argv[1]);
+    // The third argument decides the shape rather than the arity: a number means "the input side is curved,
+    // this is its exponent", a word means the side is being named. Ordered by content because a four-element
+    // slice cannot tell `[exp, alpha]` from `[side, exp]` by position alone - matching by position first
+    // produced an `unreachable pattern` warning, which is the compiler saying the two forms overlap.
+    let curved_side = match argv.as_slice() {
+        [_, _] => None,
+        // A number third: the curve is claimed for the input side, with an optional offset after it.
+        [_, _, third, ..] if third.parse::<f64>().is_ok() => Some(Hypothesis {
             side: Side::From,
-            exponent,
-            offset: alpha,
+            exponent: parse_number(third, "the hypothesised curve exponent"),
+            offset: argv
+                .get(3)
+                .map(|text| parse_number(text, "the hypothesised curve offset alpha")),
         }),
-        (true, false, Some(exponent)) => Some(Hypothesis {
-            side: Side::To,
-            exponent,
-            offset: alpha,
-        }),
-        (true, true, Some(_)) => {
-            tracing::error!(
-                "both sides are linear-printed; a third argument would imply a curve that is not there"
-            );
-            std::process::exit(3);
-        }
-        (false, false, _) => {
-            tracing::error!(
-                src = %src,
-                dst = %dst,
-                linear = ?LINEAR,
-                "both sides need a curve hypothesis: at most one side may be non-linear per fit"
-            );
-            std::process::exit(3);
+        // A word third: the side is named outright, so the exponent must follow it.
+        [_, _, side, exponent, ..] => {
+            let which = match side.as_str() {
+                "from" => Side::From,
+                "to" => Side::To,
+                other => {
+                    tracing::error!(
+                        side = %other,
+                        third = %side,
+                        "the third argument is a number (the exponent, applied to the input side) or the word `from` / `to`"
+                    );
+                    std::process::exit(2);
+                }
+            };
+            Some(Hypothesis {
+                side: which,
+                exponent: parse_number(exponent, "the hypothesised curve exponent"),
+                offset: argv
+                    .get(4)
+                    .map(|text| parse_number(text, "the hypothesised curve offset alpha")),
+            })
         }
         _ => {
             tracing::error!(
-                src = %src,
-                dst = %dst,
-                "a curved side needs its hypothesised exponent as the third argument"
+                args = argv.len(),
+                usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst> [from|to] [exponent] [alpha]",
+                "two space names, then optionally the curve hypothesis"
             );
-            std::process::exit(3);
+            std::process::exit(2);
         }
     };
     let spec = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -460,31 +273,6 @@ fn main() {
         elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
         "done"
     );
-}
-
-/// A 3×3 inverse by cofactors over the determinant, so the instrument can line the two directions of one
-/// fit up against each other and print their per-entry spread. The library computes its own inverse the
-/// same way (`matrix::invert`, private to it); this exists only to compare readings, never to produce a
-/// table the library then copies from in the other direction.
-fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
-    let cofactor = |row: usize, column: usize| -> f64 {
-        let rest = |skip: usize| -> Vec<usize> { (0..3).filter(|index| *index != skip).collect() };
-        let (rows, columns) = (rest(row), rest(column));
-        let minor = m[rows[0]][columns[0]] * m[rows[1]][columns[1]]
-            - m[rows[0]][columns[1]] * m[rows[1]][columns[0]];
-        let sign = if (row + column) % 2 == 0 { 1.0 } else { -1.0 };
-        sign * minor
-    };
-    let whole = det(*m);
-    // Adjugate over the determinant: entry (i, j) is the cofactor of (j, i).
-    std::array::from_fn(|i| std::array::from_fn(|j| cofactor(j, i) / whole))
-}
-
-/// A determinant of a 3×3 written as rows.
-fn det(m: [[f64; 3]; 3]) -> f64 {
-    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
 #[path = "../tests/common/tracing_bridge.rs"]

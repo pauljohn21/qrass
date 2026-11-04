@@ -166,3 +166,20 @@ pub fn readings(
         })
         .collect()
 }
+
+/// The archive's two reference whites, read off the rows that print them: `to_space/srgb/xyz.hrx::white`
+/// and `to_space/srgb/xyz_d50.hrx::white`. Multiplying the D50 one by the solved table must land on the
+/// D65 one — the check that caught adapting twice.
+pub fn whites(spec: &Path) -> ([f64; 3], [f64; 3]) {
+    let one = |file: &str, name: &str| {
+        let path = spec.join("srgb").join(file);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+        sections(&text)
+            .into_iter()
+            .find(|(case, _)| case == "white")
+            .and_then(|(_, [_, output])| triple(&output, name))
+            .unwrap_or_else(|| panic!("{} has no `white` row", path.display()))
+    };
+    (one("xyz.hrx", "xyz"), one("xyz_d50.hrx", "xyz-d50"))
+}
