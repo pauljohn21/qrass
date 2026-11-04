@@ -2319,7 +2319,9 @@
         该簇里还有我读不懂的形状——`hsl(none none none)` 转 `hwb` 竟打 `red`，先弄清再动）；(ii) **把 `none` 写进去**
         的一簇：`color.change(black, $red: none)` → `rgb(none 0 0)`（`change/rgb.hrx::red/none`），v3 红
         `change/rgb::` 4 行 + `change/space::missing/arg` 7 行——它等的不是解析，是 `Color::with_channel` 的签名
-        （现 `value: f64`，表达不了“写入缺”）；(iii) 转换后该打**命名色**的一簇：金样答裸命名色的行在语料侧
+        （现 `value: f64`，表达不了“写入缺”）【已做与订正：签名在 9.25 改成 `Option<f64>`，字节侧四条已绿；
+        而**这两个数本身逐字可复现**，毛病在集合——那 4 里含一条与本律无关的 `change/rgb::green/out_of_range`，
+        且“写入缺”的全集按两种口径各是 48（key 以 `/none` 结尾）/55（实参含 `: none`）——口径与分解见 9.25】；(iii) 转换后该打**命名色**的一簇：金样答裸命名色的行在语料侧
         `grep -rh "^  b: [a-z]*;$" sass-spec/spec/core_functions/color/to_space/ | wc -l` = **67**（分布在**目标**为
         `rgb` 的归档，如 `to_space/hwb/rgb.hrx::black` 要 `black` 而我打 `#000000`；注意不在 `to_space/rgb/` 下）；
         (iv) 缺 **alpha**（`rgb(0 0 0 / none)`，语料要求错误；但 `change/no_space.hrx::alpha/none` 已把
@@ -2352,6 +2354,8 @@
       • **漏记一簇（归属也指错了）**：`color.change(black, $red: none)` → `rgb(none 0 0)`（`change/rgb.hrx::red/none`）
         这一簇等的不是 `hsl`/`hwb` 解析，而是 `Color::with_channel` 的签名（`value: f64` 写不出“缺”）；
         v3 实量红：`change/rgb::` 4 行 + `change/space::missing/arg` 7 行。已入本条末尾的未做清单。
+        【订正：这两个数可复现，因而不属于“自家人数”一类错；错在把它们当“该簇全集”。
+        9.25 本批先把它说成“跑不出来的数”（错，是一次过度自我更正），后按两种口径重定：48（key）/55（input）。】
       • **结构性四条（同一事实多住所，都是本批新添的）**：(1) 四表示枚举被抄到第三份 →
         新增 `Representation::writes_bytes()`（`Color::writes_bytes` 转发它），打印两处改调谓词；但 guard 形 match
         **不能穷举**（编译器两次报 `E0004`），所以转换问的那两次合进一个穷举方法 `Color::triple()`，
@@ -2368,4 +2372,92 @@
         **`regress=0 net=0`**；对基线仍 `regress=0 net=41`（3210/11,533，27.8%，实质 3045）；空库复算同读数，
         无效错误仍 19；`fmt=0`、`sasslint count=0`、workspace 无 FAILED 无 warning；行数
         `mod.rs` 470 / `channel.rs` 110 / `space.rs` 472 / `text.rs` 430 / 守卫 181（均 ≤500）。
+
+- [x] 9.25 **`change` 可以把“缺”写进字节通道；并把 9.23 那个数的病因从“跑不出来”改正为“集合选错”（2026-11-04，
+      基线 run `missing-channel-audit-closure`）**：
+      • **先把上一批那句话的病因诊断对**。9.23/9.24 写的是“`change/rgb::` 4 行 + `change/space::missing/arg` 7 行”（共 11）。
+        本批一开始把它的毛病说成“跑不出来的数”——**那是错的，也是一次过度自我更正**：按 9.23 自己引用的 run 与前缀
+        口径复算，`failures legacy-missing-channel-v3 "core_functions/color/change/rgb::"` = **4**、
+        `… "core_functions/color/change/space::missing/arg"` = **7**，两个数逐字可复现。真正的毛病是**集合成员资格**：
+        那 4 里含一条与本律无关的 `change/rgb::green/out_of_range`（它是 hue 推导的另一条缺），而那簇本体远不止 11。
+        两种口径现量并列（互不自洽的地方写明）：
+        - **key 口径**（`failures <run> "core_functions/color/change"` 取 key 列再 `grep -cE "/none$"`）：
+          基线 **48** → 本批后 **45**（差 3；48 = 13 个空间目录×3 + `rgb` 3 + `hsl` 3 + `hwb` 2 + `no_space` 1）。
+        - **input 口径**（`grep -rn "color\.change(.*: none" sass-spec/spec/core_functions/color/change/ | wc -l`）：
+          **55** 条，= 48 + `change/space.hrx::missing/arg/*` 的 7 条（它们的 key 不以 `/none` 结尾，所以 key 口径看不见它们）。
+          本批做掉 4 条 = key 口径的 3 条 + 那 7 条里的 `missing/arg/legacy/same/implicit`，故 **55 → 51**（差 4）。
+          两条口径的差不是巧合：同一个律可以问两种问题，“余下多少”必须跟着口径写。上一批把“给数不给量法”当错犯过一次，
+          这次错在“给了量法但集合选错”——两者都是同一个根：**不得拿一个口径的数当“该律未做全集”。**
+      • **本批的律（四行金样逐字）**：`color.change(black, $red: none)` → `rgb(none 0 0)`、`$green: none` →
+        `rgb(0 none 0)`、`$blue: none` → `rgb(0 0 none)`（`change/rgb.hrx::{red,green,blue}/none`）；命名色同理，且被写入缺后不再打回关键词
+        （`change/space.hrx::missing/arg/legacy/same/implicit` → `rgb(none 192 203)`）——因为“要说出 `none` 就
+        得换形”。`Color::with_channel` 的值位因此改成 `Option<f64>`；**只有 `change` 能写入
+        缺**：`adjust`/`scale` 仍走 `amount::byte`，它拒绝 `none`（无行请它们移动一个缺），新读者
+        `amount::written_byte` 是 `change` 专用。`Color::with_channel` 的“被点名格缺则拒绝”仍适用于数字写入
+        （写缺不需要读任何东西）。
+      • **本会话第一个 `regress≠0`，而且是我自己的次序错**：第一版把字节臂里“先读参数、再读当前字节”换成了
+        后者在前，`ledger diff` 当场报 **`regress=42 net=4`** ——42 条 `scale/error/units/*.hrx::{none,wrong}/*` 从
+        错误消息变成回显。次序是**承重的**：语料那条消息来自读参数那一步，而 `modify.rs` 自己早在 296–309 行
+        写过“the message comes from reading the argument”——我没读它就动手。恢复次序后 `regress=0 net=4`，
+        并把“为什么这个顺序不可串”写在那几行旁边（带 42 这个实测数）。
+      • **又一条既存守卫被语料推翻**：`tests/color_change.rs::what_change_still_declines` 把
+        `color.change(black, $red: none)` 钉成“保持原文”，理由写的是“字节通道表达不了 `none`”——金样正好相反；
+        删列条目并把理由段改为“axes 三元组仍带不了缺”（那才是剩下的 5 条），答案部分改钉在
+        `tests/color_legacy_missing.rs::change_can_write_absence_into_a_byte_channel`。
+      • **拆文件**：加完 `written_byte` 与顺序注释后 `modify.rs` 到 503 行撞硬线。拆点是 `amount.rs` 自己已经
+        写明的两件事：“参数能不能读”（诊断）与“参数的量怎么合上当前值”——`scale_toward`/`step`/`keep` 入
+        `amount.rs`（现 475/257）；拆后对拆前 run `regress=0 net=0`（行为无变）。
+      • **读数**：`ledger diff missing-channel-audit-closure change-writes-absence-v3` = **`regress=0 net=4`**
+        （3210→3214，27.87%，实质 3049）；`ledger shift` = **`changed=0 closer=0 farther=0 tie=0
+        error_expectation=0 shape_of_text=0`**（本会话第一次一个 CHANGED 也没有）；无效错误仍 19；
+        空库复算同读数（`3214/3049/165/1264`）；`fmt=0`、`sasslint count=0`、workspace 无 FAILED 无 warning；
+        本会话累计 `ledger diff calc-constants-final change-writes-absence-final` = **`regress=0 net=716`**。
+        增益四条逐条阳性对照：基线 run 里各为 1、现在各为 0。
+      • **剩下 51 条（input 口径；= 45 条 key 口径 + 6 条 `change/space::missing/arg/*`）各自等的是什么**
+        （不是“没做”，是阻塞律不同）：
+        (a) 39 条空间色行等“`change` 打在带空间的色上”整条接线（今日实测 `change/srgb.hrx` **15 个 case 全红**，
+        即数值改写也没接），它需要：13 个空间的通道名→索引表（case 名已给全：red/green/blue、x/y/z、
+        lightness/a/b、lightness/chroma/hue）；逐通道的 `%` 因子（srgb `50%`→0.5；lab `$a: -40%`→-50 即 100%=125；
+        lightness `30%`→30）；hue 折叠（`400deg`→40、`-20deg`→340）；**负彩度折成 hue+180**
+        （`lch(50% 20 30deg)` 的 `$chroma: -10` → `lch(50% 10 210deg)`）；以及 `lab`/`lch`/`oklab`/`oklch` 的
+        `lightness/out_of_range` 四行金样要求发出 **`color-mix(in lab, color(xyz …) 100%, black)` 文本**——
+        那是 rust.md 早记过的发射能力缺口，不是本簇的数学。(b) 5 条 axes 行等 `hsl`/`hwb` 三元组能携缺，
+        且 `Color::with_hwb` 不再把 whiteness/blackness 折成字节（它现在只在 `writes_bytes()` 时写）。
+        (c) 1 条 `rgb(255 0 0 / none)` 等 `alpha: Option<f64>`。(d) 那 6 条 key 不结尾于 `/none` 的
+        `change/space::missing/arg/*`（如 `…legacy/same/explicit` 要 `color.change(pink, $red: none, $space: rgb)` →
+        `rgb(none 192 203)`，与已绿那条逐字同果；`…modern/same/implicit` 要 `color(srgb none 0.2 0.3)`）等的不是
+        本律，而是 `$space:` 写入与转换路由——它与 (a) 同批才能收。
+
+- [x] 9.26 **9.25 的 `gc-auditor` 先审后提，九条 finding 全收（其中一条它说对了，一条它说错了我也得验）（2026-11-04）**：
+      它独立复算到了所有主张读数（`regress=0 net=4`、`shift` 全 0、v2→v3 `net=0`、v3→final `net=0`、累计 716、
+      19、count=0、无 FAILED），并用不入库量具现跑得到与记录 run 完全相同的 5 个数（它声明自己不能建临时库，
+      所以“空库复算”仍只有作者一侧的读数）。它还对 v1 做了因果验证：`diff 基线→change-writes-absence` =
+      **`regress=42 net=4`** —— 本批那个次序错的因果与代价它自己算出来了，不是采信我的话。以下按它报为实的四条代码/文字问题逐条收：
+      • **一条真实结构缺陷（FINDING 1，它报为 HIGH）**：`amount::byte` 里 `_ if is_missing_word && Set => decline()`
+        在 `written_byte` 存后已**不可达**（我自己复核：`amount::byte` 全文只两个调用点——`written_byte` 在早退之后、
+        以及 `Writing::Shift` 臂），而它的注释还在说“`none` in `change` … keeps its text”——与
+        `change/rgb.hrx::red/none` 逐字相反。删臂 + 重写注释，使“`change` 遇 `none` 怎么答”只住 `written_byte` 一处。
+        `number()` 的同形臂**保留**（它经 `axis` 在 Set 下真可达，那 5 条 axes 行靠它保原文），并就地写明它管的是
+        axes 侧而不是字节侧。
+      • **引用错配（FINDING 6）**：我用 `adjust/error/type.hrx::none` 与 `scale/error/type.hrx::none` 支撑“`byte`
+        拒绝 `none`”——但它们的实参是 **`$alpha`**，走 `number()` 而非 `byte()`。金样逐字没错，承担不了这句话；
+        已归位到“alpha 读者拒绝 none”，并把“没有行请 shift/scale 移动通道缺”改写成可复现检索
+        （`grep -rEn "color\\.(adjust|scale)\\([^)]*\\$[a-z-]+: none" …` 只命中那两条 `$alpha`）。
+      • **归因不来自读数（FINDING 8）**：我写 `to_gamut/space.hrx::clip/missing/legacy/same/with_mapping` 仍红是
+        “因为 `color.to-gamut` 还不携 `none`”——实测该簇 **117 红 / 0 绿**（`failures` + `passed` 各自跑过），
+        即它根本没接线，整行连内层一起回显，因此该行携带不了“内层是否被拒”的信息。已改为读数支持的措辞，
+        窄性的证据只留给金样行本身与已钉的守卫。
+      • **未裁决形状没标注（FINDING 5）**：“把缺写进本来就是缺的格”现在被接受，而
+        `grep -rn "color.change(rgb(none" sass-spec/spec/` 实测只命中不带通道实参的三行与 `$green: 300` 那两行——
+        无行裁决。本仓纪律（`text.rs` 与守卫头部都这么做）是标明“这是 `Option` 取形的后件而非律”，已补。
+      • **run 名又写错一次（FINDING 7）**：`color_change.rs` 我写“answered since run `change-writes-absence-v2`”，
+        实测四条在 **v1** 就绿（v1 正是带那个次序错的那版），已改成不依赖错误 run 名的写法并给出可查链。
+      • **但 FINDING 2/3/4 里我自己的“修正”也得再验**：它量出 key 口径 48→45 与本批“做掉 4”不自洽（第四条
+        增益的 key 不结尾于 `/none`），并给出 input 口径 55——**两条我亲自重跑均逐字命中**（48/45/55/51，及
+        `change/space::missing` 14→13），已按两种口径重写并收回“11 行跑不出来”这句误判（那是一次过度自我更正）。
+      • **读数（收口不改行为）**：删不可达臂与改注释后新终树 run `change-writes-absence-v4` 对
+      `change-writes-absence-final` = **`regress=0 net=0`**；对基线仍 `regress=0 net=4`（3214/11,533，实质 3049）；
+        `sasslint count=0`；workspace 无 FAILED；行数 `amount.rs` 257、`color/mod.rs` 481、`modify.rs` 475（均 ≤500）。
+      • **它另外报的两条纯文字问题已改**：`amount.rs` 行数 242→257（现量）；9.23/9.24 那两句原句已就地标注
+        订正指针，不留两处并存的说法。
 

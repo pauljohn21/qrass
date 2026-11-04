@@ -424,4 +424,19 @@ BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为�
   `color.scale(rgb(none none none))` 钉成“保持原文”，而 `scale/no_channels.hrx::missing` 的金样是一个答案——
   删条目不是放松守卫，是语料换了判据，且必须写明“是哪一行、在哪个 run 里转绿的”（该 key 基线 1 / v1 0，
   不是 v2——写错 run 名也是一种不可复现的引用）。
+• **“缺”现在也能被写进去（9.25）**：`change/rgb.hrx::{red,green,blue}/none` 与 `change/space.hrx::
+  missing/arg/legacy/same/implicit` 四行金样把 `Color::with_channel` 的值位推成 `Option<f64>`，而 `adjust`/`scale`
+  继续拒绝 `none`（没行请它们移动一个缺）。命名色被写入缺后不再打回关键词（`pink` → `rgb(none 192 203)`），
+  因为“要说出 `none` 就得换形”跟 9.23 那条是同一回事的两个方向。余下的 51 条不是同一个缺口：39 条等
+  “`change` 打在带空间的色上”整条接线（连百分因子、hue 折叠、负彩度折 hue+180，以及四行金样竟要求发出
+  `color-mix(in lab, …)` 文本）、6 条等 `$space:` 写入、5 条等 axes 三元组能携缺、1 条等 `alpha: Option<f64>`。
+  本批留下两条教训。**(1) 次序是承重的**：把字节臂里“先读参数、再读当前值”换倒，`regress=42`——
+  那 42 条错误行的消息就是从读参数那一步出来的，而 `modify.rs` 自己早已写下这句话；我没读它就动手。
+  改一条链之前先读它自己标下的“为什么是这个顺序”，这句话比任何新闸都便宜。**(2) “簇多大”要给口径，而口径不是全集**：
+  9.23 写的“`change/rgb::` 4 + `change/space::missing/arg` 7 = 11”本批先被我判为“跑不出来的数”——**那是错的**
+  （按前缀口径逐字可复现），真正的毛病是**集合选错**：那 4 里混进一条无关的 `green/out_of_range`，而同一律按
+  key 口径（以 `/none` 结尾）是 48 条、按 input 口径（实参含 `: none`）是 55 条，两者之差就是
+  `change/space::missing/arg/*` 那 7 条（key 名字不结尾于 `/none`）。教训比“记得写命令”进一步：**任何单一口径
+  都只能回答它自己那个问题**，把它的数当作“该律未做全集”会把后面几批引向错误的规模估计（而把自己的错
+  说成“同一个错第两次犯”也是一次过度更正——它同样是没量就写）。
 

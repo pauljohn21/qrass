@@ -21,8 +21,20 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3210/11,533**（27.8%，**实质通过 3045** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `missing-channel-audit-closure`（终树，与它的 feat 入库 run
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3214/11,533**（27.9%，**实质通过 3049** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `change-writes-absence-v4`（终树；与 `change-writes-absence-final`
+   `regress=0 net=0`，两者只差注释与一条不可达臂。2026-11-04：**`color.change` 可以把“缺”
+   写进字节通道**——`change/rgb.hrx::{red,green,blue}/none` 要 `rgb(none 0 0)`/`rgb(0 none 0)`/`rgb(0 0 none)`，
+   `change/space.hrx::missing/arg/legacy/same/implicit` 要 `color.change(pink, $red: none)` → `rgb(none 192 203)`
+   ——所以 `Color::with_channel` 的值位取成 `Option<f64>`；只有 `change` 能写缺，`adjust`/`scale` 的读者继续拒绝。
+   **`regress=0 net=4`**，`ledger shift` 的 `changed=0`（本会话首个一个形状变化也没有）；本会话八批累计
+   **`regress=0 net=716`**；无效错误仍 19，空库复算同读数。本批犯了一个**次序错**并被闸拦住：把“先读参数、
+   再读当前字节”换倒，`ledger diff` 当场报 `regress=42`（那 42 条是 `scale/error/units/*.hrx` 的错误行，
+   语料的消息来自读参数那一步，`modify.rs` 自己写过这点但我没读它就动手）——教训是改一条链之前先读它
+   自己标下的“为何是这个顺序”。`modify.rs` 因新注释越 500 线 ⇒ `scale_toward`/`step`/`keep` 入 `amount.rs`（拆后 `net=0`）。
+   剩下的写入缺：key 口径（以 `/none` 结尾）**45** 条、input 口径（实参含 `: none`）**51** 条，各自等的律
+   （39 条空间色接线 + 6 条 `$space:` 写入、5 条 axes 带缺、1 条 alpha）全在 `tasks.md` 9.25。
+   其前一批 run `missing-channel-audit-closure`（终树，与它的 feat 入库 run
    `legacy-missing-channel-v3` `regress=0 net=0`；2026-11-04：**legacy `rgb` 三元组现在自己携带
    “缺”**——`to_space/rgb/rgb.hrx::missing/red` 要 `rgb(none 20 30)`（保 `none`、保 byte 尺度、换空格形）而同打在空间色上
    的 `to_space/srgb/rgb.hrx::missing/red` 要 `rgb(0%, 20%, 30%)`（代入），两行合起来定“缺属于 legacy 侧”，故 `Channel` 取
