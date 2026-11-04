@@ -21,8 +21,20 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3169/11,533**（27.5%，**实质通过 3004** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `transfer-segments-confirmed`（= 拆后终树；它的拆前树就是
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3210/11,533**（27.8%，**实质通过 3045** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `missing-channel-audit-closure`（终树，与它的 feat 入库 run
+   `legacy-missing-channel-v3` `regress=0 net=0`；2026-11-04：**legacy `rgb` 三元组现在自己携带
+   “缺”**——`to_space/rgb/rgb.hrx::missing/red` 要 `rgb(none 20 30)`（保 `none`、保 byte 尺度、换空格形）而同打在空间色上
+   的 `to_space/srgb/rgb.hrx::missing/red` 要 `rgb(0%, 20%, 30%)`（代入），两行合起来定“缺属于 legacy 侧”，故 `Channel` 取
+   `Option<f64>` 而不往 `InSpace` 搭第二条路；按位/派生代入/全缺 powerless 三律各只一处判定，源侧读数扩到 legacy 即转出）。
+   **`regress=0 net=41`**；本会话七批累计 **`regress=0 net=712`**；无效错误仍 19，空库复算同读数；`ledger shift`：
+   `changed=13 closer=0 farther=0 tie=0 error_expectation=0 shape_of_text=13`（13 行从“无答案”变“有答案但差 9~10 位”，
+   归属用新增的等价断言量而不是说）。中途本批自己引入过一个**造值缺陷**（`adjust(rgb(none 0 0), $red: 10)` 答了
+   金样禁止的 `rgb(10, 0, 0)`），现改为在被点名通道缺失时拒绝；逐字报出错消息仍未做。守卫 `tests/color_legacy_missing.rs`；
+   `color/mod.rs` 越 500 线后拆出 `color/channel.rs`（拆后 `net=0`）。数字与未做项全在 `tasks.md` 9.23，
+   审查收口（含四个“同一事实多住所”的合并：`Representation::writes_bytes`/`Color::triple`、删 `source` 里的
+   死算术、`has_unwritten_channel`、`is_missing_word`）在 `tasks.md` 9.24。
+   其前一批 run `transfer-segments-confirmed`（= 拆后终树；它的拆前树就是
    `rec2020-audit-closure` = `79ebe15` 本身，两者 `regress=0 net=0`。本批：量具拆开（`tests/common/fit.rs`）+
    **三个空间的分段支各自 A/B，答案不同所以不得互推类比**：`srgb` 的 `12.92` 臂被正向确认（并有
    `tests/color_srgb_segment.rs` 钉住）、`rec2020` 的 `4.5×` 臂在编码侧被拒、`prophoto` 的臂靠 `changed` 保留；

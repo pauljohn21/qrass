@@ -2271,3 +2271,101 @@
       `transfer-segments-confirmed` = 拆后终树（与它 `regress=0 net=0`）。
       • **读数**：两个新测试文件 `4 passed` + `1 passed`；准入改动不碰行为（例件不在测试链上），终树仍待重测。
 
+- [x] 9.23 **legacy 三元组自己携带“缺”（2026-11-04，基线 run `instrument-split-and-guards`）**：接 9.14 留下的
+      “legacy 源缺通道”整簇。动手前先在语料里找“该改哪一侧”的判据，而不是照上一批的形状类推：
+      • **判据（逐字取自已归档行）**：`to_space/rgb/rgb.hrx::missing/red` 要 `color.to-space(rgb(none 20 30), rgb)`
+        答 **`rgb(none 20 30)`**（保 byte 尺度、保 `none`，但换成空格形），而同一调用打在空间色上
+        （`to_space/srgb/rgb.hrx::missing/red`）答 **`rgb(0%, 20%, 30%)`**（缺位被代入）。两行合起来说的是：
+        缺**属于 legacy 三元组自身**，不是“把带缺的颜色改造成空间色”——所以实现给 `color::Channel` 的数值位
+        取成 `Option<f64>`，而非往 `InSpace` 上再搭一条路。“缺者入算术为 0”仍只有一处（
+        `color/channel.rs::missing_as_zero`，`InSpace::filled` 也走它）。
+      • **同一划分不再有两份说法**：`Color::converted` 的源侧读数扩到 legacy 三元组（一个 legacy `rgb` 三元组
+        **就是**一个 srgb 三元组），所以按位律、派生目标代入律、全缺 powerless 律各只有一处判定，新增行
+        （`rgb/srgb.hrx::missing/red` → `color(srgb none 0.0784313725 0.1176470588)`；`rgb/xyz.hrx::missing/green` →
+        `color(xyz 0.0035949053 none 0.0123994639)`；`rgb/hsl.hrx::missing/red` → `hsl(200, 100%, 5.8823529412%)`；
+        `rgb/lab.hrx::missing/all` → `lab(none none none)`）全部由此转出。
+      • **中途造值（本批自己引入的缺陷，已收）**：第一版（run `legacy-missing-channel`）把
+        `color.adjust(rgb(none 0 0), $red: 10)` 答成 `rgb(10, 0, 0)`，而语料要求**错误**
+        （`adjust/error/missing.hrx::legacy`，`scale` 同形）——“无答案”变成“金样禁止的答案”比原来更不可接受。
+        收口在 `Color::with_channel`：只当**被点名的那一格**缺时才拒绝（`ledger shift` 的 `error_expectation`
+        从 2 回到 0）。拒绝的粒度不是我的偏好而是一条金样逼的：
+        `to_gamut/space.hrx::clip/missing/legacy/same/with_mapping` 的期望 `rgb(none 255 none)` 是由
+        `color.change(rgb(none 0 none), $green: 300)` 建的（点名格已写、两兄弟是 `none`），所以“此色有任何缺就拒绝”
+        永远不可能产出那一行；该 key 在 v3 仍红是因为 `color.to-gamut` 自己还不携 `none`，不是因为内层调用被拒。
+        逐字报出语料那条消息未做（需参数名→通道映射与“被修改空间的色形”）；**体量也是量的**：
+        `grep -rc "currently support modifying missing channels" sass-spec/spec/` → 25 行，分布在 5 个归档。
+      • **一条既存守卫被语料推翻（不是放松守卫）**：`tests/color_scale.rs::calls_this_slice_cannot_answer_keep_their_text`
+        把 `color.scale(rgb(none none none))` 钉成“保持原文”，而 `scale/no_channels.hrx::missing` 的金样是
+        `rgb(none none none)`（一个答案）；该行在基线 run `instrument-split-and-guards` 红、从 run
+        `legacy-missing-channel` 起绿（逐 run 查过：基线 1 / v1 0 / v2 0 / v3 0），所以删列条目并把
+        “是语料换了判据”写明在注释里。
+      • **13 行 CHANGED 定性**：`to_space/rgb/{lab,lch,oklab,oklch,display_p3}.hrx::missing/*` 从“逐字回显（无答案）”
+        变成“有答案但差 9~10 位”（如金样 `5.2408778377%` vs 我 `5.2408778375%`）。归属用命令分，不靠说：
+        新增断言 `a_substituted_channel_leaves_the_route_unchanged` 要求 `rgb(none 20 30)` 与同色显式写 0 的
+        `rgb(0 20 30)` 在四个派生目标下**逐字相同**——既然相同，残差住在共用的 cone/primaries 表（9.14）里，
+        不是本批开的第二条算术；因此这些行**故意不钉**（钉上去就是把已知错值冻结）。
+      • **拆文件**：`color/mod.rs` 到 534 行撞硬线，拆点是代码自己已有的两条：“一个写下来的数怎么表现”
+        （`Channel` + `missing_as_zero` → `color/channel.rs`，96 行）与“一个颜色是什么”（构造子与表示，现 451 行）。
+        拆后重测：`regress=0 net=0` 对拆前 run `legacy-missing-channel-v2`（行为无变）。
+      • **读数**：`ledger diff instrument-split-and-guards legacy-missing-channel-v3` = **`regress=0 net=41`**
+        （3169→3210，27.8%，实质 3045；空期望 165、skipped 1264；无效错误仍 19；**空库复算同读数**）；
+        `ledger shift`：`changed=13 closer=0 farther=0 tie=0 error_expectation=0 shape_of_text=13`；
+        本会话累计 `ledger diff calc-constants-final legacy-missing-channel-v3` = **`regress=0 net=712`**。
+        守卫 `tests/color_legacy_missing.rs`（6 条）。阳性对照的口径写全：测试钉的 **8 个 key** 逐一
+        `failures <run> <key> --count` 都是基线 1 → v3 0；同六个目录（`to_space/rgb/{rgb,srgb,srgb_linear,xyz,hsl,lab}`）
+        一共有 **20 个 `::missing` key**，其中 17 个转绿、剩下 3 个即
+        `to_space/rgb/lab::missing/{red,green,blue}` 仍红（就是上面那 13 行 CHANGED 的一部分）。
+      • **未做（具名，全部量过）**：(i) `hsl`/`hwb` 的 `none`（需 `Space::Hsl`/`Space::Hwb` 与轴数学，不只是解析；
+        该簇里还有我读不懂的形状——`hsl(none none none)` 转 `hwb` 竟打 `red`，先弄清再动）；(ii) **把 `none` 写进去**
+        的一簇：`color.change(black, $red: none)` → `rgb(none 0 0)`（`change/rgb.hrx::red/none`），v3 红
+        `change/rgb::` 4 行 + `change/space::missing/arg` 7 行——它等的不是解析，是 `Color::with_channel` 的签名
+        （现 `value: f64`，表达不了“写入缺”）；(iii) 转换后该打**命名色**的一簇：金样答裸命名色的行在语料侧
+        `grep -rh "^  b: [a-z]*;$" sass-spec/spec/core_functions/color/to_space/ | wc -l` = **67**（分布在**目标**为
+        `rgb` 的归档，如 `to_space/hwb/rgb.hrx::black` 要 `black` 而我打 `#000000`；注意不在 `to_space/rgb/` 下）；
+        (iv) 缺 **alpha**（`rgb(0 0 0 / none)`，语料要求错误；但 `change/no_space.hrx::alpha/none` 已把
+        `rgb(255 0 0 / none)` 这个拼法给出来了）；(v) `9.16` 那句“`hsl`/`hwb` 不属索引对齐家族”仍只在注释里，
+        `is_derived` 的名字在这一批后已经不准（它现在区分的是“索引对齐”而非“XYZ 导出”）——下一批要么改名要么
+        把划分收成一个三值判据；(vi) 审查另发现 `to_space/rgb/rgb::in_range`（`color.to-space(#28d, rgb)` 要 `#28d`）
+        在基线与 v3 的 got **逐字相同**（都是回显），即 `as_legacy_rgb` 的常规支路对 hex 色实际没被走到，
+        是本批前既有缺口，下一批单独查。
+
+- [x] 9.24 **9.23 的 `gc-auditor` 先审后提，回来改了六条成文 + 四条结构（2026-11-04）**：它独立复算到了同一个数
+      （`regress=0 net=41`、`changed=13 closer=0 farther=0 error_expectation=0 shape_of_text=13`、
+      `legacy-missing-channel-v2 → v3` = `net=0`、无效错误 19、`sasslint count=0`、`fmt` EXIT=0、workspace 无 FAILED、
+      累计 `net=712`），并把工作树重录进另一个库得到与 v3 `net=0`、与基线跨库复算 `net=41`；8 项金样引证逐字
+      属实（行号它自己 `sed -n` 取的）。然后推翻十条：
+      • **技术上最重的一条：我写的“no fixture adjusts a written channel of a colour with an unwritten sibling”
+        是假的**。`to_gamut/space.hrx:49/:56` 就是这一行（`color.change(rgb(none 0 none), $green: 300)` →
+        经 clip 后 `rgb(none 255 none)`），而且它要求拒绝粒度必须是“被点名的那一格”——所以那句“我的最窄读法”
+        其实是被金样钉住的读法。已改引该行，并新增守卫 `a_written_channel_of_a_colour_with_unwritten_siblings_is_still_modified`
+        （只断言“内层调用被回答而非回显”——这才是该行蕴含的；它单独打印的文本不是语料自己的行，所以不钉）。
+      • **引用不存在的行**：命名色那簇我写成 `to_space/rgb/…::missing/*` 要 `black`，实测量过：
+        `grep -rn "b: black" sass-spec/spec/core_functions/color/to_space/rgb/` 无输出；真位置在**目标**为 `rgb`
+        的归档（`to_space/hwb/rgb.hrx:7/:150`、`to_space/lch/rgb.hrx:7/:139/:161` 等）。
+      • **两个不可复现的自家人数**：“35 行”与“30 行”我跑不出任何能得出它们的量法。现改为命令 + 口径：
+        金样答裸命名色 = `grep -rh "^  b: [a-z]*;$" …/to_space/ | wc -l` = **67**；含那条错误消息的行 =
+        `grep -rc "currently support modifying missing channels" sass-spec/spec/` = **25**，分布在 **5** 个归档。
+      • **run 名归因错**：`scale/no_channels::missing` 从 **v1**（`legacy-missing-channel`）就绿，不是 v2（逐 run 查：
+        基线 1 / v1 0 / v2 0 / v3 0）；`color_scale.rs` 注释与本条同步改正。
+      • **阳性对照口径不足**：“八个 key base=1→v3=0”会被下一个读者按集合核错：同一六个目录共有 **20 个
+        `::missing` key**，其中 17 转绿、`to_space/rgb/lab::missing/{red,green,blue}` 3 行仍红（实测）。
+      • **漏记一簇（归属也指错了）**：`color.change(black, $red: none)` → `rgb(none 0 0)`（`change/rgb.hrx::red/none`）
+        这一簇等的不是 `hsl`/`hwb` 解析，而是 `Color::with_channel` 的签名（`value: f64` 写不出“缺”）；
+        v3 实量红：`change/rgb::` 4 行 + `change/space::missing/arg` 7 行。已入本条末尾的未做清单。
+      • **结构性四条（同一事实多住所，都是本批新添的）**：(1) 四表示枚举被抄到第三份 →
+        新增 `Representation::writes_bytes()`（`Color::writes_bytes` 转发它），打印两处改调谓词；但 guard 形 match
+        **不能穷举**（编译器两次报 `E0004`），所以转换问的那两次合进一个穷举方法 `Color::triple()`，
+        `xyz()` 里那份显式列举保留并写明为什么不能是 guard。(2) `source` 里的 `byte()/255.0` 是**死算术**
+        （只读位置不读数），删——否则“字节→分数”这条律就有第二个住所。(3) “有无未写通道”被手抄两遍 →
+        `Color::has_unwritten_channel()`，并写出它依赖的不变量（`Color::in_space` 把字节三元组填成 `Some(0.0)`，
+        所以空间色不会误触发身份守卫）。(4) `none` 词素有 **三处**拼写且大小写规则不一致（两处
+        `eq_ignore_ascii_case`、`amount.rs` 一个 `== "none"`）→ 收成 `crate::color::is_missing_word`；语料无
+        `NONE` 变体行（`grep -rEn "\bNONE\b" sass-spec/spec/core_functions/color/` 空），所以大小写是**声明过的选择**
+        而不是律，这句话写在函数自己的 doc 里。
+      • **一条承认被细化**：`Color::modern` 的 `/ alpha` 不再是“无任何旁证”——`change/no_space.hrx::alpha/none`
+        给了 `rgb(255 0 0 / none)` 这个拼法（缺的是 alpha 不是通道），所以措辞改为“半边有旁证、半边无行”。
+      • **读数（收口不改行为）**：新终树 run `missing-channel-audit-closure` 对 `legacy-missing-channel-v3` =
+        **`regress=0 net=0`**；对基线仍 `regress=0 net=41`（3210/11,533，27.8%，实质 3045）；空库复算同读数，
+        无效错误仍 19；`fmt=0`、`sasslint count=0`、workspace 无 FAILED 无 warning；行数
+        `mod.rs` 470 / `channel.rs` 110 / `space.rs` 472 / `text.rs` 430 / 守卫 181（均 ≤500）。
+

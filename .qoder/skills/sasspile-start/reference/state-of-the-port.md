@@ -404,6 +404,24 @@ BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为�
   (b) polar 对——**不是“金样互斥”**而是“22 行里 20 行合一条候选律，只有 `to_space/lch/lab.hrx::missing/{lightness,non_hue}`
   两行破律”（破的是 `lab` 自己，`oklch` 同形合律），逐行在 `tasks.md` 9.15；
   (d) **`hwb` 目标有裸金样，不是“没定形体”**：`to_space/hwb/hwb.hrx` 不用 mixin，`::in_range`→`hsl(0, 55.5555555556%, 45%)`
-  而 `::missing/non_hue`→`hwb(10deg none none)`，“带不带缺”决定形体是语料自己的区分；而
-  `builtins/color/transfer.rs` 现在根本不接 `hwb` 目标，它的那句“靠 mixin 打印”只对 `to_space/srgb/hwb.hrx` 成立。
+  而 `::missing/non_hue`→`hwb(10deg none none)`，“带不带缺”决定形体是语料自己的 区分；而
+  `builtins/color/transfer.rs` 现在根本不接 `hwb` 目标，它的那句“靠 mixin 打印” 只对 `to_space/srgb/hwb.hrx` 成立。
+• **当年列的 (a) 已做了一半，而且方向是被两行金样定的（9.23）**：`Channel` 的数值位取成 `Option<f64>`，
+  legacy `rgb(none 20 30)` 不再“解不了就逐字回显”。选这一侧而不是“把带缺的颜色当成 `InSpace`”，靠的是同一调用
+  在两种源上的不同答案：`to_space/rgb/rgb.hrx::missing/red` 要 `rgb(none 20 30)`（保 `none`、保 byte 尺度，
+  但**换成空格形**，因为逗号形没有 `none` 的写法），而 `to_space/srgb/rgb.hrx::missing/red` 要 `rgb(0%, 20%, 30%)`
+  （缺位代入）。也就是说：**缺在谁身上，谁就带它出去；不在谁身上，目标形态自己算。** `converted()` 里那三条
+  律一行没加，只是源侧读数扩到了 legacy 三元组——“一个划分两份说法”的坑这次提前避开。
+  这一批留下的不是“做完了”，而是三件更具体的事：`hsl`/`hwb` 的 `none` 需要 `Space::Hsl`/`Space::Hwb` 与轴数学
+  （不只是解析，且该簇里有我还没读懂的形状：`hsl(none none none)` 转 `hwb` 竟打 `red`）；转换后该打**命名色**
+  的一簇（金样答裸命名色的行 = 67，按 `grep -rh "^  b: [a-z]*;$" …/to_space/ | wc -l` 量，分布在**目标**为 `rgb` 的
+  归档如 `to_space/hwb/rgb.hrx::black` 要 `black` 而我打 `#000000`）；以及缺 **alpha** 与
+  “修改缺通道”的逐字错误消息（语料已把消息写全：`grep -rc "currently support modifying missing channels" …` = 25 行，5 个归档）。`is_derived()` 这个名字在这一批后已经会误导：
+  它现在区分的是“索引对齐”，不再是“XYZ 导出”——`hsl`/`hwb` 将来入表时必须收成一个三值判据或改名。
+• **两条方法论收获**（都是量出来的，不是推的）：(1) “从逐字回显变成有答案但差 9~10 位”**不能归给本批也不能
+  归给天花板**，除非有等价断言——新测试要求 `rgb(none 20 30)` 与 `rgb(0 20 30)` 在四个派生目标下逐字相同，
+  这才把残差钉在共用的 cone/primaries 表上；(2) 守卫条目自己也会过期：`color_scale.rs` 把
+  `color.scale(rgb(none none none))` 钉成“保持原文”，而 `scale/no_channels.hrx::missing` 的金样是一个答案——
+  删条目不是放松守卫，是语料换了判据，且必须写明“是哪一行、在哪个 run 里转绿的”（该 key 基线 1 / v1 0，
+  不是 v2——写错 run 名也是一种不可复现的引用）。
 
