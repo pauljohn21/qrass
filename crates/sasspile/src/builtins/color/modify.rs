@@ -13,7 +13,7 @@
 //! message rather than a silence (`error/{type,units,args,bounds,polar}.hrx` under
 //! `core_functions/color/{change,adjust,scale}/`).
 
-use super::amount::{self, axis, byte, share};
+use super::amount::{self, axis, byte, keep, scale_toward, share, step};
 use crate::ErrorKind;
 use crate::SassError;
 use crate::builtins::{Builtin, Given, missing};
@@ -186,18 +186,6 @@ pub(super) static SCALE_COLOR: Builtin = Builtin {
     labelled: Some(scaled),
 };
 
-/// The value a scale writes: `amount` is read as a percentage of the distance still to the bound its sign
-/// points at, so the result is always between `floor` and `ceiling` (`scale_toward(240, -33.0, 0.0, 255.0)`
-/// is `160.8`, `scale_toward(64, 86.0, 0.0, 255.0)` is `228.26` — both from `scale/rgb.hrx`).
-fn scale_toward(current: f64, amount: f64, floor: f64, ceiling: f64) -> f64 {
-    let share = amount / 100.0;
-    if share >= 0.0 {
-        current + (ceiling - current) * share
-    } else {
-        current - (current - floor) * -share
-    }
-}
-
 /// Which of the colour's own spaces a call writes. Decided once, from what the call named, so the arithmetic
 /// below matches on `(space, writing)` instead of stacking one guard per function — three functions and three
 /// spaces is nine arms, and a chain of `if`s would have to be re-read every time a fourth writing arrives.
@@ -356,27 +344,45 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
             .into_iter()
             .try_fold(colour.clone(), |colour, (name, index)| {
                 let argument = Given::find(&given, name).ok_or_else(amount::decline)?;
-                let amount = match writing {
-                    // The channel form the corpus writes: a unitless number of `0–255`, or a percentage
-                    // of 255 (`adjust/rgb.hrx` uses both).
-                    Writing::Set | Writing::Shift => byte(argument, name, writing)?,
-                    // A scale's argument is a **share** of the distance still to the bound, not a channel:
-                    // `$red: 100%` means the whole way to 255 (`color.scale(black, $red: 100%)` → `red`,
-                    // `scale/rgb.hrx::red/max`), so it must carry `%` (`scale/error/units/rgb.hrx`).
-                    Writing::Scale => share(name, argument)?,
+                // The argument is read **before** the colour's current byte, and that order is load-bearing: the
+                // corpus's message comes from this read. `scale/error/units/srgb.hrx::wrong/red` expects
+                // `$red: Expected 1px to have unit "%".` on a call whose byte read would fail too, and reading
+                // the two the other way round answers it with the call's text instead — measured, when I made
+                // exactly that swap: 42 `scale/error/units/*` rows went red.
+                //
+                // The channel form the corpus writes is the same for `change` and a shift: a unitless number of
+                // `0–255`, or a percentage of 255 (`adjust/rgb.hrx` uses both). A scale's argument is a **share**
+                // of the distance still to the bound, not a channel: `$red: 100%` means the whole way to 255
+                // (`color.scale(black, $red: 100%)` → `red`, `scale/rgb.hrx::red/max`), so it must carry `%`
+                // (`scale/error/units/rgb.hrx`). `change` alone may write **absence** — `$red: none` is the
+                // missing-channel answer (`change/rgb.hrx::red/none` → `rgb(none 0 0)`) — which is why its reader
+                // is [`amount::written_byte`], the only one that allows a `none`.
+                let amount: Option<f64> = match writing {
+                    Writing::Set => amount::written_byte(argument, name)?,
+                    Writing::Shift => Some(byte(argument, name, writing)?),
+                    Writing::Scale => Some(share(name, argument)?),
                 };
-                // `adjust` moves the channel and cannot pass the ends: `color.adjust(#abcdef, $red: 200)`
-                // is `#ffcdef`, the byte clamped to 255 (`adjust/rgb.hrx::red/above_max`). `change` keeps
-                // the value it was given and lets the out-of-gamut rule print hsl instead. `scale` cannot
-                // pass either end by construction (`scale/rgb.hrx::red/{max,min}`).
+                // Then the current byte, for the writings that move it. `change` reads it too, and that read is
+                // what makes `Color::with_channel` decline a numeric write over a channel the colour never wrote
+                // (`adjust/error/missing.hrx::legacy`) — `change` cannot bypass it.
                 let current = colour.byte(index).ok_or_else(amount::decline)?;
-                let value = match writing {
-                    Writing::Set => amount,
-                    Writing::Shift => (current + amount).clamp(0.0, 255.0),
-                    Writing::Scale => scale_toward(current, amount, 0.0, 255.0),
+                let written: Option<f64> = match (writing, amount) {
+                    // `change` keeps the value it was given and lets the out-of-gamut rule print hsl instead;
+                    // nothing is clamped here (`change/rgb.hrx::red/out_of_range` keeps 500).
+                    (Writing::Set, written) => written,
+                    // `adjust` moves the channel and cannot pass the ends: `color.adjust(#abcdef, $red: 200)` is
+                    // `#ffcdef`, the byte clamped to 255 (`adjust/rgb.hrx::red/above_max`).
+                    (Writing::Shift, Some(delta)) => Some((current + delta).clamp(0.0, 255.0)),
+                    // A scale cannot pass either end by construction (`scale/rgb.hrx::red/{max,min}`), so it
+                    // raises no clamp question.
+                    (Writing::Scale, Some(part)) => Some(scale_toward(current, part, 0.0, 255.0)),
+                    // No reader other than `written_byte` answers `None`, and that one runs only under `Set`;
+                    // declining here instead of substituting a `0` keeps an unreachable from becoming an
+                    // invented value.
+                    (_, None) => return Err(amount::decline()),
                 };
                 colour
-                    .with_channel(index, value)
+                    .with_channel(index, written)
                     .ok_or_else(amount::decline)
             }),
         (Space::Hwb, _) => {
@@ -466,20 +472,4 @@ fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
         }
         (None, _) => built,
     }))
-}
-
-/// The offset a call named for one axis, or zero when it did not — `adjust` adds these, `change` never does.
-fn step(reads: &[(&str, f64)], name: &str) -> f64 {
-    reads
-        .iter()
-        .find(|(read, _)| *read == name)
-        .map_or(0.0, |(_, value)| *value)
-}
-
-/// The value to write for one axis, or the colour's current one when the call did not name it.
-fn keep(writes: &[(&str, f64)], name: &str, current: f64) -> f64 {
-    writes
-        .iter()
-        .find(|(written, _)| *written == name)
-        .map_or(current, |(_, value)| *value)
 }

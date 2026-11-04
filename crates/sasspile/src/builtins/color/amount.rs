@@ -1,7 +1,9 @@
-//! Reading the **channel arguments** of `color.change` / `color.adjust` / `color.scale`, and the message the
-//! corpus gives when an argument cannot be used. Split out of [`super::modify`] because that file is about
-//! *which* channel a call names and what arithmetic it does, while this one is about *whether an argument may
-//! be read at all* — the half where P7's diagnostics live.
+//! Reading the **channel arguments** of `color.change` / `color.adjust` / `color.scale`, the arithmetic that
+//! turns one into a written value, and the message the corpus gives when an argument cannot be used. Split out
+//! of [`super::modify`] because that file is about *which* channel a call names and how it dispatches, while
+//! this one is about the argument itself — whether it may be read at all (the half where P7's diagnostics
+//! live) and how its amount combines with the value the colour already has ([`scale_toward`], [`step`],
+//! [`keep`]).
 //!
 //! Every wording here is a row, and the three families do not share one wording:
 //! * `change` says `c is not a number or unquoted "none".` because an unquoted `none` **means something**
@@ -87,22 +89,36 @@ pub(super) fn share(name: &str, value: &Value) -> Result<f64, SassError> {
     Ok(magnitude)
 }
 
-/// An `rgb` channel argument as `change` and `adjust` write one: a unitless number of `0–255`
+/// An `rgb` channel argument as `adjust` writes one: a unitless number of `0–255`
 /// (`color.adjust(#abcdef, $red: 200)`, `adjust/rgb.hrx::red/above_max`) or a percentage of 255
 /// (`adjust/units.hrx` uses `10%` for a byte channel).
+///
+/// It cannot answer a `none`: `change`'s absence goes through [`written_byte`], and this reader is reached only
+/// from the shift arm (`writing == Shift`) plus [`written_byte`]'s already-guarded fall-through — so a `none`
+/// here is the corpus's type message like any other unusable value. An earlier shape of this function had a
+/// `Set`+`none` arm declining the missing-channel case; it was unreachable after [`written_byte` arrived and its
+/// comment claimed the opposite of `change/rgb.hrx::red/none`, so both are gone rather than left as a second
+/// answer to one question.
 pub(super) fn byte(value: &Value, name: &str, writing: Writing) -> Result<f64, SassError> {
     match value {
         Value::Number(number, unit) if unit.single() == Some("%") => Ok(number * 255.0 / 100.0),
         Value::Number(number, _) => Ok(*number),
-        // Anything else — a `px` quantity, the keyword `none` — has no byte to write. `none` in `change`
-        // wants the missing-channel answer, so it keeps its text; `c` is the corpus's type message. The word
-        // itself is judged by `crate::color::is_missing_word`, the crate's one answer to that question.
-        _ if crate::color::is_missing_word(value) && writing == Writing::Set => Err(decline()),
+        // Anything else — a `px` quantity, the keyword `none` — has no byte to write; `c` is the corpus's type
+        // message, and the word itself is judged by `crate::color::is_missing_word`, the crate's one answer.
         _ => Err(not_a_number(name, value, writing)),
     }
 }
 
 /// The magnitude of a numeric argument, or the family's own message about the value that is not one.
+///
+/// **The `Set` + `none` arm here is live and means something different from the byte side**: this reader serves
+/// the axes and alpha arguments (`hue`, `saturation`, `lightness`, `whiteness`, `blackness`, `alpha`) reached
+/// from `axis`, and neither the `hsl`/`hwb` axes triple nor `Color`'s `alpha` can carry an absence yet — so
+/// `color.change(hsl(0deg 100% 50%), $hue: none)` (`change/hsl.hrx::hue/none`) and
+/// `color.change(hwb(180deg 30% 50%), $whiteness: none)` (`change/hwb.hrx::whiteness/none`) keep their text,
+/// and so does `color.adjust(red, $alpha: none)` → `$alpha: none is not a number.`
+/// (`adjust/error/type.hrx::none`, `scale/error/type.hrx::none`). Declining is the *absence* of an answer, not
+/// the archive's message — writing absence into the axes is `tasks.md` 9.25's remaining five rows.
 fn number(name: &str, value: &Value, writing: Writing) -> Result<f64, SassError> {
     match value {
         Value::Number(number, _) => Ok(*number),
@@ -113,6 +129,50 @@ fn number(name: &str, value: &Value, writing: Writing) -> Result<f64, SassError>
 
 fn is_percent(value: &Value) -> bool {
     matches!(value, Value::Number(_, unit) if unit.single() == Some("%"))
+}
+
+/// The `change` family's byte amount, which **may be absence**: `$red: none` writes a missing channel, and the
+/// corpus has all three of them — `color.change(black, $red: none)` → `rgb(none 0 0)`, `$green: none` →
+/// `rgb(0 none 0)`, `$blue: none` → `rgb(0 0 none)` (`change/rgb.hrx::{red,green,blue}/none`).
+///
+/// `adjust` and `scale` never come here. Their byte reader is [`byte`], which has no case for a `none` at all
+/// now, and no fixture hands a `none` to a shift or a scale as a **channel** argument
+/// (`grep -rEn "color\\.(adjust|scale)\\([^)]*\\\$[a-z-]+: none" sass-spec/spec/core_functions/color/` reaches
+/// only the two `$alpha` rows, which are the alpha reader's business — see [`number`]'s note). Two readers
+/// rather than one with a flag, because "write absence" and "there is no such amount" are different laws.
+pub(super) fn written_byte(value: &Value, name: &str) -> Result<Option<f64>, SassError> {
+    if crate::color::is_missing_word(value) {
+        return Ok(None);
+    }
+    byte(value, name, Writing::Set).map(Some)
+}
+
+/// The value a scale writes: `amount` is read as a percentage of the distance still to the bound its sign
+/// points at, so the result is always between `floor` and `ceiling` (`scale_toward(240, -33.0, 0.0, 255.0)`
+/// is `160.8`, `scale_toward(64, 86.0, 0.0, 255.0)` is `228.26` — both from `scale/rgb.hrx`).
+pub(super) fn scale_toward(current: f64, amount: f64, floor: f64, ceiling: f64) -> f64 {
+    let share = amount / 100.0;
+    if share >= 0.0 {
+        current + (ceiling - current) * share
+    } else {
+        current - (current - floor) * -share
+    }
+}
+
+/// The offset a call named for one axis, or zero when it did not — `adjust` adds these, `change` never does.
+pub(super) fn step(reads: &[(&str, f64)], name: &str) -> f64 {
+    reads
+        .iter()
+        .find(|(read, _)| *read == name)
+        .map_or(0.0, |(_, value)| *value)
+}
+
+/// The value to write for one axis, or the colour's current one when the call did not name it.
+pub(super) fn keep(writes: &[(&str, f64)], name: &str, current: f64) -> f64 {
+    writes
+        .iter()
+        .find(|(written, _)| *written == name)
+        .map_or(current, |(_, value)| *value)
 }
 
 /// The channel names each space answers: its name, the names that **decide** it, and the names it owns.

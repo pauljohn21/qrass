@@ -398,31 +398,42 @@ impl Color {
     /// Sass represents, not an error, and clamping would turn it into `rgb(255, 0, 0)`, a different colour.
     /// [`Channel::clamped`] stays where it is: only a *written* `rgb`/`hsl` channel clamps at creation.
     ///
-    /// **A channel that was never written cannot be modified.** The corpus states it as an error —
+    /// The value is an `Option` because the call may write **absence**: `color.change(black, $red: none)` →
+    /// `rgb(none 0 0)`, and the same for green and blue (`change/rgb.hrx::{red,green,blue}/none`). `adjust` and
+    /// `scale` never reach this with `None` — their reader is [`super::builtins::color::amount::byte`], which
+    /// refuses a `none` outright (`amount::written_byte` is the one reader that allows it, and it is the
+    /// `change` family's only path here), so no fixture asks a shift or a scale to move an absence.
+    ///
+    /// **A numeric write needs the named channel to be there.** The corpus states that as an error —
     /// `color.adjust(rgb(none 0 0), $red: 10)` must fail with "$red: … Sass doesn't currently support modifying
     /// missing channels (color: rgb(none 0 0))" (`adjust/error/missing.hrx::legacy`, and the same for `scale`
-    /// at `scale/error/missing.hrx::legacy`). Returning `None` here is the *decline*, which keeps the call's own
-    /// text: reading the missing channel as `0` and writing an answer would **invent a value the archive forbids**
-    /// (`rgb(10, 0, 0)`), and that is what this guard exists to stop. Raising the corpus's message verbatim is a
-    /// separate increment, named in `tasks.md` 9.23. The refusal is keyed on **the channel the call names**,
-    /// and a fixture requires that narrowness rather than my preference: `color.change(rgb(none 0 none),
-    /// $green: 300)` must succeed — its colour comes back with green written and both siblings still `none`
-    /// (`to_gamut/space.hrx::clip/missing/legacy/same/with_mapping`, whose own row is still red because
-    /// `color.to-gamut` does not carry a `none` yet, not because the inner call is refused).
+    /// at `scale/error/missing.hrx::legacy`). Reading the missing channel as `0` and writing an answer would
+    /// **invent a value the archive forbids** (`rgb(10, 0, 0)`), which is what this guard exists to stop;
+    /// returning `None` here is the *decline*, which keeps the call's own text. Raising the corpus's message
+    /// verbatim is a separate increment, named in `tasks.md` 9.23. The refusal is keyed on **the channel the
+    /// call names**, and a fixture requires that narrowness rather than my preference: the corpus asks for
+    /// `color.change(rgb(none 0 none), $green: 300)` to come back with green written and both siblings still
+    /// `none` (`to_gamut/space.hrx::clip/missing/legacy/same/with_mapping`, whose output.css prints
+    /// `rgb(none 255 none)`). That row is red in every recorded run for a reason this line should not pretend
+    /// otherwise about: `color.to-gamut` is not wired at all (117 red / 0 green in run
+    /// `change-writes-absence-final`), so it echoes the whole call and carries no information about the inner
+    /// one — the narrowness rests on the golden text itself, and it is asserted directly in
+    /// `tests/color_legacy_missing.rs`.
     ///
-    /// The signature still cannot **write** a `none` (`value: f64`), which is why the `change(…, $red: none)`
-    /// family stays red — named in `tasks.md` 9.23.
-    pub fn with_channel(&self, index: usize, value: f64) -> Option<Self> {
+    /// Writing absence needs nothing to read, so `change` over an already-unwritten channel is accepted here.
+    /// **No fixture adjudicates that case** (`grep -rn "color.change(rgb(none" sass-spec/spec/` reaches only
+    /// calls without a channel argument, plus the `$green: 300` row above), so this is a consequence of the
+    /// `Option` shape — idempotent, and it cannot invent a number — rather than a law the archive prints.
+    pub fn with_channel(&self, index: usize, value: Option<f64>) -> Option<Self> {
         let written = Channel {
-            value: Some(value),
+            value,
             percent: false,
         };
-        (self.writes_bytes()
-            && self
-                .channels
-                .get(index)
-                .is_some_and(|channel| channel.value.is_some()))
-        .then(|| Self {
+        let writable = self
+            .channels
+            .get(index)
+            .is_some_and(|channel| channel.value.is_some() || value.is_none());
+        (self.writes_bytes() && writable).then(|| Self {
             channels: [
                 if index == 0 {
                     written

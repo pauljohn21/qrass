@@ -175,10 +175,19 @@ async fn change_writes_whiteness_and_blackness() {
     }
 }
 
-/// Rows this file does **not** claim, of two different kinds. Some need a `none` value, which this compiler
-/// does not model: `color.change(black, $red: none)` → `rgb(none 0 0)` (`change/rgb.hrx::red/none`), the same
-/// on an hsl colour (`change/hsl.hrx::hue/none`) and on a hwb one (`change/hwb.hrx::whiteness/none`). A byte
-/// channel cannot express `none`, so the call keeps its text.
+/// Rows this file does **not** claim, of two different kinds. Some need a `none` written into an **axis**,
+/// which the axes triple still cannot hold: `color.change(hsl(0deg 100% 50%), $hue: none)` →
+/// `hsl(none 100% 50%)` (`change/hsl.hrx::hue/none`) and `color.change(hwb(180deg 30% 50%), $whiteness: none)`
+/// → `hwb(180deg none 50%)` (`change/hwb.hrx::whiteness/none`) keep their text for that reason.
+///
+/// The byte half of that list is gone: `color.change(black, $red: none)` → `rgb(none 0 0)`
+/// (`change/rgb.hrx::{red,green,blue}/none`, and `color.change(pink, $red: none)` → `rgb(none 192 203)` at
+/// `change/space.hrx::missing/arg/legacy/same/implicit`) is answered as of this batch: the row first turned
+/// green in run `change-writes-absence` and is green in the recorded baseline `change-writes-absence-v4` (the
+/// run whose 42 regressions forced the read-order fix, `change-writes-absence-v2`, is the first form worth
+/// keeping), so pinning it as a decline would have asserted the opposite of the archive. It is pinned as an
+/// answer instead in
+/// `tests/color_legacy_missing.rs::change_can_write_absence_into_a_byte_channel`.
 ///
 /// One is a space this compiler cannot convert (`change/space.hrx::identical`), where keeping the text happens
 /// to match what the corpus prints.
@@ -195,9 +204,7 @@ async fn change_writes_whiteness_and_blackness() {
 #[tokio::test]
 async fn what_change_still_declines() {
     for call in [
-        // `change/rgb.hrx::red/none` — the printed form needs a `none` channel, not a byte.
-        "color.change(black, $red: none)",
-        // `change/hsl.hrx::hue/none` — same, on a colour the compiler does hold as axes.
+        // `change/hsl.hrx::hue/none` — the axes triple has no way to carry a `none` yet.
         "color.change(hsl(0deg 100% 50%), $hue: none)",
         // `change/hwb.hrx::whiteness/none` — and again on a `hwb` colour.
         "color.change(hwb(180deg 30% 50%), $whiteness: none)",

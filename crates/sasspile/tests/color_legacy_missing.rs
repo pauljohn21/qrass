@@ -44,11 +44,14 @@
 //!   Pinning any of them here would require the name-on-conversion law, which is unimplemented.
 //! * **`hsl`/`hwb` with a `none` channel.** Their constructors still decline one, so `hsl(none 20% 30%)`
 //!   remains text; the rows waiting on it are named in `tasks.md` 9.23 (and reading them needs the `hsl`/`hwb`
-//!   spaces plus the axes maths, not just the parse). **Writing** a `none` — `color.change(black, $red: none)`
-//!   → `rgb(none 0 0)` (`change/rgb.hrx::red/none`) — waits on something else entirely: `Color::with_channel`
-//!   takes an `f64`, so it cannot express “write absence”; that family is listed in `tasks.md` 9.23 too.
-//! * **An unwritten channel with an alpha, or with an out-of-gamut sibling** — no fixture prints either, so
-//!   `Color::modern`'s `/ alpha` half is a generalisation and is recorded as one, not asserted here.
+//!   spaces plus the axes maths, not just the parse). Writing absence into an `hsl` or `hwb` **axis** is the
+//!   same wait seen from the other side — `change/hsl.hrx::hue/none` wants `hsl(none 100% 50%)` and
+//!   `change/hwb.hrx::whiteness/none` wants `hwb(180deg none 50%)`, so the axes triple has to carry absence too
+//!   and `Color::with_hwb` (which currently re-derives bytes) has to keep the pair. `tasks.md` 9.25 has the
+//!   measured split of the remaining `change/*/none` rows.
+//! * **A `none` channel with an alpha** (`rgb(0 0 0 / none)`) or an out-of-gamut sibling — no fixture prints
+//!   either, so `Color::modern`'s `/ alpha` half is a generalisation (corroborated only by
+//!   `change/no_space.hrx::alpha/none`, which leaves *alpha* unwritten) and is recorded as one, not asserted.
 
 use sasspile::compile;
 
@@ -151,6 +154,31 @@ async fn a_written_channel_of_a_colour_with_unwritten_siblings_is_still_modified
         "`to_gamut/space.hrx::clip/missing/legacy/same/with_mapping` needs this inner call to be answered, not \
          echoed; this compiler returned its text:\n{built}"
     );
+}
+
+/// **`change` may write absence.** `color.change(black, $red: none)` answers `rgb(none 0 0)`, and the same for
+/// green and blue (`change/rgb.hrx::{red,green,blue}/none`); a colour created from a keyword takes the same
+/// write and stops printing its keyword, because the form has to change to say `none` at all
+/// (`change/space.hrx::missing/arg/legacy/same/implicit` is `color.change(pink, $red: none)` →
+/// `rgb(none 192 203)`). `adjust` and `scale` are not in this law: their reader `amount::byte` refuses a
+/// `none` outright, and the only rows that hand one to them expect a plain type error —
+/// `color.adjust(red, $alpha: none)` → `$alpha: none is not a number.` (`adjust/error/type.hrx::none`;
+/// `scale/error/type.hrx::none` likewise), so no fixture asks a shift or a scale to move an absence.
+#[tokio::test]
+async fn change_can_write_absence_into_a_byte_channel() {
+    let cases = [
+        ("black", "$red: none", "rgb(none 0 0)"),
+        ("black", "$green: none", "rgb(0 none 0)"),
+        ("black", "$blue: none", "rgb(0 0 none)"),
+        ("pink", "$red: none", "rgb(none 192 203)"),
+    ];
+    for (colour, write, printed) in cases {
+        let built = css(&format!("a {{b: color.change({colour}, {write})}}")).await;
+        assert!(
+            built.contains(printed),
+            "`color.change({colour}, {write})`: the archive prints `{printed}`, this compiler answered:\n{built}"
+        );
+    }
 }
 
 /// Why the thirteen unfixed rows are not this batch's defect: on the way into a derived space the unwritten
