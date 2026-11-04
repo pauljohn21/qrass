@@ -243,11 +243,17 @@ async fn the_alpha_scales_between_zero_and_one_and_nothing_named_is_a_no_op() {
 }
 
 /// A boundary of **this slice**, not a corpus row: the calls whose *output* this compiler cannot produce keep
-/// the call's text — `$space:` for a space it has no conversion for, a modern `color(…)` colour it refuses to
-/// read into sRGB, and a `none` channel it cannot move. Those rows stay red, and pinning the text is what
-/// stops a later change from quietly answering them in the wrong space.
+/// the call's text — `$space:` for a space it has no conversion for, and a modern `color(…)` colour it refuses
+/// to read into sRGB. Those rows stay red, and pinning the text is what stops a later change from quietly
+/// answering them in the wrong space.
 ///
-/// The hue is not here any more: `color.scale(white, $hue: 10%)` is answered with the corpus's own message,
+/// A `none` channel is **not** in this list any more, and the corpus is why: `scale/no_channels.hrx::missing`
+/// asks for `color.scale(rgb(none none none))` and prints `rgb(none none none)` — an answer, not the call's
+/// text. That row was red in the baseline run `instrument-split-and-guards` and green from run
+/// `legacy-missing-channel` onward (`reports/hrx.db`), so keeping it here would have pinned a behaviour the
+/// archive contradicts.
+///
+/// The hue is not here either: `color.scale(white, $hue: 10%)` is answered with the corpus's own message,
 /// pinned in `tests/color_diagnostics.rs` (`scale/error/args.hrx::hue`).
 #[tokio::test]
 async fn calls_this_slice_cannot_answer_keep_their_text() {
@@ -257,8 +263,6 @@ async fn calls_this_slice_cannot_answer_keep_their_text() {
         "color.scale(oklch(50% 0.2 0deg), $space: lab)",
         // A modern colour written as text is not read into sRGB (`scale/out_of_gamut.hrx::above_gamut/up`).
         "color.scale(color(srgb 1.2 0.5 0.7), $red: 10%)",
-        // A `none` channel is not a number this slice can move (`scale/no_channels.hrx::missing`).
-        "color.scale(rgb(none none none))",
     ] {
         assert_eq!(
             css(&format!("a {{b: {call}}}")).await,

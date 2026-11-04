@@ -43,15 +43,15 @@ impl Color {
             Representation::Hsl => Self {
                 channels: [
                     Channel {
-                        value: axes[0],
+                        value: Some(axes[0]),
                         percent: false,
                     },
                     Channel {
-                        value: axes[1],
+                        value: Some(axes[1]),
                         percent: true,
                     },
                     Channel {
-                        value: axes[2],
+                        value: Some(axes[2]),
                         percent: true,
                     },
                 ],
@@ -68,15 +68,15 @@ impl Color {
                 Self {
                     channels: [
                         Channel {
-                            value: hue,
+                            value: Some(hue),
                             percent: false,
                         },
                         Channel {
-                            value: saturation,
+                            value: Some(saturation),
                             percent: true,
                         },
                         Channel {
-                            value: lightness,
+                            value: Some(lightness),
                             percent: true,
                         },
                     ],
@@ -117,15 +117,15 @@ impl Color {
                 Some(Self {
                     channels: [
                         Channel {
-                            value: hue,
+                            value: Some(hue),
                             percent: false,
                         },
                         Channel {
-                            value: saturation,
+                            value: Some(saturation),
                             percent: true,
                         },
                         Channel {
-                            value: lightness,
+                            value: Some(lightness),
                             percent: true,
                         },
                     ],
@@ -144,7 +144,7 @@ impl Color {
                 let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
                 Some(Self {
                     channels: rgb.map(|value| Channel {
-                        value,
+                        value: Some(value),
                         percent: false,
                     }),
                     alpha: self.alpha,
@@ -173,7 +173,7 @@ impl Color {
         let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
         self.writes_bytes().then(|| Self {
             channels: rgb.map(|value| Channel {
-                value,
+                value: Some(value),
                 percent: false,
             }),
             alpha: self.alpha,
@@ -207,7 +207,8 @@ impl Color {
     /// The triple a colour **stores as written**: for `hsl` the hsl axes, for `hwb` hue/whiteness/blackness.
     /// One statement, shared by [`Color::axes_of`] and the printer, so neither restates the reading.
     pub(super) fn stored_axes(&self) -> [f64; 3] {
-        self.channels.map(|channel| channel.value)
+        self.channels
+            .map(|channel| super::missing_as_zero(channel.value))
     }
 
     /// A `hwb` colour's hsl axes, derived, not stored: `hwb(0deg, 30%, 40%)` is asked for as
@@ -231,7 +232,7 @@ impl Color {
         let channels = crate::axes::axes_to_rgb(hue, saturation, lightness);
         Self {
             channels: channels.map(|value| Channel {
-                value,
+                value: Some(value),
                 percent: false,
             }),
             alpha: source.alpha,
@@ -279,7 +280,7 @@ impl Color {
         let [red, green, blue] = [0, 1, 2].map(|index| {
             let value = channel(first, index)? * ratio + channel(second, index)? * (1.0 - ratio);
             Some(Channel {
-                value,
+                value: Some(value),
                 percent: false,
             })
         });

@@ -45,7 +45,7 @@ pub(super) fn axis(given: &[Given], name: &str, writing: Writing) -> Result<f64,
         // `color.change(hsl(0deg 100% 50%), $hue: none)` expects the output `hsl(none 100% 50%)`, so
         // refusing it loudly would turn a wrong-value row into an unexpected-error row.
         return crate::color::angle_of(value).ok_or_else(|| {
-            if is_none(value) {
+            if crate::color::is_missing_word(value) {
                 decline()
             } else {
                 not_a_number(name, value, writing)
@@ -95,8 +95,9 @@ pub(super) fn byte(value: &Value, name: &str, writing: Writing) -> Result<f64, S
         Value::Number(number, unit) if unit.single() == Some("%") => Ok(number * 255.0 / 100.0),
         Value::Number(number, _) => Ok(*number),
         // Anything else — a `px` quantity, the keyword `none` — has no byte to write. `none` in `change`
-        // wants the missing-channel answer, so it keeps its text; `c` is the corpus's type message.
-        _ if is_none(value) && writing == Writing::Set => Err(decline()),
+        // wants the missing-channel answer, so it keeps its text; `c` is the corpus's type message. The word
+        // itself is judged by `crate::color::is_missing_word`, the crate's one answer to that question.
+        _ if crate::color::is_missing_word(value) && writing == Writing::Set => Err(decline()),
         _ => Err(not_a_number(name, value, writing)),
     }
 }
@@ -105,20 +106,13 @@ pub(super) fn byte(value: &Value, name: &str, writing: Writing) -> Result<f64, S
 fn number(name: &str, value: &Value, writing: Writing) -> Result<f64, SassError> {
     match value {
         Value::Number(number, _) => Ok(*number),
-        _ if is_none(value) && writing == Writing::Set => Err(decline()),
+        _ if crate::color::is_missing_word(value) && writing == Writing::Set => Err(decline()),
         _ => Err(not_a_number(name, value, writing)),
     }
 }
 
 fn is_percent(value: &Value) -> bool {
     matches!(value, Value::Number(_, unit) if unit.single() == Some("%"))
-}
-
-/// An **unquoted** `none` — the value `change` reads as a missing channel (`change/hwb.hrx::whiteness/none`),
-/// which is why that family's type message says `or unquoted "none"` and why the value itself is refused
-/// quietly instead of with that message.
-fn is_none(value: &Value) -> bool {
-    matches!(value, Value::Raw(text) if text == "none")
 }
 
 /// The channel names each space answers: its name, the names that **decide** it, and the names it owns.

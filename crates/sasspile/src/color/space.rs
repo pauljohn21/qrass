@@ -52,7 +52,7 @@ impl InSpace {
     /// computes with (`to_space/srgb/xyz.hrx::missing/red` keeps the other two channels at the values `0` for
     /// red gives). The one reading, because two spellings of it have already drifted apart once.
     pub(super) fn filled(self) -> [f64; 3] {
-        self.channels.map(|value| value.unwrap_or(0.0))
+        self.channels.map(super::missing_as_zero)
     }
 }
 
@@ -283,7 +283,7 @@ impl Color {
     /// because every read of such a colour goes through [`Color::xyz`] and every print through [`print`].
     pub fn in_space(space: Space, channels: [Option<f64>; 3], alpha: f64) -> Self {
         let zero = |value: f64| Channel {
-            value,
+            value: Some(value),
             percent: false,
         };
         Self {
@@ -291,6 +291,24 @@ impl Color {
             alpha: crate::color::clamp_alpha(alpha),
             representation: Representation::InSpace(InSpace { space, channels }),
             authored: None,
+        }
+    }
+
+    /// The colour's channels **as a triple that can carry a `none`**, or `None` when it stores axes instead.
+    /// A legacy `rgb` triple *is* an srgb triple — which is the whole reason [`Color::converted`] can read one
+    /// source for both spellings of the same colour — while an `hsl`/`hwb` colour cannot hold a `none` yet (their
+    /// constructors still decline one, and `tasks.md` 9.23 names the rows waiting on it), so they answer `None`
+    /// here rather than claiming a fact nothing holds. **The one exhaustive listing of that partition**: the
+    /// conversion asks it in two places, and a guarded `if` cannot be exhaustive, so this is where the set is
+    /// named once instead of being re-typed.
+    fn triple(&self) -> Option<[Option<f64>; 3]> {
+        match self.representation {
+            Representation::InSpace(carried) => Some(carried.channels),
+            Representation::Legacy
+            | Representation::Percent
+            | Representation::Hex
+            | Representation::Named => Some(self.channels.map(|channel| channel.value)),
+            Representation::Hsl | Representation::Hwb => None,
         }
     }
 
@@ -316,6 +334,9 @@ impl Color {
                 let [hue, saturation, lightness] = self.hwb_axes();
                 crate::axes::axes_to_rgb(hue, saturation, lightness)
             }
+            // The four byte-storing representations, listed because a guard form (`writes_bytes`) cannot be
+            // exhaustive on its own — which is why the partition that the *conversion* asks twice lives in
+            // [`Color::triple`] instead of being typed out again here.
             Representation::Legacy
             | Representation::Percent
             | Representation::Hex
@@ -361,7 +382,11 @@ impl Color {
             Some(triple) => triple,
             None => of_xyz_d65(space, self.xyz()),
         };
-        let source = carried.map(|existing| existing.channels);
+        // The source's unwritten positions, read the same way for both carriers (`Color::triple` is where that
+        // partition is named). A legacy `rgb` triple takes part in the same index-aligned law because it *is* an
+        // srgb triple: `to_space/rgb/srgb.hrx::missing/red` prints
+        // `color(srgb none 0.0784313725 0.1176470588)` just as a written `color(srgb none …)` does.
+        let source = self.triple();
         // **The index-aligned family keeps its `none` where it was written.** The missing channel still
         // contributes `0` to the maths, and the archive's other two channels are the numbers `0` produces —
         // `to_space/xyz/srgb.hrx::missing/x` prints `color(srgb none 0.6558430379 0.5622938017)`.
@@ -369,11 +394,18 @@ impl Color {
         // rectangular space that substitution is green (`to_space/lab/srgb.hrx::missing/lightness`), while on
         // the way into `lab`/`oklab` the rows are still red in the tenth decimal, which is the ceiling
         // `tasks.md` 9.14 records and not this rule failing.
-        let same_family =
-            carried.is_some_and(|existing| !space.is_derived() && !existing.space.is_derived());
+        let same_family = match (carried, self.triple()) {
+            (Some(existing), _) => !space.is_derived() && !existing.space.is_derived(),
+            // No space triple, but a byte triple: an srgb colour all the same.
+            (None, Some(_)) => !space.is_derived(),
+            // An `hsl`/`hwb` colour's axes are not index-aligned with anything this conversion prints.
+            (None, None) => false,
+        };
         // A `none` in every channel is a colour with no power at all, and it stays powerless into a space
-        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`); a legacy `hsl` target has no
-        // way to print that and substitutes (`to_space/srgb/hsl.hrx::missing/all` answers `hsl(0, 0%, 0%)`).
+        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`, and `rgb(none none none)`
+        // reaches the same answer by the same read — `to_space/rgb/lab.hrx::missing/all`); a legacy `hsl`
+        // target has no way to print that and substitutes (`to_space/srgb/hsl.hrx::missing/all` answers
+        // `hsl(0, 0%, 0%)`).
         let powerless = source.is_some_and(|given| given.iter().all(Option::is_none));
         let triple = match source {
             Some([first, second, third]) if same_family => {
@@ -390,10 +422,20 @@ impl Color {
     /// (`to_space/srgb/rgb.hrx::middle`), while a fractional channel falls back to percentages under the law
     /// already in [`crate::color::text`].
     pub fn as_legacy_rgb(&self) -> Self {
+        // **Identity keeps what was written.** A colour that already stores srgb bytes with an unwritten
+        // channel must not have that channel substituted on the way out: the corpus asks for
+        // `color.to-space(rgb(none 20 30), rgb)` and prints `rgb(none 20 30)`
+        // (`to_space/rgb/rgb.hrx::missing/red`), while the same call on a *space* colour
+        // (`to_space/srgb/rgb.hrx::missing/red`) prints `rgb(0%, 20%, 30%)` — there the `none` belonged to the
+        // space triple and the legacy target substitutes, so the two rows together are what says this guard
+        // keys on the representation and not on the missing-ness alone.
+        if self.has_unwritten_channel() {
+            return self.clone();
+        }
         let bytes = of_xyz_d65(Space::Srgb, self.xyz()).map(|channel| channel * 255.0);
         Self {
             channels: bytes.map(|value| Channel {
-                value,
+                value: Some(value),
                 percent: false,
             }),
             alpha: self.alpha,
@@ -410,15 +452,15 @@ impl Color {
         Self {
             channels: [
                 Channel {
-                    value: hue,
+                    value: Some(hue),
                     percent: false,
                 },
                 Channel {
-                    value: saturation,
+                    value: Some(saturation),
                     percent: true,
                 },
                 Channel {
-                    value: lightness,
+                    value: Some(lightness),
                     percent: true,
                 },
             ],

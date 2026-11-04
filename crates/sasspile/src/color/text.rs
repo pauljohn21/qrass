@@ -204,18 +204,26 @@ impl Color {
             Representation::InSpace(carried) => {
                 super::space::print(carried.space, carried.channels, self.alpha)
             }
+            // **A colour with an unwritten channel prints the space-separated form**, because the legacy comma
+            // form has no spelling for `none`: `color.to-space(rgb(none 20 30), rgb)` answers
+            // `rgb(none 20 30)` (`to_space/rgb/rgb.hrx::missing/red`), and the same name-and-separator spelling
+            // with an alpha after a `/` is what the corpus prints for `color.change(red, $alpha: none)` →
+            // `rgb(255 0 0 / none)` (`change/no_space.hrx::alpha/none`) — that row leaves **alpha** unwritten
+            // rather than a channel, so it corroborates the form and the `/` only. Each written channel keeps the
+            // scale it arrived in. **No fixture pairs an unwritten channel with an alpha or with an out-of-gamut
+            // sibling**, so those two combinations are generalisations, recorded as such in `tasks.md` 9.23
+            // rather than presented as laws. It sits above the out-of-gamut arm because that arm would answer a
+            // `none` by re-deriving hsl axes from a `0` the caller never wrote.
+            representation if representation.writes_bytes() && self.has_unwritten_channel() => {
+                self.modern()
+            }
             // **An out-of-gamut colour prints in the hsl form**, whatever space it was created in:
             // `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)` and
             // `color.change(black, $green: -50)` → `hsl(120, 100%, -9.8039215686%)`
             // (`core_functions/color/change/rgb.hrx::{red,green}/out_of_range`). The bytes stay unrounded on
             // the way in — this is the same law that keeps `grayscale(red)` a percentage row, seen from the
             // other side: rounding or clamping here would answer a different question than the one asked.
-            Representation::Legacy
-            | Representation::Percent
-            | Representation::Hex
-            | Representation::Named
-                if self.out_of_gamut() =>
-            {
+            representation if representation.writes_bytes() && self.out_of_gamut() => {
                 // The triple the caller named, when there is one: deriving it from the bytes rotates the hue
                 // and flips the saturation whenever the implied channels leave the gamut. Written as a
                 // `match` rather than `unwrap_or_else` because the linting gate is right that a fallback in
@@ -357,13 +365,39 @@ impl Color {
         self.channels.iter().any(|channel| !channel.whole())
     }
 
-    /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255.
+    /// The same colour written as `rgb(…, …%, …)`: each channel converted to its share of 255. An unwritten
+    /// channel stays unwritten through the rescaling — `rgb(0% none 30%)` has no number to convert.
     fn percent_form(&self) -> String {
         let channels = self.channels.map(|channel| Channel {
-            value: channel.percent_form(),
+            value: channel.value.map(|_| channel.percent_form()),
             percent: true,
         });
         self.legacy(channels, true)
+    }
+
+    /// The space-separated spelling a colour with an unwritten channel must use; the why is on the arm in
+    /// [`Color::to_css`] that selects it.
+    fn modern(&self) -> String {
+        let channels = self
+            .channels
+            .iter()
+            .map(|channel| match channel.value {
+                None => "none".to_string(),
+                Some(value) => format!(
+                    "{}{}",
+                    crate::value::format_number(value),
+                    if channel.percent { "%" } else { "" }
+                ),
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+        if self.alpha >= 1.0 {
+            return format!("rgb({channels})");
+        }
+        format!(
+            "rgb({channels} / {})",
+            crate::value::format_number(self.alpha)
+        )
     }
 
     /// The legacy functional form: `rgb(r, g, b)` while opaque, `rgba(…)` once there is alpha (which is
@@ -376,9 +410,9 @@ impl Color {
             .iter()
             .map(|channel| {
                 let number = crate::value::format_number(if percent {
-                    channel.value
+                    super::missing_as_zero(channel.value)
                 } else {
-                    channel.value.round()
+                    super::missing_as_zero(channel.value).round()
                 });
                 format!("{number}{}", if percent { "%" } else { "" })
             })

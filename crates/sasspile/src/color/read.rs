@@ -107,7 +107,10 @@ impl Color {
                 let index = usize::from(name == "blackness");
                 let own = self.representation == Representation::Hwb;
                 let read = if own {
-                    self.channels[index + 1].value
+                    // A `hwb` colour cannot hold an unwritten channel yet (its constructor still declines a
+                    // `none`), so this read has no `None` to talk past; the helper is here so that the day it
+                    // can, the arithmetic answer is the one law in `missing_as_zero`.
+                    super::missing_as_zero(self.channels[index + 1].value)
                 } else if rgb_space {
                     let [red, green, blue] = self.channels.map(|channel| channel.byte());
                     crate::axes::rgb_to_hwb(red, green, blue)[index]
@@ -129,7 +132,11 @@ impl Color {
     pub fn hwb_of(&self) -> Option<[f64; 3]> {
         let hue = self.hue()?;
         match self.representation {
-            Representation::Hwb => Some([hue, self.channels[1].value, self.channels[2].value]),
+            Representation::Hwb => Some([
+                hue,
+                super::missing_as_zero(self.channels[1].value),
+                super::missing_as_zero(self.channels[2].value),
+            ]),
             _ if self.writes_bytes() => {
                 let [red, green, blue] = self.channels.map(|channel| channel.byte());
                 let [white, black] = crate::axes::rgb_to_hwb(red, green, blue);

@@ -258,7 +258,7 @@ fn split_run(args: &[Value]) -> Option<(&[Value], f64)> {
 /// [`Space::percent_full`] is the one place that says which, and the printer multiplies by the same number).
 fn channel(value: &Value, space: Space) -> Option<Option<f64>> {
     match value {
-        Value::Raw(text) if text.eq_ignore_ascii_case("none") => Some(None),
+        value if crate::color::is_missing_word(value) => Some(None),
         Value::Number(number, unit) => {
             let scaled = if unit.single() == Some("%") {
                 *number / space.percent_full()

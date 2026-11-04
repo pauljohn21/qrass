@@ -42,6 +42,10 @@
 
 use crate::value::Value;
 
+/// A written channel and the two scale laws that belong to it, split out when the constructors and the
+/// printing dispatch pushed this file past the line budget. The seam is the one the code already had: a
+/// channel says how one number behaves, this file says what a colour is.
+mod channel;
 mod matrix;
 mod ops;
 /// The primaries tables, split out of [`space`] when those tables and their provenance pushed that file past
@@ -54,6 +58,9 @@ mod space;
 mod text;
 
 pub use space::{InSpace, Space};
+
+pub(crate) use channel::is_missing_word;
+use channel::{Channel, missing_as_zero};
 
 /// Alpha is clamped to `0–1`, with a `NaN` reading as transparent — the same reading `rgb`'s
 /// `calc(NaN)` channel gets (`rgb/four_args/clamped`).
@@ -101,72 +108,6 @@ pub fn angle_of(value: &Value) -> Option<f64> {
     Some(if folded == 0.0 { 0.0 } else { folded })
 }
 
-/// One channel: the value as written, and whether it was written as a percentage.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Channel {
-    value: f64,
-    percent: bool,
-}
-
-impl Channel {
-    /// `0–255` regardless of the scale it arrived in.
-    fn byte(self) -> f64 {
-        if self.percent {
-            self.value * 255.0 / 100.0
-        } else {
-            self.value
-        }
-    }
-
-    /// The percentage form, for a colour that has any percentage channel.
-    fn percent_form(self) -> f64 {
-        if self.percent {
-            self.value
-        } else {
-            self.value * 100.0 / 255.0
-        }
-    }
-
-    /// Whether this channel **prints** as a whole byte, which is what decides hex/numbers against percentages.
-    ///
-    /// The tolerance is not arbitrary: it is half of the last place `format_number` can print (ten digits
-    /// after the point, so `5e-11`). Without it, float dust decides the form — `color.change(#993333,
-    /// $blackness: 80%)` implies a red channel of `51.000000000000014`, and the corpus prints `#333333`
-    /// rather than `rgb(20%, 20%, 20%)` (`change/hwb.hrx::blackness/high`). Same reason the gamut test in
-    /// [`super::text`] rounds before comparing: **rounding belongs to printing**, both directions.
-    fn whole(self) -> bool {
-        (self.byte() - self.byte().round()).abs() < 5e-11
-    }
-
-    /// Clamped into its own scale: percentages to `0–100`, plain numbers to `0–255`. A negative zero
-    /// becomes zero, which is what `four_args/clamped::red/minus_zero` shows (`rgb(-0, …)` → `0`).
-    ///
-    /// A **clamped percentage loses its percentage spelling** and comes back as the byte it clamped to —
-    /// `rgb(100.1% 0 0)` → `rgb(255, 0, 0)` and `rgb(0 -0.1% 0)` → `rgb(0, 0, 0)`, while `rgb(0% 100% 50%)`
-    /// keeps every `%` it was given (`rgb/one_arg/no_alpha.hrx::{percents/clamped/*,percents/boundaries}`).
-    /// Only the modern one-argument rows state this law; no legacy comma fixture has an out-of-range
-    /// percentage, which is why it was not visible earlier. A channel at exactly its ceiling is not clamped,
-    /// so `100%` above stays `100%`.
-    fn clamped(self) -> Self {
-        let ceiling = if self.percent { 100.0 } else { 255.0 };
-        let bound = if self.value.is_nan() || self.value < 0.0 {
-            0.0
-        } else {
-            self.value.min(ceiling)
-        } + 0.0;
-        match (self.percent, bound == self.value) {
-            (true, false) => Channel {
-                value: bound * 255.0 / 100.0,
-                percent: false,
-            },
-            _ => Channel {
-                value: bound,
-                ..self
-            },
-        }
-    }
-}
-
 /// The form a colour was created in, which decides how it prints.
 ///
 /// `Eq` is dropped for the [`Representation::InSpace`] variant: a colour in its own space carries `f64`
@@ -205,6 +146,17 @@ pub enum Representation {
     InSpace(InSpace),
 }
 
+impl Representation {
+    /// The representations whose channels are `0–255` bytes. **One name for the set**, because the same four
+    /// arms were being re-typed at every use (`xyz`, the conversion's source read, the printing dispatch) and
+    /// each copy is a place where a fifth byte-storing representation could be forgotten. `Space` colours are
+    /// not in it: their triple is filled with `Some(0.0)` by [`Color::in_space`], and their channels are the
+    /// space's own, not bytes.
+    pub(super) fn writes_bytes(self) -> bool {
+        matches!(self, Self::Legacy | Self::Percent | Self::Hex | Self::Named)
+    }
+}
+
 /// A colour value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Color {
@@ -221,15 +173,23 @@ pub struct Color {
 }
 
 impl Color {
-    /// The three channels as they were written, already clamped, plus an alpha clamped to `0–1`.
+    /// The three channels as they were written, already clamped, plus an alpha clamped to `0–1`. A channel
+    /// written `none` is carried as absent and stays absent: `rgb(none 20 30)` converts to
+    /// `rgb` as `rgb(none 20 30)` and to `srgb` as `color(srgb none 0.0784313725 0.1176470588)`
+    /// (`to_space/rgb/{rgb,srgb}.hrx::missing/red`), so the unwritten channel is a fact about the colour, not
+    /// a `0` the parser invented.
     pub fn new(red: &Value, green: &Value, blue: &Value, alpha: f64) -> Option<Self> {
         let channel = |value: &Value| match value {
+            Value::Raw(text) if is_missing_word(value) => Some(Channel {
+                value: None,
+                percent: false,
+            }),
             Value::Number(number, unit) if unit.is_unitless() => Some(Channel {
-                value: *number,
+                value: Some(*number),
                 percent: false,
             }),
             Value::Number(number, unit) if unit.single() == Some("%") => Some(Channel {
-                value: *number,
+                value: Some(*number),
                 percent: true,
             }),
             _ => None,
@@ -370,15 +330,15 @@ impl Color {
         Some(Self {
             channels: [
                 Channel {
-                    value: angle_of(hue)?,
+                    value: Some(angle_of(hue)?),
                     percent: false,
                 },
                 Channel {
-                    value: white,
+                    value: Some(white),
                     percent: true,
                 },
                 Channel {
-                    value: black,
+                    value: Some(black),
                     percent: true,
                 },
             ],
@@ -412,15 +372,15 @@ impl Color {
         Some(Self {
             channels: [
                 Channel {
-                    value: angle_of(hue)?,
+                    value: Some(angle_of(hue)?),
                     percent: false,
                 },
                 Channel {
-                    value: number(saturation)?.max(0.0),
+                    value: Some(number(saturation)?.max(0.0)),
                     percent: true,
                 },
                 Channel {
-                    value: number(lightness)?,
+                    value: Some(number(lightness)?),
                     percent: true,
                 },
             ],
@@ -437,12 +397,32 @@ impl Color {
     /// result as `hsl(0, 5000%, 98.0392156863%)` (`…::red/out_of_range`) — an out-of-gamut colour is a value
     /// Sass represents, not an error, and clamping would turn it into `rgb(255, 0, 0)`, a different colour.
     /// [`Channel::clamped`] stays where it is: only a *written* `rgb`/`hsl` channel clamps at creation.
+    ///
+    /// **A channel that was never written cannot be modified.** The corpus states it as an error —
+    /// `color.adjust(rgb(none 0 0), $red: 10)` must fail with "$red: … Sass doesn't currently support modifying
+    /// missing channels (color: rgb(none 0 0))" (`adjust/error/missing.hrx::legacy`, and the same for `scale`
+    /// at `scale/error/missing.hrx::legacy`). Returning `None` here is the *decline*, which keeps the call's own
+    /// text: reading the missing channel as `0` and writing an answer would **invent a value the archive forbids**
+    /// (`rgb(10, 0, 0)`), and that is what this guard exists to stop. Raising the corpus's message verbatim is a
+    /// separate increment, named in `tasks.md` 9.23. The refusal is keyed on **the channel the call names**,
+    /// and a fixture requires that narrowness rather than my preference: `color.change(rgb(none 0 none),
+    /// $green: 300)` must succeed — its colour comes back with green written and both siblings still `none`
+    /// (`to_gamut/space.hrx::clip/missing/legacy/same/with_mapping`, whose own row is still red because
+    /// `color.to-gamut` does not carry a `none` yet, not because the inner call is refused).
+    ///
+    /// The signature still cannot **write** a `none` (`value: f64`), which is why the `change(…, $red: none)`
+    /// family stays red — named in `tasks.md` 9.23.
     pub fn with_channel(&self, index: usize, value: f64) -> Option<Self> {
         let written = Channel {
-            value,
+            value: Some(value),
             percent: false,
         };
-        (self.writes_bytes() && index < self.channels.len()).then(|| Self {
+        (self.writes_bytes()
+            && self
+                .channels
+                .get(index)
+                .is_some_and(|channel| channel.value.is_some()))
+        .then(|| Self {
             channels: [
                 if index == 0 {
                     written
@@ -468,13 +448,15 @@ impl Color {
     /// `color.change`; an `hsl` or `hwb` colour stores different axes, and writing a byte into them would be
     /// a different colour (`change/hsl.hrx` and `change/hwb.hrx` are those calls, and they decline).
     pub fn writes_bytes(&self) -> bool {
-        matches!(
-            self.representation,
-            Representation::Legacy
-                | Representation::Percent
-                | Representation::Hex
-                | Representation::Named
-        )
+        self.representation.writes_bytes()
+    }
+
+    /// Whether the colour carries a channel that was never written. `Color::in_space` fills the byte triple
+    /// with `Some(0.0)` for a space colour (and an `hsl`/`hwb` colour cannot hold a `none` yet), so this is
+    /// false for both of those kinds — a fact the identity guard in [`Color::as_legacy_rgb`] leans on, which
+    /// is why it is written here rather than left to the reader to check.
+    pub(super) fn has_unwritten_channel(&self) -> bool {
+        self.channels.iter().any(|channel| channel.value.is_none())
     }
 
     /// The same colour under a different alpha, keeping how it was made: `rgb(#123, 0.5)` is the hex
