@@ -2213,3 +2213,61 @@
         下次给量具加东西前先把纯数学件（`entry_one`/`row_of`/`solve`/`verdict`/`residual`/`invert`/`smallest_*`）
         抽到 `tests/common/fit.rs`——拆点在仪器自己已经写明的“读格式 / 拟合 / 报读数”三层之间，不是临时找的。
 
+- [x] 9.21 **拆了量具，也把三个空间的分段支各自量了一遍（2026-11-04，基线 run `rec2020-audit-closure`）**：
+      本批不改行为，只做两件上一批指名开着的事。
+      • **拆文件**（上一批预告的 491→越线）：纯数学件（`entry_one`/`row_of`/`solve`/`verdict`/`residual`/`apply`/
+        `invert`/`det`/`smallest_*` 与两个分辨率常数）入 `crates/sasspile/tests/common/fit.rs`；`whites`（它是
+        “读归档”不是“拟合”）入 `hrx_read.rs`；例件只剩 argv + span + 报数。现 `wc -l`：例件 **279**、
+        `fit.rs` **216**、`hrx_read.rs` **185**（均 ≤500）。拆后四对已知空间的读数与拆前**逐字全等**
+        （`4.914016069057503e-11` / `5.013930937103339e-11` / `5.000000413701855e-11` ×2，均 holds）。
+        拆过程中我自己写错一次：导入表里填了个不存在的 `resolve_smallest`，又把仅在注释里出现的 `det`/
+        `SPREAD_HEADROOM` 一并导进来——编译器直接报 unused，而不是我目测。
+      • **`srgb` 的 toe 形状是量出来的，不是抄的**（`-- srgb xyz_d50 <指数> <α>`）：
+        `2.4 / 1.055` → `4.906e-11`（holds）；`2.4 / 1.0` → `0.0366`；`2.4 / 1.04` → `0.0098`；
+        `2.2 / 1.055` → `0.140`（后三条均 exit 4）。注意与 rec2020 相反：**这边偏移是真的**。
+      • **分段支到三个空间逐个 A/B，答案各不相同**（这正是“不能拿类比删”的根据）：
+        · `srgb`：删掉 `12.92` 双臂（run `srgb-no-linear-arm`）→ **`regress=156 net=0`**，
+          `ledger shift` = `changed=153 closer=9 farther=109 tie=0 error_expectation=0 shape_of_text=35`。
+          回归行是 `to_space/hwb/**::black` 一类（去臂后 got `color(srgb-linear 0.0008338051 …)`、
+          `color(xyz-d50 0.0008040347 0.0008338051 0.0006879764)` 对金样 `0 0 0`）——**臂被正向确认**。
+          （只记录读数：这批没去解释那 `8.3e-4` 从哪条路径来，要定位得走 `HRX_CASE` + `--features trace`。）
+        · `rec2020`（上一批）：删 `4.5×` 臂多得 41 行——**编码侧被拒**，解码侧仍零约束；
+        · `prophoto-rgb`：删臂 `net=0` 但 `changed` 有 11 行且臂侧靠金样——**保留，理由是 changed**。
+        三行结论已写进 `matrix.rs` 的 `sp` doc（唯一叙述处，其他文件只放指针）。
+      • **还原验证**：重新装回 `srgb` 双臂后新 run `transfer-segments-confirmed` 与基线
+        `rec2020-audit-closure` = **`regress=0 net=0`**（`pass=3169 pass_substantive=3004`），即本批对行为零改变；
+        无效错误仍 19。基线 run 名因此换为 `transfer-segments-confirmed`（读数与 `rec2020-no-offset-v3` 全等）。
+      • **未做（本批没推的东西不假装推了）**：`srgb` 线性段的**阈值本身**（`0.040_45` / `0.003_130_8`）仍只是
+        转录：`-- srgb xyz_d50` 的 `smallest_curved_printed_channel = 0.1`，说明拟合用的行根本进不了段区，
+        阈值只在“作目标且通道极小”的那些行上才可证（本批的 `regress=156` 证明了臂存在，没证明拐点在哪）；
+        上一批列的 `white()` 仍不由行和导出、`rec2020/lab::white` 与 `display_p3/lab::white` got 逐字相同而
+        归因未隔离、量具 `LINEAR` 名单 vs `Space::transfer()` 分区不一致——三条均仍开着。
+
+- [x] 9.22 **审查回来后的四件实事：名单删了、守卫补了、量具数学接上了测试（2026-11-04）**：本批的 `gc-auditor`
+      先确认了两件根基：`git diff 79ebe15 --numstat -- crates/sasspile/src` = `10 0`（生产码**零删除**，那 10 行全是
+      `///`），且 12 个搬移体逐字节全等（只有两条 doc 就地订正——上一批写成“原样搬入”，那个“原样”对不上，已收回）。
+      然后按它的四条 finding 落了地：
+      • **`LINEAR` 名单真的拆掉了**（9.19/9.20 开着的那条）。审查建议的“改走 `Space::transfer()`”需要先
+      把 `color` 模块放到 crate 的公共面上（`lib.rs` 至今只导 `compile`），而这个决定不该由一个工具默默替库做——
+      我试加 `pub fn is_curve_free` 时立刻拿到 dead-code warning，就是这件事的信号。改用不需可见性的收口：
+      **取消名单，准入只由 `verdict` 判**（曲线侧当直线拟合时残差天然大八到九个数量级）。实测新形状：
+      `rec2020 xyz 2.4 1.0`→`4.914e-11`、`xyz_d50 xyz`→`5.0000004e-11`、`srgb xyz_d50 2.4 1.055`→`4.9056e-11`、
+      新的显式侧形 `xyz rec2020 to 2.4 1.0`→`7.7006e-11`（均 holds），而不带假设的 `rec2020 xyz` →
+      **`residual=2.399946080971711e7`、`hypothesis_holds=false`、exit 4**（拒得响）。 argv 分流改按**内容**而非元数：
+      第一版按元数匹配直接吃了 `unreachable pattern` warning（编译器在说两种形式重叠）。
+      • **srgb 分段支有了 `#[test]` 守卫**（审查的 FINDING 4：确认只活在库里一个 run 名后面，删臂不会让任何测试变红）：
+      新建 `tests/color_srgb_segment.rs`，钉 `to_space/hwb/srgb_linear.hrx::black` 与 `to_space/srgb/xyz_d50.hrx::black`；
+      阳性对照就是 run `srgb-no-linear-arm` 的库内 got（`0.0008338051…` / `0.0008040347…` 对金样 `0 0 0`）。
+      同时写明：**阈值（`0.04045`/`0.0031308）不钉也不推**——审直指出我原先“只在作目标的行上才可证”过弱：
+      源侧 `0.1` 至少构成一个**上界**测试，而下界从未量过；且量具根本没法只改阈值做 A/B（只能整臂删）。
+      • **`fit.rs` 的“可单独测试”从空话变成事实**（FINDING 5）：新建 `tests/calibrate_fit.rs`（`#[path]` 引入
+      `fit`/`hrx_read`，4 条断言：合成行能解回已知阵、错的阵必被 `verdict` 拒（同时正向对照：对的阵过）、
+      正反两向 round-trip 一致、`smallest_curved_printed` 只看曲线侧）。它值得测：库里每一张被贴上的
+      拟合表都是这几个函数产的，它们错则“量出来的”这个说法整条空掉。
+      • **数字归位**：`matrix.rs`/`state-of-the-port.md`/`rust.md` 里的具体读数改回指针（数值只住本条），
+      并收回两处自相矛盾的“唯一叙述处”声明；`net=+41` 补上 base（`rec2020-no-offset`→`rec2020-no-offset-v2` 口径）；
+      “拆前拆后逐字全等”收回——全精度的拆前读数从未入库，可核的只有“搬移体逐字节全等 + src 仅 doc + 舍入位一致”。
+      基线 run 的树身份就地记清：`rec2020-audit-closure` = `79ebe15` 本身（拆前树，srgb 双臂在位），
+      `transfer-segments-confirmed` = 拆后终树（与它 `regress=0 net=0`）。
+      • **读数**：两个新测试文件 `4 passed` + `1 passed`；准入改动不碰行为（例件不在测试链上），终树仍待重测。
+
