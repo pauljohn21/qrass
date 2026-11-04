@@ -104,25 +104,42 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
             ],
         ]),
         Space::Rec2020 => Some(&[
-            // Still the transcribed table. Two separate things are wrong here and they must not be merged:
-            // * its transfer carries an offset (`α = 1.09929682680944`), so a pure-power hypothesis is judged
-            //   **not to hold** by the instrument (`-- rec2020 xyz 2.2` → `2.4e8×` its resolution, exit 4;
-            //   `tasks.md` 9.17) - that one needs a different fit;
-            // * the table itself disagrees with a curve-free fact the archive states: `color(rec2020 1 1 1)` is
-            //   `color(xyz 0.9504559271 1 1.0890577508)` (`to_space/rec2020/xyz.hrx::white`, red in run
-            //   `prophoto-solved-v2` with got `… 0.9999999304 … 1.0890577507`), i.e. the transcribed row sums
-            //   miss the white this space declares by `7e-8`. No curve hypothesis is needed to see that.
+            // Row 1 is now the archive's, fitted from `to_space/rec2020/xyz.hrx` under the surviving curve
+            // hypothesis (`linear = printed^2.4`, no offset - see `super::matrix::REC2020_GAMMA` for the scan):
+            // `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz 2.4 1.0`. Its three entries
+            // missed the transcription by `3.76e-6`, `2.00e-7` and `4.03e-6` against spreads of `1.6e-11`,
+            // `4.5e-11` and `8.0e-11`, so they were replaced. Row 0 was kept whole - `3.3e-16`, `4.6e-11` and
+            // `2.1e-12` against spreads of `4.4e-11`, `2.7e-10` and `5.7e-11`; no entry of that row is separated
+            // from the published digits by this instrument, so the published digits stay.
+            //
+            // Row 2 was replaced too, and that is a refinement of the `tasks.md` 9.16 rule worth stating: per
+            // entry, `[2][1]` and `[2][2]` miss the transcription by `4.7e-11` and `6.4e-11`, each inside its own
+            // spread (`1.6e-10`, `1.2e-10`), so the per-entry test said keep. But those two entries are the whole
+            // of a row the archive pins curve-free - `to_space/rec2020/xyz.hrx::white` states Z = `1.0890577508`,
+            // the transcription sums to `1.0890577507` (still red in run `rec2020-no-offset`), while the two
+            // fitted channels printed by the instrument (`0.028072693096295932`, `1.060985057703704`) sum to
+            // `1.0890577508000001`. A joint constraint the archive states outright outranks a per-entry tie: if
+            // the transcription fails a fact the corpus prints and the fit satisfies it, the fit has standing. The
+            // reading agrees - both variants were `regress=0`, the fitted row 2 wins more rows; see `tasks.md` 9.20.
+            // `[2][0]` is the one entry of this row that stayed: the fit prints `-0.0` for it, the difference from
+            // the transcribed `0.0` is `0`, and a signed zero is not a digit the archive could disagree with.
+            //
+            // Row 1 is what the curve-free white invariant first indicted: the transcribed row 1 summed to
+            // `0.9999999304` where `to_space/rec2020/xyz.hrx::white` states `1` - and a `7e-8` miss in a row
+            // the archive prints at ten decimals cannot be a rounding story. Two independent readings of the
+            // same archive pointed at rows of this table - which is why it was worth checking the curve
+            // hypothesis before touching any digit.
             [
                 0.636_958_048_301_291,
                 0.144_616_903_586_043,
                 0.168_880_975_164_172,
             ],
             [
-                0.262_703_970_245_312,
-                0.677_998_271_772_319,
-                0.059_297_688_361_440,
+                0.262_700_212_011_267_03,
+                0.677_998_071_522_180_3,
+                0.059_301_716_466_552_65,
             ],
-            [0.0, 0.028_072_693_049_087, 1.060_985_057_639_950],
+            [0.0, 0.028_072_693_096_295_932, 1.060_985_057_703_704],
         ]),
         _ => None,
     }

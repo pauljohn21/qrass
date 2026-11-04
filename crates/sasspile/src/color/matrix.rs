@@ -83,6 +83,48 @@ const LAB_KAPPA: f64 = 24_389.0 / 27.0;
 /// reading only the numbers).
 const A98_GAMMA: f64 = 563.0 / 256.0;
 
+/// `rec2020`'s transfer, as the archive applies it: a **plain signed gamma of `2.4`** on the power branch,
+/// with no offset at all.
+///
+/// This arm used to read `((v + (1.09929682680944 - 1)) / 1.09929682680944) ^ (1 / 0.45)` — a shifted power
+/// with an exponent of `1/0.45`, copied as a shape from prose about the space rather than read from the
+/// corpus. The scan that separates the candidates is
+/// `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz <exponent> <alpha>`, which fits the
+/// primaries under a stated curve hypothesis and reports the worst residual over the archive's own rows
+/// (`hypothesis_holds=false` exits non-zero):
+///
+/// | exponent | alpha | worst residual |
+/// |---|---|---|
+/// | `2.4` | `1.0` (no offset) | `4.914e-11` — the tenth-decimal half-step, i.e. the shape is right |
+/// | `1/0.45` | `1.09929682680944` (**this file's former law**) | `0.214` |
+/// | `2.4` | `1.09929682680944` | `0.0952` |
+/// | `2.4` | `1.055` | `0.0538` |
+/// | `2.4` | `1.019` | `0.0189` |
+/// | `2.19921875` | `1.09929682680944` | `0.292` |
+///
+/// The mirrored direction agrees: `-- xyz rec2020 2.4 1.0` fits with a `7.70e-11` residual, so the encode side
+/// is `printed = linear ^ (1/2.4)` with the same no-offset law.
+///
+/// **There is also no linear segment on this arm**, which is a reading rather than a preference: keeping the
+/// former `4.5×` arms at the new exponent measured `regress=0 net=85` (run `rec2020-no-offset`), removing them
+/// measured `regress=0 net=126` (run `rec2020-pure-power`) — so `net=41` is that one-variable comparison, both
+/// runs at exponent `2.4`. Which side that reading actually speaks to matters:
+/// `-- xyz rec2020 2.4 1.0` reports `smallest_linear_channel = 0.00163`, below the encode arm's `0.081`, while
+/// its `smallest_curved_printed_channel = 0.0689` sits above the decode arm's `0.081/4.5`. **The encode arm was
+/// exercised and the corpus prefers the power there; the decode arm stays unconstrained by any row.**
+///
+/// `prophoto-rgb` was probed the same way, and the two readings disagree in a way worth keeping straight:
+/// `net` and `regress` said nothing (`rec2020-pure-power` to `prophoto-pure-power`: `regress=0 net=0`) — so an
+/// earlier draft of this comment concluded no row reaches `1/16` or `1/512`. `ledger changed` refutes that:
+/// eleven rows changed value, and the arms are the side that matches the archive —
+/// `to_space/oklab/prophoto_rgb.hrx::missing/non_lightness` states `color(prophoto-rgb 0.016 0.016 0.016)`, the
+/// arms answer `0.0159999996 0.0160000002 0.016` (one digit off), removing them answers `0.0215443466 …`
+/// (`3.5e-3` off). Those rows are red either way because they are `missing/*` rows, which is exactly the class
+/// `net` cannot see. So: **prophoto's encode arm is positively confirmed, its decode arm is unexercised**
+/// (`smallest_curved_printed_channel = 0.1` for that pair), and the arms stay for the first reason, not the
+/// second.
+const REC2020_GAMMA: f64 = 2.4;
+
 /// A signed power: the corpus pushes negative and out-of-range channels through the same curve
 /// (`to_space/srgb/lab.hrx::out_of_range/near` converts `color(srgb -1 0.4 2)` and prints real numbers), so
 /// every transfer is defined on the whole line, not clamped into `[0, 1]` first.
@@ -114,17 +156,7 @@ impl Transfer {
                     value / 16.0
                 }
             }
-            Self::Rec2020 => {
-                if value.abs() < 0.081 / 4.5 {
-                    value / 4.5
-                } else {
-                    sp(
-                        value.signum()
-                            * ((value.abs() + (1.099_296_826_809_44 - 1.0)) / 1.099_296_826_809_44),
-                        1.0 / 0.45,
-                    )
-                }
-            }
+            Self::Rec2020 => sp(value, REC2020_GAMMA),
         }
     }
 
@@ -147,15 +179,7 @@ impl Transfer {
                     value * 16.0
                 }
             }
-            Self::Rec2020 => {
-                if value.abs() < 0.081 {
-                    value * 4.5
-                } else {
-                    value.signum()
-                        * (1.099_296_826_809_44 * value.abs().powf(0.45)
-                            - (1.099_296_826_809_44 - 1.0))
-                }
-            }
+            Self::Rec2020 => sp(value, 1.0 / REC2020_GAMMA),
         }
     }
 }

@@ -120,7 +120,7 @@ fn solve(rows: &[Reading]) -> [[f64; 3]; 3] {
 
 /// Whether a fit's rows are reproduced within what the archive can express, given the hypothesis it was
 /// fitted under. This is a **verdict field** rather than a number to eyeball, because the instrument prints a
-/// plausible-looking matrix either way: a curved pair linearised under a pure power (`rec2020`, worst
+/// plausible-looking matrix either way: a wrong exponent on a curved pair (`rec2020` under `2.2`, worst
 /// residual `0.19`) and a hypothesis that holds (`a98-rgb` under `563/256`, worst `5.0e-11`) otherwise differ
 /// by eight orders of magnitude in the same field name, and nothing in the earlier shape of this output told
 /// the reader which one they were holding. The bound per channel is the coarser of the archive's tenth-decimal
@@ -143,7 +143,7 @@ fn verdict(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (bool, f64) {
 }
 
 /// The smallest nonzero **printed** channel on the curved side only. A piecewise transfer decides its branch on
-/// the printed value of its own channels (`prophoto-rgb` against `1/16`, `rec2020` against `0.081/4.5`), so
+/// the printed value of its own channels (`prophoto-rgb` against `1/16` in `src/color/matrix.rs`), so
 /// this — not a pooled figure over both sides, and not the linearised value — is what says whether the segment
 /// branch was exercised by these rows at all. `None` when neither side is curved: there is no segment to have
 /// exercised. (A first version pooled both sides and reported prophoto's `0.0276` — that is an *XYZ output*,
@@ -171,6 +171,13 @@ fn smallest_linear(rows: &[Reading]) -> f64 {
         .map(f64::abs)
         .filter(|magnitude| *magnitude > 0.0)
         .fold(f64::INFINITY, f64::min)
+}
+
+fn parse_number(text: &str, what: &str) -> f64 {
+    text.parse::<f64>().unwrap_or_else(|error| {
+        tracing::error!(value = %text, e = %error, what = %what, "this argument must be a number");
+        std::process::exit(2);
+    })
 }
 
 fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
@@ -239,21 +246,24 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // No default pair: a run that silently fell back to `xyz_d50 → xyz` would hand the next reader a
     // correct-looking answer to a question they never asked.
-    let Some(([src, dst], gamma)) = (match argv.as_slice() {
-        [src, dst] => Some(([src, dst], None)),
+    let Some(([src, dst], gamma, alpha)) = (match argv.as_slice() {
+        [src, dst] => Some(([src, dst], None, None)),
         [src, dst, gamma] => Some((
             [src, dst],
-            Some(gamma.parse::<f64>().unwrap_or_else(|error| {
-                tracing::error!(gamma = %gamma, e = %error, "the third argument must be a number: the hypothesised curve exponent");
-                std::process::exit(2);
-            })),
+            Some(parse_number(gamma, "the hypothesised curve exponent")),
+            None,
+        )),
+        [src, dst, gamma, alpha] => Some((
+            [src, dst],
+            Some(parse_number(gamma, "the hypothesised curve exponent")),
+            Some(parse_number(alpha, "the hypothesised curve offset alpha")),
         )),
         _ => None,
     }) else {
         tracing::error!(
             args = argv.len(),
-            usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst> [gamma]",
-            "two space names, plus the curve exponent when one side is printed through a transfer curve"
+            usage = "cargo run -q -p sasspile --example calibrate_space -- <src> <dst> [exponent] [alpha]",
+            "two space names, then the curve exponent, then the offset alpha for a shifted-power transfer"
         );
         std::process::exit(2);
     };
@@ -262,9 +272,10 @@ fn main() {
     // (`prophoto-rgb`, `rec2020`) may still be named as the curved side and will be fitted under whatever
     // exponent is passed — this instrument cannot tell a pure power from a segmented curve, which is why
     // [`verdict`] exists and why a failed hypothesis exits non-zero rather than leaving a plausible table on
-    // screen: a pure-power guess on `rec2020` fits with a worst residual of `0.19`, and only the verdict says
-    // that is not the archive's relation. (An earlier draft of this comment claimed such pairs are refused by
-    // name, which the measured `rec2020` run disproved.)
+    // screen: `rec2020` fitted under `2.2` gives a worst residual of `0.19`, and only the verdict says that is
+    // not the archive's relation - whereas `2.4` with no offset holds (`tasks.md` 9.20 is what settled
+    // `rec2020`, not this refusal-by-name, which an earlier draft of this comment claimed and the measured run
+    // disproved).
     const LINEAR: [&str; 4] = ["xyz", "xyz_d50", "srgb_linear", "display_p3_linear"];
     let curved_side = match (
         LINEAR.contains(&src.as_str()),
@@ -275,10 +286,12 @@ fn main() {
         (false, true, Some(exponent)) => Some(Hypothesis {
             side: Side::From,
             exponent,
+            offset: alpha,
         }),
         (true, false, Some(exponent)) => Some(Hypothesis {
             side: Side::To,
             exponent,
+            offset: alpha,
         }),
         (true, true, Some(_)) => {
             tracing::error!(
@@ -338,6 +351,7 @@ fn main() {
                 Side::To => Side::From,
             },
             exponent: hypothesis.exponent,
+            offset: hypothesis.offset,
         }),
     );
     let direct = solve(&back);
@@ -347,12 +361,16 @@ fn main() {
         from = %format!("{src}/{file}"),
         hypothesis = curved_side.map_or("none (both sides linear)".to_string(), |hypothesis| {
             format!(
-                "{} side linearised as a signed power {}",
+                "{} side linearised as a signed power {}{}",
                 match hypothesis.side {
                     Side::From => "input",
                     Side::To => "output",
                 },
-                hypothesis.exponent
+                hypothesis.exponent,
+                hypothesis.offset.map_or(String::new(), |alpha| format!(
+                    " with offset alpha={alpha} (((v+alpha-1)/alpha)^{hypothesis_exponent})",
+                    hypothesis_exponent = hypothesis.exponent
+                ))
             )
         }),
         "archive rows read"
@@ -386,7 +404,7 @@ fn main() {
     );
     // A refuted hypothesis exits non-zero rather than leaving a fitted table on screen next to a verdict a
     // reader might not have reached yet: this is the difference between `a98-rgb` under `563/256` (holds) and
-    // the same pair under a rounded or inverted exponent (does not), or `rec2020` under any pure power.
+    // the same pair under a rounded or inverted exponent (does not), or `rec2020` under `2.2`.
     if !holds {
         tracing::error!(
             pair = %format!("{src} → {dst}"),

@@ -76,7 +76,10 @@ pub(super) enum Transfer {
     A98,
     /// Gamma `1.8` with the linear segment below `1/16`.
     Prophoto,
-    /// The `alpha = 1.09929682680944, beta = 0.081` curve.
+    /// A plain signed gamma of `2.4`, with **no offset and no linear segment on the encode side** - the corpus
+    /// prefers the plain power there by `net=41` rows over keeping the former `4.5×` arms (`matrix.rs`'s
+    /// `REC2020_GAMMA` carries the scan, both A/B runs, and which side of the pair each reading speaks to;
+    /// `tasks.md` 9.20).
     Rec2020,
 }
 

@@ -26,17 +26,25 @@ pub enum Side {
 /// A curve hypothesis under test: which side of a pair is curved, and with which **decode** exponent
 /// (`linear = printed^exponent`). The instrument never claims this is the archive's law — it fits under it and
 /// reports whether the result can be told from the archive's own rows.
+///
+/// `offset` is the `α` of a **hypothetical** shifted-power transfer, decoding as
+/// `linear = ((printed + α − 1)/α)^exponent`. It exists because prose about `rec2020` describes exactly that
+/// shape and someone had to be able to test it — the test came back negative (`tasks.md` 9.20: the archive's
+/// `rec2020` is `α = 1.0`, i.e. no offset at all), so this field is a channel for scanning a hypothesis, not a
+/// statement about any space in the library. `None` means a pure gamma, which is what every curved space in
+/// `src/color/matrix.rs` actually is.
 #[derive(Clone, Copy, Debug)]
 pub struct Hypothesis {
     pub side: Side,
     pub exponent: f64,
+    pub offset: Option<f64>,
 }
 
 /// One archive reading: the case name, the input triple, the printed output triple, and **the same two
 /// triples before any linearisation**. The raw pair is kept because a piecewise transfer decides its branch
-/// on the printed value (`prophoto-rgb` compares `|channel|` to `1/16`, `rec2020` to `0.081/4.5`), while a fit
-/// runs on linearised ones — without both, "the segment branch was never exercised by these rows" would be a
-/// reader's inference rather than a printed fact.
+/// on the printed value (compare `prophoto-rgb`'s `1/16` in `src/color/matrix.rs`), while a fit runs on
+/// linearised ones — without both, "the segment branch was never exercised by these rows" would be a reader's
+/// inference rather than a printed fact.
 pub struct Reading {
     pub case: String,
     pub input: [f64; 3],
@@ -126,20 +134,26 @@ pub fn readings(
             // `examples/calibrate_space.rs` about the duplicated `invert` - readings may be produced with it,
             // but a number in the library is never copied back from here. If `sp` and this ever disagree, the
             // fit's rows stop reproducing, which is what `verdict` is for.
-            let power = |channels: [f64; 3], exponent: f64| {
+            let power = |channels: [f64; 3], exponent: f64, offset: Option<f64>| {
                 channels.map(|channel| {
                     if channel == 0.0 {
                         0.0
                     } else {
-                        channel.signum() * channel.abs().powf(exponent)
+                        // A shifted power moves the magnitude before the exponent; the sign rides outside
+                        // both, the same way the corpus carries negative channels through a curve.
+                        let moved = match offset {
+                            Some(alpha) => (channel.abs() + (alpha - 1.0)) / alpha,
+                            None => channel.abs(),
+                        };
+                        channel.signum() * moved.powf(exponent)
                     }
                 })
             };
             let (input, output) = match curved {
                 None => (input, output),
                 Some(hypothesis) => match hypothesis.side {
-                    Side::From => (power(input, hypothesis.exponent), output),
-                    Side::To => (input, power(output, hypothesis.exponent)),
+                    Side::From => (power(input, hypothesis.exponent, hypothesis.offset), output),
+                    Side::To => (input, power(output, hypothesis.exponent, hypothesis.offset)),
                 },
             };
             Some(Reading {
