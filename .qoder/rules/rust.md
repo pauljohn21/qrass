@@ -21,8 +21,23 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3028/11,533**（26.3%，**实质通过 2863** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `prophoto-solved-v2`（2026-11-03：`prophoto-rgb` 的 primaries 整表改为从
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3169/11,533**（27.5%，**实质通过 3004** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `rec2020-no-offset-v3`（2026-11-04：**`rec2020` 的转移曲线两个常数以
+   及分段支都不是语料的**——原写 `((v+α−1)/α)^(1/0.45)`（`α=1.09929682680944`），语料是**纯有符号幂 `2.4`**（无任何
+   偏移）；分开它们的是假设扫描的最坏残差（`2.4/1.0` → `4.9e-11` holds；原写法 → `0.214`；数值只住 `tasks.md` 9.20），
+   而“删掉 `4.5×` 分段支”是 A/B 定的（保留 → `net=85`，删除 → `net=126`；语料正向偏好纯幂，但该读数只覆盖
+   **编码侧**：`smallest_linear_channel=0.00163 < 0.081` 而 `smallest_curved_printed_channel=0.0689 > 0.081/4.5`，
+   解码臂仍零约束）。同一探针对 `prophoto`：`net=0` 但 `ledger changed` 查出 **11 行变值且臂侧靠金样**
+   （`to_space/oklab/prophoto_rgb.hrx::missing/non_lightness`：金样 `0.016`，留臂 `0.0159999996`，删臂 `0.0215443466`），
+   所以它的臂**保留的理由是 changed 读数而不是“不可证伪”**——只看 `net` 会得出完全错的理由（`missing/*` 行两例都红）。
+   表：第一行三项拟合后覆盖（差 `3.76e-6/2.00e-7/4.03e-6`）；第二行两项虽差不过自身散布，但白行（曲线无关）直接
+   锁住整行行和 → **联合约束优先于单项平局**（新口径，见 9.20）。**`regress=0 net=141`**；本会话六批累计
+   **`regress=0 net=671`**；无效错误仍 19，空库复算同读数；`ledger shift`：**`changed=142 closer=131 farther=0
+   tie=0 error_expectation=0 shape_of_text=11`**（本会话首个 `farther=0`）；中间变体曾绿的 16 行已逐条具名（全为末位 1，
+   **两侧都有**：rec2020 作目标用逆阵、作源用正阵）。守卫 `tests/color_rec2020.rs`。
+   其前一批 run `audit-closure-prophoto`（同日：补跑 prophoto 那批的审查，把 `Space::white()` 的 `_ =>` 兜底改为
+   穷举 13 变体，并把 rec2020 的 `7e-8` 行和缺陷从“曲线假设未定”里拆出来——拆后行为无变，`regress=0 net=0`）。
+   其前一批 run `prophoto-solved-v2`（2026-11-03：`prophoto-rgb` 的 primaries 整表改为从
    `to_space/prophoto_rgb/xyz.hrx` 拟合（九项均超出自身逐项散布），而拟合出的表**自身就落在 D65 白上**，故
    `Space::white()` 不再把该空间归入 D50——白点由表携带，不再两处各自声明（该白行改前 X 差 `3.4e-2`；`4.2e-2` 是
    `[0][0]` 项自己的差，两个对象不得写混）。
