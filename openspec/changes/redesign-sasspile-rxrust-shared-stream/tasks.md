@@ -2670,3 +2670,47 @@
       `calculation.rs` 127/`value.rs` 116/`calc.rs` 106/`unit.rs` 104），以及 `builtins/math.rs` 之外新动的其他文件里的
       `oracle` 一词待统一；第二批写进 `crates/ledger/src/bin/capability.rs` 的“唯一的 oracle”也在待改名单里。
 
+- [x] 9.32 **注释中文化第四批：`builtins/color/` 的域根 + 构造子 + 三族操纵子 + `to-space`（四文件 291 行注释，2026-11-05）**。
+      行数（`wc -l`，HEAD→NOW）：`color/mod.rs` **497→489**（原本贴着 500 上限，本批因修正假断言多写了 4 行，仍未越线）、
+      `constructors.rs` 355→347、`modify.rs` 197→195、`transfer.rs` 51→49。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计另用“剥掉注释后四文件 SHA-256 与 HEAD 逐字相同”的第二重量法
+      与 6 个历史提交的非零阳性对照。`name`/`params`/`optional`/`variadic`/`apply`/`labelled` 字段值、`COLORS` 32 项
+      顺序、全部 `SassError::new("…")` 串均未动。四文件反引号奇数行（跨行断裂）现为 **0**（HEAD：mod.rs 2、constructors 1）。
+      读数：`ledger diff zh-comments-builtins-math-v2 zh-comments-builtins-color-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；现测 hrx `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、
+      `skipped=1264`；无效错误 **19**；`sasslint lint crates/sasspile/src` count=0（EXIT=0）、`fmt` EXIT=0、
+      `cargo test --workspace --no-fail-fast` EXIT=0（62 条 `test result: ok`）。注释内数字多重集（口径
+      `[0-9]+([.][0-9]+)?`）：transfer 全等；mod/constructors 共多三枚 `1`、modify 多 `0`/`12`/`17`，
+      全部来自本批新增的修正句与把 HEAD 拼写的 “one” 写成数字——不报成全等。
+      `gc-auditor` 判 14 条 finding，全收。本批的分量与前三批不同：**它查出三条注释在断一件归档已经推翻的事**，
+      而我只是在把它译成中文时原样继承：
+      • **`accessor` 的“`rgb` 颜色被问 `hue` 需要至今没有金样的 rgb→hsl 换算”是假的**——
+        `core_functions/modules/color/hue.hrx:3` 就是 `a {b: color.hue(#abcdef)}` → `:7 b: 210deg;`，代码已落
+        `color/ops.rs:67,226 crate::axes::rgb_to_axes`，守卫 `tests/color.rs:235 rgb_colours_answer_hsl_axis_questions`，
+        而 `tasks.md:675` 早记着“被推翻的推定 2：‘rgb 源被问 hsl 轴无金样’不成立”。本批现量
+        `HRX_CASE=modules/color/hue` = `total=1 pass=1 pass_substantive=1`。已改写：今天答不了的只剩自带空间的颜色
+        （`no_legacy_axes`）。
+      • **“没有任何一行 `scale/*.hrx` 点名 `$hue:`”是假的**：`grep -rn '\$hue:' sass-spec/…/color/scale/` = **12** 行
+        （对照同目录 `$saturation:` = 31），语料给的是硬错误 `Error: $hue: Channel isn't scalable.`
+        （`scale/error/args.hrx::unknown`、`scale/error/polar.hrx::{legacy,lch,oklch}`）。改“这句消息本编译器
+        还没造出来”（不拿“没行”当依据），同时保留“角度没有可缩放的界限”这条选型理由。
+      • **“没有哪条 `change` 行说出 no-op 与单给 `$alpha:` 仍动”是假的**：`change/no_space.hrx::{positional,named,
+        alpha/max,alpha/min}` 存在，现量 `HRX_CASE=change/no_space` = `total=12 pass=0`——所以 `change` 在那里
+        decline 是一处**未闭缺口**，不是“语料没说”（写文档时把“我没做”说成“语料没说”是本仓反复踩的那类错）。
+      • 六条取不到的 key 全部现量核实后改掉：`rgb/three_args::1_of_3` → `rgb/multi_argument_var.hrx::1_of_3`（原文逐字相符）、
+        `saturate.hrx::max` → `two_args/max`（该文件 :80/:83）、`four_args/clamped::red` →
+        `rgb/four_args/clamped.hrx::red/finite`、`hsl(0, 500%, 50%)` 改挂 `hsl/three_args/out_of_gamut.hrx::saturation/above`
+        （`bounds.hrx` 实为 200%/500% 的另两行）、`mix/units.hrx` 的 `50%` 改挂 `mix/explicit_weight.hrx`（该文件
+        只有 `weight/{unitless,unknown}` 两行，各带一条 `DEPRECATION WARNING [function-units]`）、
+        `error/{type,units,args,bounds,polar}` 的三族叉乘（12/15）改成逐族实际名单。
+      • 强度/强调/排版：“with the **same** shape” 被我写成“**完全相同**”（紧接的区分判据自己说两者不同）⇒降回同强度；
+        给 HEAD 无强调的 `needs_labels` 句多加了一对 `**不**` ⇒删；`**before**` 的强调丢了 ⇒移到“**跑之前**”；
+        `**朝符号/指向的那一侧界限移动**` 跨 `///` 断行 ⇒重排；`above_max` 的“没有”补上可复取的量法与对照
+        （`scale/` 0 个文件、`adjust/` 17，本会话自测）。
+      • 口径订正（FINDING 14）：调用方先前报的 `mod.rs 485` 是中途量，本批终量 **489**；“句号被正则吃掉”的回声
+        也不成立，换成小数点安全的口径后只差上面那些新写的数。
+      基线 run 自此为 `zh-comments-builtins-color-v2`（与 `zh-comments-builtins-math-v2` `regress=0 net=0`，只差注释语言）。
+      **未做（不得当作已交付）**：`builtins/color/amount.rs`（165 行注释）与 `write.rs`（147）待下批；`sasspile` 顶层
+      与 `color/` 目录共约 3100 行未改。另：`change/no_space` 那 12 行仍红，是一处新记明的**未闭能力缺口**，
+      不等于本批把它做了；`Error: $hue: Channel isn't scalable.` 也未做（消息那摊工作）。
+
