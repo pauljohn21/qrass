@@ -2621,3 +2621,52 @@
       `lib.rs` Usage 块那 4 条命令行本身的 rustdoc `unclosed HTML tag` 告警 HEAD 与 NOW 一样（非本批引入，
       要消得单独把整行命令用反引号包住，属下一轮可选项）。
 
+- [x] 9.31 **注释中文化第三批：`crates/sasspile/src/builtins` 的登记骨架 + math 域五个文件（2026-11-05）**。
+      本批开始动 sasspile（行数均按 `wc -l`）：mod.rs 295→277（100 行注释）、math.rs 477→458（98）、
+      math/trig.rs 172→167（34）、math/combining.rs 117→114（32）、math/exponents.rs 86→85（22），
+      共 286 行注释；五者均 ≤500，math.rs 从 477 降到 458 给后续留出空间。
+      **只改注释**：`git diff -U0` 非注释行 = **0**，审计另用“剥掉注释后行序列与 HEAD 全等”的第二重量法
+      （五文件均 0）+ 两个非零阳性对照；`name`/`params`/`optional`/`variadic` 字段值、`MATHS` 顺序、
+      所有 `SassError::typed(..)` 消息串与 `format!` 格式串均未动。
+      读数：`ledger diff zh-comments-ledger-v2 zh-comments-builtins-math-v2` = **`regress=0 net=0`**，
+      `changed` = **`changed=0`**；现测 hrx `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、
+      `skipped=1264`；无效错误 **19**；`sasslint lint crates/sasspile/src` EXIT=0（count=0）、`fmt` EXIT=0、
+      `cargo test --workspace --no-fail-fast` EXIT=0（62 条 `test result: ok`，无 FAILED 无 warning）。
+      注释内数字多重集：trig/combining/exponents 与 HEAD 全等；mod.rs 只差一个“29”（下面 FINDING 3）、
+      math.rs 多出的 2/3/6 各一个均来自新加那句“示意式”说明里重复引的 `6px / 3px`、`2/px`、`2in/s`——
+      **不得把这两个 DIFF 报成“全等”**。
+      `gc-auditor` 逐条对照英文原文，判 17 条 finding，收 16 拒 1；本批最重的一类是**它查出的 case key 本身就是错的**
+      （继 9.28 之后又一例“注释里的 key grep 不回归档”，每条都现量过才改）：
+      • `hypot.hrx::units` → `hypot.hrx::compatible_units`（两处；`5q * 40`/`11.6189500386cm` 实在 hypot.hrx:14/18，
+        该文件根本没有 `units` 这个用例）；`hypot.hrx::infinite/*` → `infinity/*`（边界在 :23/34/45）；
+      • `max.hrx::unit/mixed` → `units/and_unitless`（`math.max(2px, 1)` 在 :64，`b: 2px;` 在 :68）；
+      • `round.hrx::error/no_args` → `error/too_few_args`（:151-155 逐字是 `Error: Missing argument $number.`）；
+      • `math/div.hrx::error/missing_argument` → `core_functions/math/div.hrx::error/too_few_args`（:165-166）；
+      • `unitless()` 的出处 `{round,atan,asin,sqrt,unitless}.hrx` 是过度声称：现量 `to have no units` 在
+        round=0、unitless=0、atan/asin/sqrt/log 各命中，收窄成真正带这一行的文件 + `pow/arguments.hrx` 的
+        `$base:`/`$exponent:`；`math.percentage.hrx::error/unit` 去掉不存在的 `math.` 前缀；
+      • 记法修形：`three_args/unitless::named` → `rgb/three_args/unitless.hrx::named`，`{pow,sqrt,log}.hrx`
+        改称 `pow/` 目录（pow 不是单文件），`error/*_has_units` → `{base,exponent}_has_units`，
+        `red|green/out_of_range` → `{red,green}/out_of_range`，`math.max.hrx::` → `max.hrx::`；
+      • **语义漂移（最严重的一条）**：“`hypot` names that case differently” 被我写成“对这个情形另有一套说法”，
+        下一个会话会读成“两条不同消息”，而归档里 hypot.hrx:243 与 min/max.hrx:172 是**同一句**
+        `At least one argument must be passed.`，不同的只是用例名（`zero_args` vs `too_few_args`）——已改回；
+      • **新增断言**：“this arm only keeps the read total” 被我多译成“不做判定”，而那一臂确实 `return Err(missing(..))`；
+        同批 exponents.rs 的同一短语就没加——已删这半句；
+      • **无可复取的数字**：“把 29 个函数体改成穿过 newtype”——没有任何一条命令给出 29（实测
+        `apply: |args|` = 31、`Builtin = Builtin {` = 55、MATHS = 23），改为“所有既有函数体”，不拿一个造数顶替；
+      • 中文质量：十位**小节**→小数、“裸点名值”→“只把值写出来、不点名参数”、“哪一/侧”跳行断开→重排、
+        `at_least_one` 那处丢掉的 `**不**` 粗体补回（mod.rs 的 `**` 计数 32→30 就是这一处）；
+      • F17：`6px / 3px`、`2/px`、`2in/s`、`1px*em / 1em` 这类是单位代数的**示意**，归档里逐字命中 0，
+        而反引号会把下一个会话骗去 grep它们——已在 `math.div` 的 doc 里写明“这些是示意，不是归档逐字行”，
+        可逐字取回的是各 key 下的调用式与输出行（如 div.hrx:78 → :80 `b: 192;`）。
+      **拒掉的一条**：审计要求把叙述词 `arity`/`oracle`/`fixture`/`run` 全译。`arity`/`run`/`fixture` 是本仓中文行文
+      自己的用词（现量：rust.md `arity`=1、`run`=23；`sasspile-start` skill 三份 `arity`=6、`fixture`=5、`run`=43），
+      改了反而与规则文不一致，保留；`oracle` 两边都 0 命中、不是既定词，已按它建议改“归档”（三处）。
+      本批自己写坏的一处（审计未报，读回全文时发现）：“毫米”写成了“殫米”——全仓 `grep -rn 殫` 现为空。
+      基线 run 自此为 `zh-comments-builtins-math-v2`（与 `zh-comments-ledger-v2` `regress=0 net=0`，只差注释语言）。
+      **未做（不得当作已交付）**：`crates/sasspile/src` 还剩约 3422 行注释——`builtins/color/` 六文件（603）、
+      `color/` 目录（1086）、顶层余下文件（约 1700，大头 `exec.rs` 204/`expr.rs` 165/`brackets.rs` 136/`lexer.rs` 129/
+      `calculation.rs` 127/`value.rs` 116/`calc.rs` 106/`unit.rs` 104），以及 `builtins/math.rs` 之外新动的其他文件里的
+      `oracle` 一词待统一；第二批写进 `crates/ledger/src/bin/capability.rs` 的“唯一的 oracle”也在待改名单里。
+
