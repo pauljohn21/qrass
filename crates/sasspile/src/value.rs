@@ -299,7 +299,8 @@ pub(crate) fn format_number(value: f64) -> String {
     // A cut that lands on `-0` prints as plain zero: `color.change(red, $lightness: 0.5%)` leaves a channel
     // of `-1.1e-15` — float dust for zero — and the corpus prints `rgb(1%, 0%, 0%)`, not `-0%`
     // (`change/hsl.hrx::lightness/fraction`). It is the printing half of the rule `Channel::clamped` applies
-    // to a written `-0` (`rgb/three_args::clamped/red/minus_zero`).
+    // to a written `-0` (`rgb/four_args/clamped.hrx::red/negative_zero`: `rgb(-0, 0, 0, 0.5)` →
+    // `rgba(0, 0, 0, 0.5)`).
     match cut.as_str() {
         "-0" => "0".to_string(),
         _ => cut,

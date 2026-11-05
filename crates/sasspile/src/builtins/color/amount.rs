@@ -24,6 +24,7 @@ use super::modify::Writing;
 use crate::ErrorKind;
 use crate::SassError;
 use crate::builtins::Given;
+use crate::color::{Color, Space};
 use crate::value::Value;
 
 /// The refusal this slice already makes for reasons the corpus leaves unanswered — an unreadable colour, a
@@ -147,6 +148,105 @@ pub(super) fn written_byte(value: &Value, name: &str) -> Result<Option<f64>, Sas
     byte(value, name, Writing::Set).map(Some)
 }
 
+/// One channel argument of `color.change` on a colour that **carries its own space**, in that space's stored
+/// scale — or `None`, which is the archive's `none` (`change/lch.hrx::chroma/none` → `lch(50% none 30deg)`,
+/// `change/display_p3.hrx::red/none` → `color(display-p3 none 0.5 0.7)`).
+///
+/// Four readings, each with its own fixture:
+/// * a percentage divides by **that channel's** base — `change/srgb.hrx::red/percent` (`50%` → `0.5`) and
+///   `change/lab.hrx::a/percent` (`-40%` → `-50`) are the same kind of argument on different bases, which is
+///   why [`crate::color::Space::percent_divisor`] is per channel;
+/// * any **other unit** is refused by name: `color.change(color(srgb 0.2 0.5 0.7), $red: 0.5px)` →
+///   `$red: Expected 0.5px to have unit "%" or no units.` (`change/error/units/srgb.hrx::red`, a wording the
+///   archive uses 37 times across `change/error/units/`). Reading `0.5px` as the magnitude `0.5` was this
+///   arm's first shape, and it answered 27 rows the archive calls errors;
+/// * a hue is an **angle** and folds into one turn: `change/lch.hrx::hue/negative` reads `-20deg` as `340deg`
+///   and `…::hue/above_max` reads `400deg` as `40deg` — the same [`crate::color::angle_of`] the `hsl` hue axis
+///   uses. A percentage on it is the corpus's angle error (`change/error/units/lch.hrx::hue`, `$hue: 20%` →
+///   `Expected 20% to have an angle unit (deg, grad, rad, turn).`), which is also the answer
+///   [`crate::color::Space::percent_divisor`] deliberately leaves blank;
+/// * anything else is the magnitude as written, **unclamped**: `change/xyz.hrx::x/out_of_range` keeps the `1.2`
+///   it was given and `change/oklab.hrx::a/out_of_range` the `1`;
+/// * and a value that is not a number at all is **declined** rather than answered with the type message, for
+///   the reason on the body of this function.
+pub(super) fn written_channel(
+    value: &Value,
+    name: &str,
+    space: Space,
+    channel: usize,
+) -> Result<Option<f64>, SassError> {
+    if crate::color::is_missing_word(value) {
+        return Ok(None);
+    }
+    // A value that is neither a number nor `none` is **declined**, not answered with a message: every
+    // `change/error/type.hrx` row is a legacy colour, so no fixture says what a *space* colour should reply to
+    // `c`. Raising the type message there — what this arm first did — turned three rows into errors the archive
+    // never asks for (`change/unusual_numbers::{nan,infinity,negative_infinity}/linear`, where
+    // `color.change(lab(50% 0 0), $a: calc(nan))` wants the colour back once `calc()` is evaluated) and moved
+    // the unexpected-error count from 19 to 22; the decline is what the gate measures back down.
+    let (magnitude, units) = match value {
+        Value::Number(magnitude, units) => (*magnitude, units),
+        _ => return Err(decline()),
+    };
+    let unit = units.single();
+    if space.is_hue(channel) {
+        // A hue reads as an angle, folded into one turn by the same [`crate::color::angle_of`] the `hsl` hue
+        // axis uses (`change/lch.hrx::hue/{negative,above_max}`); anything that is not an angle — a percentage
+        // included — is the corpus's angle message (`change/error/units/lch.hrx::hue`).
+        let angle = match unit {
+            None => true,
+            Some(unit) => crate::unit::is_angle(unit),
+        };
+        if !angle {
+            return Err(expected_angle(name, value));
+        }
+        return crate::color::angle_of(value)
+            .map(Some)
+            // Unreachable for a number, which the match above has already narrowed to.
+            .ok_or_else(decline);
+    }
+    // A unit that is neither `%` nor nothing at all is refused by name: that wording appears 37 times in
+    // `change/error/units/*.hrx`, and the first shape of this arm answered 27 of them with a value (the
+    // measured `error_expectation=27` of run `change-in-carried-space`).
+    if unit.is_some_and(|unit| unit != "%") {
+        return Err(expected_percent_or_none(name, value));
+    }
+    if unit != Some("%") {
+        return Ok(Some(magnitude));
+    }
+    space
+        .percent_divisor(channel)
+        .map(|divisor| Some(magnitude / divisor))
+        // Unreachable in this shape: the only channel whose base the table leaves blank is a hue, and the hue
+        // branch above already answers a `%` with the corpus's angle error. It stays as the decline rather
+        // than an invented number so a future percentage-on-hue row cannot silently become arithmetic.
+        .ok_or_else(decline)
+}
+
+/// Write every channel the call named **in the colour's own space**, left to right so a later name cannot
+/// overwrite an earlier one: `color.change(color(srgb 0.2 0.5 0.7), $red: 0.7, $green: 0.4, $blue: 0.2)` →
+/// `color(srgb 0.7 0.4 0.2)` (`change/srgb.hrx::all`), and `change/lab.hrx::all` writes
+/// `lab(50% 20 -30)` through `$lightness: 20%, $a: -30, $b: 40`.
+///
+/// `change` only: [`written_channel`] is the reading, and the arms that keep their text for a name this space
+/// does not own are recorded in `tasks.md` 9.25 rather than answered with an error this slice has not read yet.
+pub(super) fn write_carried(
+    colour: &Color,
+    given: &[Given],
+    space: Space,
+    owned: &[(&str, usize)],
+) -> Result<Color, SassError> {
+    owned
+        .iter()
+        .try_fold(colour.clone(), |colour, (name, channel)| {
+            let argument = Given::find(given, name).ok_or_else(decline)?;
+            let value = written_channel(argument, name, space, *channel)?;
+            colour
+                .with_space_channel(*channel, value)
+                .ok_or_else(decline)
+        })
+}
+
 /// The value a scale writes: `amount` is read as a percentage of the distance still to the bound its sign
 /// points at, so the result is always between `floor` and `ceiling` (`scale_toward(240, -33.0, 0.0, 255.0)`
 /// is `160.8`, `scale_toward(64, 86.0, 0.0, 255.0)` is `228.26` — both from `scale/rgb.hrx`).
@@ -175,7 +275,11 @@ pub(super) fn keep(writes: &[(&str, f64)], name: &str, current: f64) -> f64 {
         .map_or(current, |(_, value)| *value)
 }
 
-/// The channel names each space answers: its name, the names that **decide** it, and the names it owns.
+/// The channel names each **legacy group** answers: its name, the names that **decide** it, and the names it
+/// owns. This is not the Color-4 table — a colour carrying `srgb`/`xyz`/`lch` says its own names in
+/// `crate::color::channels`, and the `rgb` row here happens to spell the same three words because the legacy
+/// byte triple *is* an srgb triple (`change/rgb.hrx` vs `change/srgb.hrx` use `$red` alike). What is *local to
+/// this* table is the middle column — which names decide the group — and that is the law `mixed_channel` reports.
 ///
 /// `rgb` owns only its three bytes: `color.change(red, $red: 1, $hue: 1)` is refused as
 /// `$hue: Color space rgb doesn't have a channel with this name.` (`change/error/mixed_formats.hrx::red_and_hue`),
@@ -237,6 +341,35 @@ fn expected_percent(name: &str, value: &Value) -> SassError {
     SassError::typed(
         ErrorKind::WrongUnits,
         format!("${name}: Expected {} to have unit \"%\".", value.to_css()),
+    )
+}
+
+/// The same expectation as [`expected_percent`] for a channel that may also be written plain: `change` on a
+/// colour in its own space refuses only a unit that is neither `%` nor unitless —
+/// `color.change(color(srgb 0.2 0.5 0.7), $red: 0.5px)` → `$red: Expected 0.5px to have unit "%" or no units.`
+/// (`change/error/units/srgb.hrx::red`, and that wording is the same in every space's file at
+/// `change/error/units/`).
+fn expected_percent_or_none(name: &str, value: &Value) -> SassError {
+    SassError::typed(
+        ErrorKind::WrongUnits,
+        format!(
+            "${name}: Expected {} to have unit \"%\" or no units.",
+            value.to_css()
+        ),
+    )
+}
+
+/// A hue takes an angle and nothing else, so even the *shape* of the unit complaint differs:
+/// `color.change(lch(50% 30 50deg), $hue: 20%)` →
+/// `$hue: Expected 20% to have an angle unit (deg, grad, rad, turn).` (`change/error/units/lch.hrx::hue`,
+/// with the `oklch` twin).
+fn expected_angle(name: &str, value: &Value) -> SassError {
+    SassError::typed(
+        ErrorKind::WrongUnits,
+        format!(
+            "${name}: Expected {} to have an angle unit (deg, grad, rad, turn).",
+            value.to_css()
+        ),
     )
 }
 

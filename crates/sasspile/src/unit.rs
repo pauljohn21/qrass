@@ -81,6 +81,14 @@ pub fn measure(unit: &str) -> (&str, f64) {
         .map_or_else(|| (unit, 1.0), |(_, (family, factor))| (*family, *factor))
 }
 
+/// Whether a unit name is one of the angle units the table carries (`deg`, `grad`, `rad`, `turn`). Asked in
+/// three places — the colour hue read, the trigonometric arguments, and `color.change`'s hue channel — and
+/// answered here once, so "which units count as an angle" cannot disagree between them. An unknown unit (like
+/// `%` or `px`) is its own family by [`measure`]'s rule, so it is not an angle.
+pub fn is_angle(unit: &str) -> bool {
+    measure(unit).0 == "angle"
+}
+
 /// One side of a rational unit: every unit name that appears there, in the order it appeared.
 type Names = Vec<String>;
 
@@ -239,7 +247,7 @@ impl Unit {
     /// `calc(NaN * 1deg)` (`core_functions/math/asin.hrx::greater_than_one`).
     ///
     /// Said plainly so the next reader does not over-read this: the **colour** printers do not come through
-    /// here. `Color::legacy`/`Channel`/`space::print` write `format_number(…) + "%"` directly, so the same
+    /// here. `Color::legacy`/`Channel`/`text::print` write `format_number(…) + "%"` directly, so the same
     /// bare `infinity%` is still printed there — measured as `core_functions/color/to_space/hwb/hsl::white`,
     /// which got `hsl(0, infinity%, 100%)` against the archive's `hsl(0, 0%, 100%)`. One law, one home, is
     /// still open work on that side.

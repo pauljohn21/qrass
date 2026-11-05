@@ -15,7 +15,6 @@
 //! `to_space/srgb/xyz_d50.hrx::white`).
 
 use super::matrix::{from_polar, of_xyz_d65, to_polar, to_xyz_d65};
-use crate::value::format_number;
 
 /// The spaces this compiler can carry and convert. `rgb`/`hsl`/`hwb` are absent on purpose: those targets are
 /// answered by the legacy [`crate::color::Representation`] they already print in, not by a space channel
@@ -204,74 +203,37 @@ impl Space {
         !self.is_derived()
     }
 
-    /// The number a **full-scale percentage** names in this space's lightness: `lab`/`lch` state lightness on
-    /// a `0–100` scale, so their `50%` *is* `50` (`to_space/srgb/lab.hrx::middle` reads `lab(44.1210142293% …)`
-    /// and prints the same number it holds), while every other space is a fraction of one, so `100%` is `1`
-    /// (`to_space/oklab/srgb.hrx::white` reads `oklab(100% 0 0)` and wants `color(srgb 1 1 1)`;
-    /// `to_space/srgb/oklab.hrx::white` wants `oklab(100% 0 0)` back for white).
-    ///
-    /// This is **one** law with both directions read from it: the argument parser divides by it (in
-    /// `builtins/color/constructors.rs`) and [`print`] multiplies by it before writing the `%`. It was
-    /// written three times before — the print suffix, this divisor, and the matrix's `0–1` domain — and the
-    /// three disagreed for `oklab`/`oklch`, turning `oklab(100% 0 0)` into `L = 100` and a conversion into
-    /// numbers of order `1e5`.
+    /// The number a **full-scale percentage** names in this space's lightness — the `channel = 0` row of
+    /// [`Space::percent_divisor`], whose table carries the reasoning and the fixtures. It keeps its own name
+    /// because the printer and the `color(…)` reader ask only about that channel; the other channels of the
+    /// same space sit on different bases (`change/lab.hrx::a/percent` is not on `lightness`'s scale).
     pub fn percent_full(self) -> f64 {
-        match self {
-            Self::Lab | Self::Lch => 1.0,
-            _ => 100.0,
-        }
+        super::channels::full(self)
     }
-}
 
-/// One channel as printed: `none` for a powerless one, otherwise the number the corpus's printer yields.
-fn channel(value: Option<f64>, suffix: &str) -> String {
-    value.map_or_else(
-        || "none".to_string(),
-        |number| format!("{}{suffix}", format_number(number)),
-    )
-}
+    /// The index of `name` **in this space**, or `None` when this space has no channel by that name. The names
+    /// and the fixtures behind them are in [`super::channels`]: `change/srgb.hrx` writes `$red`,
+    /// `change/xyz.hrx` `$x`, `change/lab.hrx` `$a`, `change/lch.hrx` `$chroma`.
+    pub fn channel(self, name: &str) -> Option<usize> {
+        super::channels::index(self, name)
+    }
 
-/// The CSS text of a colour carried in its own space, in the forms the corpus pins:
-/// `color(display-p3 0.25 0.4 0.77)`, `lab(44.1210142293% 10.9543336098 -59.0857381981)`,
-/// `lch(44.1210142293% 60.0926108873 280.5032243387deg)` and an alpha after a `/`
-/// (`to_space/srgb/*.hrx::middle` and `::alpha/partial`).
-pub fn print(space: Space, channels: [Option<f64>; 3], alpha: f64) -> String {
-    let suffixes: [&str; 3] = if space.is_functional() {
-        ["", "", ""]
-    } else {
-        match space {
-            // Lightness is a percentage; a and b are plain.
-            Space::Lab | Space::Oklab => ["%", "", ""],
-            // Lightness a percentage, chroma plain, hue an angle.
-            _ => ["%", "", "deg"],
-        }
-    };
-    let body = [0, 1, 2]
-        .iter()
-        .map(|index| {
-            // A percentage channel is written back on the space's own scale — `L = 1` of `oklab` is `100%`,
-            // `L = 44.1210142293` of `lab` is `44.1210142293%` — through the same [`Space::percent_full`] the
-            // reading divides by, so the two directions of one law cannot drift apart again.
-            let scaled = channels[*index].map(|value| {
-                if suffixes[*index] == "%" {
-                    value * space.percent_full()
-                } else {
-                    value
-                }
-            });
-            channel(scaled, suffixes[*index])
-        })
-        .collect::<Vec<String>>()
-        .join(" ");
-    let alpha_part = if alpha < 1.0 {
-        format!(" / {}", format_number(alpha))
-    } else {
-        String::new()
-    };
-    if space.is_functional() {
-        format!("color({} {body}{alpha_part})", space.css())
-    } else {
-        format!("{}({body}{alpha_part})", space.css())
+    /// This space's three channel names, in index order — what a call writes by when the colour carries this
+    /// space (`change/xyz.hrx` names `$x`, `change/lch.hrx` names `$chroma`; [`super::channels`] is the table).
+    pub fn channel_names(self) -> [&'static str; 3] {
+        super::channels::names(self)
+    }
+
+    /// Whether one of this space's channels is its hue, which an argument reaches as an angle.
+    pub fn is_hue(self, channel: usize) -> bool {
+        super::channels::is_hue(self, channel)
+    }
+
+    /// The divisor a percentage argument on one channel reads against, or `None` where the archive states no
+    /// percentage for that channel (the two hues). **Per channel, not per space** — that is the finding of
+    /// `change/lab.hrx::{lightness,a}/percent`, which disagree on the base inside one space.
+    pub fn percent_divisor(self, channel: usize) -> Option<f64> {
+        super::channels::percent_divisor(self, channel)
     }
 }
 
@@ -280,7 +242,8 @@ use super::{Channel, Color, Representation};
 impl Color {
     /// A colour **in its own space**: the space and its channels travel as one value inside
     /// `Representation::InSpace` (with `none` kept as `None`), and the byte/hsl-axis triple stays empty
-    /// because every read of such a colour goes through [`Color::xyz`] and every print through [`print`].
+    /// because every read of such a colour goes through [`Color::xyz`] and every print through
+    /// [`super::text::print`].
     pub fn in_space(space: Space, channels: [Option<f64>; 3], alpha: f64) -> Self {
         let zero = |value: f64| Channel {
             value: Some(value),
@@ -415,6 +378,51 @@ impl Color {
             _ => channels.map(|value| (!powerless).then_some(value)),
         };
         Self::in_space(space, triple, self.alpha)
+    }
+
+    /// The space this colour carries, if it carries one. `color.change` asks this first: a colour **in its own
+    /// space** is written in that space's channels, not in bytes or hsl axes
+    /// (`change/srgb.hrx::red/unitless` writes `color(srgb 0.2 0.5 0.7)` through `$red`).
+    pub fn carried_space(&self) -> Option<Space> {
+        match self.representation {
+            Representation::InSpace(carried) => Some(carried.space),
+            _ => None,
+        }
+    }
+
+    /// One channel of a colour that carries its own space, written as the call named it: `None` is the
+    /// archive's `none` (`change/oklab.hrx::lightness/none` → `oklab(none 0.2 -0.3)`,
+    /// `change/lch.hrx::chroma/none` → `lch(50% none 30deg)`), and nothing is clamped —
+    /// `change/xyz.hrx::x/out_of_range` keeps the `1.2` it was given and `change/oklab.hrx::a/out_of_range`
+    /// the `1`.
+    ///
+    /// **A negative chroma is not stored negative**: `color.change(lch(50% 20 30deg), $chroma: -10)` answers
+    /// `lch(50% 10 210deg)` (`change/lch.hrx::chroma/negative`) — the magnitude, with the hue half a turn
+    /// over — and `color.change(oklch(50% 0.2 30deg), $chroma: -0.1)` answers `oklch(50% 0.1 210deg)`
+    /// (`change/oklch.hrx::chroma/negative`). Both fold the same way, so one arm serves the pair; no other
+    /// channel folds (`lab`'s and `oklab`'s negative axes stay negative, per their `*/out_of_range` rows).
+    pub fn with_space_channel(&self, channel: usize, value: Option<f64>) -> Option<Self> {
+        let carried = match self.representation {
+            Representation::InSpace(carried) => carried,
+            _ => return None,
+        };
+        let mut channels = carried.channels;
+        // A written `-0` comes back as `0`, the same fold the byte clamp makes
+        // (`color.change(lab(50% 0 0), $a: -0)` → `lab(50% 0 0)`, `change/unusual_numbers::negative_zero`).
+        channels[channel] = value.map(super::channel::without_negative_zero);
+        let hue = match (carried.space, channel) {
+            // The two polar spaces name chroma at index 1 and carry their hue at index 2.
+            (Space::Lch | Space::Oklch, 1) => value.is_some_and(|chroma| chroma < 0.0),
+            _ => false,
+        };
+        if hue {
+            channels[1] = value.map(|chroma| chroma.abs());
+            // The hue turns over by half a circle and comes back inside one, which is the same fold the
+            // space's own hue argument gets from `angle_of` (`change/lch.hrx::hue/negative` reads `-20deg`
+            // as `340deg`). An unwritten hue stays unwritten: `-10` of nothing has no angle to turn.
+            channels[2] = channels[2].map(|degrees| (degrees + 180.0).rem_euclid(360.0));
+        }
+        Some(Self::in_space(carried.space, channels, self.alpha))
     }
 
     /// The colour as a **legacy srgb** colour, which is what `color.to-space($c, rgb)` asks for. The form is

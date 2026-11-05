@@ -35,7 +35,7 @@ fn radians(args: &[Value]) -> Result<f64, SassError> {
     }
     let angle = unit
         .single()
-        .filter(|name| crate::unit::measure(name).0 == "angle")
+        .filter(|name| crate::unit::is_angle(name))
         .map(|name| (value * crate::unit::measure(name).1).to_radians());
     angle.ok_or_else(|| {
         SassError::typed(

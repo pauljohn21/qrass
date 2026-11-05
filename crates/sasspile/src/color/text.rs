@@ -11,7 +11,7 @@
 //!   (`rgb(#123, 0.5)` → `rgba(17, 34, 51, 0.5)`), and no eight-digit hex is printed;
 //! * percentages are written with Sass's number form (`67.8431372549%` from `173`).
 
-use super::{Channel, Color, Representation};
+use super::{Channel, Color, Representation, Space};
 
 /// Every CSS colour keyword, **as spellings only**.
 ///
@@ -201,9 +201,7 @@ impl Color {
         // channel.
         let byte = |value: u32| format!("{value:02x}");
         match self.representation {
-            Representation::InSpace(carried) => {
-                super::space::print(carried.space, carried.channels, self.alpha)
-            }
+            Representation::InSpace(carried) => print(carried.space, carried.channels, self.alpha),
             // **A colour with an unwritten channel prints the space-separated form**, because the legacy comma
             // form has no spelling for `none`: `color.to-space(rgb(none 20 30), rgb)` answers
             // `rgb(none 20 30)` (`to_space/rgb/rgb.hrx::missing/red`), and the same name-and-separator spelling
@@ -426,5 +424,54 @@ impl Color {
             "{name}({channels}, {})",
             crate::value::format_number(self.alpha)
         )
+    }
+}
+
+/// One channel as printed: `none` for a powerless one, otherwise the number the corpus's printer yields.
+fn channel(value: Option<f64>, suffix: &str) -> String {
+    value.map_or_else(
+        || "none".to_string(),
+        |number| format!("{}{suffix}", crate::value::format_number(number)),
+    )
+}
+
+/// The CSS text of a colour carried in its own space, in the forms the corpus pins:
+/// `color(display-p3 0.25 0.4 0.77)`, `lab(44.1210142293% 10.9543336098 -59.0857381981)`,
+/// `lch(44.1210142293% 60.0926108873 280.5032243387deg)` and an alpha after a `/`
+/// (`to_space/srgb/*.hrx::middle` and `::alpha/partial`).
+///
+/// Living here rather than beside the conversion tables is the same seam the rest of this file draws: a space
+/// decides what a colour **is**, this one decides what it **reads as**.
+pub(super) fn print(space: Space, channels: [Option<f64>; 3], alpha: f64) -> String {
+    // The suffixes are **read from the channel tables**, not re-listed per space: which index is the lightness
+    // (printed as a percentage) and which is the hue (printed as an angle) is stated once in
+    // [`super::channels::suffix`], so a space with no hue channel cannot grow a `deg` here by accident.
+    let suffixes: [&str; 3] = [0, 1, 2].map(|index| super::channels::suffix(space, index));
+    let body = [0, 1, 2]
+        .iter()
+        .map(|index| {
+            // A percentage channel is written back on the space's own scale — `L = 1` of `oklab` is `100%`,
+            // `L = 44.1210142293` of `lab` is `44.1210142293%` — through the same [`Space::percent_full`] the
+            // reading divides by, so the two directions of one law cannot drift apart again.
+            let scaled = channels[*index].map(|value| {
+                if suffixes[*index] == "%" {
+                    value * space.percent_full()
+                } else {
+                    value
+                }
+            });
+            channel(scaled, suffixes[*index])
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+    let alpha_part = if alpha < 1.0 {
+        format!(" / {}", crate::value::format_number(alpha))
+    } else {
+        String::new()
+    };
+    if space.is_functional() {
+        format!("color({} {body}{alpha_part})", space.css())
+    } else {
+        format!("{}({body}{alpha_part})", space.css())
     }
 }

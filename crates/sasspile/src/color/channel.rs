@@ -25,9 +25,19 @@ pub(crate) fn is_missing_word(value: &Value) -> bool {
 /// absent is one fact and two spellings of it have already drifted apart once in this repository.
 ///
 /// What the *answer* prints is a different question, decided by the index-aligned rule at the bottom of
-/// [`Color::converted`](super::Color::converted) and by [`super::space::print`]; nothing here guesses it.
+/// [`Color::converted`](super::Color::converted) and by [`super::text::print`]; nothing here guesses it.
 pub(super) fn missing_as_zero(value: Option<f64>) -> f64 {
     value.unwrap_or(0.0)
+}
+
+/// How a written number's **negative zero** comes back: as `0`. The corpus folds it —
+/// `color.change(lab(50% 0 0), $a: -0)` answers `lab(50% 0 0)` (`change/unusual_numbers::negative_zero`) and
+/// `rgb(-0, 0, 0, 0.5)` answers `rgba(0, 0, 0, 0.5)` (`rgb/four_args/clamped.hrx::red/negative_zero`) — while
+/// `f64` would keep the sign
+/// through every arithmetic step and print `-0`. The one statement of it; both the byte-scale clamp below and
+/// [`Color::with_space_channel`](super::space::Color::with_space_channel) read this.
+pub(super) fn without_negative_zero(value: f64) -> f64 {
+    value + 0.0
 }
 
 /// One channel: the value as written, and whether it was written as a percentage. `None` is a `none` — a
@@ -75,7 +85,8 @@ impl Channel {
     }
 
     /// Clamped into its own scale: percentages to `0–100`, plain numbers to `0–255`. A negative zero
-    /// becomes zero, which is what `four_args/clamped::red/minus_zero` shows (`rgb(-0, …)` → `0`).
+    /// becomes zero, which is what `rgb/four_args/clamped.hrx::red/negative_zero` shows (`rgb(-0, 0, 0, 0.5)`
+    /// → `rgba(0, 0, 0, 0.5)`).
     ///
     /// A **clamped percentage loses its percentage spelling** and comes back as the byte it clamped to —
     /// `rgb(100.1% 0 0)` → `rgb(255, 0, 0)` and `rgb(0 -0.1% 0)` → `rgb(0, 0, 0)`, while `rgb(0% 100% 50%)`
@@ -91,11 +102,11 @@ impl Channel {
             return self;
         };
         let ceiling = if self.percent { 100.0 } else { 255.0 };
-        let bound = if value.is_nan() || value < 0.0 {
+        let bound = without_negative_zero(if value.is_nan() || value < 0.0 {
             0.0
         } else {
             value.min(ceiling)
-        } + 0.0;
+        });
         match (self.percent, bound == value) {
             (true, false) => Channel {
                 value: Some(bound * 255.0 / 100.0),

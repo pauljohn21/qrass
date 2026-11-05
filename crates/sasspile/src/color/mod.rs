@@ -46,6 +46,11 @@ use crate::value::Value;
 /// printing dispatch pushed this file past the line budget. The seam is the one the code already had: a
 /// channel says how one number behaves, this file says what a colour is.
 mod channel;
+/// Each colour space's own channel names and its per-channel percentage base, as tables with a fixture behind
+/// every row. Split out of [`space`] for the same reason [`primaries`] was, and the line budget is only half of
+/// it: a `change` call names channels by the space's own vocabulary (`$red` / `$x` / `$chroma`), and the
+/// archive gives the channels of one space **different** bases.
+mod channels;
 mod matrix;
 mod ops;
 /// The primaries tables, split out of [`space`] when those tables and their provenance pushed that file past
@@ -100,7 +105,7 @@ pub fn angle_of(value: &Value) -> Option<f64> {
     let factor = match value {
         Value::Number(_, unit) => unit
             .single()
-            .filter(|name| crate::unit::measure(name).0 == "angle")
+            .filter(|name| crate::unit::is_angle(name))
             .map_or(1.0, |name| crate::unit::measure(name).1),
         _ => 1.0,
     };

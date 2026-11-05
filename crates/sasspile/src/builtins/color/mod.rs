@@ -17,6 +17,9 @@ mod amount;
 mod constructors;
 mod modify;
 mod transfer;
+/// The write side of the same three families: which space a call writes, and the arithmetic each
+/// representation gets. Split out when [`modify`] passed the line budget.
+pub(super) mod write;
 
 use constructors::{COLOR_HWB, COLOR_SPACE, HSL, HSLA, HWB, LAB, LCH, OKLAB, OKLCH, RGB, RGBA};
 use modify::{COLOR_ADJUST, COLOR_CHANGE, COLOR_SCALE, SCALE_COLOR};
