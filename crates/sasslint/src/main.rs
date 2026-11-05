@@ -1,11 +1,10 @@
-//! `sasslint` CLI: scan a directory (default `crates/sasspile/src`) for iron-rule
-//! violations; report each via `tracing`; exit non-zero if any are found (a CI gate).
+//! `sasslint` CLI：扫一个目录（默认 `crates/sasspile/src`）找铁律违规；逐条用 `tracing` 报告；只要
+//! 找到就非零退出（一道 CI 闸）。
 //!
-//! The documented invocation is `sasslint lint <dir>` (`rust.md`), and the first version of this shell
-//! read `argv[1]` as the **path** — so `sasslint lint crates/sasspile/src` searched for a directory named
-//! `lint`, found nothing, and reported `count=0` forever: a gate that always passes is worse than no
-//! gate, because it looks like a clean bill of health while the `gate_sasspile_is_clean` test on the same
-//! code was red. The verb is therefore consumed, and a positional path is still accepted.
+//! 文档里的调用形式是 `sasslint lint <dir>`（`rust.md`），而这层壳的第一版把 `argv[1]` 读成**路径**——
+//! 于是 `sasslint lint crates/sasspile/src` 去找一个叫 `lint` 的目录，什么也没找到，就永远报 `count=0`：
+//! 一道永远通过的闸比没有闸更糟，因为它看着像一张健康证明，而同一份代码上的
+//! `gate_sasspile_is_clean` 测试是红的。所以这个动词要被消耗掉，同时位置参数里的路径仍然接受。
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -41,15 +40,15 @@ fn main() {
     }
 }
 
-/// The filter the environment asks for, `info` by default so the gate's output does not change shape.
+/// 环境所要求的过滤器，默认 `info`，好让闸的输出形状不变。
 fn filter() -> tracing_subscriber::filter::EnvFilter {
     tracing_subscriber::filter::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::filter::EnvFilter::new("info"))
 }
 
-/// Install the subscriber. Under `--features trace` the `sasslint` span (which carries the scanned path)
-/// is also bridged to OpenTelemetry and printed by `opentelemetry-stdout`, so "how long did the gate take
-/// and over what" is readable without timing the process from outside.
+/// 装上 subscriber。开了 `--features trace` 时，`sasslint` 这个 span（它带着被扫的路径）也会桥到
+/// OpenTelemetry 并由 `opentelemetry-stdout` 打印，于是“这道闸花了多久、扫的是什么”不必从进程外掐表
+/// 也能读到。
 #[cfg(feature = "trace")]
 fn trace_setup() {
     use opentelemetry::trace::TracerProvider as _;
@@ -61,8 +60,7 @@ fn trace_setup() {
         .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
         .build();
     let tracer = provider.tracer("sasslint");
-    // The tracer holds the pipeline through an `Arc`; dropping the provider would close the exporter
-    // before the span is written.
+    // tracer 通过一个 `Arc` 持有这条管线；把 provider drop 掉会在 span 写出之前就关掉 exporter。
     std::mem::forget(provider);
     let _ = tracing_subscriber::registry()
         .with(tracing_opentelemetry::layer().with_tracer(tracer))

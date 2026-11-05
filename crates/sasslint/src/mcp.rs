@@ -1,6 +1,5 @@
-//! `sasslint-mcp`: a Model Context Protocol server over stdio (newline-delimited
-//! JSON-RPC 2.0) exposing the `review` tool. stdout carries ONLY protocol messages;
-//! no logging is written there (so framing stays clean).
+//! `sasslint-mcp`：一个跑在 stdio 上的 Model Context Protocol 服务器（换行分隔的 JSON-RPC 2.0），
+//! 对外提供 `review` 工具。stdout **只**承载协议消息；日志一律不往那里写（这样分帧才能保持干净）。
 
 use std::io::{self, BufRead, Write};
 
