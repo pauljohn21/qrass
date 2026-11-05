@@ -1,37 +1,31 @@
-//! The **primaries tables** — each RGB-like space's linear-light channels to XYZ, as the archive computes
-//! them. Split out of [`super::space`] because that file had grown past this repository's 500-line limit on
-//! the strength of these tables plus the provenance each one now carries: a number that was fitted rather than
-//! copied needs saying next to the number, and the place for that saying is here, not in the value type.
+//! **primaries 表** —— 每个 RGB 样的空间从其线性光通道到 XYZ 的矩阵，按归档算出的样子。从
+//! [`super::space`] 里拆出来，是因为那个文件正是靠这些表加上每表现在携带的出处，已经长过了本仓库 500 行的
+//! 上限：一个数若是拟合来的而不是照录来的，这句话就得写在那个数字旁边，而说这话的地方是这里，不是值类型里。
 //!
-//! Two rules govern what is written down:
-//! * **One provenance per table.** A fitted table names the command that produced it, and the readings behind
-//!   the decision live in `openspec/…/tasks.md` for that batch — because the same numbers copied into a second
-//!   file is how this repository keeps acquiring a second answer (and one such copy was already an order of
-//!   magnitude off; `tasks.md` 9.17).
-//! * **A fit may replace a transcribed digit only where the fit can tell them apart** — see
-//!   `tasks.md` 9.16 for the rule and `examples/calibrate_space.rs` for the instrument that prints, per entry,
-//!   how far its two independent directions disagree. That spread is the noise floor of a single digit here;
-//!   below it, the published digits stay.
+//! 写不写、写什么，由两条规则管：
+//! * **一张表一个出处。**一张拟合出的表要点名产出它的那条命令，而决策背后的读数住在
+//!   `openspec/…/tasks.md` 的那一批里 —— 因为把同一批数字再写进第二个文件，就是本仓库不断得到一个第二份答案的
+//!   方式（而其中一份已经差了一个量级；`tasks.md` 9.17）。
+//! * **拟合只能在两个方向能分开的地方顶掉一个抄来的数字** —— 规则见 `tasks.md` 9.16，量具见
+//!   `examples/calibrate_space.rs`，它逐项印出两个独立方向差多远。那个散布就是这里一个数字的噪声底；在它
+//!   之下，发表的数字留着。
 
 use super::Space;
 
-/// The primaries matrix, linear-light of this space to XYZ **at the white the table itself lands on**.
-/// `None` for the spaces whose channels already are (or are derived from) XYZ — those answer with their own
-/// math in [`super::matrix`], and [`Space::primaries`] is the arm that says which question is well-posed.
+/// primaries 矩阵，从这个空间的线性光到 XYZ，**在表自己落在的那个白点上**。对通道本身已经是 XYZ、或由 XYZ
+/// 导出的那些空间，这里是 `None` —— 它们用 [`super::matrix`] 里自己的数学答；而 [`Space::primaries`] 是那个先说清
+/// 哪个问题才谈得上答案的那一臂。
 pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
     match space {
         Space::Srgb | Space::SrgbLinear => Some(&super::matrix::SRGB_PRIMARIES),
         Space::DisplayP3 | Space::DisplayP3Linear => Some(&[
-            // `display-p3`'s Z-output-row's last two entries are the archive's, read off
-            // `cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz`; the other seven
-            // entries are still the transcribed ones, and that split is a measurement rather than a taste.
-            // What the instrument prints is the fit and, per entry, how far its two independent directions
-            // disagree - the noise floor of one digit, `1.8e-11`…`2.6e-10` here. An entry may only be replaced
-            // where the transcription misses the fit by **more** than its own spread; the three deltas that
-            // decided this row (`5.1e-9`, `6.9e-9`, and `5.3e-11` for `[0][1]`, which stayed) are recorded in
-            // `tasks.md` 9.16, where the transcribed values were still in the tree to subtract - the
-            // instrument itself never prints that difference. Replacing the whole fitted matrix anyway
-            // measured worse; both readings are in the same entry.
+            // `display-p3` 的 Z 输出行后两项是归档的，读自
+            // `cargo run -q -p sasspile --example calibrate_space -- display_p3_linear xyz`；其余七项仍是抄来的，
+            // 而这个分界是一个测量而不是口味。量具印出的是拟合，以及逐项两个独立方向差多远 —— 一个数字的噪声底，
+            // 这里是 `1.8e-11`…`2.6e-10`。一项只有在抄本错过拟合**多于**它自己的散布时才能被顶掉；定了这一行的
+            // 三个差值（`5.0778e-9`、`6.8716e-9`，以及留在原地的 `[0][1]` 的 `5.3e-11`）逐字记在 `tasks.md` 9.16，那时抄来的
+            // 值还在树里可以相减 —— 量具本身从不印那个差。反正把整张拟合矩阵换上，测出来更差；两个读数都在同一个
+            // 条目里。
             [
                 0.486_570_948_648_212,
                 0.265_667_693_169_093,
@@ -45,17 +39,15 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
             [0.0, 0.045_113_381_937_499_92, 1.043_944_368_862_499_9],
         ]),
         Space::A98Rgb => Some(&[
-            // Fitted from `to_space/a98_rgb/xyz.hrx` under the curve hypothesis that survived the residual
-            // comparison (`linear = printed^(563/256)`); re-measure with
-            // `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz 2.19921875`, and read the
-            // candidates and residuals in `tasks.md` 9.17 — that curve was previously on the wrong side of the
-            // pair in `super::matrix`, which is the bigger half of what was wrong here.
+            // 在残差比较之下活下来的那条曲线假设下，从 `to_space/a98_rgb/xyz.hrx` 拟合而来
+            // （`linear = printed^(563/256)`）；重测用
+            // `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz 2.19921875`，候选值与残差读在
+            // `tasks.md` 9.17 —— 那条曲线此前在 `super::matrix` 里站在这一对的另一侧，而那才是这里错得更狠的那一半。
             //
-            // Only `[0][0]` is kept from the transcription: every other entry misses the fit by more than its
-            // own two-direction spread, and the Z output row is the worst of them. That is why the old table
-            // failed the archive's own white invariant — `to_space/a98_rgb/xyz.hrx::white` states
-            // `color(xyz 0.9504559271 1 1.0890577508)`, which this row now reproduces and previously answered
-            // `color(xyz 0.9521708788 1.0000000001 1.0506135487)` (run `display-p3-solved-final`).
+            // 只有 `[0][0]` 保留了抄本：其余每一项错过拟合都多于它自己两个方向的散布，而 Z 输出行是其中最差的。
+            // 这就是旧表过不了归档自己的白点不变量的原因 —— `to_space/a98_rgb/xyz.hrx::white` 说
+            // `color(xyz 0.9504559271 1 1.0890577508)`，这一行现在复现得出，而此前答的是
+            // `color(xyz 0.9521708788 1.0000000001 1.0506135487)`（run `display-p3-solved-final`）。
             [
                 0.576_669_042_910_13,
                 0.185_558_237_964_962_82,
@@ -73,20 +65,18 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
             ],
         ]),
         Space::ProphotoRgb => Some(&[
-            // Fitted from `to_space/prophoto_rgb/xyz.hrx` under `linear = printed^1.8`: re-measure with
-            // `cargo run -q -p sasspile --example calibrate_space -- prophoto_rgb xyz 1.8` and read the
-            // caveats in `tasks.md` 9.18. Scoped exactly, because the unscoped claim is false: **the rows this
-            // fit read** (prophoto-rgb as the *source*) never print a channel below `0.1`, so the decode segment
-            // (`|channel| < 1/16`) is exercised by none of them; prophoto as a *target* does print smaller
-            // (`to_space/oklch/prophoto_rgb.hrx::missing/x` has `0.0010727236`), and those are what constrain
-            // the encode segment (`1/512` in `super::matrix`).
+            // 在 `linear = printed^1.8` 下从 `to_space/prophoto_rgb/xyz.hrx` 拟合：重测用
+            // `cargo run -q -p sasspile --example calibrate_space -- prophoto_rgb xyz 1.8`，那些注意事项读在
+            // `tasks.md` 9.18。范围要说准，因为不限量地说它是假的：**这个拟合读到的那些行**（prophoto-rgb 作为
+            // *源*）从不打印低于 `0.1` 的通道，所以解码分段支（`|channel| < 1/16`）没有一行演练它；prophoto 作为
+            // *目标* 确实打印更小的值（`to_space/oklch/prophoto_rgb.hrx::missing/lightness` 里有 `0.0010727236`），而约束
+            // 编码分段支（`super::matrix` 里的 `1/512`）的正是那些行。
             //
-            // All nine entries missed the transcription by more than their own spreads, so the table is the
-            // archive's whole. The largest entry delta is `[0][0]` at `4.2e-2`; composed onto the archive's own
-            // white row that shows as a `3.4e-2` miss, which printed
-            // `color(xyz 0.9845637886 0.9989843031 1.089497388)` for the row the archive states as
-            // `color(xyz 0.9504559271 1 1.0890577508)` (`to_space/prophoto_rgb/xyz.hrx::white`). It lands on
-            // the D65 white by itself, which is why `Space::white()` no longer adapts this space a second time.
+            // 九项全都比自己的散布更偏离抄本，所以这张表整张是归档的。最大的单项差是 `[0][0]` 的 `4.2e-2`；
+            // 合成到归档自己的白点行上就显成 `3.4e-2` 的偏离，那一行归档说的是
+            // `color(xyz 0.9504559271 1 1.0890577508)`，而它此前打印
+            // `color(xyz 0.9845637886 0.9989843031 1.089497388)`（`to_space/prophoto_rgb/xyz.hrx::white`）。这张表
+            // 自己就落在 D65 白上，这就是 `Space::white()` 不再对这个空间适应第二遍的原因。
             [
                 0.755_590_742_296_920_9,
                 0.112_719_842_707_560_62,
@@ -104,31 +94,25 @@ pub(super) fn table(space: Space) -> Option<&'static [[f64; 3]; 3]> {
             ],
         ]),
         Space::Rec2020 => Some(&[
-            // Row 1 is now the archive's, fitted from `to_space/rec2020/xyz.hrx` under the surviving curve
-            // hypothesis (`linear = printed^2.4`, no offset - see `super::matrix::REC2020_GAMMA` for the scan):
-            // `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz 2.4 1.0`. Its three entries
-            // missed the transcription by `3.76e-6`, `2.00e-7` and `4.03e-6` against spreads of `1.6e-11`,
-            // `4.5e-11` and `8.0e-11`, so they were replaced. Row 0 was kept whole - `3.3e-16`, `4.6e-11` and
-            // `2.1e-12` against spreads of `4.4e-11`, `2.7e-10` and `5.7e-11`; no entry of that row is separated
-            // from the published digits by this instrument, so the published digits stay.
+            // 第 1 行现在的是归档的，在活下来的曲线假设下从 `to_space/rec2020/xyz.hrx` 拟合
+            // （`linear = printed^2.4`，无偏移 —— 扫描见 `super::matrix::REC2020_GAMMA`）：
+            // `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz 2.4 1.0`。它的三项比抄本错过
+            // `3.76e-6`、`2.00e-7` 与 `4.03e-6`，而各自的散布是 `1.6e-11`、`4.5e-11` 与 `8.0e-11`，所以换掉了。
+            // 第 0 行整行留着 —— `3.3e-16`、`4.6e-11` 与 `2.1e-12` 对着 `4.4e-11`、`2.7e-10` 与 `5.7e-11` 的
+            // 散布；这台量具没法把该行任何一项从发表的数字里分辨出来，所以发表的数字留着。
             //
-            // Row 2 was replaced too, and that is a refinement of the `tasks.md` 9.16 rule worth stating: per
-            // entry, `[2][1]` and `[2][2]` miss the transcription by `4.7e-11` and `6.4e-11`, each inside its own
-            // spread (`1.6e-10`, `1.2e-10`), so the per-entry test said keep. But those two entries are the whole
-            // of a row the archive pins curve-free - `to_space/rec2020/xyz.hrx::white` states Z = `1.0890577508`,
-            // the transcription sums to `1.0890577507` (still red in run `rec2020-no-offset`), while the two
-            // fitted channels printed by the instrument (`0.028072693096295932`, `1.060985057703704`) sum to
-            // `1.0890577508000001`. A joint constraint the archive states outright outranks a per-entry tie: if
-            // the transcription fails a fact the corpus prints and the fit satisfies it, the fit has standing. The
-            // reading agrees - both variants were `regress=0`, the fitted row 2 wins more rows; see `tasks.md` 9.20.
-            // `[2][0]` is the one entry of this row that stayed: the fit prints `-0.0` for it, the difference from
-            // the transcribed `0.0` is `0`, and a signed zero is not a digit the archive could disagree with.
+            // 第 2 行也换掉了，而这是 `tasks.md` 9.16 那条规则一个值得写下的精化：逐项看，`[2][1]` 与 `[2][2]`
+            // 比抄本错过 `4.7e-11` 与 `6.4e-11`，都在自己的散布（`1.6e-10`、`1.2e-10`）之内，所以逐项那条判的是留。
+            // 但这两项正是一行被归档*无需曲线假设*就钉住的全体 —— `to_space/rec2020/xyz.hrx::white` 说 Z =
+            // `1.0890577508`，抄本的和是 `1.0890577507`（在 run `rec2020-no-offset` 里仍红），而量具印出的两个拟合
+            // 通道（`0.028072693096295932`、`1.060985057703704`）之和是 `1.0890577508000001`。归档直说的一个联合
+            // 约束高于一个逐项的平局：若抄本对不上语料打印出来的一个事实、而拟合满足它，拟合就有资格顶掉它。读数一致 —— 两个
+            // 变体都是 `regress=0`，拟合的第 2 行赢下更多行；见 `tasks.md` 9.20。`[2][0]` 是这一行唯一留下的项：
+            // 拟合为它印 `-0.0`，与抄的 `0.0` 之差是 `0`，而一个带符号的零不是归档会有异议的一个数字。
             //
-            // Row 1 is what the curve-free white invariant first indicted: the transcribed row 1 summed to
-            // `0.9999999304` where `to_space/rec2020/xyz.hrx::white` states `1` - and a `7e-8` miss in a row
-            // the archive prints at ten decimals cannot be a rounding story. Two independent readings of the
-            // same archive pointed at rows of this table - which is why it was worth checking the curve
-            // hypothesis before touching any digit.
+            // 第 1 行正是那条无曲线的白点不变量最先指认的：抄的第 1 行和是 `0.9999999304`，而
+            // `to_space/rec2020/xyz.hrx::white` 说 `1` —— 一行被归档打十位小数的地方差 `7e-8` 不可能是舍入的故事。
+            // 两次独立的对同一归档的读数都指向这张表的行 —— 这就是为什么动任何数字之前先查曲线假设是值得的。
             [
                 0.636_958_048_301_291,
                 0.144_616_903_586_043,

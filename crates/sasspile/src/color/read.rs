@@ -1,20 +1,19 @@
-//! Reading **one channel** out of a colour — the accessors and `color.channel`. Split out of [`super`]
-//! because it is the half where the space matters: the same colour answers `171` in `rgb`,
-//! `0.7529411765` in `srgb` and `349.5238095238deg` in `hsl`/`hwb`, and which of those a call may ask for is
-//! its own law (`channel/*.hrx`), separate from how a colour is built or printed.
+//! 从一个颜色里读**一个通道** —— 访问器与 `color.channel`。从 [`super`] 里拆出来，是因为空间要紧的正是这一半：
+//! 同一个“读某通道”的问题在不同空间里有三种答法 —— `#abcdef` 的 red 在 `rgb` 里是 `171`、`pink` 的 green 在
+//! `srgb` 里是 `0.7529411765`、`pink` 的 hue 在 `hsl`/`hwb` 里是 `349.5238095238deg`，而一次调用可以问哪一个
+//! 又是它自己的一条律（`channel/*.hrx`），与一个颜色怎么被造出来或打印分开。
 
 use super::{Channel, Color, Representation};
 use crate::value::Value;
 
 impl Color {
-    /// One `0–255` channel, for the accessors. A colour held in **another space** returns `None` rather
-    /// than a wrong number.
+    /// 一个 `0–255` 的通道，给访问器用。存在**另一个空间**里的颜色返回 `None`，而不是一个错数。
     ///
-    /// Nothing in the corpus contradicts that caution, and the measurement says it is not a gap I should
-    /// fill by inference: `grep`ing every `.hrx` under `spec/` for `color.(red|green|blue)(…hsl(…))` finds
-    /// **no row at all** — the hsl-space fixtures read the hsl axes (`channel/hsl.hrx`), which
-    /// [`Self::hsl_channel`] serves. `hsl` → `rgb` therefore has no golden to be written against, while
-    /// the reverse direction does and is implemented.
+    /// 语料里没有一行与这份小心相矛盾，而测量也说这不是一个该靠推理填的缺口：
+    /// `grep -rlE 'color\.(red|green|blue)\([^)]*hsl\(' sass-spec/spec/` 找到的是**零个文件**（对照
+    /// `grep -rl 'color\.red(' sass-spec/spec/` 命中 6 个）—— hsl 空间的 fixture 读的是 hsl 轴
+    /// （`channel/hsl.hrx`），那由 [`Self::hsl_channel`] 服务。所以 `hsl` → `rgb` 没有可照着写的金样，而反方向有，
+    /// 也已实现。
     pub fn byte(&self, index: usize) -> Option<f64> {
         match self.representation {
             Representation::Legacy
@@ -25,37 +24,34 @@ impl Color {
                 .get(index)
                 .map(|channel: &Channel| channel.byte().round()),
             Representation::Hsl | Representation::Hwb => None,
-            // A colour in its own space has no srgb bytes until something converts it, so a bare
-            // `color.red(color(srgb …))` declines to its text rather than answering off the triple that the
-            // space colour leaves empty. The read that should serve it is
-            // `color.channel(…, "red", $space: srgb)`, which needs the conversion route wired into the
-            // accessor — not guessed here.
+            // 一个在自己空间里的颜色，在有谁把它换算之前没有 srgb 字节，所以一个裸的
+            // `color.red(color(srgb …))` 退回自己的文本，而不是拿那个空间颜色留空的三元组作答。该服它的读法是
+            // `color.channel(…, "red", $space: srgb)`，而那需要把换算路线接进访问器 —— 不在这里猜。
             Representation::InSpace(..) => None,
         }
     }
 
-    /// The colour's own alpha: `color.alpha(rgba(red, 0.42))` → `0.42` (`alpha.hrx::color/middle`).
+    /// 颜色自己的 alpha：`color.alpha(rgba(red, 0.42))` → `0.42`（`alpha.hrx::color/middle`）。
     pub fn alpha(&self) -> f64 {
         self.alpha
     }
 
-    /// One channel, named the way `color.channel` names it, read in a space.
+    /// 一个通道，按 `color.channel` 点它的方式命名，在某个空间里读。
     ///
-    /// `space` is the call's `$space:` as written (`hsl`, `rgb`, `srgb`); `None` means **the colour's own
-    /// space**, which is all the corpus pins without a label: `color.channel(#abcdef, "red")` → `171` and
-    /// `color.channel(hsl(10 40% 60%), "hue")` → `10deg` (`channel/rgb.hrx::local/*`,
-    /// `channel/hsl.hrx::local/*`). A cross-space read is answered only when the label says so
-    /// (`channel/hsl.hrx::foreign/hue` is `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`);
-    /// converting on the colour's behalf without one would invent a rule no fixture states.
+    /// `space` 是调用写下的 `$space:`（`hsl`、`rgb`、`srgb`）；`None` 意思是**颜色自己的空间**，而没有标签时语料
+    /// 只钉住这个：`color.channel(#abcdef, "red")` → `171`，`color.channel(hsl(10 40% 60%), "hue")` → `10deg`
+    /// （`channel/rgb.hrx::local/*`、`channel/hsl.hrx::local/*`）。跳空间的读只有在标签说了话时才答
+    /// （`channel/hsl.hrx::foreign/hue` 是 `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`）；
+    /// 不待标签就代表颜色换算一次，会发明一条没有 fixture 说过的规则。
     ///
-    /// Units come from the corpus too: an `rgb`/`srgb` channel is a bare number (`171`, and
-    /// `color.channel(pink, "green", $space: srgb)` → `0.7529411765` — the byte over 255), the hue carries
-    /// `deg`, saturation and lightness carry `%`.
+    /// 单位也来自语料：一个 `rgb`/`srgb` 通道是一个裸数字（`171`，以及
+    /// `color.channel(pink, "green", $space: srgb)` → `0.7529411765` —— 就是字节除 255），色相带 `deg`，
+    /// 饱和度与亮度带 `%`。
     pub fn channel(&self, name: &str, space: Option<&str>) -> Option<Value> {
         let number = |value: f64| Value::Number(value, crate::unit::Unit::unitless());
         let percent = |value: f64| Value::Number(value, crate::unit::Unit::named("%"));
-        // Which representations hold `0–255` bytes is judged once, by [`Color::writes_bytes`]; restating the
-        // variant list here is how a later variant would answer bytes it does not store.
+        // 哪些表示拿着 `0–255` 字节，由 [`Color::writes_bytes`] 判一次；在这里重列一次变体清单，就是会让以后新加
+        // 的变体去答它并不持有的字节。
         let rgb_space = self.writes_bytes();
         match name {
             "red" | "green" | "blue" => {
@@ -71,8 +67,8 @@ impl Color {
                     _ => None,
                 }
             }
-            // The hue is the same number in `hsl` and in `hwb` (`channel/hwb.hrx::foreign/hue` reads
-            // `349.5238095238deg` off `pink`), and [`Self::axes_of`] derives it for every space stored.
+            // 色相在 `hsl` 与 `hwb` 里是同一个数（`channel/hwb.hrx::foreign/hue` 从 `pink` 读出
+            // `349.5238095238deg`），而 [`Self::axes_of`] 为每个被存下的空间都能推出它。
             "hue" => match space {
                 Some("hsl") | Some("hwb") => Some(Value::Number(
                     self.hsl_channel(0)?,
@@ -99,17 +95,16 @@ impl Color {
                     false => None,
                 }
             }
-            // Whiteness and blackness exist only in `hwb`: a `hwb`-created colour stores them, and an
-            // `rgb`-family colour answers the label through [`crate::axes::rgb_to_hwb`]
-            // (`color.channel(pink, "whiteness", $space: hwb)` → `75.2941176471%`, `…"blackness"…` → `0%`,
-            // `channel/hwb.hrx::foreign/*`).
+            // whiteness 与 blackness 只存在于 `hwb`：一个由 `hwb` 造出的颜色存着它们，而一个 `rgb` 族的颜色通过
+            // [`crate::axes::rgb_to_hwb`] 对这个标签作答（`color.channel(pink, "whiteness", $space: hwb)` →
+            // `75.2941176471%`，`…"blackness"…` → `0%`，`channel/hwb.hrx::foreign/*`）。
             "whiteness" | "blackness" => {
                 let index = usize::from(name == "blackness");
                 let own = self.representation == Representation::Hwb;
                 let read = if own {
-                    // A `hwb` colour cannot hold an unwritten channel yet (its constructor still declines a
-                    // `none`), so this read has no `None` to talk past; the helper is here so that the day it
-                    // can, the arithmetic answer is the one law in `missing_as_zero`.
+                    // 一个 `hwb` 颜色还拿不住一个未写的通道（它的构造子仍对 `none` decline），所以这一次读没有
+                    // `None` 可以越过；这个助手在这里，是为了让它真的能拿住的那天，算术的那个答案就是
+                    // `missing_as_zero` 里那一条律。
                     super::missing_as_zero(self.channels[index + 1].value)
                 } else if rgb_space {
                     let [red, green, blue] = self.channels.map(|channel| channel.byte());
@@ -119,16 +114,15 @@ impl Color {
                 };
                 (own && space.is_none() || space == Some("hwb")).then(|| percent(read))
             }
-            // Every other space (`lab`, `lch`, `oklab`, `oklch`, the device spaces) needs a conversion this
-            // compiler has not implemented.
+            // 其余每个空间（`lab`、`lch`、`oklab`、`oklch`，以及那些设备空间）需要一个本编译器还没实现的换算。
             _ => None,
         }
     }
 
-    /// The colour's `[hue, whiteness, blackness]`, in the form [`Color::with_hwb`] takes back:
-    /// stored for a `hwb` colour, derived from the bytes otherwise (`color.channel(pink, "whiteness",
-    /// $space: hwb)` → `75.2941176471%` reads the same derivation, `channel/hwb.hrx::foreign/*`).
-    /// `None` for an `hsl`-created colour, whose whiteness and blackness no fixture ever asks for.
+    /// 颜色的 `[hue, whiteness, blackness]`，按 [`Color::with_hwb`] 收回来的那种形式：`hwb` 颜色是存着的，
+    /// 其余情况由字节推出（`color.channel(pink, "whiteness", $space: hwb)` → `75.2941176471%` 读的就是同一个推导，
+    /// `channel/hwb.hrx::foreign/*`）。对一个由 `hsl` 造出的颜色是 `None`，它的 whiteness 与 blackness 没有
+    /// 一行会问。
     pub fn hwb_of(&self) -> Option<[f64; 3]> {
         let hue = self.hue()?;
         match self.representation {
@@ -146,36 +140,36 @@ impl Color {
         }
     }
 
-    /// The hue in degrees: `359deg` from `hsl(359, 50%, 50%)`, `180deg` from `hsl(540, …)` because the hue
-    /// was folded into `0–360` at creation (`color/hue.hrx`), and `210deg` from `#abcdef` — read off the
-    /// `rgb` channels through [`Self::axes_of`] (`modules/color/hue.hrx`).
+    /// 以度计的色相：`hsl(359, 50%, 50%)` 给 `359deg`，`hsl(540, …)` 给 `180deg`，因为色相在创建时就被折进了
+    /// `0–360`（`color/hue.hrx`），而 `#abcdef` 给 `210deg` —— 从 `rgb` 通道经 [`Self::axes_of`] 读出
+    /// （`modules/color/hue.hrx`）。
     pub fn hue(&self) -> Option<f64> {
         self.hsl_channel(0)
     }
 
-    /// The saturation, for `color.saturation`: `100%`, `0%`, `50%`, `0.5%`, `42%` (`color/saturation.hrx`)
-    /// and `68%` for `#abcdef` (`modules/color/saturation.hrx`).
+    /// 饱和度，给 `color.saturation`：`100%`、`0%`、`50%`、`0.5%`、`42%`（`color/saturation.hrx`），以及 `#abcdef`
+    /// 的 `68%`（`modules/color/saturation.hrx`）。
     pub fn saturation(&self) -> Option<f64> {
         self.hsl_channel(1)
     }
 
-    /// The lightness, for `color.lightness`: the same five readings in the L axis (`color/lightness.hrx`)
-    /// and `80.3921568627%` for `#abcdef` (`modules/color/lightness.hrx`).
+    /// 亮度，给 `color.lightness`：同样的五个读数在 L 轴上（`color/lightness.hrx`），以及 `#abcdef` 的
+    /// `80.3921568627%`（`modules/color/lightness.hrx`）。
     pub fn lightness(&self) -> Option<f64> {
         self.hsl_channel(2)
     }
 
-    /// One axis of the colour, wherever it is stored: the channels themselves for an `hsl` colour, the
-    /// [`crate::axes`] round trip for a colour held in another legacy space.
+    /// 颜色的一个轴，不论它存在哪里：一个 `hsl` 颜色就是通道本身，存在另一个 legacy 空间里的颜色走
+    /// [`crate::axes`] 的往返。
     ///
-    /// `None` for a colour in its own colour space — the corpus wants an error there, not a number
-    /// (`hue.hrx::error/non_legacy`, `saturation.hrx::error/non_legacy`, `lightness.hrx::error/non_legacy`),
-    /// and the refusal is stated once by [`Color::axes_of`] rather than by this accessor remembering to ask.
+    /// 对一个在自己色彩空间里的颜色是 `None` —— 语料在那里要的是一个错误，不是一个数字
+    /// （`hue.hrx::error/non_legacy`、`saturation.hrx::error/non_legacy`、`lightness.hrx::error/non_legacy`），
+    /// 而这一拒答由 [`Color::axes_of`] 说一次，不靠这个访问器记得去问。
     ///
-    /// For the legacy families the converted reading is what the corpus asks for, row by row:
-    /// `color.lightness(#abcdef)` → `80.3921568627%` is `(239 + 171)/2` of 255 and
-    /// `color.saturation(#abcdef)` → `68%` is `68/(510-410)`, both from `modules/color/*.hrx`. Those rows are
-    /// why a round trip is safe here; an `hsl` colour's own axes are already stored, so none is taken for it.
+    /// 对 legacy 那几族，换算而来的读法正是语料逐行要的：`color.lightness(#abcdef)` → `80.3921568627%` 是 255
+    /// 的 `(239 + 171)/2`，而 `color.saturation(#abcdef)` → `68%` 是 `68/(510-410)`，两边都出自
+    /// `modules/color/*.hrx`。就是这些行让一次往返在这里是安全的；一个 `hsl` 颜色自己的轴已经存着，所以不为它
+    /// 走往返。
     pub(super) fn hsl_channel(&self, index: usize) -> Option<f64> {
         self.axes_of().and_then(|axes| axes.get(index).copied())
     }
