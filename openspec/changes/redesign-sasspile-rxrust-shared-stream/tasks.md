@@ -2547,3 +2547,38 @@
         空库复算同读数（`3457/3292/165/1264`）；`fmt=0`、`count=0`、workspace 无 FAILED 无 warning；
         最长文件 499（`ledger/src/lib.rs`）。基线 run 自此为 `change-in-carried-space-v6`。
 
+- [x] 9.29 **注释中文化第一批：`crates/sasslint/src` 三个文件全改（2026-11-05）**。
+      9.28 末条遗留项落地：上一会话的回退在新会话重做，按 crate 逐批，第一批是 sasslint
+      （lib.rs 385 + main.rs 76 + mcp.rs 22 行，共 109 行注释）。**只改注释**：`git diff -U0` 里
+      非注释行 = **0**（机器验证 `NON_COMMENT_DIFF_LINES=0`）；规则 id、`SUBSTRING_BANS`/`AND_BANS`/
+      `HIGHER_ORDER` 的签名条目、`review_report` 与 MCP `description` 的字符串、tracing 的消息文本
+      一律保持英文——它们是输出凭据，译了就 grep 不回归档原文，也会把闸的输出形状改掉。
+      读数：`ledger diff change-in-carried-space-v6 zh-comments-sasslint-v2` = **`regress=0 net=0`**，
+      `ledger changed` = **`changed=0`**；现测 hrx `3457/11533`、`pass_substantive=3292`、
+      `pass_empty_expectation=165`、`skipped=1264`；无效错误 **19**；`sasslint lint crates/sasspile/src`
+      `count=0`（EXIT=0）、`cargo fmt --all -- --check` EXIT=0、`cargo test --workspace --no-fail-fast`
+      EXIT=0（62 条 `test result: ok`，无 FAILED 无 warning）。自扫 `crates/sasslint/src` 仍 20 条
+      （工具自己的 CLI 兜底不在闸目标内；代码行零改动故与 HEAD 同，`the_gate_count_is_pinned` 绿）。
+      `gc-auditor` 逐条对照英文原文：五个高风险判据（AND_BANS 的两半同现才成立、single-table 的阈值与
+      “按定义而非文件名识别”、HIGHER_ORDER 的“丢掉/漏掉”两档、`merge_all` 排队内层丢失发射、
+      `is_table_evidence` 必须用原始内容的行号空间）判为保真；18 项反引号凭据 old=new、prime 符号
+      `P0′` 4→4、rustdoc 链接集合逐字相同、繁体字位命中 0（带阳性对照）。推翻 8 条，全收：
+      • 「四个以上」按规范汉语可读成 `> 4`，而代码是 `>= 4`（`table_units >= 4`）⇒ 两处改成
+        「四个及以上（`>= 4`）」；
+      • lexer 与 lexeme 塌成了同一个「词素」，丢掉可 grep 的模块指向 ⇒ 改「`lexer` 里的表」；
+      • 「一个相」不是本仓 phase 的既定写法（rust.md 用「阶段」）⇒「一个阶段」；
+      • `LINE_START_BANS` 原文括号里的 (non-comment, non-`//`) 连 `//` 字面量一起被我删了 ⇒ 补回；
+      • 粗体焦点从 **original** 漂到「始终」⇒ 改成「输入**始终是原始内容**」；
+      • 「单位表的一臂」漏了 line，而被计数者正是行 ⇒「单位表的一条臂行」；
+      • 原文的大写/粗体强调处置不一致（`DRIVES`/`before`/`ONLY` 无标记，同批其它粗体却保住了）⇒
+        统一落成 **驱动**/**先**/**只**；
+      • 「闸先报错了行号」首读为「报错了」⇒「先报了错的行号」。
+      本批自己写坏的三处（读回全文时发现，不是审计指出）：中文里残留 `spelled`、“这层壳”写成“这局壳”、
+      “所以返回”写成“所返”——9.28 说的错字率问题在本批仍然真实，所以后续批次不得省「读回全文逐句核」
+      这一步，只扫 diff 不够。基线 run 自此为 `zh-comments-sasslint-v2`（与 `change-in-carried-space-v6`
+      `regress=0 net=0`，只差注释语言）。
+      **未做（不得当作已交付）**：`crates/ledger/src` 仍全英文注释（209 行，下一批）；`crates/sasspile/src`
+      3708 行注释需按目录分簇逐批，每批一个 `regress=0 net=0` 的纯文本 commit。另有与本批无关、在开工前
+      就已存在于工作区的 `sass-spec` 子模块内部 `.hrx` 修改（会话首条 `git status` 即报 ` M sass-spec`），
+      它不得混进任何中文化 commit，需单独交代。
+
