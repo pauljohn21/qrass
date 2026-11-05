@@ -2406,7 +2406,7 @@
         `tests/color_legacy_missing.rs::change_can_write_absence_into_a_byte_channel`。
       • **拆文件**：加完 `written_byte` 与顺序注释后 `modify.rs` 到 503 行撞硬线。拆点是 `amount.rs` 自己已经
         写明的两件事：“参数能不能读”（诊断）与“参数的量怎么合上当前值”——`scale_toward`/`step`/`keep` 入
-        `amount.rs`（现 475/257）；拆后对拆前 run `regress=0 net=0`（行为无变）。
+        `amount.rs`（现 475/390 行，本批又长了）；拆后对拆前 run `regress=0 net=0`（行为无变）。
       • **读数**：`ledger diff missing-channel-audit-closure change-writes-absence-v3` = **`regress=0 net=4`**
         （3210→3214，27.87%，实质 3049）；`ledger shift` = **`changed=0 closer=0 farther=0 tie=0
         error_expectation=0 shape_of_text=0`**（本会话第一次一个 CHANGED 也没有）；无效错误仍 19；
@@ -2460,4 +2460,90 @@
         `sasslint count=0`；workspace 无 FAILED；行数 `amount.rs` 257、`color/mod.rs` 481、`modify.rs` 475（均 ≤500）。
       • **它另外报的两条纯文字问题已改**：`amount.rs` 行数 242→257（现量）；9.23/9.24 那两句原句已就地标注
         订正指针，不留两处并存的说法。
+
+- [x] 9.27 **`color.change` 现在能写在带自己空间的色上（13 个 Color-4 空间；2026-11-04，基线 run
+      `change-writes-absence-v4`）**：接 9.25 的 (a) 条（那 39+6 行）。**本会话最大的一批增益**。
+      • **先说一个差点让判断错的根因**：一开始我只接了写入臂，`change/srgb` 等 7 个全绿而
+        `change/xyz` 一行没动——不是写错了，而是 **`$x/$y/$z/$a/$b/$chroma` 不在 `COLOR_CHANGE` 的形参表里**，
+        标签根本不进 `Given`（`Builtin.optional` 是唯一的入口）。已补声明并把“未声明就根本不绑”这句
+        写在签名旁边。教训：先验“名字能不能到这里”，再验“到了这里算得对不对”——两者混在一起时，
+        一个文件的增益会假装成另一个文件的律。
+      • **四条律全部逐字取自语料**（不推）：名字属于空间（`change/{xyz,lab,lch}.hrx` 不写 `red`）；
+        **`%` 底数是逐通道而非逐空间**（同一个 `lab` 里 `lightness 30%`→30 而 `a -40%`→-50；
+        `oklab a -40%`→-0.16；`lch chroma 40%`→60；`oklch chroma 40%`→0.16）——因此新表
+        `color/channels.rs::percent_divisor(space, channel)` 是 (空间, 通道) 的，
+        `Space::percent_full` 现在只是它的 `channel = 0` 行（不是第二份真源）；
+        hue 是角度且折叠（`400deg`→40、`-20deg`→340）；**负彩度折成 hue+180**
+        （`change/lch.hrx::chroma/negative` → `lch(50% 10 210deg)`，`oklch` 同形）。
+      • **两个“拒接”而非“算”的形状（都有金样原文）**：`change/error/units/{srgb,lab,…}.hrx` 要
+        `$red: Expected 0.5px to have unit "%" or no units.`（第一版把 `0.5px` 取了量值，27 行从回显变成
+        被语料称为错误的值）；`change/error/units/lch.hrx::hue` 要 `$hue: Expected 20% to have an angle unit
+        (deg, grad, rad, turn).`——这也把“hue 无百分比底数”的空位填成了拒绝而不是猜一个数。
+      • **第二例“FAIL 变另一种 FAIL”，由 `unexpected error` 闸拦住**：上面两条修完后计数仍从 19 升到 **22**，
+        多了 `change/unusual_numbers::{nan,infinity,negative_infinity}/linear` 三行——我对**非数值**（未求值的
+        `calc(nan)`）抛了类型消息，而语料这些行要的是颜色本身（等 `calc()` 求值）。现改为“不是数字就 decline”，
+        因为 `change/error/type.hrx` 五行全是 legacy 色，没有任何行说空间色遇到 `c` 该怎么答。计数回到 **19**。
+      • **第三例同类**：`change/unusual_numbers::negative_zero`（`$a: -0` 要 `lab(50% 0 0)`而我打 `-0`）——
+        “写入的 `-0` 读作 `0`”这条律原本只住在 `Channel::clamped` 里，现收成 `channel::without_negative_zero`
+        一处，两侧各读它一次（不在空间写入里再抄一份 `+ 0.0`）。
+      • **拆文件**：接完写入臂后 `builtins/color/modify.rs` 到 512 行。拆点是该文件自己写的两句：“哪个签名接纳
+        哪些标签”（`COLOR_{CHANGE,ADJUST,SCALE}`、`needs_labels`、`Writing`）与“写下去算什么”
+        （`Space` 写入目标枚举 + `route` 本体）⇒ 后者入 `builtins/color/write.rs`（197/327 行，终树现量）。
+        拆分与 `-0` 一并量：`shift v4→v5` = `changed=0 closer=0 farther=0`，`net=1` 就是那一行。
+      • **读数**：`ledger diff change-writes-absence-v4 change-in-carried-space-v5` = **`regress=0 net=243`**
+        （3214→3457，30.0%，实质 3292）；`ledger shift` = `changed=49 closer=0 farther=0 tie=0
+        error_expectation=0 shape_of_text=49`，49 条已逐条定性：44 条嵌套行（`to-space(color.change(…))` 从回显
+        变成有答案但差 8~9 位，归共用的 lab/oklab 表）、4 条 `*/lightness/out_of_range`（语料要
+        `color-mix(in lab, color(xyz …) 100%, black)` 文本，本编译器发不出）、1 条 `negative_zero`（当时未修）。
+        无效错误 19；空库复算同读数；`fmt=0`、`count=0`、workspace 无 FAILED 无 warning；最长文件 497 行。
+        本会话累计 `ledger diff calc-constants-final change-in-carried-space-v5` = **`regress=0 net=959`**。
+        【收口后的订正指针见 9.28：那的 `changed=49` 含“1 条 `negative_zero`”是把两对 run 的数搞混了，
+        收口后终树 run 为 `change-in-carried-space-v6`，`base→v6` 的 `shift` 是 `changed=48`。】
+        守卫 `tests/color_change_space.rs`（5 条）含一条等价断言：写出来的通道与直接写同一个数的字面量必须
+        转换到同一文本（把 44 条嵌套行的残差钉在共用的路线上）。
+      • **空余（现量）**：13 个空间文件 197 行中 9 个文件全绿，仍红 **10** 行 = 4×`lightness/out_of_range`
+        （`color-mix` 发射能力）+ 4×`*/lightness/none` + 2×`{lch,oklch}::hue/none`（后六个被 axes 预读的
+        decline 挡住，等 9.25 (b) 的“axes 三元组能携缺”）；`change/space::missing` 仍红 12（`$space:` 写入）；
+        `adjust`/`scale` 打在空间色上未接（本轮只改 `Writing::Set`）；名字不属于该空间时的
+        `Color space X doesn't have a channel with this name.` 仍未实现（只有 legacy 组的行）。
+
+- [x] 9.28 **9.27 的 `gc-auditor`：14 条 finding 全收；并定下“注释用中文”的规则（2026-11-05）**。
+      它独立复算到同一批读数（`net=243`、`shift` 全 0、累计 959、无效错误 19、`count=0`、无 FAILED、
+      13 个空间文件 197 行里 9 个全绿/10 个仍红的逐条具名），逐字确认 12 条守卫断言与全部 `*/percent` 底数，
+      并独立验到“非数值就 decline”是空位而不是逃律（`change/error/type.hrx` 11 行全为 legacy 色）。推翻十条：
+      • **伪造金样 key（最重，我自己写的）**：`without_negative_zero` 的注释引
+        `adjust/four_args/clamped.hrx::red/minus_zero`——该 key 全语料不存在（`grep -rn "minus_zero" sass-spec/spec/`
+        为空），真身是 `rgb/four_args/clamped.hrx::red/negative_zero`（`rgb(-0, 0, 0, 0.5)` →
+        `rgba(0, 0, 0, 0.5)`，逐字取过）。同错另有两处 HEAD 遗留（`color/channel.rs` 的 `clamped` doc、
+        `value.rs` 的 `rgb/three_args::clamped/red/minus_zero`），三处均改指真实 key，
+        `grep -rn minus_zero crates/` 现为空。“没行支持 X”这类句式先前只被要过在记账里，现在确认它同样适用于注释。
+      • **真源索引失效**：`rxrust-reactive/SKILL.md` 的真源表仍指 `modify.rs::route`，而 `route` 已搬到
+        `write.rs`——指针失效等于邀请下一个会话在旧位置再写一份。已改指 `write.rs`，并新增一行登记
+        `crate::color::channels` 为“空间通道名 + 逐通道百分比底数”的唯一住所。
+      • **两处 `_ =>` 兜底**：`channels::full`（一个臂兼答 11 个变体）与 `percent_divisor` 尾臂。本仓已两次否定
+        同形（`unwrap_or(&BRADFORD)`、`Space::white`），所以改为**穷举 13 个空间**；“hue 无百分比”与“第 4 个
+        通道不是通道”分开表达（后者靠 `bases.get()` 的自然 `None`）。行为无变。
+      • **角度判定的第三处**：新写的 `unit != "%" && measure(..).0 == "angle"` 与 `color/mod.rs::angle_of`、
+        `builtins/math/trig.rs` 已各写一份 ⇒ 收成 `crate::unit::is_angle` 三处同读；`%` 本就不是角度，多余限定已删。
+      • **打印后缀表又按空间枚举了一遍“哪个通道是角度”** ⇒ 改为 `channels::suffix(space, channel)` 从 `names`
+        导出。第一版写成 `if/else if` 链，被 sasslint 的“else-if 债务只准减少”闸当场拦下（`} else if` 从 6 变 7），
+        是闸把新代码抬回了查表形式。
+      • **doc 指向已搬走的 `space::print`**（三处）⇒ 改指 `text::print`；rustdoc 对非公共项不报失效链接，只能人核。
+      • **测试头引错归档文件**：空间色的外名错误行不在 `change/error/mixed_formats.hrx`（实测该文件空间色行 = 0），
+        而在 `change/error/incompatible_channel.hrx::{legacy_channel,modern_both}`（基线与 v5/v6 都红 3 行）。
+      • **数字口径**：`changed=49` 含“1 条 `negative_zero`”是把 `base→carried-v4` 与 `base→v6` 两对 run 混用，
+        正确为 `base→v6` `changed=48`（44 嵌套 + 4 条 `color-mix`），`negative_zero` 只属于 net（已在 9.27 就地
+        加订正指针）；“27 行”是语料行数误标：该措辞实量 **37** 次，27 是 `base→carried-v1` 的
+        `error_expectation`；`write.rs`/`modify.rs` 行数实为 327/197（旧文 198/329）。
+      • **`SPACE_CHANNELS` 与新名表的重叠**未合：它多一列“decides”是另一条律，且 `hsl`/`hwb` 不是 Color-4 空间，
+        强行合并反而造出第三种说法；已在两侧 doc 写清各管什么（遗留项，不是已完成）。
+      • **注释改用中文的规则定下了**（`.qoder/rules/rust.md` 首节：标识符、命令行、文件名与 case key、
+        逐字引用的金样输出/错误消息保持原文，因它们是可复取凭据）。但第一个试点
+        （`sasslint/src/lib.rs`，92 行）**已回退**：本会话中文输出错字率过高，且修正本身继续引入坏字
+        （“始终”→“始级”→“始绉”，同一行四轮未对），所以**存量注释仍全为英文**，改写待新会话按 crate 逐批做。
+      • **收口读数**：`ledger diff change-in-carried-space-v5 change-in-carried-space-v6` = **`regress=0 net=0`**；
+        `shift change-writes-absence-v4 change-in-carried-space-v6` = `changed=48 closer=0 farther=0 tie=0
+        error_expectation=0 shape_of_text=48`；`diff calc-constants-final → v6` 仍 **`net=959`**；无效错误 19；
+        空库复算同读数（`3457/3292/165/1264`）；`fmt=0`、`count=0`、workspace 无 FAILED 无 warning；
+        最长文件 499（`ledger/src/lib.rs`）。基线 run 自此为 `change-in-carried-space-v6`。
 

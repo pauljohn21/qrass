@@ -4,7 +4,12 @@ alwaysApply: true
 ---
 
 ## 技术栈与语言
-- Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释保持 English。
+- Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释用中文
+  （2026-11-05 由 English 改过来；**目前只有本规则自身是中文，存量代码注释还全是英文**，按目录逐批改写，
+  每批一个 `regress=0 net=0` 的纯文本 commit；已试点的一批因中文输出错字率过高而回退，见 `tasks.md` 9.28）。
+  仍保持原文的只有四类，因为它们是「可复取凭据」而不是叙述：代码标识符与函数名、命令行、
+  文件名与 `sass-spec` 的 case key、以及逐字引用的金样输出或错误消息
+  （如 `Expected 0.5px to have unit "%" or no units.`）——译了就 grep 不回归档原文。
 - 以 **rxrust 为核心**（见「铁律」）。版本钉 `=1.0.0-rc.6`。
 
 ## 🧭 新会话起手（先读这几处再写码，否则必返工）
@@ -21,10 +26,24 @@ alwaysApply: true
 
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
-   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3214/11,533**（27.9%，**实质通过 3049** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `change-writes-absence-v4`（终树；与 `change-writes-absence-final`
-   `regress=0 net=0`，两者只差注释与一条不可达臂。2026-11-04：**`color.change` 可以把“缺”
-   写进字节通道**——`change/rgb.hrx::{red,green,blue}/none` 要 `rgb(none 0 0)`/`rgb(0 none 0)`/`rgb(0 0 none)`，
+   色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3457/11,533**（30.0%，**实质通过 3292** + 空期望蒙对 165，skipped 1264；
+   A/B 记录 = `reports/hrx.db` 里的具名 run `change-in-carried-space-v6`（终树；与 feat 入库的
+   `change-in-carried-space-v5` `regress=0 net=0`，只差 9.28 的审查收口。2026-11-04：**`color.change` 能写在
+   带自己空间的色上**，13 个 Color-4 空间共 197 行里 9 个文件全绿——名字属于空间本身（`$red`/`$x`/`$chroma`），
+   而 **`%` 的底数是逐通道的不是逐空间的**（`lab` 自己里面 `lightness 30%`→30、`a -40%`→-50），所以新表
+   `color/channels.rs::percent_divisor(空间, 通道)` 是唯一住所，`Space::percent_full` 只是它的 `通道 0` 行；
+   hue 折成一圈（`400deg`→40），**负彩度折 hue+180**（`lch(50% 20 30deg)` 的 `$chroma: -10` → `lch(50% 10 210deg)`）。
+   两个“拒接”形状也有金样（`Expected 0.5px to have unit "%" or no units.` / `Expected 20% to have an angle unit
+   (deg, grad, rad, turn).`），而“不是数字”仍 decline（`unexpected error` 一度 19→22 后按这条闸改回）。
+   **`regress=0 net=243`**（本会话单批最大），`ledger shift` = **`changed=48 closer=0 farther=0
+   error_expectation=0 shape_of_text=48`**（44 条嵌套行归共用的 lab/oklab 表、4 条等 `color-mix` 发射；
+   `negative_zero` 那行只属于 net 口径）；无效错误仍 19，空库复算同读数；本会话九批累计
+   **`regress=0 net=959`**。`builtins/color/modify.rs` 到 512 行 ⇒ 拆为签名层与写入层 `write.rs`（拆分 `changed=0`）。
+   数字与空余项全在 `tasks.md` 9.27；其 14 条 finding 的收口（含三处伪造/失效的金样 key 引用与
+   `unit::is_angle` 的合并）在 `tasks.md` 9.28。
+   其前一批 run `change-writes-absence-v4`（终树；与 `change-writes-absence-final` `regress=0 net=0`，
+   两者只差注释与一条不可达臂。2026-11-04：**`color.change` 能把“缺”写进字节通道**
+   ——`change/rgb.hrx::{red,green,blue}/none` 要 `rgb(none 0 0)`/`rgb(0 none 0)`/`rgb(0 0 none)`，
    `change/space.hrx::missing/arg/legacy/same/implicit` 要 `color.change(pink, $red: none)` → `rgb(none 192 203)`
    ——所以 `Color::with_channel` 的值位取成 `Option<f64>`；只有 `change` 能写缺，`adjust`/`scale` 的读者继续拒绝。
    **`regress=0 net=4`**，`ledger shift` 的 `changed=0`（本会话首个一个形状变化也没有）；本会话八批累计
@@ -34,8 +53,10 @@ alwaysApply: true
    自己标下的“为何是这个顺序”。`modify.rs` 因新注释越 500 线 ⇒ `scale_toward`/`step`/`keep` 入 `amount.rs`（拆后 `net=0`）。
    剩下的写入缺：key 口径（以 `/none` 结尾）**45** 条、input 口径（实参含 `: none`）**51** 条，各自等的律
    （39 条空间色接线 + 6 条 `$space:` 写入、5 条 axes 带缺、1 条 alpha）全在 `tasks.md` 9.25。
-   其前一批 run `missing-channel-audit-closure`（终树，与它的 feat 入库 run
-   `legacy-missing-channel-v3` `regress=0 net=0`；2026-11-04：**legacy `rgb` 三元组现在自己携带
+   【现量订正：那 39 条空间色接线已由 9.27 做掉 —— 其中 key 以 `/none` 结尾的 39 条已绿 33 条，
+   剩 6 条（`change/{lab,lch,oklab,oklch}::lightness/none` 4 条与 `change/{lch,oklch}::hue/none` 2 条）
+   仍在等“axes 三元组能携缺”；当时写的“5 条 axes 带缺”是 legacy `hsl` 3 + `hwb` 2 的合计。】
+   其前一批 run `legacy-missing-channel-v3`（与它 `regress=0 net=0`；2026-11-04：**legacy `rgb` 三元组现在自己携带
    “缺”**——`to_space/rgb/rgb.hrx::missing/red` 要 `rgb(none 20 30)`（保 `none`、保 byte 尺度、换空格形）而同打在空间色上
    的 `to_space/srgb/rgb.hrx::missing/red` 要 `rgb(0%, 20%, 30%)`（代入），两行合起来定“缺属于 legacy 侧”，故 `Channel` 取
    `Option<f64>` 而不往 `InSpace` 搭第二条路；按位/派生代入/全缺 powerless 三律各只一处判定，源侧读数扩到 legacy 即转出）。

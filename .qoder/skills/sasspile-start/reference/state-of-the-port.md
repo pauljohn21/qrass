@@ -439,4 +439,14 @@ BRE 版是条永远为绿的量具），`directives/for/for.hrx::to_scope` 为�
   `change/space::missing/arg/*` 那 7 条（key 名字不结尾于 `/none`）。教训比“记得写命令”进一步：**任何单一口径
   都只能回答它自己那个问题**，把它的数当作“该律未做全集”会把后面几批引向错误的规模估计（而把自己的错
   说成“同一个错第两次犯”也是一次过度更正——它同样是没量就写）。
+• **`color.change` 现在能写在带空间的色上（9.27，单批最大增益 net=243）**：13 个 Color-4 空间、197 行，
+  9 个文件全绿。命名与单位这两张表进了新的 `color/channels.rs`，因为语料说的是空间自身的事：
+  名字属于空间（`$x`/`$chroma` 不是 `$red`），而 **`%` 的底数逐通道不同**（一个 `lab` 里
+  `lightness 30%`→30 而 `a -40%`→-50）——所以 `percent_divisor(空间, 通道)` 是唯一住所，
+  `Space::percent_full` 降为它的 `通道 0` 行（与 `primaries`/`BRADFORD` 那次同一个“表不抄两份”的口味）。
+  另外三条同批学到的：负彩度折 hue+180（`lch`/`oklch` 同形）；写入的 `-0` 读作 `0`（原先只住在
+  `Channel::clamped`，现 `without_negative_zero` 一处两侧读）；以及**两个“拒接”形状必须按金样报错而不是取量值**
+  （`Expected 0.5px to have unit "%" or no units.` 27 行、`Expected 20% to have an angle unit …`）。
+  根因上还有一个坑值得记：一开始 `change/xyz` 一行没动，不是因为算术错，而是 **`$x` 从来没被声明成
+  `COLOR_CHANGE` 的形参**——标签不绑就根本到不了写入臂。下次接新命名前，先验“名字能不能到这里”。
 
