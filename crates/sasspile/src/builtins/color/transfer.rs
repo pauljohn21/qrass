@@ -1,18 +1,17 @@
-//! `color.to-space` — moving a colour between the colour spaces [`crate::color::space`] models.
+//! `color.to-space` —— 把一个颜色在 [`crate::color::space`] 所建模的各个色彩空间之间移动。
 //!
-//! Split out of the domain root because it is neither a constructor nor an axis operation: it reads a colour,
-//! asks one question of the conversion table, and produces a colour in a different space. The two legacy
-//! targets (`rgb`, `hsl`) are answered by the representations that already print them, which is what the
-//! corpus distinguishes: the same `color(srgb 0.2 0.4 0.8)` becomes `#3366cc` under `rgb` and
-//! `hsl(220, 60%, 50%)` under `hsl` (`to_space/srgb/{rgb,hsl}.hrx::middle`).
+//! 从域根里拆出来，是因为它既不是构造子也不是轴操作：它读一个颜色、向换算表问一个问题、产出一个在另一个
+//! 空间里的颜色。两个 legacy 目标（`rgb`、`hsl`）由那些已经在打印它们的表示来答，这正是语料区分的东西：同一个
+//! `color(srgb 0.2 0.4 0.8)` 在 `rgb` 下变成 `#3366cc`，在 `hsl` 下变成 `hsl(220, 60%, 50%)`
+//! （`to_space/srgb/{rgb,hsl}.hrx::middle`）。
 
 use crate::SassError;
 use crate::builtins::Builtin;
 use crate::color::Space;
 use crate::value::Value;
 
-/// `color.to-space($color, $space)`. Registered as a **named** two-parameter builtin so `$color:` and
-/// `$space:` bind, and variadic so an over-long call reports its own arity instead of being misread.
+/// `color.to-space($color, $space)`。登记成一个**具名**的双参数内置函数，好让 `$color:` 与 `$space:` 能绑定；
+/// 同时是 variadic，所以一次过长的调用报的是它自己的 arity，而不是被误读。
 pub(super) static COLOR_TO_SPACE: Builtin = Builtin {
     name: "color.to-space",
     params: &["color", "space"],
@@ -22,9 +21,8 @@ pub(super) static COLOR_TO_SPACE: Builtin = Builtin {
     apply: to_space,
 };
 
-/// The target space as the call named it. A legacy name wins over the space table because the two produce
-/// different **forms**: `color.to-space($c, rgb)` must read `#3366cc`, not `color(srgb 0.2 0.4 0.8)`
-/// (`to_space/srgb/rgb.hrx::middle`).
+/// 调用所点名的目标空间。legacy 名字优先于空间表，因为两者产出的**形体**不同：`color.to-space($c, rgb)` 必须
+/// 读成 `#3366cc`，不是 `color(srgb 0.2 0.4 0.8)`（`to_space/srgb/rgb.hrx::middle`）。
 fn target(name: &str) -> Option<fn(&crate::color::Color) -> crate::color::Color> {
     match name.to_ascii_lowercase().replace('_', "-").as_str() {
         "rgb" => Some(|color| color.as_legacy_rgb()),
@@ -41,8 +39,8 @@ fn to_space(args: Vec<Value>) -> Result<Value, SassError> {
     let (Value::Color(color), Value::Raw(text)) = (source, name) else {
         return Err(decline());
     };
-    // `hwb` is deliberately absent: the fixtures that convert to it print through a module mixin
-    // (`to_space/srgb/hwb.hrx`), so nothing here states the form, and a colour is not guessed a printing.
+    // `hwb` 是刻意缺席的：转到它的那些 fixture 是经一个模块 mixin 打印的（`to_space/srgb/hwb.hrx`），所以这里
+    // 没有任何东西说出它的形体，而一个颜色不会被猜一个打印方式。
     if let Some(legacy) = target(text) {
         return Ok(Value::Color(legacy(&color)));
     }
