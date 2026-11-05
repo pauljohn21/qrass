@@ -1,9 +1,7 @@
-//! The `math` domain (`core_functions/math/**`). Bodies only: the contract, the registry entry and the
-//! arity diagnostics live in [`crate::builtins`], because the corpus states those identically for every
-//! function and duplicating them per domain is how they drift. The bodies that need a second file are
-//! [`trig`] (the seven trigonometric functions), [`exponents`] (`pow`/`sqrt`/`log`) and [`combining`]
-//! (`clamp`/`hypot`); each is a child of this module, so all three read the argument helpers below rather
-//! than carrying their own.
+//! `math` 域（`core_functions/math/**`）。这里只有函数体：契约、登记表条目与 arity 诊断住在
+//! [`crate::builtins`]，因为语料对每个函数的说法都一样，而把它们按域各写一份就是它们漂移的方式。
+//! 需要第二个文件的函数体是 [`trig`]（七个三角函数）、[`exponents`]（`pow`/`sqrt`/`log`）与
+//! [`combining`]（`clamp`/`hypot`）；三者都是本模块的子模块，所以都读下面的实参助手，而不自带一套。
 
 pub(super) mod combining;
 pub(super) mod exponents;
@@ -14,7 +12,7 @@ use crate::unit::Unit;
 use crate::value::Value;
 use crate::{ErrorKind, SassError};
 
-/// This domain's registrations, in the order the file defines them.
+/// 本域的登记表，按文件定义它们的顺序。
 pub(super) static MATHS: &[&Builtin] = &[
     &MATH_DIV,
     &MATH_ROUND,
@@ -41,22 +39,20 @@ pub(super) static MATHS: &[&Builtin] = &[
     &combining::MATH_HYPOT,
 ];
 
-/// The `math` module's own constants, addressed `math.$pi` (`core_functions/math/variables.hrx`). Each value
-/// is quoted from the row that prints it, because a remembered digit string is exactly what this project has
-/// been burned by:
-/// * `math.$pi * 1e15` → `3141592653589793`, `math.$e * 1e15` → `2718281828459045`,
-///   `math.$epsilon * 1e31` → `2220446049250313` — the three `f64` constants themselves;
-/// * `math.$max-safe-integer` → `9007199254740991`, `math.$min-safe-integer` → its negative;
-/// * `math.$max-number` → the 309 digits of the largest finite double, and
-///   `math.$min-number * 1e300 * 1e39` → `4940656458412465`, which makes `$min-number` the **smallest
-///   denormal** (`f64::from_bits(1)` = 4.9406564584124654e-324), not `MIN_POSITIVE`.
+/// `math` 模块自己的常数，按 `math.$pi` 寻址（`core_functions/math/variables.hrx`）。每个值都是从打印它的
+/// 那一行取来的，因为凭记忆写下的数字串正是本项目被烧过的地方：
+/// * `math.$pi * 1e15` → `3141592653589793`，`math.$e * 1e15` → `2718281828459045`，
+///   `math.$epsilon * 1e31` → `2220446049250313` —— 这三个 `f64` 常数本身；
+/// * `math.$max-safe-integer` → `9007199254740991`，`math.$min-safe-integer` → 它的负数；
+/// * `math.$max-number` → 最大有限 double 的 309 位数字，而 `math.$min-number * 1e300 * 1e39` →
+///   `4940656458412465`，这让 `$min-number` 成为**最小的 denormal**（`f64::from_bits(1)` =
+///   4.9406564584124654e-324），不是 `MIN_POSITIVE`。
 ///
-/// `infinity` and `nan` are the same two doubles the **calculation** surface reads (`calc(infinity)`,
-/// `calc(NaN)` — `values/calculation/calc/constant.hrx`); they sit here rather than in a second table so no
-/// number in this crate is written down twice. What is **not** attested is the module-variable spelling of
-/// these two: no in-scope row writes `math.$infinity` or `math.$NaN` (measured over `sass-spec/spec`: zero
-/// files), so their reach through [`super::module_value`] is a side effect of the shared table, not a
-/// delivered feature.
+/// `infinity` 与 `nan` 就是**计算**面读的那两个 double（`calc(infinity)`、`calc(NaN)` ——
+/// `values/calculation/calc/constant.hrx`）；它们住在这里而不是第二张表里，好让这个 crate 里没有一个数字被
+/// 写两遍。**没有被证实**的是这两个常数的模块变量写法：范围内没有任何一行写 `math.$infinity` 或
+/// `math.$NaN`（在 `sass-spec/spec` 上量过：零个文件），所以它们经由 [`super::module_value`] 的可达只是这张
+/// 共享表的副作用，不是一个已交付的特征。
 pub(crate) fn constant(name: &str) -> Option<f64> {
     Some(match name {
         "pi" => std::f64::consts::PI,
@@ -72,11 +68,11 @@ pub(crate) fn constant(name: &str) -> Option<f64> {
     })
 }
 
-/// The refusal of a parameter that must carry **no unit**: `$number: Expected 1px to have no units.`
-/// (`core_functions/math/{round,atan,asin,sqrt,unitless}.hrx::error/*`, and `$base:` under the same words in
-/// `log.hrx::error/base_has_units`). Read by the trig inverse, `math.sqrt`, `math.log` and `math.pow`, so
-/// the wording lives in one place — plural “units” even for one unit is the corpus's own text
-/// (`math.percentage.hrx::error/unit`).
+/// 一个必须带**无单位**的参数的拒语：`$number: Expected 1px to have no units.`。逐字带着这一行的文件现量是
+/// `core_functions/math/{atan,asin,sqrt,log}.hrx`；`log.hrx::error/base_has_units` 与
+/// `pow/arguments.hrx::error/{base,exponent}_has_units` 用同一套措辞点名 `$base:`/`$exponent:`。读它的是三角
+/// 反函数、`math.sqrt`、`math.log` 与 `math.pow`，所以措辞住在一处——一个单位也照样用复数“units”是语料自己的
+/// 文本（`percentage.hrx::error/unit`）。
 pub(super) fn unitless(name: &str, value: f64, unit: Unit) -> Result<f64, SassError> {
     if unit.is_unitless() {
         return Ok(value);
@@ -90,13 +86,13 @@ pub(super) fn unitless(name: &str, value: f64, unit: Unit) -> Result<f64, SassEr
     ))
 }
 
-/// `math.div(6, 3)` → `2`: numbers only, with the unit law the goldens state — same unit cancels
-/// (`6px / 3px` → `2`), a unitless divisor keeps the numerator's unit (`6px / 3` → `2px`), convertible
-/// units convert first (`6in / 3px` → `192`, which also fixes `1in = 96px` as the only factor the corpus
-/// evidences), and anything else becomes a **rational unit** rather than a refusal:
-/// `math.div(6, 3px)` is `2/px`, which `* 1px` cancels back to `2` (`div.hrx::unit/denominator`),
-/// `math.div(6in, 3s)` is `2in/s` (`…::unit/incompatible`) and `math.div(6c, 3d)` is `2c/d` — unknown
-/// units combine without being converted (`…::unit/unknown`).
+/// `math.div(6, 3)` → `2`：只收数字，配上金样写明的单位定律——同单位相消（`6px / 3px` → `2`）、无单位的
+/// 除数保留分子的单位（`6px / 3` → `2px`）、可换算的单位先换算（`6in / 3px` → `192`，这也把 `1in = 96px`
+/// 钉成语料唯一支持的因子），其余一切都变成一个**有理单位**而不是拒收：`math.div(6, 3px)` 是 `2/px`，
+/// 乘 `* 1px` 能除回 `2`（`div.hrx::unit/denominator`），`math.div(6in, 3s)` 是 `2in/s`
+/// （`…::unit/incompatible`），`math.div(6c, 3d)` 是 `2c/d`——未知的单位只合并不换算（`…::unit/unknown`）。
+/// 上面 `6px / 3px`、`2/px`、`2in/s` 这类写法是单位代数的示意，不是归档里的逐字行；可逐字取回的是各 key 下的
+/// 调用式与输出行。
 static MATH_DIV: Builtin = Builtin {
     name: "math.div",
     params: &["number1", "number2"],
@@ -112,8 +108,8 @@ static MATH_DIV: Builtin = Builtin {
             else {
                 return Err(SassError::new("not a number"));
             };
-            // A calculation argument is a number when its content folded: `math.div(calc(2px * 3px), 4px)`
-            // is `1.5px` (`values/calculation/calc/operator/units::multiplication`).
+            // 一个 calculation 实参在它的内容折叠之后就是一个数字：`math.div(calc(2px * 3px), 4px)`
+            // 是 `1.5px`（`values/calculation/calc/operator/units::multiplication`）。
             let (left, right) = (
                 Value::Number(from_value, from_unit.clone()),
                 Value::Number(by_value, by_unit.clone()),
@@ -130,18 +126,16 @@ static MATH_DIV: Builtin = Builtin {
     },
 };
 
-/// The factor that puts one unit on its family's base, read from the single table in [`crate::unit`] —
-/// `math.div`, the colour hues, `math.compatible` and `math.hypot` all go through it. A local copy of these
-/// numbers used to live here as ten-decimal literals; `hypot.hrx::units` (`5q * 40` among centimetres and
-/// inches → `11.6189500386cm`) needs `q` and the exact quarter-millimetre relation, which is what a second
-/// table cannot give.
+/// 把一个单位放到它那个族的基准上的因子，读自 [`crate::unit`] 里唯一的那张表——`math.div`、色彩的色相、
+/// `math.compatible` 与 `math.hypot` 都走它。这些数字过去在这里有一份本地副本，写成十位小数的字面量；而
+/// `hypot.hrx::compatible_units`（`5q * 40` 混在厘米与英寸之间 → `11.6189500386cm`）需要 `q` 与精确的“毫米的四分之一”
+/// 关系，那正是第二张表给不出的东西。
 fn to_base(unit: &str) -> Option<f64> {
     crate::unit::conversion(unit).map(|(_, factor)| factor)
 }
 
-/// `math.unit(1px)` → `"px"`, `math.unit(1)` → `""`, and the compound forms the corpus states
-/// (`"px*em*rad"`, `"px/em"`, `"px^-1"`, `"px*em/(rad*s)"`) — all of them come out of
-/// [`Unit::to_css`], which is the single place a unit becomes text.
+/// `math.unit(1px)` → `"px"`，`math.unit(1)` → `""`，以及语料给出的复合形态（`"px*em*rad"`、`"px/em"`、
+/// `"px^-1"`、`"px*em/(rad*s)"`）——它们全部出自 [`Unit::to_css`]，那是单位变成文本的唯一一处。
 static MATH_UNIT: Builtin = Builtin {
     name: "math.unit",
     params: &["number"],
@@ -153,8 +147,8 @@ static MATH_UNIT: Builtin = Builtin {
     },
 };
 
-/// `math.is-unitless(1px)` → `false` — the file is `unitless.hrx`, but the function the corpus calls is
-/// `math.is-unitless`; naming it after the file would have implemented nothing.
+/// `math.is-unitless(1px)` → `false`——那个文件叫 `unitless.hrx`，但语料调用的函数是 `math.is-unitless`；
+/// 照着文件命名就会实现出一个什么都做不成的东西。
 static MATH_IS_UNITLESS: Builtin = Builtin {
     name: "math.is-unitless",
     params: &["number"],
@@ -164,9 +158,9 @@ static MATH_IS_UNITLESS: Builtin = Builtin {
     apply: |args| number_arg("number", &args).map(|(_, unit)| Value::Bool(unit.is_unitless())),
 };
 
-/// `math.percentage(0.246)` → `24.6%`. A unit on the argument is the corpus's own message
-/// (`$number: Expected 1% to have no units.` — plural “units” even for one unit, as written), and the
-/// result only fits Sass's ten-significant-digit output for a computed number.
+/// `math.percentage(0.246)` → `24.6%`。实参上带单位时用的是语料自己的消息
+/// （`$number: Expected 1% to have no units.`——一个单位也照样写复数“units”，照原文），而结果只在 Sass 对
+/// 算出的数字的十位有效数字输出里才合得上。
 static MATH_PERCENTAGE: Builtin = Builtin {
     name: "math.percentage",
     params: &["number"],
@@ -189,11 +183,10 @@ static MATH_PERCENTAGE: Builtin = Builtin {
     },
 };
 
-/// `math.compatible(1px, 2in)` → `true`: two numbers are comparable when they carry the same unit, either
-/// is unitless, or both units belong to a dimension the corpus evidences. An unknown unit **declines**
-/// rather than answering `false`, because `px` vs `q` is not something the fixtures state. Each parameter
-/// is validated under its own name, as `comparable.hrx::error/type/*` demands
-/// (`$number1: c is not a number.`, `$number2: c is not a number.`).
+/// `math.compatible(1px, 2in)` → `true`：两个数字在带同一单位、任一侧无单位、或两个单位都属于语料证实过的
+/// 某个量纲时可比。一个未知的单位**decline**而不是答 `false`，因为 `px` 对 `q` 不是 fixture 说过的东西。每个
+/// 参数都在自己的名字下被校验，正如 `comparable.hrx::error/type/*` 要求的（`$number1: c is not a number.`、
+/// `$number2: c is not a number.`）。
 static MATH_COMPATIBLE: Builtin = Builtin {
     name: "math.compatible",
     params: &["number1", "number2"],
@@ -209,10 +202,9 @@ static MATH_COMPATIBLE: Builtin = Builtin {
         if first_unit == second_unit || first_unit.is_unitless() || second_unit.is_unitless() {
             return Ok(Value::Bool(true));
         }
-        // Comparison is on the **dimension signature** — the multiset of dimensions on each side of the
-        // fraction — so an inverse unit answers rather than declining: `math.compatible(1px, 1/1px)` is
-        // `false` (`comparable.hrx::unit/to_inverse`), while `1px` vs `2em` stays `false`
-        // (`…::unit/to_different`) and any unit outside the proven table still declines.
+        // 比较走的是**量纲签名**——分数两侧各自的量纲多重集——所以一个倒数单位会答而不是 decline：
+        // `math.compatible(1px, 1/1px)` 是 `false`（`comparable.hrx::unit/to_inverse`），而 `1px` 对 `2em`
+        // 仍是 `false`（`…::unit/to_different`），那张证实过的表之外的任何单位依旧 decline。
         match (dimension(&first_unit), dimension(&second_unit)) {
             (Some(left), Some(right)) => Ok(Value::Bool(left == right)),
             _ => Err(SassError::new("unit dimension not proven")),
@@ -220,15 +212,13 @@ static MATH_COMPATIBLE: Builtin = Builtin {
     },
 };
 
-/// `math.max(1px, 1in, 1cm)` → `1in`: the arguments are compared under the unit law and the **original**
-/// value wins (it is not rewritten into a common unit).
+/// `math.max(1px, 1in, 1cm)` → `1in`：实参按单位定律比较，而**原始**值胜出（它不会被改写成某个公共单位）。
 ///
-/// The length factors come from the oracle itself (`libsass/units/conversion/size.hrx`: `1in` → `96px`,
-/// `1cm` → `37.7952755906px`, `1mm` → `3.7795275591px`, `1pc` → `16px`, `1pt` → `1.3333333333px`), and
-/// `max.hrx::error/incompatible_units` states that `px` and `s` are different dimensions.
-/// Two **known** different dimensions produce the corpus's message; an unlisted unit declines to verbatim
-/// instead of inventing that error, because `1px and 2q have incompatible units.` is not something the
-/// fixtures assert and an unknown unit is not evidence of incompatibility.
+/// 长度的因子来自归档自己（`libsass/units/conversion/size.hrx`：`1in` → `96px`、`1cm` →
+/// `37.7952755906px`、`1mm` → `3.7795275591px`、`1pc` → `16px`、`1pt` → `1.3333333333px`），而
+/// `max.hrx::error/incompatible_units` 说 `px` 与 `s` 是不同量纲。两个**已知的**不同量纲产出语料那句消息；
+/// 一个没列出的单位则退回逐字文本而不是发明那次错误，因为 `1px and 2q have incompatible units.` 不是
+/// fixture 断言过的东西，而一个未知单位不是不相容的证据。
 static MATH_MIN: Builtin = Builtin {
     name: "math.min",
     params: &[],
@@ -247,15 +237,14 @@ static MATH_MAX: Builtin = Builtin {
     apply: |args| extremum(Ordering::Greater, args),
 };
 
-/// Which way an extremum picks. A named choice keeps one body for `min` and `max` rather than two copies
-/// that can drift apart.
+/// 一个极值往哪个方向挑。一个具名的选择让 `min` 与 `max` 共用一个函数体，而不是两份会互相漂移的副本。
 #[derive(Clone, Copy, PartialEq)]
 enum Ordering {
     Less,
     Greater,
 }
 
-/// Fold the arguments down to the smallest or largest, comparing them pairwise under the unit law.
+/// 把实参折叠到最小或最大，逐对按单位定律比较。
 fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
     let numbers = args
         .into_iter()
@@ -281,21 +270,19 @@ fn extremum(wants: Ordering, args: Vec<Value>) -> Result<Value, SassError> {
         .map(|(number, unit)| Value::Number(number, unit))
 }
 
-/// The two magnitudes to compare, in a common scale, or why they cannot be compared at all. One reading for
-/// every function that orders numbers, so the law cannot drift between `min`/`max`, `math.compatible`,
-/// `math.clamp` and `math.hypot`.
+/// 要比较的两个大小，处于同一个尺度上；或者它们根本不能比较的理由。每个会给数字排序的函数都读这一个读数，
+/// 好让定律不会在 `min`/`max`、`math.compatible`、`math.clamp` 与 `math.hypot` 之间漂移。
 enum Comparison {
-    /// Comparable as written, with both magnitudes in the scale the caller already has.
+    /// 按原样可比，两个大小都在调用方已有的尺度里。
     Ordered(f64, f64),
-    /// Exactly one side is unitless — `min`/`max` compare them anyway (`max.hrx::unit/mixed` gives `2px` for
-    /// `math.max(2px, 1)`), while `clamp`/`hypot` refuse: `… have incompatible units
-    /// (one has units and the other doesn't).` (`clamp.hrx::error/some_unitless/*`).
+    /// 恰好一侧无单位——`min`/`max` 照样比它们（`max.hrx::units/and_unitless` 对 `math.max(2px, 1)` 给出 `2px`），
+    /// 而 `clamp`/`hypot` 拒收：`… have incompatible units (one has units and the other doesn't).`
+    /// （`clamp.hrx::error/some_unitless/*`）。
     PartlyUnitless,
-    /// Two **known** different families: `1px and 2s have incompatible units.`
-    /// (`max.hrx::error/incompatible_units`).
+    /// 两个**已知的**不同族：`1px and 2s have incompatible units.`（`max.hrx::error/incompatible_units`）。
     Clash,
-    /// A family outside [`crate::unit::conversion`]: nothing evidences `1px` against `1c`, so the caller
-    /// declines instead of inventing a clash.
+    /// [`crate::unit::conversion`] 之外的一个族：没有任何东西证实 `1px` 对 `1c`，所以调用方 decline 而不是
+    /// 发明一次冲突。
     Unproven,
 }
 
@@ -312,7 +299,7 @@ fn compare(a: &(f64, Unit), b: &(f64, Unit)) -> Comparison {
             b.1.single().and_then(to_base),
         ) {
             (Some(from_a), Some(from_b)) => Comparison::Ordered(a.0 * from_a, b.0 * from_b),
-            // A compound unit of one family (`1px*em / 1em`-shapes) has no single factor to scale by.
+            // 一个同族的复合单位（`1px*em / 1em` 那种形状）没有一个可用于缩放的单一因子。
             _ => Comparison::Unproven,
         },
         (Some(_), Some(_)) => Comparison::Clash,
@@ -320,14 +307,13 @@ fn compare(a: &(f64, Unit), b: &(f64, Unit)) -> Comparison {
     }
 }
 
-/// The two magnitudes to compare, in a common scale: equal units (or either side unitless) compare as
-/// written, known convertible units of one family are scaled, and known different families are the corpus's
-/// `1px and 2s have incompatible units.` — anything else declines. `min`/`max` read this; `clamp`/`hypot`
-/// read [`compare_named`], which keeps both parameter names in the message.
+/// 要比较的两个大小，处于同一个尺度上：同单位（或任一侧无单位）按原样比，已知可换算的同族单位被缩放，而已知
+/// 的不同族就是语料那句 `1px and 2s have incompatible units.`——其余一律 decline。`min`/`max` 读这个；
+/// `clamp`/`hypot` 读 [`compare_named`]，它把两个参数名都留在消息里。
 fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError> {
     match compare(a, b) {
         Comparison::Ordered(left, right) => Ok((left, right)),
-        // A unitless neighbour is comparable as written here, which is what `math.max(2px, 1)` → `2px` needs.
+        // 一个无单位的邻居在这里按原样可比，这正是 `math.max(2px, 1)` → `2px` 需要的。
         Comparison::PartlyUnitless => Ok((a.0, b.0)),
         Comparison::Clash => Err(SassError::typed(
             ErrorKind::IncompatibleUnits,
@@ -341,9 +327,9 @@ fn comparable(a: &(f64, Unit), b: &(f64, Unit)) -> Result<(f64, f64), SassError>
     }
 }
 
-/// [`compare`] with both parameter names in the refusal, as `clamp.hrx::error/*` and `hypot.hrx::error/*`
-/// state them — the left one first (`$number: 1px and $min: 1deg have incompatible units.`,
-/// `$max: 2px and $min: 0 have incompatible units (one has units and the other doesn't).`).
+/// [`compare`] 的拒语里带上两个参数名，照 `clamp.hrx::error/*` 与 `hypot.hrx::error/*` 给出的写法——左边的
+/// 先出现：`$number: 1px and $min: 1deg have incompatible units.`，以及
+/// `$max: 2px and $min: 0 have incompatible units (one has units and the other doesn't).`
 pub(super) fn compare_named(
     left: (&str, &(f64, Unit)),
     right: (&str, &(f64, Unit)),
@@ -371,12 +357,10 @@ pub(super) fn compare_named(
     }
 }
 
-/// The dimension signature of a unit: the group each name belongs to, on both sides of the fraction, in
-/// the order written. Every group comes from the one shared table ([`crate::unit::conversion`]); `em` is
-/// named here because `comparable.hrx::unit/to_different` states `math.compatible(1px, 2em)` → `false` and
-/// `em` has no conversion factor to carry — no other relative unit has such a row, so none is added here.
-/// `px` vs `c`, `q`, `rem` etc. leave the signature unproven and every function that would judge one
-/// declines.
+/// 一个单位的量纲签名：每个名字所属的族，写在分数两侧，保持声明顺序。每个族都出自那张共享表
+/// （[`crate::unit::conversion`]）；`em` 在这里点名，是因为 `comparable.hrx::unit/to_different` 说
+/// `math.compatible(1px, 2em)` → `false`，而 `em` 没有一个可带的换算因子——没有别的相对单位有这样一行，
+/// 所以这里也不加。`px` 对 `c`、`q`、`rem` 等等会让签名停留在未证实状态，每个本要判定的函数都 decline。
 pub(super) fn dimension(unit: &Unit) -> Option<(Vec<&'static str>, Vec<&'static str>)> {
     let group = |name: &str| match name {
         "em" => Some("em"),
@@ -395,11 +379,10 @@ pub(super) fn dimension(unit: &Unit) -> Option<(Vec<&'static str>, Vec<&'static 
     ))
 }
 
-/// The rounding family shares one parameter name and one type contract, both stated by the corpus:
-/// `Missing argument $number.` and `$number: c is not a number.` (`core_functions/math/{round,abs,ceil,
-/// floor}.hrx::error/*`). Their units are preserved (`7px / 4em` cases need compound units and are out of
-/// reach), and every unitless golden here is matched exactly: `round(2.2)` → `2`, `round(-5.6)` → `-6`,
-/// `round(0.2)` → `0`, `abs(-17)` → `17`, `ceil(-1.2)` → `-1`, `floor(-1.2)` → `-2`.
+/// 取整一族共用一个参数名与一个类型契约，两句都是语料自己说的：`Missing argument $number.` 与
+/// `$number: c is not a number.`（`core_functions/math/{round,abs,ceil,floor}.hrx::error/*`）。它们的单位被
+/// 保留（`7px / 4em` 那种情形需要复合单位，够不着），而这里每个无单位的金样都被逐字对上：`round(2.2)` → `2`、
+/// `round(-5.6)` → `-6`、`round(0.2)` → `0`、`abs(-17)` → `17`、`ceil(-1.2)` → `-1`、`floor(-1.2)` → `-2`。
 static MATH_ROUND: Builtin = Builtin {
     name: "math.round",
     params: &["number"],
@@ -408,10 +391,9 @@ static MATH_ROUND: Builtin = Builtin {
     labelled: None,
     apply: |args| {
         number_arg("number", &args).map(|(value, unit)| {
-            // Rounding a value that is **not** itself zero lands on zero, and the corpus prints that as
-            // plain `0`: `math.round(-0.2)` → `0` (`core_functions/math/round.hrx::up/to_zero`). A
-            // transcendental handed a `-0.0` keeps the sign instead (`math.sin(-0.0)` → `-0`,
-            // `sin.hrx::negative_zero`) — so the distinction lives in the operation, not in the printer.
+            // 一个**本身不是**零的值取整落到零时，语料把它打成普通的 `0`：`math.round(-0.2)` → `0`
+            // （`core_functions/math/round.hrx::up/to_zero`）。而一个超越函数拿到 `-0.0` 时保留符号
+            // （`math.sin(-0.0)` → `-0`，`sin.hrx::negative_zero`）——所以这个区别住在运算里，不在打印机里。
             let rounded = value.round();
             Value::Number(if rounded == 0.0 { 0.0 } else { rounded }, unit)
         })
@@ -449,18 +431,17 @@ static MATH_FLOOR: Builtin = Builtin {
     },
 };
 
-/// A parameter that must be a number. The message is the oracle's own, and the value renders in CSS form
-/// so a quoted string keeps its quotes (`$number: "0" is not a number.`) while an unquoted identifier does
-/// not (`$number: c is not a number.`).
+/// 一个必须是数字的参数。消息是归档自己的，而值以 CSS 形式渲染，所以一个带引号的字符串保住它的引号
+/// （`$number: "0" is not a number.`），不带引号的标识符则不带（`$number: c is not a number.`）。
 ///
-/// Not every builtin uses this: `math.div` with a non-number emits a deprecation **warning** and still
-/// produces a value (`div.hrx::non_numeric/numerator`), so its body declines instead of failing — the
-/// difference lives in the body, because that is where the corpus differs.
+/// 不是每个内置函数都用它：`math.div` 拿到非数字时发出的是一条 deprecation **warning** 并且仍然产出一个值
+/// （`div.hrx::non_numeric/numerator`），所以它的函数体是 decline 而不是失败——这个差别住在函数体里，因为
+/// 语料正是在那里分岔。
 fn number_arg(param: &str, bound: &[Value]) -> Result<(f64, Unit), SassError> {
-    // The two failures are different messages, so they stay two branches: an absent argument is
-    // `Missing argument $number.` (`core_functions/math/round.hrx::error/no_args`), a present one that is
-    // not a number is `$number: c is not a number.` (`…::error/type`). A calculation whose content folded
-    // counts as the number it reached (`Value::number`).
+    // 两种失败是两句不同的消息，所以它们保持两个分支：一个缺席的实参是 `Missing argument $number.`
+    // （`core_functions/math/round.hrx::error/too_few_args`），一个在场却不是数字的实参是
+    // `$number: c is not a number.`（`…::error/type`）。一个内容已经折叠起来的 calculation，
+    // 算作它到达的那个数字（`Value::number`）。
     let Some(bound) = bound.first() else {
         return Err(SassError::typed(
             ErrorKind::MissingArgument,
