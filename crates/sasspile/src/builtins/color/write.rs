@@ -1,8 +1,7 @@
-//! The **write side** of `color.change` / `color.adjust` / `color.scale`: which space a call is writing, and the arithmetic each of the
-//! four representations gets for it. Split out of [`super::modify`], which keeps the signatures — the labels
-//! a family declares and the error wording of an unreadable argument — because the two halves answer
-//! different questions: "what did the call name" is a signature law, "what does it write" is an arithmetic
-//! one, and the file had passed this repository's line budget with both in it.
+//! `color.change` / `color.adjust` / `color.scale` 的**写入侧**：一次调用在写哪个空间，以及四种表示各自为它
+//! 拿到的算术。从 [`super::modify`] 里拆出来，那个文件留着签名——一个族声明哪些标签，以及一个读不了的实参的
+//! 错误措辞——因为两半答的是不同的问题：“调用点名的”是一条签名律，“它写什么”是一条算术律，而两个都装在一个
+//! 文件里已经越过本仓库的行数预算。
 
 use super::amount::{self, axis, byte, keep, scale_toward, share, step};
 use super::modify::Writing;
@@ -12,32 +11,30 @@ use crate::builtins::{Given, missing};
 use crate::color::Color;
 use crate::value::Value;
 
-/// Which of the colour's own spaces a call writes. Decided once, from what the call named, so the arithmetic
-/// below matches on `(space, writing)` instead of stacking one guard per function — three functions and three
-/// spaces is nine arms, and a chain of `if`s would have to be re-read every time a fourth writing arrives.
+/// 一次调用写的是颜色自己哪个空间。只决定一次，从调用点名的东西算出来，好让下面的算术对 `(space, writing)`
+/// 做 `match`，而不是每个函数叠一道守卫——三个函数乘三个空间就是九臂，而一条 `if` 链每多来第四种写法就得重读
+/// 一遍。
 pub(super) enum Space {
-    /// Nothing but `$alpha:`, or no channel at all — the colour carries through (`adjust/no_channels.hrx`).
+    /// 只有 `$alpha:`，或者一个通道都没点名——颜色原样透过去（`adjust/no_channels.hrx`）。
     Nothing,
-    /// `rgb` channels, which the colour stores as bytes.
+    /// `rgb` 的通道，颜色把它们存成字节。
     Bytes,
-    /// Whiteness and blackness, which it may store directly or imply from bytes.
+    /// whiteness 与 blackness，颜色可能直接存着它们，也可能由字节推出。
     Hwb,
-    /// The hsl axes.
+    /// hsl 的轴。
     Axes,
 }
 
-/// One `color.change`/`color.adjust`/`color.scale` call: read the colour, apply the channels it names — as
-/// bytes, as hsl axes, or as hwb axes — then let the colour's own printing law decide the output form.
+/// 一次 `color.change`/`color.adjust`/`color.scale` 调用：读颜色，对它点名的通道施加改动——按字节、按 hsl 轴或
+/// 按 hwb 轴——然后让颜色自己的打印律决定输出形体。
 pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassError> {
     let decline = Err(amount::decline());
     let colour = match Given::find(&given, "color") {
-        // `color.change()` — the corpus names the parameter that is missing (`change/error/args.hrx::too_few`,
-        // and the same row in `adjust`/`scale`).
+        // `color.change()` —— 语料点名缺的那个参数（`change/error/args.hrx::too_few`，`adjust`/`scale` 里同一行）。
         None => return Err(missing("color".to_string())),
-        // `$color: 1 is not a color.` is said for a **number** (`change/error/type.hrx::color`). A colour in
-        // a space this compiler has not got — `color(srgb …)`, `lab(…)`, `oklch(…)` — keeps declining: the
-        // corpus gives no message for those calls, and reading them as sRGB is the wrong value
-        // [`Color::of`] already refuses.
+        // `$color: 1 is not a color.` 是对一个**数字**说的（`change/error/type.hrx::color`）。一个颜色在本
+        // 编译器没有的空间里——`color(srgb …)`、`lab(…)`、`oklch(…)`——继续 decline：语料对这些调用没给消息，
+        // 而把它们读成 sRGB 就是 [`Color::of`] 已经拒掉的那个错值。
         Some(value @ Value::Number(_, _)) => {
             return Err(SassError::typed(
                 ErrorKind::NotAColor,
@@ -46,19 +43,18 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
         }
         Some(value) => Color::of(value).ok_or_else(amount::decline)?,
     };
-    // These three take the colour positionally and every channel by name: `color.change(red, 1)` is
+    // 这三个把颜色按位置拿、把每个通道按名字拿：`color.change(red, 1)` 是
     // `Error: Only one positional argument is allowed. All other arguments must be passed by name.`
-    // (`change/error/args.hrx::too_many`, and the same row in `adjust`/`scale`).
+    // （`change/error/args.hrx::too_many`，`adjust`/`scale` 里同一行）。
     if Given::positional(&given) > 1 {
         return Err(SassError::typed(
             ErrorKind::TooManyArguments,
             "Only one positional argument is allowed. All other arguments must be passed by name.",
         ));
     }
-    // `$space:` asks for a space this compiler has no conversion for, so it declines; the modern-space
-    // `change`/`adjust`/`scale` files stay red for that reason — unless the argument is not a string at all,
-    // which the corpus says outright: `color.scale(red, $space: 1)` → `Error: $space: 1 is not a string.`
-    // (`scale/error/type.hrx::space`, and the same row in `adjust` and `change`).
+    // `$space:` 要的是一个本编译器没有换算的空间，所以它 decline；现代空间的 `change`/`adjust`/`scale` 文件因此
+    // 仍是红的——除非那个实参根本不是一个字符串，语料对这件事说得直接：`color.scale(red, $space: 1)` →
+    // `Error: $space: 1 is not a string.`（`scale/error/type.hrx::space`，`adjust` 与 `change` 里同一行）。
     let beyond = match Given::find(&given, "space") {
         Some(Value::Raw(_)) => true,
         Some(value) => {
@@ -82,12 +78,11 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
         .filter(|name| Given::names(&given, name))
         .collect::<Vec<&str>>();
     let hue = Given::names(&given, "hue");
-    // **A colour that carries its own space is written through that space's channels**, named by that space's
-    // own vocabulary: `color.change(color(srgb 0.2 0.5 0.7), $red: 0.5)` → `color(srgb 0.5 0.5 0.7)`
-    // (`change/srgb.hrx::red/unitless`), while `change/xyz.hrx` writes the same position through `$x` and
-    // `change/lch.hrx` through `$chroma` — the names come from the space's table in `color::channels`, not
-    // from a list here. Only `change` is wired: `adjust`/`scale` on a carried space keep declining exactly as
-    // they do now, and `tasks.md` 9.25 names the rows that still wait on them.
+    // **一个自带空间的颜色用那个空间自己的通道来写**，用的是那个空间自己的词汇：
+    // `color.change(color(srgb 0.2 0.5 0.7), $red: 0.5)` → `color(srgb 0.5 0.5 0.7)`
+    // （`change/srgb.hrx::red/unitless`），而 `change/xyz.hrx` 在同一个位置上写 `$x`、`change/lch.hrx` 写
+    // `$chroma`——名字来自 `color::channels` 里那张空间表，不是这里的一份清单。只接了 `change`：
+    // `adjust`/`scale` 打在自带空间上仍按现在这样 decline，而 `tasks.md` 9.25 点名了还在等它们的行。
     let owned = match (colour.carried_space(), writing) {
         (Some(space), Writing::Set) => space
             .channel_names()
@@ -97,16 +92,17 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
             .collect::<Vec<(&'static str, usize)>>(),
         _ => Vec::new(),
     };
-    // A hue has no bound to move toward, so a scale that names one is refused by name:
-    // `color.scale(white, $hue: 10%)` → `Error: $hue: Channel isn't scalable.` (`scale/error/args.hrx::hue`,
-    // `…/polar.hrx`), and `scale/*.hrx` never uses the parameter otherwise.
+    // 色相没有可朝它移动的界限，所以点名它的 scale 被点名拒收：`color.scale(red, $hue: 10%)` →
+    // `Error: $hue: Channel isn't scalable.`（`scale/error/args.hrx::unknown`；`white` 那一例在
+    // `scale/error/polar.hrx::legacy`，同文件另两例是 `…::{lch,oklch}`），而 `scale/*.hrx`
+    // 其他情形下从不使用这个参数。
     if writing == Writing::Scale && hue {
         return Err(SassError::typed(
             ErrorKind::Channel,
             "$hue: Channel isn't scalable.",
         ));
     }
-    // The channel names the call wrote, in signature order — which is the order the refusal below reports in.
+    // 调用写下的那些通道名，按签名顺序——下面的拒语也就是按这个顺序报告的。
     let channels = bytes
         .iter()
         .map(|(name, _)| *name)
@@ -114,65 +110,58 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
         .chain(hsl.iter().copied())
         .chain(hwb.iter().copied())
         .collect::<Vec<&str>>();
-    // Two spaces in one call is refused **by name**, not kept as text: the first group says which space the
-    // call is writing and the first foreign name is reported against it —
-    // `color.change(red, $red: 1, $hue: 1)` → `Error: $hue: Color space rgb doesn't have a channel with this
-    // name.`, `color.scale(red, $saturation: 1%, $blackness: 1%)` → `Error: $blackness: Color space hsl …`
-    // (`{change,adjust,scale}/error/mixed_formats.hrx`).
+    // 一次调用里出现两个空间是**点名拒收**，不是保住文本：第一个组说出这次调用在写哪个空间，而来自另一个空间的
+    // 第一个名字就对着它报——`color.change(red, $red: 1, $hue: 1)` →
+    // `Error: $hue: Color space rgb doesn't have a channel with this name.`，
+    // `color.scale(red, $saturation: 1%, $blackness: 1%)` → `Error: $blackness: Color space hsl …`
+    // （`{change,adjust,scale}/error/mixed_formats.hrx`）。
     if let Some(foreign) = amount::mixed_channel(&channels) {
         return Err(foreign);
     }
-    // A colour in its own colour space is refused by the **write itself**, further down: `Color::with_axes`
-    // reads its axes through [`Color::axes_of`], which answers `None` for `Representation::InSpace`, and
-    // `Color::with_hwb` asks [`Color::writes_bytes`], which answers `false` for it; either way the call declines
-    // to its text. It is deliberately not a guard at this entry. An experiment with one placed before the
-    // channel reads was measured and reverted, and the reason is stated by rows rather than by a count that no
-    // recorded run can reproduce any more: `scale/error/polar.hrx::lch` writes
-    // `color.scale(lch(50% 30% 180deg), $hue: 10%)` and its golden **is** `Error: $hue: Channel isn't
-    // scalable.`, and `scale/error/units/oklch.hrx::wrong/lightness` writes
-    // `color.scale(lch(30% 70% 200deg), $lightness: 1px)` expecting `Error: $lightness: Expected 1px to have
-    // unit "%".` — a blanket refusal answers neither, because the message comes from reading the argument. The
-    // cost of letting the reading run is recorded in `tasks.md` 9.9: two rows
-    // (`change/unusual_numbers::{infinity,negative_infinity}/polar`) report
-    // `$hue: calc(infinity) is not a number or unquoted "none"` where the corpus expects `lch(50% 150 0deg)`,
-    // because `calc()` to a number and the Color-4 `$space` write are both unbuilt.
-    // `$alpha:` is read **before** the "nothing else named" refusal below, because the corpus reports a bad
-    // alpha even for a call that names nothing else: `color.change(red, $alpha: c)` →
-    // `Error: $alpha: c is not a number or unquoted "none".` (`change/error/type.hrx::alpha`, and
-    // `…::quoted_none` for the quoted `"none"`), while `color.adjust(red, $alpha: none)` →
-    // `Error: $alpha: none is not a number.` says the plain wording for the two families that do not take it
-    // (`adjust/error/type.hrx::none`, `scale/error/type.hrx::none`).
+    // 一个自带空间的颜色是由**写入本身**在更下面拒掉的：`Color::with_axes` 经由 [`Color::axes_of`] 读它的轴，
+    // 而后者对 `Representation::InSpace` 答 `None`；`Color::with_hwb` 会问 [`Color::writes_bytes`]，它对那个
+    // 表示答 `false` —— 两条路都让这个调用退回自己的文本。这里刻意不在入口处放那道守卫。曾把守卫挪到通道读取
+    // 之前的一次实验被量过并回退了，而理由是由行说出的，不是一枚再也复取不到的计数：
+    // `scale/error/polar.hrx::lch` 写 `color.scale(lch(50% 30% 180deg), $hue: 10%)`，它的金样**就是**
+    // `Error: $hue: Channel isn't scalable.`，而 `scale/error/units/oklch.hrx::wrong/lightness` 写
+    // `color.scale(lch(30% 70% 200deg), $lightness: 1px)`，期望
+    // `Error: $lightness: Expected 1px to have unit "%".` —— 一刀全拒两句都答不上，因为消息来自读实参那一步。
+    // 让读取跑下去的代价记在 `tasks.md` 9.9：两行
+    // （`change/unusual_numbers::{infinity,negative_infinity}/polar`）报
+    // `$hue: calc(infinity) is not a number or unquoted "none"`，而语料要的是 `lch(50% 150 0deg)`，因为
+    // `calc()` 到数字与 Color-4 的 `$space` 写入两样都还没造。
+    // `$alpha:` 是在下面那道“其他什么都没点名”的拒语**之前**读的，因为语料对一次只给了一个坏 alpha 的调用也要报
+    // 它：`color.change(red, $alpha: c)` → `Error: $alpha: c is not a number or unquoted "none".`
+    // （`change/error/type.hrx::alpha`，带引号的 `"none"` 见 `…::quoted_none`），而
+    // `color.adjust(red, $alpha: none)` → `Error: $alpha: none is not a number.` 对不接它的两族说的是朴素的那句
+    // （`adjust/error/type.hrx::none`、`scale/error/type.hrx::none`）。
     let alpha = if Given::names(&given, "alpha") {
         Some(axis(&given, "alpha", writing)?)
     } else {
         None
     };
-    // `change` writes an alpha only when it is already in range: every `change` row that names one passes an
-    // in-gamut value (`change/hsl.hrx::alpha_arg` uses `0.7`), so what an out-of-range one does — clamp as
-    // `rgb()` does, or report a type error — has no golden, and declining keeps the row red instead of
-    // borrowing a law from a different function.
+    // `change` 只在那个 alpha 本来就在范围内时才写它：每一条点名 alpha 的 `change` 行给的都是范围内的值
+    // （`change/hsl.hrx::alpha_arg` 用 `0.7`），所以一个范围外的值该做什么——像 `rgb()` 那样夹紧，还是报一个类型
+    // 错误——没有金样，而 decline 让那一行保持红态，而不是从另一个函数借一条律。
     if writing == Writing::Set && alpha.is_some_and(|alpha| !(0.0..=1.0).contains(&alpha)) {
         return decline;
     }
-    // Which space the call is writing: bytes, the hsl axes, or the hwb ones. `$hue:` belongs to both axis
-    // spaces (`change/hsl.hrx::hue/*` writes it as hsl, `change/hwb.hrx::all` alongside whiteness and
-    // blackness), so it never decides on its own — and a call that names two spaces at once has already been
-    // refused by name above, so at most one group is set here.
+    // 这次调用在写哪个空间：字节、hsl 轴，还是 hwb 轴。`$hue:` 两个轴空间都有（`change/hsl.hrx::hue/*` 把它按
+    // hsl 写，`change/hwb.hrx::all` 把它与 whiteness、blackness 一起写），所以它从不单独决定什么——而一次同时点名
+    // 两个空间的调用在上面已经被点名拒收了，所以这里最多只有一个组被置上。
     let named = bytes.len() + hsl.len() + hwb.len() + usize::from(hue) + owned.len();
     if beyond || (named == 0 && writing == Writing::Set) {
         return decline;
     }
-    // A named channel that cannot be read stops the call — with the corpus's message when the argument is
-    // there but unusable (`$red: c is not a number.`), and with the refusal when the family has a rule this
-    // slice has not got yet: `color.change(hsl(0deg 100% 50%), $hue: none)` wants
-    // `hsl(none 100% 50%)`, a missing-channel law, not a type error.
+    // 一个被点名却读不出来的通道会停下这次调用——实参在场但用不了时用语料那句消息（`$red: c is not a number.`），
+    // 而当这个族有一条这一刀还没拿到的律时退回拒答：`color.change(hsl(0deg 100% 50%), $hue: none)` 要的是
+    // `hsl(none 100% 50%)`，那是一条缺通道的律，不是一条类型错误。
     let reads = ["hue", "saturation", "lightness", "whiteness", "blackness"]
         .into_iter()
         .filter(|name| Given::names(&given, name))
         .map(|name| axis(&given, name, writing).map(|value| (name, value)))
         .collect::<Result<Vec<(&str, f64)>, SassError>>()?;
-    // Which space to write. The guard above has already refused a call that names two of them, so exactly one
-    // of these flags is set.
+    // 写哪个空间。上面那道守卫已经拒掉了同时点名两个空间的调用，所以这几个标志里恰好只有一个被置上。
     let space = match (named == 0, !bytes.is_empty(), !hwb.is_empty()) {
         (true, _, _) => Space::Nothing,
         (false, true, _) => Space::Bytes,
@@ -180,8 +169,8 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
         _ => Space::Axes,
     };
     let built = match colour.carried_space() {
-        // The space's own names were collected above, so an empty `owned` here means the call named something
-        // this space has no channel for — which keeps its text, as it did before this arm existed.
+        // 空间自己的名字在上面已经收好了，所以这里的 `owned` 为空意味着这次调用点了一个该空间没有通道的名字——
+        // 它保住自己的文本，和这条臂存在之前一样。
         Some(space) if !owned.is_empty() => amount::write_carried(&colour, &given, space, &owned),
         _ => match (space, writing) {
             (Space::Nothing, _) => Ok(colour.clone()),
@@ -190,45 +179,43 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
                     .into_iter()
                     .try_fold(colour.clone(), |colour, (name, index)| {
                         let argument = Given::find(&given, name).ok_or_else(amount::decline)?;
-                        // The argument is read **before** the colour's current byte, and that order is load-bearing: the
-                        // corpus's message comes from this read. `scale/error/units/srgb.hrx::wrong/red` expects
-                        // `$red: Expected 1px to have unit "%".` on a call whose byte read would fail too, and reading
-                        // the two the other way round answers it with the call's text instead — measured, when I made
-                        // exactly that swap: 42 `scale/error/units/*` rows went red.
+                        // 实参是在颜色的当前字节**之前**读的，而这个次序是承重墙：语料那句消息就来自这一次读。
+                        // `scale/error/units/srgb.hrx::wrong/red` 期望的是 `$red: Expected 1px to have unit "%".`，
+                        // 而那次调用的字节读取本也会失败；把两次读倒过来，它就只用调用的文本作答了——我恰好做过
+                        // 这个交换并量到：42 条 `scale/error/units/*` 行变红。
                         //
-                        // The channel form the corpus writes is the same for `change` and a shift: a unitless number of
-                        // `0–255`, or a percentage of 255 (`adjust/rgb.hrx` uses both). A scale's argument is a **share**
-                        // of the distance still to the bound, not a channel: `$red: 100%` means the whole way to 255
-                        // (`color.scale(black, $red: 100%)` → `red`, `scale/rgb.hrx::red/max`), so it must carry `%`
-                        // (`scale/error/units/rgb.hrx`). `change` alone may write **absence** — `$red: none` is the
-                        // missing-channel answer (`change/rgb.hrx::red/none` → `rgb(none 0 0)`) — which is why its reader
-                        // is [`amount::written_byte`], the only one that allows a `none`.
+                        // 语料在 legacy 字节上写下的通道形式对 `change` 与一次 shift 是同一个：一个 `0–255` 的无单位
+                        // 数字；百分比那条形在 legacy 字节侧没有 fixture（见 [`byte`] 的注），带 `%` 的字节通道只在自带
+                        // 空间那侧出现，那一侧走 [`amount::written_channel`]。一个 scale 的实参不是通道，而是到界限还剩
+                        // 那段距离的一个**份额**：`$red: 100%` 意思是走到 255 的全程
+                        // （`color.scale(black, $red: 100%)` → `red`，`scale/rgb.hrx::red/max`），所以它必须带 `%`
+                        // （`scale/error/units/rgb.hrx`）。只有 `change` 可以写**缺席**——`$red: none` 就是缺通道那个答
+                        // （`change/rgb.hrx::red/none` → `rgb(none 0 0)`）——这就是它的读法是
+                        // [`amount::written_byte`]、唯一一个允许 `none` 的读法。
                         let amount: Option<f64> = match writing {
                             Writing::Set => amount::written_byte(argument, name)?,
                             Writing::Shift => Some(byte(argument, name, writing)?),
                             Writing::Scale => Some(share(name, argument)?),
                         };
-                        // Then the current byte, for the writings that move it. `change` reads it too, and that read is
-                        // what makes `Color::with_channel` decline a numeric write over a channel the colour never wrote
-                        // (`adjust/error/missing.hrx::legacy`) — `change` cannot bypass it.
+                        // 然后是当前字节，为那些要移动它的写法读它。`change` 也读它，而这个读正是让
+                        // `Color::with_channel` 在一个颜色从未写过的通道上拒掉一次数字写入的东西
+                        // （`adjust/error/missing.hrx::legacy`）——`change` 绕不过它。
                         let current = colour.byte(index).ok_or_else(amount::decline)?;
                         let written: Option<f64> = match (writing, amount) {
-                            // `change` keeps the value it was given and lets the out-of-gamut rule print hsl instead;
-                            // nothing is clamped here (`change/rgb.hrx::red/out_of_range` keeps 500).
+                            // `change` 保住给它的那个值，并让 out-of-gamut 规则改打 hsl；这里什么都不夹紧
+                            // （`change/rgb.hrx::red/out_of_range` 保住 500）。
                             (Writing::Set, written) => written,
-                            // `adjust` moves the channel and cannot pass the ends: `color.adjust(#abcdef, $red: 200)` is
-                            // `#ffcdef`, the byte clamped to 255 (`adjust/rgb.hrx::red/above_max`).
+                            // `adjust` 移动通道而过不去两端：`color.adjust(#abcdef, $red: 200)` 是 `#ffcdef`，那个字节
+                            // 被夹到 255（`adjust/rgb.hrx::red/above_max`）。
                             (Writing::Shift, Some(delta)) => {
                                 Some((current + delta).clamp(0.0, 255.0))
                             }
-                            // A scale cannot pass either end by construction (`scale/rgb.hrx::red/{max,min}`), so it
-                            // raises no clamp question.
+                            // 一个 scale 按构造也过不去任何一端（`scale/rgb.hrx::red/{max,min}`），所以它提不出夹紧的问题。
                             (Writing::Scale, Some(part)) => {
                                 Some(scale_toward(current, part, 0.0, 255.0))
                             }
-                            // No reader other than `written_byte` answers `None`, and that one runs only under `Set`;
-                            // declining here instead of substituting a `0` keeps an unreachable from becoming an
-                            // invented value.
+                            // 除了 `written_byte` 没有别的读法会答 `None`，而那一个只在 `Set` 下跑；这里 decline 而不是
+                            // 代一个 `0` 进去，是为了不让一个不可达变成一枚编造的值。
                             (_, None) => return Err(amount::decline()),
                         };
                         colour
@@ -237,36 +224,33 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
                     })
             }
             (Space::Hwb, _) => {
-                // Whiteness and blackness the colour does not store must be implied from its bytes; an `hsl`
-                // colour has no such reading and no row asks for one, so that call keeps its text.
+                // 颜色没存的 whiteness 与 blackness 必须由它的字节推出；一个 `hsl` 颜色没有这种读法，也没有哪一行要它，
+                // 所以那次调用保住自己的文本。
                 let current = colour.hwb_of().ok_or_else(amount::decline)?;
-                // No clamp here for any writing: the pair is normalised by its sum afterwards, which is what
-                // `color.adjust(#cc6666, $whiteness: 100%)` → `rgb(87.5%, …)` shows
-                // (`adjust/hwb.hrx::whiteness/max`) and `color.scale(#66cc99, $whiteness: 100%)` →
-                // `rgb(83.3333333333%, …)` repeats (`scale/hwb.hrx::whiteness/max`).
+                // 这里对任何写法都没有夹紧：那一对在之后按它的和归一化，这正是
+                // `color.adjust(#cc6666, $whiteness: 100%)` → `rgb(87.5%, …)` 所示
+                // （`adjust/hwb.hrx::whiteness/max`），而 `color.scale(#66cc99, $whiteness: 100%)` →
+                // `rgb(83.3333333333%, …)` 重复了它（`scale/hwb.hrx::whiteness/max`）。
                 //
-                // A channel the call did **not** name keeps its current value — which reads differently per
-                // writing: `change` needs the value itself (nothing is written), `adjust` needs no offset and
-                // `scale` no share. Feeding the current value through the same `keep(..)` path once doubled it
-                // (`#993333` with `$blackness: 40%` came out `#555555` instead of `#333333`,
-                // `…::blackness/high`), because the shift then added what was already there.
+                // 调用**没**点名的通道保住它当前的值——而这一点按写法读起来不同：`change` 要的是值本身（什么都不写），
+                // `adjust` 不要偏移，`scale` 不要份额。把当前值再喂过同一条 `keep(..)` 路径曾把它翻倍
+                // （`#993333` 配 `$blackness: 40%` 出来是 `#555555` 而不是 `#333333`，`…::blackness/high`），
+                // 因为那次 shift 又加上了本已在那儿的量。
                 //
-                // The hue sits at index 0 and is **not** folded here: a `scale` naming it is refused above, so its
-                // share is zero and `scale_toward(hue, 0.0, …)` returns the current value; a `set` writes the value
-                // `angle_of` already folded at the read; and a `shift` that passes 360 is wrapped by the conversion
-                // it is handed to ([`crate::axes::axes_to_rgb`]) — one fold serving every caller rather than one
-                // per writing.
+                // 色相坐在下标 0 上，而这里**不**折叠它：点名它的 `scale` 在上面就被拒了，所以它的份额是零，
+                // `scale_toward(hue, 0.0, …)` 返回当前值；一个 `set` 写的是 `angle_of` 在读的时候已经折好的值；而一个
+                // 超过 360 的 `shift` 由它被交给的那个换算（[`crate::axes::axes_to_rgb`]）wrap 掉——一次折叠服务所有
+                // 调用者，而不是每种写法一次。
                 let applied = |index: usize, name: &str| match writing {
                     Writing::Set => keep(&reads, name, current[index]),
                     Writing::Shift => current[index] + step(&reads, name),
                     Writing::Scale => scale_toward(current[index], step(&reads, name), 0.0, 100.0),
                 };
-                // What that leaves asymmetric is recorded here, not settled: the axes branch below folds a shifted
-                // hue *before storing it*, so a past-a-turn sum reaches [`Color::with_hwb`] raw and
-                // [`Color::with_axes`] folded, and only `authored` — the out-of-gamut hsl print — could show the
-                // difference. No row can: none adds a nonzero hue to a colour whose own hue is nonzero
-                // (`adjust/hsl.hrx`/`adjust/hwb.hrx` start at `red` or `black`, and `blue` is added `0`), and
-                // `color::text`'s `out_of_gamut` matches the authored triple on saturation and lightness alone.
+                // 它留下的不对称记在这里，而不是就地定死：下面那条轴分支在*存之前*折叠一个被移动的色相，所以一个
+                // 超过一圈的和会原样到达 [`Color::with_hwb`]、却是折好地到达 [`Color::with_axes`]，而只有 `authored`——
+                // out-of-gamut 的那次 hsl 打印——能把差别显示出来。没有任何一行能：没有一行给一个自身色相非零的颜色
+                // 加上非零的色相（`adjust/hsl.hrx`/`adjust/hwb.hrx` 从 `red` 或 `black` 起步，而 `blue` 加的是 `0`），
+                // 而 `color::text` 的 `out_of_gamut` 只按饱和度与亮度对上 authored 的三元组。
                 colour
                     .with_hwb(
                         applied(0, "hue"),
@@ -277,31 +261,28 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
             }
             (Space::Axes, _) => colour
                 .with_axes(|[hue, saturation, lightness]| match writing {
-                    // `change` writes the triple it was given, unclamped, and remembers it for the out-of-gamut
-                    // print (`change/hsl.hrx`).
+                    // `change` 把它拿到的三元组原样写出、不夹紧，并为 out-of-gamut 的打印记住它（`change/hsl.hrx`）。
                     Writing::Set => [
                         keep(&reads, "hue", hue),
                         keep(&reads, "saturation", saturation),
                         keep(&reads, "lightness", lightness),
                     ],
-                    // The legacy clamp does not belong here: `adjust/hsl.hrx::saturation/max_remaining` keeps the
-                    // 100.2868217054% that `color.adjust(plum, $saturation: 53%)` adds up to and prints it as hsl,
-                    // while `saturate.hrx::two_args/max_remaining` gives `#ff7eff` for the same move — two
-                    // entries, because two opposite laws are attested ([`Color::transform_axes`] is the legacy
-                    // one).
+                    // legacy 的夹紧不属于这里：`adjust/hsl.hrx::saturation/max_remaining` 保住
+                    // `color.adjust(plum, $saturation: 53%)` 累出的 100.2868217054% 并把它按 hsl 打，而
+                    // `saturate.hrx::two_args/max_remaining` 对同一次移动给出 `#ff7eff`——两个条目，因为两条相反的律
+                    // 都被证实过（[`Color::transform_axes`] 是 legacy 那一条）。
                     //
-                    // Asymmetric bounds, both from rows: a saturation pushed below zero becomes the grey a zero
-                    // is (`…::saturation/{min,min_remaining}` → `rgb(74.7058823529%, …)`), a lightness pushed
-                    // below zero stays negative and prints hsl (`…::lightness/min` → `hsl(0, 100%, -50%)`). The
-                    // hue wraps, which is the one bound both entries share (`…::hue/arg_above_max` reads 540 as
-                    // 180).
+                    // 不对称的界限，两边都出自行：被推到零以下的饱和度变成零饱和度那个灰
+                    // （`…::saturation/{min,min_remaining}` → `rgb(74.7058823529%, …)`），被推到零以下的亮度保持负值并
+                    // 按 hsl 打（`…::lightness/min` → `hsl(0, 100%, -50%)`）。色相 wrap，这是两个条目共享的那一条界限
+                    // （`…::hue/arg_above_max` 把 540 读成 180）。
                     Writing::Shift => [
                         (hue + step(&reads, "hue")).rem_euclid(360.0),
                         (saturation + step(&reads, "saturation")).max(0.0),
                         lightness + step(&reads, "lightness"),
                     ],
-                    // Toward 0 or 100 by the named share, which cannot leave the gamut — so no clamp question
-                    // arises, and no `scale` row prints hsl (`scale/hsl.hrx::saturation/max` → `#ff7eff`).
+                    // 朝 0 或 100 按点名的份额移动，它出不去 gamut——所以提不出夹紧问题，也没有任何一行 `scale` 打
+                    // hsl（`scale/hsl.hrx::saturation/max` → `#ff7eff`）。
                     Writing::Scale => [
                         hue,
                         scale_toward(saturation, step(&reads, "saturation"), 0.0, 100.0),
@@ -311,11 +292,11 @@ pub(super) fn route(given: Vec<Given>, writing: Writing) -> Result<Value, SassEr
                 .ok_or_else(amount::decline),
         },
     }?;
-    // `adjust` moves the alpha and `clamp_alpha` keeps it in `0–1`, which is what
-    // `color.adjust(black, $red: 12, $green: 24, $blue: 48, $alpha: -0.3)` → `rgba(12, 24, 48, 0.7)` shows
-    // (`adjust/rgb.hrx::alpha_arg`); `scale` moves it toward whichever bound its sign points at
-    // (`color.scale(rgba(red, 0.5), $alpha: 14%)` → `0.57`, `scale/no_space.hrx::alpha/high`); `change`
-    // writes the value as given, having refused an out-of-range one above where it was read.
+    // `adjust` 移动 alpha，而 `clamp_alpha` 把它留在 `0–1` 里，这正是
+    // `color.adjust(black, $red: 12, $green: 24, $blue: 48, $alpha: -0.3)` → `rgba(12, 24, 48, 0.7)` 所示
+    // （`adjust/rgb.hrx::alpha_arg`）；`scale` 把它朝符号指向的那一侧界限移动
+    // （`color.scale(rgba(red, 0.5), $alpha: 14%)` → `0.57`，`scale/no_space.hrx::alpha/high`）；`change` 照给的值写，
+    // 而它在读到的那一处已经把范围外的拒掉了。
     Ok(Value::Color(match (alpha, writing) {
         (Some(alpha), Writing::Set) => built.with_alpha(alpha),
         (Some(alpha), Writing::Shift) => built.with_alpha(built.alpha() + alpha),
