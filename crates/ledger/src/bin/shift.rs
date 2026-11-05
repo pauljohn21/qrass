@@ -1,17 +1,15 @@
-//! The reading `ledger changed` leaves to the operator: of the rows that fail in **both** runs with a
-//! different detail, which moved **toward** the archive and which moved **away**.
+//! `ledger changed` 留给操作者的那个读数：在**两个** run 都失败且详情不同的行里，哪些**朝着**归档移动了、
+//! 哪些**远离**了。
 //!
 //! ```text
 //! cargo run -q -p ledger --bin shift -- <base-run> <this-run> [key-prefix] [--db <path>]
 //! ```
 //!
-//! `changed` prints both details and stops there; the qualification it demands was until now made by
-//! eyeballing, which is how one batch of this project described 816 shape-changed rows as progress while
-//! rows of its own cluster had gone *further* from the golden. This command turns the split into a reading
-//! with a positive control (`crates/ledger/tests/shift_split.rs`), and it lists by key the two buckets a
-//! count must not absorb: rows that moved away, and rows that changed **kind** (a verbatim that became a
-//! computed value, an answer that became an error). The classifier lives in `src/shift_impl.rs` for that
-//! reason; see [`ledger::changed_details`] for the query it reads through.
+//! `changed` 打出两侧详情就停在那里；它要求的定性一直到今天还是肉眼比对做出的，而本项目就是这么把一批
+//! 816 条形状变了的行说成进步的，尽管它自己簇里有行*更*远离金样了。这条命令把这个拆分变成一个带阳性对照
+//! 的读数（`crates/ledger/tests/shift_split.rs`），并且按 key 列出计数不该吞掉的两个桶：远离了的行，和换了
+//! **种类**的行（一句原样输出变成算出的值、一个答案变成一个错误）。分类器因此住在 `src/shift_impl.rs`；
+//! 它读过去的那条查询见 [`ledger::changed_details`]。
 
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -24,8 +22,8 @@ use crate::shift_impl::split_of;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter("info").init();
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    // `--db <path>` splits the arguments from the positionals; the positional shape is
-    // `<base> <this> [prefix]`, the same scope convention `changed` itself takes.
+    // `--db <path>` 把位置参数与它的取值分开；位置参数的形状是
+    // `<base> <this> [prefix]`，与 `changed` 自己接受的 scope 约定相同。
     let (positionals, db) = match argv.iter().position(|arg| arg == "--db") {
         Some(at) => match argv.get(at + 1) {
             Some(path) => (

@@ -1,20 +1,18 @@
-//! The A/B reading `diff` cannot give: cases that fail in **both** runs with a *different* detail.
+//! `diff` 给不了的那个 A/B 读数：**两个** run 都失败、但详情*不同*的行。
 //!
-//! `diff` answers "what started or stopped failing". A row that fails before and after moves neither
-//! count, yet its failure can change kind — an honest verbatim turning into a wrong value, or a wrong
-//! value turning into an error the corpus never stated. The project has been caught by exactly that: one
-//! batch reported `regress=0 net=11` while its own cluster had gone from "kept the source text" to
-//! "computed the value the golden says the user's own function should return", and another added six
-//! invalid errors behind the same clean reading. So the comparison is a command, not a habit of
-//! eyeballing two listings: `ledger changed <a> <b> [key-prefix]`.
+//! `diff` 回答的是“什么开始失败或不再失败”。一行前后都失败，两个计数都不动，可它的失败种类可以变——
+//! 一句诚实的原样输出变成一个错值，或者一个错值变成一句语料从没说过的错误。本项目就被这件事抓住过：
+//! 有一批报 `regress=0 net=11`，而它自己的簇已经从“保留源文本”变成“算出金样说用户自己那个函数该返
+//! 回的值”，另一批在同样干净的读数背后多加了六条无效错误。所以这个比较是一条命令，不是肉眼比对两份列表
+//! 的习惯：`ledger changed <a> <b> [key-prefix]`。
 
 use rusqlite::params;
 use rusqlite::{Connection, Result as QResult};
 use tracing::info;
 
-/// A shape comparison as data a caller can assert on: the differing lines, plus **how many rows failed in
-/// each run inside the scope**. The counts are not decoration — without them `changed = 0` cannot be told
-/// apart from "the scope matched nothing", the same confusion [`crate::Diff::fails_a`]/`fails_b` exist for.
+/// 一次形状比较，作为调用方能直接断言的数据：那些有差异的行，加上**每个 run 在 scope 内的失败行数**。
+/// 这两个计数不是装饰——没有它们，`changed = 0` 就和“scope 什么都没匹配上”分不开，而 [`crate::Diff::fails_a`]
+/// /`fails_b` 就是为了同一个混淆而存在的。
 #[derive(Debug)]
 pub struct Changed {
     pub rows: Vec<String>,
@@ -22,9 +20,8 @@ pub struct Changed {
     pub fails_b: usize,
 }
 
-/// Keys failing in both runs whose stored detail differs, as `key | a: <detail> | b: <detail>` lines,
-/// scoped by key prefix (empty = the whole record) exactly like [`crate::diff_runs`] so a scoped
-/// verification cannot silently be reading nothing.
+/// 两个 run 都失败、存下的详情不同的 key，输出成 `key | a: <detail> | b: <detail>` 行，按 key 前缀限定
+/// scope（空 = 整份记录），与 [`crate::diff_runs`] 完全一致，好让一次限定 scope 的校验不会悄悄在读空。
 pub fn changed_details(conn: &Connection, a: &str, b: &str, prefix: &str) -> QResult<Changed> {
     let (ra, rb) = (crate::run_id(conn, a)?, crate::run_id(conn, b)?);
     let pattern = format!("{prefix}%");
@@ -56,9 +53,8 @@ pub fn changed_details(conn: &Connection, a: &str, b: &str, prefix: &str) -> QRe
     })
 }
 
-/// `ledger changed <a> <b> [key-prefix]`: one line per shape-changed failure, then the count **beside
-/// both scope totals** — a `0` has to be distinguishable from "the scope matched nothing", which is how
-/// `diff`'s clean verdict was once misread.
+/// `ledger changed <a> <b> [key-prefix]`：每条形状变了的失败一行，然后把计数**挨着两个 scope 总量**打出来——
+/// 一个 `0` 必须能和“scope 什么都没匹配上”区分开，`diff` 那次干净的判定就是这样被误读过的。
 pub fn run_cli(conn: &Connection, args: &[String]) -> QResult<()> {
     let (Some(a), Some(b)) = (args.first(), args.get(1)) else {
         info!("usage: ledger changed <a> <b> [key-prefix]");

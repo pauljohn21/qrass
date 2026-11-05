@@ -1,10 +1,10 @@
-//! Ledger CLI thin shell: tracing subscriber setup + argument plumbing; all
-//! logic lives in the `ledger` library (shared with the hrx runner).
+//! 账本 CLI 的薄壳：tracing 订阅者的装配 + 参数的接线；所有逻辑都住在 `ledger` 库里
+//! （与 hrx runner 共用）。
 //!
-//! Under `--features trace` the run also gets an OpenTelemetry view (see [`trace_setup`]). The root span
-//! is not decoration: `tracing-opentelemetry` exports **spans**, and this shell used to create none, so a
-//! "traced" CLI run would have exported an empty trace. One span per invocation, carrying which command
-//! ran against which database, is the minimum a reading of "what did this call do" needs.
+//! 开 `--features trace` 时这一次 run 还会有一份 OpenTelemetry 视图（见 [`trace_setup`]）。那个根 span
+//! 不是装饰：`tracing-opentelemetry` 导出的是 **span**，而这层壳从前一个都不建，所以一次“带 trace 的”
+//! CLI run 会导出一条空 trace。每次调用一个 span、带着哪条命令对着哪个数据库跑，是“这次调用干了什么”
+//! 这个读数至少需要的东西。
 
 use rusqlite::Connection;
 use std::path::Path;
@@ -31,19 +31,17 @@ fn main() {
     }
 }
 
-/// The filter the environment asks for, defaulting to `info` so a normal run prints exactly what it
-/// printed before any tracing work.
+/// 环境要求的过滤器，默认 `info`，好让一次普通 run 打出的东西与任何 tracing 工作之前完全一样。
 ///
-/// ANSI styling is off on purpose: this binary's output **is** the reading, and colour codes in it broke
-/// every `sed`/`awk` slice attempted against it (three times in one session, each time producing a
-/// plausible-looking `0` that had to be caught by a positive control).
+/// ANSI 样式是故意关掉的：这个二进制的输出**就是**那个读数，而混在里面的颜色代码弄坏了每一回对它下手的
+/// `sed`/`awk` 切片（一个会话里三次，每次都产出一个看着合理的 `0`，非得靠阳性对照才抓得住）。
 fn filter() -> tracing_subscriber::filter::EnvFilter {
     tracing_subscriber::filter::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::filter::EnvFilter::new("info"))
 }
 
-/// Install the subscriber. With the `trace` feature the spans of this run are additionally bridged to
-/// OpenTelemetry and printed by `opentelemetry-stdout`, which needs no collector and no network.
+/// 装上 subscriber。开了 `trace` feature 时，这次 run 的 span 还额外桥到 OpenTelemetry，由
+/// `opentelemetry-stdout` 打印，它不需要 collector 也不需要网络。
 #[cfg(feature = "trace")]
 fn trace_setup() {
     use opentelemetry::trace::TracerProvider as _;
@@ -55,8 +53,8 @@ fn trace_setup() {
         .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
         .build();
     let tracer = provider.tracer("ledger");
-    // The tracer owns the exporter pipeline through an `Arc`; dropping the provider handle here would
-    // shut it down before the root span is ever exported.
+    // tracer 通过一个 `Arc` 持有 exporter 管线；在这里 drop 掉 provider 句柄会在根 span 来得及导出之前
+    // 就把它关掉。
     std::mem::forget(provider);
     let _ = tracing_subscriber::registry()
         .with(tracing_opentelemetry::layer().with_tracer(tracer))

@@ -1,25 +1,22 @@
-//! `ledger capability <run>` — **which capability blocks which rows**, counted from the corpus instead of
-//! guessed from the defect I happened to be touching.
+//! `ledger capability <run>`——**哪个能力挡住哪些行**，从语料数出来，而不是从我正好在动的那个缺陷猜。
 //!
-//! Why this tool exists: the failure distribution by *directory* (`core_functions/color` = 5,732 rows) says
-//! where the red is, but not *why*, so a session keeps picking its next increment out of the last needle it
-//! ran and re-litigating local fixes. This walks every failing key of one named run, pulls that case's own
-//! `input.scss` out of the `.hrx` archive it came from, and buckets it by the feature predicates below.
+//! 这个工具为什么存在：按*目录*看失败分布（`core_functions/color` = 5,732 行）说的是红在哪里，不是
+//! *为什么*，于是每个会话都接着从上一根 needle 里挑下一个增量、在局部修复上反复争执。本命令走一遍某个
+//! 具名 run 的每一个失败 key，从它出自的那份 `.hrx` 归档里取出该用例自己的 `input.scss`，再按下面的特征
+//! 谓词分桶。
 //!
-//! Two numbers per feature, because one without the other misleads: **rows** (the input mentions the feature
-//! at all — what a session could unblock by building it, upper bound) and **sole** (the input mentions *only*
-//! that feature — a lower bound on what is blocked by nothing else). Sorting by `rows` ranks the size of the
-//! prize; sorting by `sole` ranks what actually gates a row today.
+//! 每个特征两个数字，因为缺了另一个就会误导：**rows**（输入里只要提到这个特征——一个会话能靠造出它解锁
+//! 多少，上界）与 **sole**（输入里*只*提到这一个特征——不被别的东西挡住的下界）。按 `rows` 排是奖品的规模；
+//! 按 `sole` 排是今天真正挡住一行的是什么。
 //!
-//! The archive is the only oracle: an unresolved key is counted and reported rather than dropped silently.
+//! 归档是唯一的 oracle：一个解析不出的 key 会被计数并报告，而不是悄悄丢掉。
 
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One predicate and what it names. The strings are matched against the case's input text; `error golden`
-/// against the ledger's own failure detail, because a row whose expectation is an error message is blocked by
-/// the error work, not by the feature its input spells.
+/// 一个谓词和它点的名字。这些字符串拿去匹配该用例的输入文本；`error golden` 匹配的是账本自己的失败
+/// 详情，因为期望是错误消息的那些行是被错误那摊工作挡住的，不是被它们输入里写的特征挡住的。
 fn predicates() -> Vec<(&'static str, Vec<&'static str>)> {
     vec![
         (
@@ -82,8 +79,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let usage = || tracing::info!("usage: ledger capability <run> [--db <path>]");
     let (db, run) = match argv.split_first() {
-        // The run name is positional and `--db` takes its value in the next argument, matching how the
-        // `ledger` binary itself is invoked (`--db` with a space, not `--db=`).
+        // run 名是位置参数，`--db` 的值在下一个参数里，与 `ledger` 二进制自己被调用的方式一致
+        // （`--db` 带空格，不是 `--db=`）。
         Some((run, rest)) => {
             let explicit = rest
                 .iter()
@@ -136,8 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // The error expectation is its own bucket: a row that wants `Error: …` cannot be landed by implementing
-    // the syntax its input spells, so it must not be counted as a syntax prize.
+    // 错误期望是它自己的一个桶：一行想要的若是 `Error: …`，就不可能靠实现它输入里写的语法落地，所以不能把它
+    // 算成语法奖品。
     let errors = rows
         .iter()
         .filter(|row| {
@@ -170,9 +167,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The case's own input text: a key is `<path under spec>::<case name>`, and inside the archive the section
-/// header is `<===> <case name>/input.scss`. Returns `None` when either half cannot be found, which the
-/// caller reports as `unresolved` rather than dropping the row quietly.
+/// 该用例自己的输入文本：key 形如 `<path under spec>::<case name>`，前半是 spec 之下的路径；而在归档里
+/// 段头写作 `<===> <case name>/input.scss`。任何一半找不到都返回 `None`，调用方把它报成 `unresolved` 而不是
+/// 悄悄丢掉这一行。
 fn input_of(key: &str, spec: &Path) -> Option<String> {
     let (path, case) = key.split_once("::")?;
     let file = spec.join(format!("{path}.hrx"));
