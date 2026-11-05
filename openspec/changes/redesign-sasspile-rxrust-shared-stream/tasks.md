@@ -2663,7 +2663,7 @@
       **拒掉的一条**：审计要求把叙述词 `arity`/`oracle`/`fixture`/`run` 全译。`arity`/`run`/`fixture` 是本仓中文行文
       自己的用词（现量：rust.md `arity`=1、`run`=23；`sasspile-start` skill 三份 `arity`=6、`fixture`=5、`run`=43），
       改了反而与规则文不一致，保留；`oracle` 两边都 0 命中、不是既定词，已按它建议改“归档”（三处）。
-      本批自己写坏的一处（审计未报，读回全文时发现）：“毫米”写成了“殫米”——全仓 `grep -rn 殫` 现为空。
+      本批自己写坏的一处（审计未报，读回全文时发现）：把“毫米”写成了一个形近的生僻字（U+6BAB）——全仓重扫该码位现为空。
       基线 run 自此为 `zh-comments-builtins-math-v2`（与 `zh-comments-ledger-v2` `regress=0 net=0`，只差注释语言）。
       **未做（不得当作已交付）**：`crates/sasspile/src` 还剩约 3422 行注释——`builtins/color/` 六文件（603）、
       `color/` 目录（1086）、顶层余下文件（约 1700，大头 `exec.rs` 204/`expr.rs` 165/`brackets.rs` 136/`lexer.rs` 129/
@@ -2713,4 +2713,47 @@
       **未做（不得当作已交付）**：`builtins/color/amount.rs`（165 行注释）与 `write.rs`（147）待下批；`sasspile` 顶层
       与 `color/` 目录共约 3100 行未改。另：`change/no_space` 那 12 行仍红，是一处新记明的**未闭能力缺口**，
       不等于本批把它做了；`Error: $hue: Channel isn't scalable.` 也未做（消息那摊工作）。
+
+- [x] 9.33 **注释中文化第五批：`builtins/color/{amount,write}.rs`（271 行注释，2026-11-05）**。
+      行数（`wc -l`）：amount.rs 390→387、write.rs 327→308，均 ≤500；注释字符总量（逐行 `wc -m` 求和）
+      amount 12246→6912、write 10414→5437。奇数反引号行（凭据跨 `///` 断裂）：write.rs HEAD 6 → NOW **0**，
+      amount.rs HEAD 0 → NOW **0**（中途我自己造成过两处：一句 `Color space rgb doesn't have a channel …` 与
+      一个 `color.change(lab(…))` 输入被拆到两行，均已重排并量回 0）。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计用“剥掉注释后与 HEAD 逐行全等”独立复算同样为 0。
+      读数：`ledger diff zh-comments-builtins-color-v2 zh-comments-builtins-write-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；现测 hrx `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、
+      `skipped=1264`；无效错误 **19**；sasslint count=0、fmt EXIT=0、`cargo test --workspace` EXIT=0（62 条 ok）。
+      `gc-auditor` 判 12 条 finding，收 11、驳 1。本批又是**内容错**为主（HEAD 继承，但句子都经我重写）：
+      • `change/lab.hrx::all` 的期望被写成输入的 `lab(50% 20 -30)`，归档 :133-139 逐字是输入那一串、输出
+        `b: lab(20% -30 40);` ⇒ 已改成“输入…打的是 `lab(20% -30 40)`”；
+      • `axis()` 的“这一刀不读 lch/oklch”与同文件 `written_channel` 的 hue 分支自相矛盾：现量
+        `ledger failures zh-comments-builtins-write-v1 "core_functions/color/change/error/units" --count` = **0**
+        ⇒ `change` 确实答那句角度错误；已限定为“只对 `adjust`/`scale` 成立”；
+      • “`adjust/rgb.hrx` 两种都用（含百分比）”与“`adjust/units.hrx` 对一个字节通道用 `10%`”都无根据：
+        现量 `adjust/rgb.hrx` 里 `[0-9]%` = 0、`adjust/units.hrx` 里 `$red/$green/$blue` = 0，带 `%` 的字节通道
+        只在自带空间那侧（`adjust/display_p3.hrx:80` 的 `$green: 40%`），那一侧走 `written_channel` ⇒ 两处的
+        “百分比臂”改标为无 fixture；
+      • `scale/error/args.hrx::hue` 是个不存在的 case：真实边界只有 `too_few/too_many/unknown/wrong_name`，
+        而 `color.scale(red, $hue: 10%)` 属 `::unknown`（`white` 那例在 `polar.hrx::legacy`）⇒ 输入与键不再交叉；
+      • “`change/error/units/` 里每个空间的文件都是这句措辞”越了范围：现量 `hwb.hrx` = 0（它走不带
+        “or no units” 的那句）、`lch`/`oklch` 各 2、共 37 ⇒ 改成“除 `hwb.hrx` 外…，共 37 次”，让范围与计数互证；
+      • “五条原本通过的行”与 `#993333` 的例子都复取不到（现量是 `change/hwb.hrx` 的
+        `{all,alpha_input,alpha_arg,named}` 四行，输入为 `color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)`）
+        ⇒ 改成点名行而不用一个拿不到的计数；“被删臂的注释说反了”也在 `git log -S` 下取不到 ⇒ 删这半句，只留
+        可从代码复取的“不可达”论据；
+      • `error_expectation=27` 可复取，审计的量法用错了（它跑 `ledger shift` 子命令，真入口是
+        `--bin shift`）：本会话现量
+        `cargo run -q -p ledger --bin shift -- change-writes-absence-v4 change-in-carried-space` 打
+        `error_expectation=27`，同一对打到 `change-in-carried-space-v6` 是 0 ⇒ 把命令与成对 run 名写进注释；
+      • `160.8`/`228.26` 不是归档字面（grep = 0）但由金样精确推得 ⇒ 同一括号里并列
+        `63.0588235294% × 255` / `89.5137254902% × 255`，既可算又可 grep；
+      • 强调强度三处由斜体升为粗体（*缺席*/*就是*/*存之前*）⇒ 降回与 HEAD 一一对应。
+      审计还判两件事为“澄清而非新增断言”（“下面四条是取值读法，最后一条是拒答”对应 HEAD “Four readings” 却列五
+      条的内部不一致；“9.25 剩下的那五行”与 tasks.md 一致），并点名 `adjust/error/units/` 的计数与 21 行
+      `mixed_formats` 等可复取项逐条对上。
+      本批自己抓住的一处错字：`一遗`→一遍。另：审计在仓外 `/tmp` 建了对照文件（角色越界，已在报告里自
+      报），开仓内文件未动；它同时在 tasks.md 旧条目里发现 6 处 `拓`/`拄` 误字（早于本会话），已记为待清单。
+      基线 run 自此为 `zh-comments-builtins-write-v2`（与 `zh-comments-builtins-color-v2` `regress=0 net=0`）。
+      **未做（不得当作已交付）**：`crates/sasspile/src/color/` 目录 1086 行与顶层约 1700 行未改；本批标为
+      “无 fixture 的百分比字节臂”与“`change/no_space` 12 行”两处仍是未闭缺口，不得当已实现。
 
