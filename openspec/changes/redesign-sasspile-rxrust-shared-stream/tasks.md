@@ -2582,3 +2582,42 @@
       就已存在于工作区的 `sass-spec` 子模块内部 `.hrx` 修改（会话首条 `git status` 即报 ` M sass-spec`），
       它不得混进任何中文化 commit，需单独交代。
 
+- [x] 9.30 **注释中文化第二批：`crates/ledger/src` 六个文件全改（2026-11-05）**。
+      行数口径全用 `wc -l`（不是编辑器口径，9.29 批尾审计为此单独报过一条）：lib **499→485**、
+      changed 84→80、shift_impl 190→184、main 79→77、bin/shift 81→79、bin/capability 189→186，
+      六文件均 ≤500；注释字符总量（逐行 `wc -m` 求和，HEAD→NOW）：8156→4458 / 1612→798 / 2857→1338 / 1343→729 /
+      1186→615 / 2049→951——两个口径分开写：本仓的 `wc -L` 与 BSD `awk length()` 量出的其实是**字节**而不是字符（同一行
+      110→89 个字符，却 111→174 字节，因为 CJK 每字 3 字节），拿字节当字符会得出完全相反的结论；
+      逐行 `wc -m` 量得的最长注释行**字符**数为 110→89 / 109→82 / 109→84 / 107→85 / 108→91 / 111→83。
+      现余 27 行无中文注释：全部是空分隔行、Usage 里的**命令行**、`regression = fails(b) − fails(a)`
+      这条集合公式、以及一行带着 `reports/*.tsv` 签名的续行；Usage 的四个括注（它们是散文不是命令行）
+      已译。SQL、`predicates()` 全部字符串条目、`info!`/usage 串、`"--count"`、`" | a: "`/`" | b: "`/`got "`/`" want "`
+      一律未动（`git diff -U0` 非注释行 = **0**，审计另用“剥掉注释后与 HEAD 字节全等”的第二重量法+两个
+      非零阳性对照复算到同一读数）。
+      读数：`ledger diff zh-comments-sasslint-v2 zh-comments-ledger-v2` = **`regress=0 net=0`**，`changed` =
+      **`changed=0`**；现测 hrx `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、`skipped=1264`；
+      无效错误 **19**；`sasslint lint crates/sasspile/src` EXIT=0；`cargo fmt --all -- --check` EXIT=0；
+      `cargo test --workspace --no-fail-fast` EXIT=0（62 条 `test result: ok`，无 FAILED 无 warning）；
+      自扫 `crates/ledger/src` = 12 条，HEAD 副本同输入也是 12（全在代码行，非本批引入）。
+      `gc-auditor` 逐条对照英文原文，判 17 条 finding，全收：
+      • **凭据可 grep 性被本批打断（最重）**：`ledger failures <run> core_functions/color/hwb "expected error"`
+        被我拆到两条 `///` 上，整串 `grep -cF` 从 1 变 0——而本批正好把同文件里旧有的 `passed head-600-pathkey
+        operators/` 跨行断裂修好了，却在同文件新造了一处同形缺陷。命令整体回到一行（现重测 = 1）；
+      • **判据强度被削弱**：“the **only** alternative universe” 译成“另一个可选的论域”⇒补回“唯一”；
+      • **判据强度被加强**：“which is what proves …” 被我写成“唯一证明”⇒改为“它正是证明……的那条读数”；
+      • **关键动词换义**：“not to move the clusters it owns” 写成“不推动”（“推动”自带“推进”的反向含义）⇒“不改动”；
+      • **比较对象缺中心语**：“与它通过的长得一模一样”⇒补“用例”；“over-eager new rule” 整个限定词丢；
+      • **when 从句被写成断言**：“know when two texts do not line up” 少了“何时”⇒补上（那正是
+        `judge` 里 `va.len() != vw.len()` 那一支）；
+      • **“是”被译成“欠”**（“whether a slice is a capability or a message”）、**句法缺介词**（“…一起公开的
+        同一个理由”读不出主谓）、**漏虚词**（“多加六条”→“多加了六条”）、**同批两种译法**（“位置量”/“位置参数”）；
+      • **span 内占位符被译**：`<path under spec>::<case name>` 写成中文，与同段未译的
+        `<===> <case name>/input.scss` 不一致 ⇒ 恢复原样，解释写在 span 外；
+      • **粗体焦点被扩边**（`**both**`、`**error**`、`**beside both scope totals**` 四处）⇒收回单词焦点并把
+        `Reason` 那句长句断开；`rows` 括号里丢了“at all”（上界口径的全部依据）⇒补“只要”，并找回“a session”；
+      • **口径订正**：调用方报的 485/500 是编辑器把末行后的幻影空行也计入的口径，`wc -l` 为 485/499。
+      基线 run 自此为 `zh-comments-ledger-v2`（与 `zh-comments-sasslint-v2` `regress=0 net=0`，只差注释语言）。
+      **未做（不得当作已交付）**：`crates/sasspile/src` 的 3708 行注释仍未改（唯一剩下的大块，需按目录分簇）；
+      `lib.rs` Usage 块那 4 条命令行本身的 rustdoc `unclosed HTML tag` 告警 HEAD 与 NOW 一样（非本批引入，
+      要消得单独把整行命令用反引号包住，属下一轮可选项）。
+

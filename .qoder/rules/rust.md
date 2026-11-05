@@ -5,10 +5,11 @@ alwaysApply: true
 
 ## 技术栈与语言
 - Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释用中文
-  （2026-11-05 由 English 改过来；**存量代码注释正按 crate 逐批改写**：第一批 `crates/sasslint/src` 已做完
-  （`tasks.md` 9.29，`regress=0 net=0`），`ledger`/`sasspile` 待批；每批一个 `regress=0 net=0` 的纯文本 commit。
+  （2026-11-05 由 English 改过来；**存量代码注释正按 crate 逐批改写**：第一批 `crates/sasslint/src`（`tasks.md` 9.29）
+  与第二批 `crates/ledger/src`（9.30）已做完，各自 `regress=0 net=0`；待批的只剩 `crates/sasspile/src`（3708 行注释，
+  需按目录分簇），每批一个 `regress=0 net=0` 的纯文本 commit。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
-  只扫 diff 不够）。
+  只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。
   仍保持原文的只有四类，因为它们是「可复取凭据」而不是叙述：代码标识符与函数名、命令行、
   文件名与 `sass-spec` 的 case key、以及逐字引用的金样输出或错误消息
   （如 `Expected 0.5px to have unit "%" or no units.`）——译了就 grep 不回归档原文。
@@ -29,8 +30,9 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3457/11,533**（30.0%，**实质通过 3292** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-sasslint-v2`（终树；与 `change-in-carried-space-v6`
-   `regress=0 net=0`，只差 9.29 的注释语言。该 v6 又是 feat 入库的
+   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-ledger-v2`（终树；与 `zh-comments-sasslint-v2`
+   `regress=0 net=0`，只差 9.30 的注释语言；后者又是 `change-in-carried-space-v6` 的纯文本后继
+   （只差 9.29 的注释语言）。该 v6 又是 feat 入库的
    `change-in-carried-space-v5` `regress=0 net=0`，只差 9.28 的审查收口。2026-11-04：**`color.change` 能写在
    带自己空间的色上**，13 个 Color-4 空间共 197 行里 9 个文件全绿——名字属于空间本身（`$red`/`$x`/`$chroma`），
    而 **`%` 的底数是逐通道的不是逐空间的**（`lab` 自己里面 `lightness 30%`→30、`a -40%`→-50），所以新表
