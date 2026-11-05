@@ -2185,7 +2185,10 @@
         8.0e-11`）→ 换；第 0 行全保（`3.3e-16 / 4.6e-11 / 2.1e-12` 对各自散布）；第二行两项差 `4.7e-11 / 6.4e-11`
         均在自身散布（`1.6e-10 / 1.2e-10`）**以内**——按旧规则该保留，但它们是语料用白行（曲线无关）直接锁住的一整行：
         `to_space/rec2020/xyz.hrx::white` 的 Z 写 `1.0890577508`，转录值行和只到 `1.0890577507`，而拟合值行和为
-        `1.0890577507999998`。所以新口径：**当一个已声明的联合约束（语料直接印出的行和）能把单项分辨不出的差
+        `1.0890577507999998`【现量订正（9.34）：把表里那两个拟合通道相加，
+        `awk 'BEGIN{printf "%.17g", 0.028072693096295932+1.060985057703704}'` 与反序相加都是
+        `1.0890577508000001`，不是上边那个尾数；两处的单一住所已收到 `color/primaries.rs` 的注释里，以本行为准】。
+        所以新口径：**当一个已声明的联合约束（语料直接印出的行和）能把单项分辨不出的差
         分开时，拟合值有权覆盖转录值**。实测两个变体都 `regress=0`：run `rec2020-no-offset-v2`（保留旧第二行）
         `net=126`，run `rec2020-no-offset-v3`（拟合第二行）`net=141`，两者相差 `regress=16 net=31`。
         **那 16 行逐条具名并全部是末位 1**（`to_space/{hwb,lch,xyz,a98_rgb,prophoto_rgb}/rec2020::*` 与
@@ -2756,4 +2759,45 @@
       基线 run 自此为 `zh-comments-builtins-write-v2`（与 `zh-comments-builtins-color-v2` `regress=0 net=0`）。
       **未做（不得当作已交付）**：`crates/sasspile/src/color/` 目录 1086 行与顶层约 1700 行未改；本批标为
       “无 fixture 的百分比字节臂”与“`change/no_space` 12 行”两处仍是未闭缺口，不得当已实现。
+
+- [x] 9.34 **注释中文化第七批（按序第六个 commit）：`color/{channels,primaries,read,channel}.rs` 四张表（275 行注释，2026-11-05）**。
+      行数（`wc -l`）：channels 153→142、primaries 146→130、read 182→175、channel 121→112，均 ≤500。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计用“剥掉注释后四文件 shasum 与 HEAD 各自相同”交叉验过，
+      所以 `primaries.rs` 四张矩阵的每个浮点字面量（`0.486_570_948_648_212`、`[0.0, 0.045_113_381_937_499_92, …]`、
+      `[0.0, 0.028_072_693_096_295_932, 1.060_985_057_703_704]`）、`Space::Lab | Space::Lch => 1.0`、
+      `value + 0.0`、`5e-11` 一律未动。
+      凭据断行（奇数反引号行）：HEAD 是 channels 0、primaries 0、**read 2、channel 2**，NOW 四文件均 **0**
+      —— 本批把四处继承的跨 `///` 断行接回行内（送审时我先报过“HEAD 0/0/0/0”，那是错的，以这条量法为准）。
+      注释内数字多重集（`[0-9]+([.][0-9]+)?`）：channels/channel 全等；primaries 只有 `5.1`→`5.0778`、
+      `6.9`→`6.8716`（把转写换回 tasks.md 9.16 的原串）；read 多一枚 `6`（新写的阳性对照）。
+      读数：`ledger diff zh-comments-builtins-write-v2 zh-comments-color-tables-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；hrx 现量 `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、
+      `skipped=1264`；无效错误 **19**；sasslint count=0、fmt EXIT=0、`cargo test --workspace` EXIT=0（62 条 ok）。
+      `gc-auditor` 判 19 条 finding，全收。两条高危是**键与事实**：
+      • `to_space/oklch/prophoto_rgb.hrx::missing/x` 不存在（现量：该文件 `missing/` 下只有
+        lightness/chroma/hue/non_hue/non_lightness/all；`0.0010727236` 在 :106，属 `missing/lightness`）⇒ 改对；
+      • `read.rs` 头部“同一个颜色在 rgb/srgb/hsl 里分别答三个数”与归档矛盾：`171` 出自 `color.channel(#abcdef, "red")`
+        而 `0.7529411765` 出自 `color.channel(pink, "green", $space: srgb)`（同文件下文自己就分对了）⇒ 改成
+        “同一个问题在不同空间里的三种答法”并各带自己的颜色；
+      • `grep` 那条量法在 HEAD 就不可执行（模式里带省略号）且我把命令名译成了叙述词⇒ 换成可逐字执行的
+        `grep -rlE 'color\.(red|green|blue)\([^)]*hsl\(' sass-spec/spec/`，现量**零个文件**，并补上阳性对照
+        `grep -rl 'color\.red('` = 6 个（“反方向已实现”因此可验）；
+      • `change/unusual_numbers::negative_zero` 补 `.hrx`（唯一一处不带后缀的键，现量 `negative_zero` 用例存在）。
+      判据强度与译义五项：`curve-free` 被译成“无条件”（它的意思是“与曲线假设无关”，同词另处又译对）⇒ 两处统一；
+      “no entry … separated from the published digits **by this instrument**” 被我写成“量具与数字共同分开”（施动者错）；
+      “it was worth checking” 被我写成开放的“是否值得”；“has standing”→“有立场”、“fails a fact”→“负了一个事实”
+      均改为通顺不换了义的说法；“needs saying” 那句漏了宾语。
+      另两条量法/口径的纠正：**`tasks.md` 9.20 记的 `1.0890577507999998` 与 `primaries.rs` 的
+      `1.0890577508000001` 是同一事实的两份写法，自算两种相加次序都是后者**⇒ 已在 9.20 就地加【现量订正】，
+      单一住所归 `color/primaries.rs` 的注释；`5.1e-9`/`6.9e-9` 不是 9.16 的原串（真形 `5.0778e-9`/`6.8716e-9`）
+      ⇒ 换回原串并写“逐字记在”。其余为中文质量：答应→作答、“重一个数”→“把那个数再写一次”、“它那明度”→
+      “它的明度”、“定形体”→“决定它打成哪一种形制”、“由谁定”倒装改写、gap→缺口（与 `modify.rs:84` 同词）、
+      “拒语”→“这一拒答”。
+      本批我自己写坏的：`拄`（三次，同一个字连错三轮，最后改用“照录”避开）、`一遗`→一遍、`顶`当`项`三处、
+      `彩留空`多一字；全部靠读回与 `grep -n "拄\|殫\|一遗\|癲"` 现量收干（四文件现为空）。
+      基线 run 自此为 `zh-comments-color-tables-v2`（与 `zh-comments-builtins-write-v2` `regress=0 net=0`）。
+      **未做**：`color/` 还剩 `mod.rs`（215 行注释、486 行文件）、`matrix.rs`（179）、`space.rs`（177）、
+      `text.rs`（127）、`ops.rs`（113）共约 811 行，以及 `sasspile/src` 顶层约 1700 行；审计另点名两处
+      **继承的键制式不齐**（`hue.hrx`/`saturation.hrx`/`lightness.hrx` 在 `color/`、`global/color/`、`modules/color/`
+      三处同名，且同一段注释里基目录在 `core_functions/` 与 `core_functions/color/` 之间来回），本批没动它们。
 

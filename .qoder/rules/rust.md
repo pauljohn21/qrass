@@ -7,14 +7,18 @@ alwaysApply: true
 - Rust edition 2024，toolchain 1.99。所有对话用中文，代码/命令/文件名/注释用中文
   （2026-11-05 由 English 改过来；**存量代码注释正按 crate 逐批改写**：`crates/sasslint/src`（`tasks.md` 9.29）、
   `crates/ledger/src`（9.30）、`builtins` 登记骨架 + math 域（9.31）、`builtins/color/` 四文件（9.32）与
-  `builtins/color/{amount,write}.rs`（9.33）已做完，各自 `regress=0 net=0`；待批只剩 `crates/sasspile/src/color/`
-  （1086 行）与顶层余文件约 1700 行，每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行）。
+  `builtins/color/{amount,write}.rs`（9.33）与 `color/{channels,primaries,read,channel}.rs`（9.34）已做完，
+  各自 `regress=0 net=0`；待批只剩 `crates/sasspile/src/color/` 的 `mod/matrix/space/text/ops`（约 811 行）
+  与顶层余文件约 1700 行，每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行）。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
   只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。
   **中文化不等于沿用旧文**：9.32/9.33 两批共查出七条注释在断一件归档已推翻或无根据的事（`rgb` 颜色答 hsl 轴、
   `$hue:` “无行点名”、`change` 无行说 no-op、`lab(50% 20 -30)` 当输出、`axis()` 自称不读 lch/oklch、
   legacy 字节侧的百分比臂无 fixture、“五条原本通过的行”复取不到），它们全是继承而非新写——
-  改写每一句时都要现量它对不对，错的当场改对。
+  改写每一句时都要现量它对不对，错的当场改对。9.34 另立两条收尾规矩：**送审的读数必须是刚跑过的**（本轮把
+  “奇数反引号行 HEAD=0”报错了，实际 read/channel 各有 2 处）；**同一处事实只住一个文件**
+  （`tasks.md` 9.20 与 `color/primaries.rs` 对同一行和写了两个不同尾数，已订正并把单一住所归注释）。
+  中文错字靠定量的怪字表收尾：`grep -n "拄\|殫\|一遗\|癲" crates/`（本会话连错三轮“抄”→“拄”，同一个字靠眼睛抽不干净）。
   仍保持原文的只有四类，因为它们是「可复取凭据」而不是叙述：代码标识符与函数名、命令行、
   文件名与 `sass-spec` 的 case key、以及逐字引用的金样输出或错误消息
   （如 `Expected 0.5px to have unit "%" or no units.`）——译了就 grep 不回归档原文。
@@ -35,10 +39,10 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3457/11,533**（30.0%，**实质通过 3292** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-builtins-write-v2`（终树；与 `zh-comments-builtins-color-v2`
-   `regress=0 net=0`，只差 9.33 的注释语言；这条纯文本链往前依次是 9.32/9.31/9.30/9.29 的
-   `zh-comments-builtins-color-v2`、`zh-comments-builtins-math-v2`、`zh-comments-ledger-v2`、
-   `zh-comments-sasslint-v2`，再到 `change-in-carried-space-v6`。该 v6 又是 feat 入库的
+   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-color-tables-v2`（终树；与 `zh-comments-builtins-write-v2`
+   `regress=0 net=0`，只差 9.34 的注释语言；这条纯文本链往前依次是 9.33/9.32/9.31/9.30/9.29 的
+   `zh-comments-builtins-write-v2`、`zh-comments-builtins-color-v2`、`zh-comments-builtins-math-v2`、
+   `zh-comments-ledger-v2`、`zh-comments-sasslint-v2`，再到 `change-in-carried-space-v6`。该 v6 又是 feat 入库的
    `change-in-carried-space-v5` `regress=0 net=0`，只差 9.28 的审查收口。2026-11-04：**`color.change` 能写在
    带自己空间的色上**，13 个 Color-4 空间共 197 行里 9 个文件全绿——名字属于空间本身（`$red`/`$x`/`$chroma`），
    而 **`%` 的底数是逐通道的不是逐空间的**（`lab` 自己里面 `lightness 30%`→30、`a -40%`→-50），所以新表
