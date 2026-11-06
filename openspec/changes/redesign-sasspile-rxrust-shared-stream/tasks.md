@@ -3006,3 +3006,39 @@
       `operations.rs` 85、`loops.rs` 72、`structure.rs` 54、`calls.rs` 50、`trace.rs` 49、`selector.rs` 43、
       `phases.rs` 40）与 `builtins/` 余下约 847 行。基线 run 自此为 `zh-comments-axes-v3`。
 
+- [x] 9.40 **注释中文化第十三批：`calls.rs`（50 行注释 → 51 行，文件 174→175，2026-11-06）**。单文件批。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计用“剥注释后与 HEAD 逐字 diff 为空”交叉验证，并逐个
+      确认 `Argument` 两字段与 `#[derive(Debug, Clone, PartialEq)]`、`split(&brackets(toks))?`、
+      `builtins::signature(&name)`、`tracing::debug!` 五个字段与 `found.map_or("<none: kept verbatim>",
+      |_| "<registered>")`、`fold`/`std::mem::take`/`strip_suffix('(')`/`matches!(&toks[tail],
+      Tok::Punct(')'))`/`toks[(head + 1)..tail]`/`depth_of(&current) == 0`/`toks[2..].to_vec()`/
+      `[Tok::Var(name), Tok::Punct(':'), ..]` 与 `trim_layout`+`is_empty` 链均未动；`cargo doc` 对本文件
+      **0** 条未解析链接（全文仅剩 lib.rs:179 一条 `[`Render`]`，待 `lib.rs` 那批顺修）。
+      读数：`ledger diff zh-comments-axes-v3 zh-comments-calls-v2` = **`regress=0 net=0`**、`changed=0`；
+      hrx `3457/11533`、实质 **3292** + 蒙对 165、skipped 1264；无效错误 **19**；sasslint count=0、fmt EXIT=0、
+      `cargo test --workspace` EXIT=0（62 条 ok）；奇数反引号 NOW=**0**。
+      **读数订正（本会话第二次报错自己现量的数）**：我对审计说“HEAD 奇数反引号行=0”，审计用同法量到
+      **HEAD=2**（第 144/145 行把 `cut_at(.., |tok| matches!(tok,` 与 `Tok::Space(_)))` 拆两行）——即本批是
+      **2→0 的修复**而不是“本来就没有”。已记进 rust.md：送审前该读数必须把命令原输出贴下来而不是凭刚看一眼。
+      `gc-auditor` 判 5 条，全收：
+      • **零读数缺阳性对照**：我写的 `grep -c '"var"' builtins/mod.rs` = 0 无法区分“缺席”与“在表里”——
+        同一量法对已登记的 `"div"`/`"rgb"`/`"min"` 也全是 0。改用 `grep -rn 'name: "var"' …/builtins/` = 0、
+        `name: "calc"` = 0，并对已登记名 `name: "math.div"`/`name: "rgb"` 交出 **2**（已写进注释）；
+      • **假凭据**：“`signature` 自己列的名单”一说不成立于代码（`signature` 只遍历
+        `BUILTINS = &[math::MATHS, color::COLORS]`，mod.rs:102）；改成同时指代码真源与 `signature` 的
+        **文档句**（那句确实点名 `color.contrast`/`var`/`map.merge`）；
+      • **全称句挂错例**：“`var(--a, b)` 内部的分隔符永远切不开”在语料与 tests/ 里都 0 引用；真正的凭据是
+        `tests/calculation.rs:70`（`calc(clamp(1%, 2px, 3%))`）与 `:323`（`math.div(1, min(10, 20))`），
+        已把“永远”挂到这两个测试名上，并把 `var(--a, b)` 标为**推断例**；
+      • 中文：「开括」→写为“紧跟的 `(`”、“错数字”→“错的数字”、“两端的还是得去”（可误读为“必须要去”）
+        →“两端的仍要剥掉”。
+      审计判为未弱化的一条：“`rgb(18 52 86)` 的实参是三个 Word”——逐字数组字面量仍只住
+      `tests/color_args.rs:5`（行为断言 :24），金样 `rgb/one_arg/no_alpha.hrx:7` = `a {b: rgb(18 52 86)}` ✓，
+      散文改写不造成第二住所。其余通过项：三个指针（1.7a→tasks.md:1144、1.2b→:227、0′.3b→:83）各有住所；
+      “(`/`) 非结构字符”“`(` 不刷 pending”“整个那一串”“`name()` 零实参”“粒度没有超过词法”均能找到
+      lexer.rs 的行或 tests/builtins.rs 的用例（:101/:134/:262）。
+      **未做（不得当作已交付）**：顶层余 10 个文件约 790 行（`value.rs` 116、`calc.rs` 106、`unit.rs` 104、
+      `lib.rs` 98、`operations.rs` 85、`loops.rs` 72、`structure.rs` 54、`trace.rs` 49、`selector.rs` 43、
+      `phases.rs` 40）与 `builtins/` 余下约 847 行；顺修清单：`builtins/color/modify.rs:78` 与 `lib.rs:179` 两条
+      断链。基线 run 自此为 `zh-comments-calls-v2`。
+
