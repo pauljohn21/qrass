@@ -1797,7 +1797,7 @@
         `sasslint count=0`、无 >500 行文件、`cargo fmt --check` exit=0。
       • **未做（不得当作已交付）**：
         (a) **换算校准** —— 白点不变量失败：`to_space/srgb/oklab.hrx::white` 得 `oklab(101.8011897979% …)`
-            而金样是 `oklab(100% 0 0)`；`to_space/lab/srgb.hrx::middle` 差 ~1.5e-3。这不是“多拄几位常数”：
+            而金样是 `oklab(100% 0 0)`；`to_space/lab/srgb.hrx::middle` 差 ~1.5e-3。这不是“多照录几位常数”：
             中性行必须回 100/0/0，失败说明 BRADFORD 与 srgb primaries 的版本/推导与语料 oracle 不一致。
             可解途径（金样已给独立三元组）：`to_space/srgb/xyz.hrx::missing/{red,green,blue}` 三行的输入在
             解码后线性无关，每输出通道 3 方程 3 未知，能直接解出语料自己的矩阵列。
@@ -2091,7 +2091,7 @@
         ④ `row_of` 的 `> 0.01` 是凭空的阈值，而它自称要拒的 `0.04` 对能原样通过——改成 `>= 1.0` 并把理由写成
            放大倍数（语料半步除以 `n₂−n₁`）；现在 `prophoto_rgb` 的反接假设在 1/1.8 下被它拒掉
            （`separate ... by only 0.8686684159955671` → panic），而 `1.8` 正常通过（ratio `0.062`）。
-        另：同一残差表原先拄在 6 个文件里（其中一份还错了一个数量级：`8e-17` 应为 `7.8e-16`）——现在数值只住在本条，
+        另：同一残差表原先被复写进 6 个文件里（其中一份还错了一个数量级：`8e-17` 应为 `7.8e-16`）——现在数值只住在本条，
         src/守卫/基线节都改为指针。`smallest_channel` 字段补上后，量具会打出本次拟合见过的最小非零通道
         （`prophoto_rgb 1.8` → 线性化后 `0.0158`）；但语料打印侧最小非零通道是 `0.1 > 1/16`，
         即 **prophoto 的分段支本批仍零约束**，下一批不得拿 `4.9e-11` 当“分段也对了”的证据。
@@ -2134,8 +2134,8 @@
         五张 primaries 表（四张字面 + `srgb` 为委派）连同出处搬到新文件
         `color/primaries.rs`（119 行，`matrix()` 改为委派），`space.rs` 回到 409 行。拆完重测：`prophoto-solved` vs
         `prophoto-solved-v2` = `regress=0 net=0`，确认拆分行为无变。
-        过程中我自己写错过一次：拄表时把 a98 的 `[2][0]` 误填成了 prophoto 的 `0.0039…`，编译前核对数字才改回
-        `0.02703136138641237`——同一批里手抄数字的第二例，下一例应当由命令递而不是由人拄。
+        过程中我自己写错过一次：转录那张表时把 a98 的 `[2][0]` 误填成了 prophoto 的 `0.0039…`，编译前核对数字才改回
+        `0.02703136138641237`——同一批里手抄数字的第二例，下一例应当由命令递而不是由人重录。
       • **未做**：`rec2020`（需带 `α` 偏移的假设，纯幂已被 verdict 拒）；prophoto 的分段支（语料无 `|channel| < 1/16`
         的行，需另找证据或接受这个盲区）；`xyz/prophoto_rgb::white` 这类差末位 1 的行（天花板，已具名不钉）。
 
@@ -2842,4 +2842,55 @@
       A98 候选指针、`state-of-the-port.md` 里 9.17 残差的舍入副本）未动。
       基线 run 自此为 `zh-comments-color-math-v2`（与 `zh-comments-color-tables-v2` `regress=0 net=0`，只差注释与
       上面那些被修正的内容）。
+
+- [x] 9.36 **注释中文化第九批：`color/{text,space}.rs`（304 行注释，2026-11-06）**。
+      行数（`wc -l`）：text.rs 477→468、space.rs 480→449（两文件原本都贴 500 上限，现都留出余量）。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计用“剥注释后逐行与 HEAD 全等”独立复算同一值，
+      `NAMES` 表 148 个拼写逐字节全等（148/148、重复 0），`Space` 13 个变体、`parse`/`css` 每臂、`white()` 的
+      D50 三/D65 十、`transfer()` 映射、`polar_pair` 四对、`same_family` 三臂、`DUST = 5e-11` 均未动。
+      奇数反引号行（凭据跳 `///` 断开）：text.rs **HEAD 4 → NOW 0**、space.rs 0→0；两文件已无英文散文注释。
+      读数：`ledger diff zh-comments-color-math-v2 zh-comments-color-space-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；hrx 现量 `3457/11533`、实质 **3292** + 蒙对 165、skipped 1264；无效错误 **19**；
+      sasslint count=0、fmt EXIT=0、`cargo test --workspace` EXIT=0（62 条 ok）。注释内数字多重集本批不等 HEAD，
+      内容全部在下条列出（删：伪造的 `0.25 0.4 0.77` 与已过期的 `0.9999999304`/`1.0890577507`；加：逐字金样
+      `0.2498513331 0.3952400722 0.77356175` 与现量读数 `0`/`5`/`255`/`350`/`360`/`500`/节号 `9.24`）。
+      `gc-auditor` 判 15 条 finding，全收（本轮按新立的 rust.md 规矩，先对**全称否定句与节号指针**逐条现量）：
+      • **高危一：“目前有一张表与这里声明的白不一致”已过期**。现量：`ledger failures … "to_space/rec2020/xyz"` 交出
+        5 行，其中**没有** `xyz.hrx::white`（那是 `xyz_d50::{white,middle,out_of_range/{near,far}}` 与
+        `xyz::out_of_range/far`），而 `primaries.rs` 自己写明“第 1 行现在的是归档的”——转录表那 `7e-8` 缺陷已被
+        拟合行顶掉。那批数字因此从 `space.rs` 删除，出处归单一住所 [`super::primaries`]（也是同文件双住所一条）；
+      • **高危二：“没有任何 fixture 把一个未书写通道与 alpha 配对”无限定地为假**：
+        `core_functions/color/color/alpha.hrx::none/slash/blue` 逐字写 `color(srgb 0.1 0.2 none / 0.4)`。那句只对该臂
+        负责的四表示成立（空间族由 `print` 打），已加限定并写明这一区分；gamut 那半边现量 `output.css` 里含通道 `none`
+        的 rgb 值无一行分量 > 255（阳性对照：人造串 `rgb(none 0 500)` 会响），并预先挡掉
+        `to_gamut/space.hrx::clip/*` 那堆 `rgb(none 255 none)`（调用点域外、打印前已夹回）；
+      • **高危三：伪造金样**。`color(display-p3 0.25 0.4 0.77)` 全仓 0 命中（它是真值的舍入转述却被说成语料钉住），
+        已换为逐字 `color(display-p3 0.2498513331 0.3952400722 0.77356175)`（`to_space/srgb/display_p3.hrx::middle`）；
+        同一句里的 `to_space/srgb/*.hrx::middle` 通配也不全成立——同目录 `srgb.hrx` **根本没有** `middle` 段（现量 0）；
+      • 省略号凭据归到了同名另一个 case：`…::lightness/fraction` 本指 `change/hsl.hrx`（`rgb(1%, 0%, 0%)`），但上一句
+        刚引过 `adjust/hsl.hrx`，而它的 `lightness/fraction` 是 `rgb(100%, 1%, 1%)` ⇒ 名字写全，并记下“同名 key 跨文件
+        不得用省略号”这条口径；
+      • “八位 hex 从不打印”不限定为假：归档有八位串（`ie_hex_str.hrx` 等，`#FFDADDEE` 逐字可取），但那是未实现的
+        `ie-hex-str()` 的输出（现量：`grep -rn "ie.hex.str" crates/sasspile/src` 只命中本注释；阳性对照用
+        `"grayscale"` 命中 `builtins/color/mod.rs:163`）⇒ 已改成“本文件的颜色打印机（hex 臂）从不打八位形”；
+      • “`tasks.md` 9.23 按推广记录”指错：9.23 区间内 `推广/孪生` 命中 0，“半边有旁证、半边无行”在 **9.24** ⇒ 改指；
+      • “有 primaries 表的那五个空间”是表数不是空间数：五张 `Some(&` 臂盖**七个**变体（`srgb`/`srgb-linear` 共用、
+        `display-p3`/`-linear` 共用）；“`A98_GAMMA` 是唯一写下那个数的地方”口径混（代码口径成立，另有 4 处散文提及）
+        ⇒ 限定为“唯一以代码写下该指数的地方”；
+      • `rgb(0% none 30%)` 归档 0 命中⇒ 标为人造示例；`255.19` 与 `-1.1e-15` 住所是 `tasks.md` 而非归档⇒ 标“算出的，
+        不是归档文本”；“没有 fixture 把一个角当 gamut”补上口径与阳性对照（>360 为 0 行，阈值改 100 交 350 行）；
+      • 中文：一处词被断在两行（“在进一 / 个矩形空间”）已接回；`power` 与 `powerless` 统一；本批自己写坏的另有三处
+        （“开尖”、“相零”、“拄”当“抄”→改写为“转录”）。
+      **审计自我披露两条（必须计入）**：① 它在上下文压缩前曾创建 `.audit_spans.txt` 再删除，违反“不创建文件”的
+      要求（本轮压缩后未再创建）；② 它自报四个无效量具（`--include=*.hrx` 未加引号被 zsh 展开、`grep -v 'INFO ledger'`
+      误滤数据行、`set -- $p` 不分割、macOS awk 不支持三参数 `match`），因此它的 `rec2020/xyz` 当时报 0 行、
+      八位 hex 报 13 行——我这边重跑分别为 **5 行**与 **43 处 occurrence**（行/出现两种口径），结论以现量为准。
+      审计另记一条 OUT-OF-SCOPE：`tests/color.rs:356` 写“six rows under `core_functions/color/rgb/**`”，实为 6 个
+      **文件** / 15 **行**；本批未改 `tests/`，待顶层批次一并收。
+      顺手收干的一条旧债：怪字表 `grep -rn "拄" tasks.md` 在本批之前交出 8 处，其中 4 处是散文里的真错字（:1800、
+      :2094、:2137、:2138），已改为“照录/被复写进/转录/重录”；其余 4 处（:2758/:2796/:2797/:2883）是把该字当**待查串引用**
+      的记录句，故意保留 —— 不然下次把怪字表当闸用时会被自己的记账误报。从此跑该表时要区分这两类。
+      **未做（不得当作已交付）**：只剩 `color/mod.rs`（215 行注释、486 行文件贴上限）与 `sasspile/src` 顶层约
+      1700 行；`REC2020_GAMMA`/prophoto 两段仍转述 9.20 的残差与 `net`（上一批已标注为转述，未抽干）。
+      基线 run 自此为 `zh-comments-color-space-v2`。
 

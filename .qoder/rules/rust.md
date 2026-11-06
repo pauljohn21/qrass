@@ -8,8 +8,8 @@ alwaysApply: true
   （2026-11-05 由 English 改过来；**存量代码注释正按 crate 逐批改写**：`crates/sasslint/src`（`tasks.md` 9.29）、
   `crates/ledger/src`（9.30）、`builtins` 登记骨架 + math 域（9.31）、`builtins/color/` 四文件（9.32）与
   `builtins/color/{amount,write}.rs`（9.33）与 `color/{channels,primaries,read,channel}.rs`（9.34）与
-  `color/{ops,matrix}.rs`（9.35）已做完，各自 `regress=0 net=0`；待批只剩 `color/{mod,space,text}.rs`
-  （519 行注释，文件 486/480/477 行、都贴 500 上限，需压缩式改写）与顶层余文件约 1700 行，
+  `color/{ops,matrix}.rs`（9.35）与 `color/{text,space}.rs`（9.36）已做完，各自 `regress=0 net=0`；待批只剩
+  `color/mod.rs`（215 行注释、486 行文件贴 500 上限，需压缩式改写）与顶层余文件约 1700 行，
   每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行）。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
   只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。
@@ -24,7 +24,13 @@ alwaysApply: true
   拒答”、“legacy 访问器保文本——语料要的就是这个”），另有一条指向不存在记录的指针（“`tasks.md` 9.9 记着 `$space:`
   未闭”，而 9.9 区间内 `$space` 命中 0）；归档里 `error/non_legacy` 共 15 行逐字要的是错误。
   改写到“无行/零命中/没有 fixture”或一个 `tasks.md` 节号时，必须先跑一条 `grep` 或
-  `ledger failures … --count`，把那个数或命中位置写进注释。
+  `ledger failures … --count`，把那个数或命中位置写进注释。9.36 真正执行了一次这条规矩，发现四类新故障，都是同一成因：
+  **现在时的全称句会过期**（“目前有一张表与声明的白不一致”——那批 `7e-8` 早被拟合行顶掉，现量只数到 5 行且不包含
+  那行 white）；**全称句没写作用域**（“没有任何 fixture 把缺通道与 alpha 配对”——空间族里就有，
+  `color/alpha.hrx::none/slash/blue`；该句只对存字节那四表示成立）；**舍入转述当逐字金样**
+  （`color(display-p3 0.25 0.4 0.77)` 全仓 0 命中，真值是 `0.2498513331 0.3952400722 0.77356175`）；
+  **同名 key 跨文件用省略号**（`…::lightness/fraction` 在 `change/hsl.hrx` 与 `adjust/hsl.hrx` 里值不同）。
+  所以：全称句必带作用域名，金样必逐字可 grep，“目前/现在”类句式只在刚重测过时才写。
   仍保持原文的只有四类，因为它们是「可复取凭据」而不是叙述：代码标识符与函数名、命令行、
   文件名与 `sass-spec` 的 case key、以及逐字引用的金样输出或错误消息
   （如 `Expected 0.5px to have unit "%" or no units.`）——译了就 grep 不回归档原文。
@@ -45,11 +51,11 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3457/11,533**（30.0%，**实质通过 3292** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-color-math-v2`（终树；与 `zh-comments-color-tables-v2`
-   `regress=0 net=0`，只差 9.35 的注释语言与被修正的内容；这条纯文本链往前依次是 9.34/9.33/9.32/9.31/9.30/9.29 的
-   `zh-comments-color-tables-v2`、`zh-comments-builtins-write-v2`、`zh-comments-builtins-color-v2`、
-   `zh-comments-builtins-math-v2`、`zh-comments-ledger-v2`、`zh-comments-sasslint-v2`，再到
-   `change-in-carried-space-v6`。该 v6 又是 feat 入库的
+   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-color-space-v2`（终树；与 `zh-comments-color-math-v2`
+   `regress=0 net=0`，只差 9.36 的注释语言与被修正的内容；这条纯文本链往前依次是 9.35/9.34/9.33/9.32/9.31/9.30/9.29 的
+   `zh-comments-color-math-v2`、`zh-comments-color-tables-v2`、`zh-comments-builtins-write-v2`、
+   `zh-comments-builtins-color-v2`、`zh-comments-builtins-math-v2`、`zh-comments-ledger-v2`、
+   `zh-comments-sasslint-v2`，再到 `change-in-carried-space-v6`。该 v6 又是 feat 入库的
    `change-in-carried-space-v5` `regress=0 net=0`，只差 9.28 的审查收口。2026-11-04：**`color.change` 能写在
    带自己空间的色上**，13 个 Color-4 空间共 197 行里 9 个文件全绿——名字属于空间本身（`$red`/`$x`/`$chroma`），
    而 **`%` 的底数是逐通道的不是逐空间的**（`lab` 自己里面 `lightness 30%`→30、`a -40%`→-50），所以新表
