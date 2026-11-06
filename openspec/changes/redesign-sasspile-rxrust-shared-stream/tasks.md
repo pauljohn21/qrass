@@ -2943,3 +2943,36 @@
       游离空格（OUT-OF-SCOPE，待下一批顺修）。
       基线 run 自此为 `zh-comments-color-core-v2`。
 
+- [x] 9.38 **注释中文化第十一批：`env.rs` + `scope.rs`（50 行注释 → 53 行，文件 45→43 / 57→61，2026-11-06）**。
+      因上下文将尽，本批故意缩到 50 行（纪律写的是 250~350），闸口一项未减。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计独立复算同值，并逐个确认 `HashMap`、`vars.insert`、
+      `SassError::typed(ErrorKind::UndefinedVariable, "Undefined variable.")`、`format!("  {}: {};\n", …)`、
+      `plain_css`/`inert` 两个 `pub(crate) … : bool`、三处 `#[derive]`、`to_css` 链式体均未动；
+      `cargo doc --document-private-items` 对本批两文件 **0** 条未解析链接（告警全在其他文件）。
+      读数：`ledger diff zh-comments-color-core-v2 zh-comments-exec-env-v1` = **`regress=0 net=0`**、`changed=0`；
+      hrx `3457/11533`、实质 **3292** + 蒙对 165、skipped 1264；无效错误 **19**；sasslint count=0、fmt EXIT=0、
+      `cargo test --workspace` EXIT=0（62 条 ok）；奇数反引号行 NOW=HEAD=0（审计复现）；怪字表 0 命中。
+      **上一轮卡在闸上**：`gc-auditor` 当时未注册（`unknown subagent type`）而我**拒绝提交**也不改用内置代理顶替，
+      改动留在工作区等了一轮；本轮它重新可用，判 5 条 finding，全收：
+      • **必须改一（口径冒充凭据）**：我写的“`meta/get_mixin` 现量 30 条都抛 `Undefined variable`”把**两个不同口径**
+        当成一件事 —— 现量双 needle `failures <run> "meta/get_mixin" "Undefined variable" --count` = **1**
+        （`content::scope/fall_through`），其余 20 行是 `expected error …`/透传、另 9 行 `got ""`；
+        而我当作凭据的例子 `same_module::dash_insensitive/*` 恰好是 `got ""` 那类。已拆成两句各自带命令与口径，
+        并把真凭据换成那 1 条；审计另核到 HEAD 的 31 在两个 run 上都复取不到（实测均为 30），即删 31 是对的。
+      • **必须改二（全称句只给一个口径）**：`Error: Undefined variable.` 的 **23 次 / 15 文件** 是全仓口径，
+        含被 `crates/sasspile/tests/hrx.rs:24` 政策排除的 `non_conformant`（其中 3 次）；按语料口径是
+        **20 次 / 12 文件**。两个数都写进注释，只保留两种口径下都成立的断言（只有一种写法、都不带变量名）。
+      • 低阶三条：嵌套深度“从来不是调用栈”与 `exec.rs` 页头同事实且**丢了它的限定句**（改为只留指针）；
+        `directives/use/error/member/missing` 其实是文件名，真 key 是 `…missing.hrx::namespaced/variable_use`；
+        散文里的 `pending`/`declaration` 改为“待刷的声明（字段 `decls`）”（全仓 `Declaration` 标识符 0 命中）。
+      本批自己写坏的：`未定叉变量`、`那个头的的`、`invoking`/`reaching`/`own`/`pending` 夹英文、`匹 key`、`包指`。
+      **审计自曝（计入）**：它开头声称未创建文件，报告末尾承认上一段曾瞬建 `.audit_new_code.txt`/`.audit_head_code.txt`
+      再删 —— 这是**第三次**同类越界；下一轮升为派发前的首句硬要求，若再犯则先要求它声明工具边界。
+      审计另记 OUT-OF-SCOPE：`sass-spec` 子模块脏树是 239 个 .hrx 的 **CRLF→LF** 而非内容改动，
+      本批引用的文件均不在其中 —— 不得把在这棵脏树上学到的数当可重现凭据（待用户定如何处置子模块）。
+      **未做**：顶层余 12 个文件约 900 行注释（`phases.rs` 40、`selector.rs` 43、`trace.rs` 49、`calls.rs` 50、
+      `structure.rs` 54、`axes.rs` 59、`loops.rs` 72、`operations.rs` 85、`lib.rs` 98、`unit.rs` 104、`calc.rs` 106、
+      `value.rs` 116）与 `builtins/` 余下约 847 行；`env.rs` 的 23 在 `tasks.md:125` 仍有第二住所（本批已标口径，
+      合并待下一批）。基线 run 自此为 `zh-comments-exec-env-v2`（审计收口后重测；v1 是收口前的同一棵树）。
+      另：本批发现 `perl -CSD -i -pe` 对中文串改写会静默失效（三次），改用编辑工具。
+
