@@ -1,24 +1,20 @@
-//! The colour **spaces** — the model `core_functions/color/to_space/**` and the `color()` constructor need,
-//! kept apart from [`crate::color`]'s srgb-era laws.
+//! 色彩**空间** —— `core_functions/color/to_space/**` 与 `color()` 构造子需要的模型，与
+//! [`crate::color`] 那些 srgb 时代的律分开。
 //!
-//! Why a separate owned value instead of more fields on [`crate::color::Representation`]: a colour in
-//! `display-p3` or `oklch` *is* its three channel values plus the space they belong to, so the space travels
-//! as data on the colour (`Color::space`) and every existing print/read law keeps working untouched for the
-//! colours that have no space. `None` means "the channels are the srgb-family bytes / hsl-hwb axes the struct
-//! already stored" — which is what keeps 1,690 passing rows from being re-decided by this file.
+//! 为什么是一个独立的 owned 值而不是往 [`crate::color::Representation`] 上再加字段：一个在 `display-p3` 或
+//! `oklch` 里的颜色*就是*它的三个通道值加上它们所属的那个空间，所以空间作为颜色上的数据跟着它走
+//! （`Color::space`），而每一条既存的打印/读入律对那些没有空间的颜色继续原样工作。`None` 的意思是
+//! “这些通道就是结构体早存下的 srgb 族字节 / hsl-hwb 轴” —— 那正是保住 1,690 行已通过的行不被本文件重定一次的根据。
 //!
-//! The math is one table per space (primaries matrix, transfer function, reference white) and **one** route:
-//! every conversion goes through XYZ referenced to D65. The white-point adaptation is computed from the
-//! Bradford cone matrix rather than copied as a rounded constant, because the corpus prints ten significant
-//! digits and a hand-copied matrix (`0.964295676`) is already wrong in the tenth (`color(srgb 1 1 1)` converted
-//! to `xyz-d50` is `color(xyz-d50 0.9642956764 1 0.8251046025)`,
-//! `to_space/srgb/xyz_d50.hrx::white`).
+//! 数学是每个空间一张表（primaries 矩阵、传递函数、参考白）加上**唯一一条**路线：每次换算都走以 D65 为基准的
+//! XYZ。白点适应是从 Bradford 锥矩阵算出来的，而不是作为一个舍入常数录来的，因为语料打十位有效数字，而一份
+//! 手录的矩阵（`0.964295676`）在第十位就已经错了（`color(srgb 1 1 1)` 转到 `xyz-d50` 是
+//! `color(xyz-d50 0.9642956764 1 0.8251046025)`，`to_space/srgb/xyz_d50.hrx::white`）。
 
 use super::matrix::{from_polar, of_xyz_d65, to_polar, to_xyz_d65};
 
-/// The spaces this compiler can carry and convert. `rgb`/`hsl`/`hwb` are absent on purpose: those targets are
-/// answered by the legacy [`crate::color::Representation`] they already print in, not by a space channel
-/// triple.
+/// 本编译器能携带与换算的那些空间。`rgb`/`hsl`/`hwb` 是有意缺席的：那些目标由它们自己已经在打的 legacy
+/// [`crate::color::Representation`] 作答，而不是由一个空间通道三元组。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Space {
     Srgb,
@@ -36,10 +32,9 @@ pub enum Space {
     Oklch,
 }
 
-/// A colour's own space and the channel values as it carries them. `None` is a `none` channel — powerless,
-/// which is data rather than a sentinel number, because the maths always needs a number while the answer
-/// sometimes has to say `none` back. How the two are reconciled is one question with one answer, in
-/// [`Color::converted`]; this type only carries the data.
+/// 一个颜色自己的空间，以及它携带通道值的方式。`None` 就是一个 `none` 通道 —— powerless，那是数据而不是一个哨兵
+/// 数字，因为数学总是需要一个数，而答案有时得把 `none` 说回去。两者如何调和是一个只有一答的问题，答案在
+/// [`Color::converted`]；这个类型只携数据。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InSpace {
     pub space: Space,
@@ -47,45 +42,43 @@ pub struct InSpace {
 }
 
 impl InSpace {
-    /// The channels as the maths reads them: a powerless channel contributes `0`, which is what the archive
-    /// computes with (`to_space/srgb/xyz.hrx::missing/red` keeps the other two channels at the values `0` for
-    /// red gives). The one reading, because two spellings of it have already drifted apart once.
+    /// 数学读法下的那些通道：一个 powerless 通道贡献 `0`，那正是归档算账用的东西
+    /// （`to_space/srgb/xyz.hrx::missing/red` 把另两个通道保持在 `0` 给 red 的那些值上）。只保留一种读法，
+    /// 因为它的两种拼法已经飘开过一次。
     pub(super) fn filled(self) -> [f64; 3] {
         self.channels.map(super::missing_as_zero)
     }
 }
 
-/// Which white point a space's numbers are referenced to.
+/// 一个空间的数字以哪个白点为基准。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum White {
     D65,
     D50,
 }
 
-/// The transfer between the printed channel and the linear-light value the matrices expect.
+/// 打印通道与矩阵期望的那个线性光值之间的那条传递曲线。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Transfer {
     Linear,
-    /// srgb, and the same curve for `display-p3` (`color(display-p3 …)` channels).
+    /// srgb，以及 `display-p3` 用的同一条曲线（`color(display-p3 …)` 的通道）。
     Srgb,
-    /// Pure gamma `563/256` from the printed channel to linear light. Stated as the fraction because the
-    /// rounded `2.19921` is not the archive's exponent — it is far enough away to move the tenth decimal
-    /// (`matrix.rs`'s `A98_GAMMA` is the only place the value is written; `tasks.md` 9.17 has the residuals
-    /// that separate the candidates).
+    /// 从打印通道到线性光的纯 gamma `563/256`。写成分数而不是小数，因为舍入后的 `2.19921` 不是归档的指数 ——
+    /// 它远到足以移动第十位（`matrix.rs` 的 `A98_GAMMA` 是唯一以代码写下该指数的地方，其余只是散文提及；分开那些
+    /// 候选的残差在 `tasks.md` 9.17）。
     A98,
-    /// Gamma `1.8` with the linear segment below `1/16`.
+    /// 带 `1/16` 以下线性分段的 gamma `1.8`。
     Prophoto,
-    /// A plain signed gamma of `2.4`, with **no offset and no linear segment on the encode side** - the corpus
-    /// prefers the plain power there by `net=41` rows over keeping the former `4.5×` arms (`matrix.rs`'s
-    /// `REC2020_GAMMA` carries the scan, both A/B runs, and which side of the pair each reading speaks to;
-    /// `tasks.md` 9.20).
+    /// 一个普通的带符号 gamma `2.4`，**在编码侧没有偏移也没有线性分段** —— 语料在那侧以 `net=41` 行偏好纯幂而不是
+    /// 保住先前的 `4.5×` 两臂（那个扫描、两个 A/B run、以及每个读数到底说哪一侧都在 `matrix.rs` 的
+    /// `REC2020_GAMMA` 上；`tasks.md` 9.20）。
     Rec2020,
 }
 
 impl Space {
-    /// The space a written name names. Underscore and hyphen spellings are the same space, because the corpus
-    /// fixture files use the former (`to_space/srgb/xyz_d50.hrx`) while CSS prints the latter
-    /// (`color(xyz-d50 …)`), and a Sass name is case-insensitive (`color/color/no_alpha.hrx::case`).
+    /// 一个写下的名字所命名的空间。下划线与连字符两种拼法是同一个空间，因为语料的 fixture 文件用前者
+    /// （`to_space/srgb/xyz_d50.hrx`）而 CSS 打后者（`color(xyz-d50 …)`），而 Sass 的名字大小写不敏感
+    /// （`color/color/no_alpha.hrx::case`）。
     pub fn parse(name: &str) -> Option<Self> {
         let key: String = name.to_ascii_lowercase().replace('_', "-");
         match key.as_str() {
@@ -106,7 +99,7 @@ impl Space {
         }
     }
 
-    /// The name the printed form uses.
+    /// 打印出来的形体所用的名字。
     pub fn css(self) -> &'static str {
         match self {
             Self::Srgb => "srgb",
@@ -125,31 +118,30 @@ impl Space {
         }
     }
 
-    /// The primaries matrix, linear-light of this space to XYZ **at the white the table itself lands on**.
-    /// `None` for the spaces whose channels already are (or are derived from) XYZ. The tables and the
-    /// provenance of every fitted digit live in [`super::primaries`], which is a separate file because these
-    /// tables plus those notes pushed this one past the line limit.
+    /// 这个空间的 primaries 矩阵，从本空间的线性光到 XYZ，**在表自己落到的那个白上**。通道已经是（或从）XYZ 派生
+    /// 的那些空间是 `None`。那些表与每个拟合数字的出处住在 [`super::primaries`]，那是一个独立的文件，因为这些表
+    /// 加上那些说明会把本文件顶过行数上限。
     pub(super) fn matrix(self) -> Option<&'static [[f64; 3]; 3]> {
         super::primaries::table(self)
     }
 
-    /// Which white point the conversion routes this space through. Every variant is named on purpose: a
-    /// `_ => White::D65` fallback is the same shape this file elsewhere rejects (`unwrap_or(&BRADFORD)`, see
-    /// [`Self::primaries`]) — it would answer for a variant added later without ever being asked.
+    /// 换算会把这个空间路由过哪个白点。每个变体都是有意具名的：一个 `_ => White::D65` 的兜底就是本文件在别处
+    /// 拒绝的同一个形状（`unwrap_or(&BRADFORD)`，见 [`Self::primaries`]）—— 它会在没人问的情况下为一个以后新增的
+    /// 变体作答。
     ///
-    /// For the five spaces with a primaries table this is **not** an independent fact: the table's own row
-    /// sums are its white, and the archive states them curve-free (`color(<space> 1 1 1)` survives any
-    /// transfer, since a power fixes 0 and 1). `to_space/*/xyz.hrx::white` is therefore the test of this
-    /// function, and one table currently disagrees with the white declared here:
-    /// `to_space/rec2020/xyz.hrx::white` prints `color(xyz 0.9504559271 1 1.0890577508)` while the
-    /// transcribed rec2020 row sums reach `color(xyz 0.9504559271 0.9999999304 1.0890577507)` — a `7e-8` defect
-    /// in the **table**, which must not be filed under "rec2020's curve hypothesis is unresolved".
+    /// 对有 primaries 表的那五张表盖到的七个变体（`srgb`/`srgb-linear` 共用一张，`display-p3`/`-linear` 共用一张），
+    /// 这**不是一个独立事实**：表自己的行和就是它的白，而归档不经曲线就把它们说出来（`color(<space> 1 1 1)` 对任何
+    /// 传递都成立，因为一个幂钉住 0 与 1）。所以 `to_space/*/xyz.hrx::white` 就是这个函数的测试。那些行的逐位数字
+    /// 与每张表的出处只住 [`super::primaries`]，这里不复述 —— 它已经复述过一次而留下两个答案：rec2020 转录表
+    /// `7e-8` 的行和缺陷早已被拟合行顶掉，所以 `to_space/rec2020/xyz.hrx::white` 现在是绿的，今天红的
+    /// 是另一件事（现量 `cargo run -q -p ledger -- failures <run> "to_space/rec2020/xyz" --count` = **5**：
+    /// `xyz_d50::{white,middle,out_of_range/near,out_of_range/far}` 与 `xyz::out_of_range/far`，那走的是 D50
+    /// 路线上的换算，不是“这里声明的白与表不一致”）。
     pub(super) fn white(self) -> White {
         match self {
             Self::XyzD50 | Self::Lab | Self::Lch => White::D50,
-            // `prophoto-rgb` is D65 here even though the pigment's reference white is D50, because the fitted
-            // table lands on the D65 white by itself (`to_space/prophoto_rgb/xyz.hrx::white`); declaring it D50
-            // as well would adapt a second time. The white travels with the table.
+            // 尽管颜料自己的参考白是 D50，`prophoto-rgb` 在这里仍是 D65，因为拟合出的表自己就落在 D65 白上
+            // （`to_space/prophoto_rgb/xyz.hrx::white`）；再把它声明成 D50 就是适应第二遍。白点随表走。
             Self::Srgb
             | Self::SrgbLinear
             | Self::DisplayP3
@@ -163,11 +155,10 @@ impl Space {
         }
     }
 
-    /// The primaries table of a space whose channels **are** RGB-like. [`Self::matrix`] is an `Option`
-    /// because the rest (`xyz`, `xyz-d50`, `lab`, `lch`, `oklab`, `oklch`) answer with their own math in
-    /// [`super::matrix`] and never reach here; the fallback this replaces (`unwrap_or(&BRADFORD)`) answered
-    /// a missing table by using the white-point matrix as if it were primaries — a number no fixture
-    /// states, and one that would have gone unnoticed if a variant were added without its arm.
+    /// 一个通道**就是** RGB 型的那个空间的 primaries 表。[`Self::matrix`] 是个 `Option`，因为其余那些
+    /// （`xyz`、`xyz-d50`、`lab`、`lch`、`oklab`、`oklch`）在 [`super::matrix`] 里用自己的数学作答，从不走到这里；
+    /// 它替掉的兜底（`unwrap_or(&BRADFORD)`）是把白点矩阵当 primaries 用来自答一个缺席的表 —— 那是一个没有任何
+    /// fixture 说过的数字，而如果一个变体带着它自己的臂进来，它会一直没人看见。
     pub(super) fn primaries(self) -> &'static [[f64; 3]; 3] {
         self.matrix()
             .expect("a space that reaches the primaries arm has a primaries table")
@@ -184,54 +175,51 @@ impl Space {
         }
     }
 
-    /// The **one** arm that separates the spaces whose channels are a lightness plus a derived pair
-    /// (`lab`/`lch`/`oklab`/`oklch`) from the ones whose channels are an index-aligned RGB-or-XYZ triple.
-    /// Two consequences hang off it, and the archive states each separately — they are listed here rather
-    /// than copied, because two arm lists is two answers for one partition:
-    /// * the derived spaces print with their own suffix ([`Self::is_functional`]);
-    /// * a `none` survives `color.to-space` **in the position it was written** only inside the
-    ///   index-aligned family — `to_space/srgb/xyz.hrx::missing/red` answers
-    ///   `color(xyz none 0.028962782 0.0735618977)`, while `to_space/srgb/lab.hrx::missing/red` answers
-    ///   `lab(19.2964565453% -7.7361660103 -20.488348653)` with the missing channel substituted ([`Color::converted`]).
+    /// **唯一**那一条臂，它把“通道是一个亮度加上一对派生值”的空间（`lab`/`lch`/`oklab`/`oklch`）与“通道是一个
+    /// 按下标对齐的 RGB 或 XYZ 三元组”的那些分开。两个推论挂在它上面，而归档把它们各自说出来 —— 这里只列不抄，
+    /// 因为两份臂名单就是对同一个划分有两个答案：
+    /// * 派生空间用自己的后缀打（[`Self::is_functional`]）；
+    /// * 一个 `none` 只有在按下标对齐的那族里，才能**在写下它的那个位置上**活过 `color.to-space` ——
+    ///   `to_space/srgb/xyz.hrx::missing/red` 答 `color(xyz none 0.028962782 0.0735618977)`，而
+    ///   `to_space/srgb/lab.hrx::missing/red` 把缺的那个通道代入后答
+    ///   `lab(19.2964565453% -7.7361660103 -20.488348653)`（[`Color::converted`]）。
     fn is_derived(self) -> bool {
         matches!(self, Self::Lab | Self::Lch | Self::Oklab | Self::Oklch)
     }
 
-    /// Whether this space's channels are a `color()` call's `r g b` (or `x y z`) triple printed as plain
-    /// numbers, as against the `lab(…)`/`lch(…)` forms with their own suffixes.
+    /// 这个空间的通道是不是一个 `color()` 调用里打成裸数字的 `r g b`（或 `x y z`）三元组，而不是带自己后缀的
+    /// `lab(…)`/`lch(…)` 形体。
     pub(super) fn is_functional(self) -> bool {
         !self.is_derived()
     }
 
-    /// The number a **full-scale percentage** names in this space's lightness — the `channel = 0` row of
-    /// [`Space::percent_divisor`], whose table carries the reasoning and the fixtures. It keeps its own name
-    /// because the printer and the `color(…)` reader ask only about that channel; the other channels of the
-    /// same space sit on different bases (`change/lab.hrx::a/percent` is not on `lightness`'s scale).
+    /// **满量程百分比**在这个空间的亮度上命名的那个数 —— 即 [`Space::percent_divisor`] 的 `通道 0` 行，那张表
+    /// 带着理由与 fixture。它保留自己的名字，因为打印机与 `color(…)` 的读入只看那一个通道；同一个空间的其他通道
+    /// 坐在不同的底上（`change/lab.hrx::a/percent` 不在 `lightness` 的尺度上）。
     pub fn percent_full(self) -> f64 {
         super::channels::full(self)
     }
 
-    /// The index of `name` **in this space**, or `None` when this space has no channel by that name. The names
-    /// and the fixtures behind them are in [`super::channels`]: `change/srgb.hrx` writes `$red`,
-    /// `change/xyz.hrx` `$x`, `change/lab.hrx` `$a`, `change/lch.hrx` `$chroma`.
+    /// `name` **在这个空间里**的下标，当这个空间没有叫那个名的通道时是 `None`。那些名字与背后的 fixture 在
+    /// [`super::channels`]：`change/srgb.hrx` 写 `$red`、`change/xyz.hrx` 写 `$x`、`change/lab.hrx` 写 `$a`、
+    /// `change/lch.hrx` 写 `$chroma`。
     pub fn channel(self, name: &str) -> Option<usize> {
         super::channels::index(self, name)
     }
 
-    /// This space's three channel names, in index order — what a call writes by when the colour carries this
-    /// space (`change/xyz.hrx` names `$x`, `change/lch.hrx` names `$chroma`; [`super::channels`] is the table).
+    /// 这个空间的三个通道名，按下标顺序 —— 颜色带着这个空间时一次调用会点名什么（`change/xyz.hrx` 点名 `$x`、
+    /// `change/lch.hrx` 点名 `$chroma`；表在 [`super::channels`]）。
     pub fn channel_names(self) -> [&'static str; 3] {
         super::channels::names(self)
     }
 
-    /// Whether one of this space's channels is its hue, which an argument reaches as an angle.
+    /// 这个空间是否有一个通道是它的色相，而一个实参会以一个角到达它那里。
     pub fn is_hue(self, channel: usize) -> bool {
         super::channels::is_hue(self, channel)
     }
 
-    /// The divisor a percentage argument on one channel reads against, or `None` where the archive states no
-    /// percentage for that channel (the two hues). **Per channel, not per space** — that is the finding of
-    /// `change/lab.hrx::{lightness,a}/percent`, which disagree on the base inside one space.
+    /// 一个通道上的百分比实参所读的那个除数，或者在归档对那个通道没有说过百分比时是 `None`（那两个色相）。
+    /// **逐通道而不是逐空间** —— 那正是 `change/lab.hrx::{lightness,a}/percent` 的发现，同一个空间里它们底不同。
     pub fn percent_divisor(self, channel: usize) -> Option<f64> {
         super::channels::percent_divisor(self, channel)
     }
@@ -240,10 +228,9 @@ impl Space {
 use super::{Channel, Color, Representation};
 
 impl Color {
-    /// A colour **in its own space**: the space and its channels travel as one value inside
-    /// `Representation::InSpace` (with `none` kept as `None`), and the byte/hsl-axis triple stays empty
-    /// because every read of such a colour goes through [`Color::xyz`] and every print through
-    /// [`super::text::print`].
+    /// 一个**在自己空间里**的颜色：空间与它的通道作为一个值在 `Representation::InSpace` 里跟着颜色走（`none`
+    /// 继续作为 `None` 存），而字节/hsl-轴那个三元组保持空白，因为这样一个颜色的每一次读入都走 [`Color::xyz`]、
+    /// 每一次打印都走 [`super::text::print`]。
     pub fn in_space(space: Space, channels: [Option<f64>; 3], alpha: f64) -> Self {
         let zero = |value: f64| Channel {
             value: Some(value),
@@ -257,13 +244,11 @@ impl Color {
         }
     }
 
-    /// The colour's channels **as a triple that can carry a `none`**, or `None` when it stores axes instead.
-    /// A legacy `rgb` triple *is* an srgb triple — which is the whole reason [`Color::converted`] can read one
-    /// source for both spellings of the same colour — while an `hsl`/`hwb` colour cannot hold a `none` yet (their
-    /// constructors still decline one, and `tasks.md` 9.23 names the rows waiting on it), so they answer `None`
-    /// here rather than claiming a fact nothing holds. **The one exhaustive listing of that partition**: the
-    /// conversion asks it in two places, and a guarded `if` cannot be exhaustive, so this is where the set is
-    /// named once instead of being re-typed.
+    /// 颜色的通道，**作为一个能携带 `none` 的三元组**；当它存的是轴时是 `None`。一个 legacy `rgb` 三元组
+    /// 就*是*一个 srgb 三元组 —— 这正是 [`Color::converted`] 能为同一个颜色的两种拼法只读一个来源的全部原因 ——
+    /// 而一个 `hsl`/`hwb` 颜色还存不下 `none`（它们的构造子仍拒绝一个，而 `tasks.md` 9.23 点名了等它的行），
+    /// 所以它们在这里答 `None`，而不是声称一个没东西持有的事实。**那个划分唯一一份穷举列出**：换算在两处问它，
+    /// 而一个带条件的 `if` 不可能穷举，所以集合在这里只命名一次，而不是被重新打一遍。
     fn triple(&self) -> Option<[Option<f64>; 3]> {
         match self.representation {
             Representation::InSpace(carried) => Some(carried.channels),
@@ -275,20 +260,18 @@ impl Color {
         }
     }
 
-    /// CIE XYZ referenced to D65 — the one route between any two spaces.
+    /// 以 D65 为基准的 CIE XYZ —— 任意两个空间之间唯一的那条路线。
     ///
-    /// A space colour converts by the table above. A legacy colour reads as srgb: an `hsl`/`hwb` colour first
-    /// through the axes it stores, an `rgb`-family one through its bytes, and both are the *encoded* channel
-    /// of the srgb transfer curve, which is why `#3366cc` and `color(srgb 0.2 0.4 0.8)` convert to the same
-    /// `lab` (`to_space/srgb/lab.hrx::middle`).
+    /// 一个空间颜色按上面那张表换算。一个 legacy 颜色按 srgb 读：一个 `hsl`/`hwb` 颜色先过它存的轴，一个
+    /// `rgb` 族的颜色过它的字节，而两者都是 srgb 传递曲线的*编码后*通道，这就是为何 `#3366cc` 与
+    /// `color(srgb 0.2 0.4 0.8)` 换算到同一个 `lab`（`to_space/srgb/lab.hrx::middle`）。
     pub fn xyz(&self) -> [f64; 3] {
         let bytes = match self.representation {
             Representation::InSpace(carried) => {
                 return to_xyz_d65(carried.space, carried.filled());
             }
-            // Each of these two reads its own axes through the one helper that states how (`stored_axes` for
-            // what `hsl` wrote, `hwb_axes` for the derivation a `hwb` colour implies) — a colour that carries
-            // a space cannot reach here, so no zero-filled triple is ever read as bytes.
+            // 这两个读法各自过那个说出怎么读的唯一 helper（`stored_axes` 读 `hsl` 写下的东西，`hwb_axes` 读一个
+            // `hwb` 颜色蕴含的推导）—— 一个携带空间的颜色到不了这里，所以永远不会把一个填零的三元组当字节读。
             Representation::Hsl => {
                 let [hue, saturation, lightness] = self.stored_axes();
                 crate::axes::axes_to_rgb(hue, saturation, lightness)
@@ -297,9 +280,8 @@ impl Color {
                 let [hue, saturation, lightness] = self.hwb_axes();
                 crate::axes::axes_to_rgb(hue, saturation, lightness)
             }
-            // The four byte-storing representations, listed because a guard form (`writes_bytes`) cannot be
-            // exhaustive on its own — which is why the partition that the *conversion* asks twice lives in
-            // [`Color::triple`] instead of being typed out again here.
+            // 四个存字节的表示，列出来是因为一个守卫形式（`writes_bytes`）自己不可能穷举 —— 这正是为何*换算*要问
+            // 两次的那个划分住在 [`Color::triple`]，而不是在这里再打一遍。
             Representation::Legacy
             | Representation::Percent
             | Representation::Hex
@@ -308,15 +290,13 @@ impl Color {
         to_xyz_d65(Space::Srgb, bytes.map(|byte| byte / 255.0))
     }
 
-    /// This colour's channels in `space`, for `color.to-space`. A `none` is data, not a sentinel: the maths
-    /// always reads it as `0` ([`InSpace::filled`]), and what the **answer** prints is decided by the one
-    /// rule at the bottom of this function — the index-aligned family keeps it in the position it was
-    /// written, everything else substitutes.
+    /// 这个颜色在 `space` 里的通道，给 `color.to-space` 用。一个 `none` 是数据而不是哨兵：数学永远把它读成 `0`
+    /// （[`InSpace::filled`]），而**答案**打些什么由本函数底部那条唯一规则定 —— 按下标对齐的那族把它留在写下它的
+    /// 位置上，其余一律代入。
     pub fn converted(&self, space: Space) -> Self {
-        // **Same space, same numbers.** An identity conversion may neither re-round a channel nor decide which
-        // ones were `none` by way of a matrix round trip: `to_space/xyz_d50/xyz_d50.hrx::missing/x` keeps
-        // `color(xyz-d50 none 0.2 0.3)` verbatim, and running the triple through XYZ twice is what turned it
-        // into invented numbers.
+        // **同空间同数字。**一次恒等换算既不得重取整一个通道，也不得靠一次矩阵往返去决定哪些曾经是 `none`：
+        // `to_space/xyz_d50/xyz_d50.hrx::missing/x` 逐字保住 `color(xyz-d50 none 0.2 0.3)`，而把那个三元组跑两遍
+        // XYZ 正是把它变成发明出的数字的东西。
         let carried = match self.representation {
             Representation::InSpace(carried) => Some(carried),
             _ => None,
@@ -326,13 +306,11 @@ impl Color {
                 return self.clone();
             }
         }
-        // **A rectangular/polar pair is one triple, not a conversion.** `oklab` ↔ `oklch` and `lab` ↔ `lch`
-        // share every channel and differ only in how the last two are written, so no matrix is involved. The
-        // archive shows this directly: `to_space/oklab/oklch.hrx::missing/b` writes
-        // `color.to-space(oklab(10% 0.2 none), oklch)` and answers `oklch(10% 0.2 0deg)` — lightness and chroma
-        // carried over digit for digit. Sending that through XYZ cannot reproduce it: the round trip leaves the
-        // exactly-zero channel at ±1e-17, and a negative residue makes `atan2` fold to `359.999…deg`, which
-        // prints as `360deg`. That is how one row went red when the cone table was corrected.
+        // **矩形/极坐标一对就是同一个三元组，不是一次换算。**`oklab` ↔ `oklch` 与 `lab` ↔ `lch` 共用每一个通道，
+        // 只在后两个怎么写上不同，所以不涉及任何矩阵。归档直接把这点显示出来：`to_space/oklab/oklch.hrx::missing/b`
+        // 写 `color.to-space(oklab(10% 0.2 none), oklch)` 而答 `oklch(10% 0.2 0deg)` —— 亮度与彩度逐位携过去。
+        // 把它穿过 XYZ 无法复现：那次往返会把一个恰为零的通道留在 ±1e-17，而一个负的余数让 `atan2` 折到
+        // `359.999…deg`，打出来就是 `360deg`。那就是修正 cone 表时一行变红的来历。
         let polar_pair = |carried: InSpace| {
             let triple = carried.filled();
             match (carried.space, space) {
@@ -345,30 +323,26 @@ impl Color {
             Some(triple) => triple,
             None => of_xyz_d65(space, self.xyz()),
         };
-        // The source's unwritten positions, read the same way for both carriers (`Color::triple` is where that
-        // partition is named). A legacy `rgb` triple takes part in the same index-aligned law because it *is* an
-        // srgb triple: `to_space/rgb/srgb.hrx::missing/red` prints
-        // `color(srgb none 0.0784313725 0.1176470588)` just as a written `color(srgb none …)` does.
+        // 源侧那些未书写的位置，对两种载体都按同一个方式读（那个划分命名在 `Color::triple`）。一个 legacy `rgb`
+        // 三元组参与同一条按下标对齐的律，因为它*就是*一个 srgb 三元组：`to_space/rgb/srgb.hrx::missing/red` 打
+        // `color(srgb none 0.0784313725 0.1176470588)`，与一个写下的 `color(srgb none …)` 一样。
         let source = self.triple();
-        // **The index-aligned family keeps its `none` where it was written.** The missing channel still
-        // contributes `0` to the maths, and the archive's other two channels are the numbers `0` produces —
-        // `to_space/xyz/srgb.hrx::missing/x` prints `color(srgb none 0.6558430379 0.5622938017)`.
-        // Any other pair substitutes, so the same triple becomes three numbers; on the way into a
-        // rectangular space that substitution is green (`to_space/lab/srgb.hrx::missing/lightness`), while on
-        // the way into `lab`/`oklab` the rows are still red in the tenth decimal, which is the ceiling
-        // `tasks.md` 9.14 records and not this rule failing.
+        // **按下标对齐的那族把自己的 `none` 留在写下它的位置上。**缺的那个通道仍向数学贡献 `0`，而归档另两个通道
+        // 就是 `0` 产生的那两个数 —— `to_space/xyz/srgb.hrx::missing/x` 打
+        // `color(srgb none 0.6558430379 0.5622938017)`。其余任何一对都代入，于是同一个三元组变成三个数；
+        // 在进一个矩形空间的路上那个代入是绿的（`to_space/lab/srgb.hrx::missing/lightness`），而在进
+        // `lab`/`oklab` 的路上那些行仍红在第十位小数，那天花板是 `tasks.md` 9.14 记下的，不是这条律失败。
         let same_family = match (carried, self.triple()) {
             (Some(existing), _) => !space.is_derived() && !existing.space.is_derived(),
-            // No space triple, but a byte triple: an srgb colour all the same.
+            // 没有空间三元组，但有一个字节三元组：那仍是一个 srgb 颜色。
             (None, Some(_)) => !space.is_derived(),
-            // An `hsl`/`hwb` colour's axes are not index-aligned with anything this conversion prints.
+            // 一个 `hsl`/`hwb` 颜色的轴与这次换算能打出的任何东西都不按下标对齐。
             (None, None) => false,
         };
-        // A `none` in every channel is a colour with no power at all, and it stays powerless into a space
-        // (`to_space/srgb/lab.hrx::missing/all` answers `lab(none none none)`, and `rgb(none none none)`
-        // reaches the same answer by the same read — `to_space/rgb/lab.hrx::missing/all`); a legacy `hsl`
-        // target has no way to print that and substitutes (`to_space/srgb/hsl.hrx::missing/all` answers
-        // `hsl(0, 0%, 0%)`).
+        // 每一个通道都是 `none` 就是一个完全没有 power 的颜色（powerless），而在进一个空间时它仍保持 powerless
+        // （`to_space/srgb/lab.hrx::missing/all` 答 `lab(none none none)`，而 `rgb(none none none)` 过同一个读法
+        // 到达同一个答案 —— `to_space/rgb/lab.hrx::missing/all`）；一个 legacy `hsl` 目标没有办法打那个，于是代入
+        // （`to_space/srgb/hsl.hrx::missing/all` 答 `hsl(0, 0%, 0%)`）。
         let powerless = source.is_some_and(|given| given.iter().all(Option::is_none));
         let triple = match source {
             Some([first, second, third]) if same_family => {
@@ -380,9 +354,8 @@ impl Color {
         Self::in_space(space, triple, self.alpha)
     }
 
-    /// The space this colour carries, if it carries one. `color.change` asks this first: a colour **in its own
-    /// space** is written in that space's channels, not in bytes or hsl axes
-    /// (`change/srgb.hrx::red/unitless` writes `color(srgb 0.2 0.5 0.7)` through `$red`).
+    /// 这个颜色携带的那个空间，如果它携带一个。`color.change` 先问这个：一个**在自己空间里**的颜色是在那个空间的
+    /// 通道上被书写，不是写在字节或 hsl 轴上（`change/srgb.hrx::red/unitless` 经 `$red` 写 `color(srgb 0.2 0.5 0.7)`）。
     pub fn carried_space(&self) -> Option<Space> {
         match self.representation {
             Representation::InSpace(carried) => Some(carried.space),
@@ -390,53 +363,49 @@ impl Color {
         }
     }
 
-    /// One channel of a colour that carries its own space, written as the call named it: `None` is the
-    /// archive's `none` (`change/oklab.hrx::lightness/none` → `oklab(none 0.2 -0.3)`,
-    /// `change/lch.hrx::chroma/none` → `lch(50% none 30deg)`), and nothing is clamped —
-    /// `change/xyz.hrx::x/out_of_range` keeps the `1.2` it was given and `change/oklab.hrx::a/out_of_range`
-    /// the `1`.
+    /// 一个携带自己空间的颜色的那一个通道，按调用点名的方式写入：`None` 就是归档的那个 `none`
+    /// （`change/oklab.hrx::lightness/none` → `oklab(none 0.2 -0.3)`、
+    /// `change/lch.hrx::chroma/none` → `lch(50% none 30deg)`），而没有任何东西被夹紧 ——
+    /// `change/xyz.hrx::x/out_of_range` 保住它收到的 `1.2`，`change/oklab.hrx::a/out_of_range` 保住 `1`。
     ///
-    /// **A negative chroma is not stored negative**: `color.change(lch(50% 20 30deg), $chroma: -10)` answers
-    /// `lch(50% 10 210deg)` (`change/lch.hrx::chroma/negative`) — the magnitude, with the hue half a turn
-    /// over — and `color.change(oklch(50% 0.2 30deg), $chroma: -0.1)` answers `oklch(50% 0.1 210deg)`
-    /// (`change/oklch.hrx::chroma/negative`). Both fold the same way, so one arm serves the pair; no other
-    /// channel folds (`lab`'s and `oklab`'s negative axes stay negative, per their `*/out_of_range` rows).
+    /// **一个负的彩度不会被存成负数**：`color.change(lch(50% 20 30deg), $chroma: -10)` 答
+    /// `lch(50% 10 210deg)`（`change/lch.hrx::chroma/negative`）—— 取幅值，色相折半圈 —— 而
+    /// `color.change(oklch(50% 0.2 30deg), $chroma: -0.1)` 答 `oklch(50% 0.1 210deg)`
+    /// （`change/oklch.hrx::chroma/negative`）。两边折法相同，所以一臂服务这一对；其他通道都不折
+    /// （`lab` 与 `oklab` 的负轴保持为负，按它们各自的 `*/out_of_range` 行）。
     pub fn with_space_channel(&self, channel: usize, value: Option<f64>) -> Option<Self> {
         let carried = match self.representation {
             Representation::InSpace(carried) => carried,
             _ => return None,
         };
         let mut channels = carried.channels;
-        // A written `-0` comes back as `0`, the same fold the byte clamp makes
-        // (`color.change(lab(50% 0 0), $a: -0)` → `lab(50% 0 0)`, `change/unusual_numbers::negative_zero`).
+        // 一个写下的 `-0` 以 `0` 回来，与字节夹紧做的是同一个折法
+        // （`color.change(lab(50% 0 0), $a: -0)` → `lab(50% 0 0)`，`change/unusual_numbers::negative_zero`）。
         channels[channel] = value.map(super::channel::without_negative_zero);
         let hue = match (carried.space, channel) {
-            // The two polar spaces name chroma at index 1 and carry their hue at index 2.
+            // 两个极坐标空间把彩度命名在下标 1，而把自己的色相携在下标 2。
             (Space::Lch | Space::Oklch, 1) => value.is_some_and(|chroma| chroma < 0.0),
             _ => false,
         };
         if hue {
             channels[1] = value.map(|chroma| chroma.abs());
-            // The hue turns over by half a circle and comes back inside one, which is the same fold the
-            // space's own hue argument gets from `angle_of` (`change/lch.hrx::hue/negative` reads `-20deg`
-            // as `340deg`). An unwritten hue stays unwritten: `-10` of nothing has no angle to turn.
+            // 色相转过半圈再回到一圈之内，这与空间自己的色相实参从 `angle_of` 得到的那个折法是同一个
+            // （`change/lch.hrx::hue/negative` 把 `-20deg` 读成 `340deg`）。一个未书写的色相继续未书写：
+            // 无东西的 `-10` 没有可转的角。
             channels[2] = channels[2].map(|degrees| (degrees + 180.0).rem_euclid(360.0));
         }
         Some(Self::in_space(carried.space, channels, self.alpha))
     }
 
-    /// The colour as a **legacy srgb** colour, which is what `color.to-space($c, rgb)` asks for. The form is
-    /// the hex one because that is what the corpus prints: `color(srgb 0.2 0.4 0.8)` to `rgb` is `#3366cc`
-    /// (`to_space/srgb/rgb.hrx::middle`), while a fractional channel falls back to percentages under the law
-    /// already in [`crate::color::text`].
+    /// 这个颜色作为一个 **legacy srgb** 颜色，那正是 `color.to-space($c, rgb)` 要的。形体是 hex 那个，因为那
+    /// 就是语料打的：`color(srgb 0.2 0.4 0.8)` 到 `rgb` 是 `#3366cc`（`to_space/srgb/rgb.hrx::middle`），
+    /// 而一个小数通道在 [`crate::color::text`] 已有的那条律下退到百分比。
     pub fn as_legacy_rgb(&self) -> Self {
-        // **Identity keeps what was written.** A colour that already stores srgb bytes with an unwritten
-        // channel must not have that channel substituted on the way out: the corpus asks for
-        // `color.to-space(rgb(none 20 30), rgb)` and prints `rgb(none 20 30)`
-        // (`to_space/rgb/rgb.hrx::missing/red`), while the same call on a *space* colour
-        // (`to_space/srgb/rgb.hrx::missing/red`) prints `rgb(0%, 20%, 30%)` — there the `none` belonged to the
-        // space triple and the legacy target substitutes, so the two rows together are what says this guard
-        // keys on the representation and not on the missing-ness alone.
+        // **恒等保住照写的东西。**一个已经存着 srgb 字节、且带着未书写通道的颜色，不得在出口路上把那个通道代入：
+        // 语料要 `color.to-space(rgb(none 20 30), rgb)` 而打 `rgb(none 20 30)`（`to_space/rgb/rgb.hrx::missing/red`），
+        // 而同一个调用作用在一个*空间*颜色上（`to_space/srgb/rgb.hrx::missing/red`）打 `rgb(0%, 20%, 30%)` ——
+        // 那里那个 `none` 属于空间三元组而 legacy 目标代入，所以这两行合起来才说出：这道守卫是按表示定键的，
+        // 不是只按缺不缺。
         if self.has_unwritten_channel() {
             return self.clone();
         }
@@ -452,8 +421,8 @@ impl Color {
         }
     }
 
-    /// The colour as a legacy **hsl** colour: `color(srgb 0.2 0.4 0.8)` to `hsl` is `hsl(220, 60%, 50%)`
-    /// (`to_space/srgb/hsl.hrx::middle`), the comma form the existing printer already produces.
+    /// 这个颜色作为一个 legacy 的 **hsl** 颜色：`color(srgb 0.2 0.4 0.8)` 到 `hsl` 是 `hsl(220, 60%, 50%)`
+    /// （`to_space/srgb/hsl.hrx::middle`），即已有的打印机已经在产的那个逗号形。
     pub fn as_legacy_hsl(&self) -> Self {
         let bytes = of_xyz_d65(Space::Srgb, self.xyz()).map(|channel| channel * 255.0);
         let [hue, saturation, lightness] = crate::axes::rgb_to_axes(bytes[0], bytes[1], bytes[2]);
