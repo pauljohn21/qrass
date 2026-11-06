@@ -961,7 +961,7 @@
         这一改顺手多收 8 条 legacy 访问器/`saturate` 的 `too_few_args`；② `Given.label: bool` +
         `Given::positional()`，因为语料规定这三个函数只允许一个位置实参（去掉标签后
         `color.change(red, 1)` 与 `color.change($color: red, $red: 1)` 不可区分）。
-      • **本回合自己的两个错，都是量具拓出来的**：（一）第一版给 `$hue: none` 上类型消息，把一条**期望输出**
+      • **本回合自己的两个错，都是量具暴露出来的**：（一）第一版给 `$hue: none` 上类型消息，把一条**期望输出**
         的行（`change/hsl::hue/none`）变成意外错误——**53 → 54**，靠 `ledger failures … --count` 当场发现；
         （二）我在注释里又编了不存在的 case 名 `scale/error/type.hrx::alpha_none`（真名 `none`）——第七次
         同类错，已把“case 名也是字面量，先 grep 名子列表”写进 rust.md。
@@ -1095,7 +1095,7 @@
         （`round.hrx::up/to_zero` → `0`、`hsl/four_args/in_gamut.hrx::negative_zero/hue` → `0`、
         `rgb/four_args/clamped.hrx::alpha/negative_zero` → `0`）。因此上一轮写的“`format_number` 把 `-0`
         归零”错了层级：打印层保留精确 `-0`，`math.round`/`clamp_alpha`/`angle_of` 各自归正
-        （`f64::rem_euclid` 会保留 `-0.0`）。改完打印层后 `ledger diff` 拓出 **5 条回归**，就是这个发现。
+        （`f64::rem_euclid` 会保留 `-0.0`）。改完打印层后 `ledger diff` 查出 **5 条回归**，就是这个发现。
       • **实测**：hrx **1455 → 1585（实质 1290 → 1420）**，`ledger diff mixed-channel trig` = **`regress=0 net=130`**
         （atan2 各文件 66、tan 12、sin 12、atan 12、asin 11、cos 10、acos 7），无效错误仍 **53**；
         空库复算（`/tmp/qrass-ab5.db`：trig-verify-before 1455 vs trig-verify-after 1585）逐字重现；
@@ -2890,7 +2890,56 @@
       顺手收干的一条旧债：怪字表 `grep -rn "拄" tasks.md` 在本批之前交出 8 处，其中 4 处是散文里的真错字（:1800、
       :2094、:2137、:2138），已改为“照录/被复写进/转录/重录”；其余 4 处（:2758/:2796/:2797/:2883）是把该字当**待查串引用**
       的记录句，故意保留 —— 不然下次把怪字表当闸用时会被自己的记账误报。从此跑该表时要区分这两类。
+      （9.37 又按同一口径收了 `拓` 的三处散文错字（:964、:1098、本批自己的一处），其中“拓宽”一词与
+      :2758/:1756 的引用句不动。）
       **未做（不得当作已交付）**：只剩 `color/mod.rs`（215 行注释、486 行文件贴上限）与 `sasspile/src` 顶层约
       1700 行；`REC2020_GAMMA`/prophoto 两段仍转述 9.20 的残差与 `net`（上一批已标注为转述，未抽干）。
       基线 run 自此为 `zh-comments-color-space-v2`。
+
+- [x] 9.37 **注释中文化第十批：`color/mod.rs`（215 行注释 → 181 行，文件 486→473 行，2026-11-06）** ——
+      `color/` 目录自此全部中文化。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计以两种口径独立复算同一值（剥注释逐行 diff = 0，
+      代码本体两版都是 271 行 / 8058 字节）；`Representation` 七变体与 `matches!` 四臂、`clamp_alpha`、
+      `angle_of`、`from_hex` 的 `* 17`/`6 | 8` 分段、`from_name` 的 `replace("grey", "gray")`、`hsl` 的 `.max(0.0)`、
+      `with_channel` 的 `is_some_and(...)` 与三个 `if index == n` 均未动。
+      读数：`ledger diff zh-comments-color-space-v2 zh-comments-color-core-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；hrx 现量 `3457/11533`、实质 **3292** + 蒙对 165、skipped 1264；无效错误 **19**；
+      sasslint count=0、fmt EXIT=0、`cargo test --workspace` EXIT=0（62 条 ok）、`codegraph sync` EXIT=0。
+      强调标记与 HEAD 一一对应（`**` 58/58，全 `*` 145/145）；中文间游离空格 0；`cargo doc --no-deps
+      --document-private-items` 对本文件**不再有未解析链接**（HEAD 遗留的 3 条已修：不存在的 `[`angle`]` →
+      `[`angle_of`]`、`[`super::text`]` → `[`text`]`、`[`super::builtins::color::amount::byte`]` →
+      `[`crate::builtins::color::amount::byte`]`）。
+      `gc-auditor` 判 18 条 finding，全收且全由我自己重跑确认。本批把 9.35/9.36 立的规矩当清单用，发现
+      **三类新故障**（都是 HEAD 继承，但句子经我重写）：
+      • **凭据引用了 input.scss 却当成 output.css**：`initial_letter` 的 `four-digit: #AbCd` 只存在于 input，
+        output 逐字要 `  four-digit: rgba(170, 187, 204, 0.8666666667);` —— 所以“声明里的 hex 保住拼法”**不是**
+        语料的律而是本仓的选型，且那一行今天仍红（got `#AbCd`/want `rgba(...)`）；整节改写为“选型 + 相冲的期望 +
+        现量命令”，并标明这是未闭缺口。
+      • **不存在的 key**：表行五的 `four_args/clamped::red`（真名 `red/finite`，input 是 `rgb(256, 0, 0, 0.5)`；
+        而 `rgb(0, 0, 0, 0.5)` 在该文件里根本不存在）；`hsl/three_args/units` 的 `hue/turn`（真名 `hue/angle`；
+        全仓 `hue/turn` 只在 `adjust/{oklch,lch}.hrx`）；`alpha.hrx::color/named` 是 `rgba(red, 0.73)`→`0.73`，
+        而 `color.alpha(red)`→`1` 属 `color/max`。三个全部改成现量到的真 key/真值。
+      • **键与值错配**：`percents.hrx::clamped/red` 的 output 是 `rgb(255, 0, 0)`而不是“`100.1%` → `100%`”，
+        与本文件 188 行自己写对的注释互相打脸 ⇒ 按金样重写。
+      其余：全称句“没有任何 legacy 逗号值的行走过任一侧”为假（`hsl/three_args/bounds.hrx::saturation/below` 得
+      `hsl(0, 0%, 50%)`、`::lightness/below` 留住 `-100%`，两侧都在逗号形里被说出）⇒ 删推论、改用那两行当凭据；
+      “`7.0980392157%`”全仓 0 命中且算不出来（`7.1×255/100=18.105`，除回是 `7.1`；要先得 `18.1` 才行）⇒ 改成
+      “得到的数不再逐字等于写下的那个”并引表格第三行的可复取算式；“语料确实使用 `-grey`”不准（真行形是
+      `invert(grey, $space: hsl)`，七个复合拼法 0 行，只有裸 `grey` 17 行）⇒ 按现量重写并明说覆盖面；
+      “没有 fixture 把字节写进 hsl/hwb”被当作有凭据（`change/{hsl,hwb}.hrx` 的 `$red` = 0，全仓也是 0）⇒
+      标为按值型推的选型；“15 条 non_legacy”补上可复取命令与作域（15 个函数文件各一条）；“每个有记录的 run 都红”
+      改为“有这条 needle 的 run”（现量 2 条：`clip/…` 与 `local_minde/…`；库里 205 个 run 中 27 个未包含该
+      fixture，而 `ledger/src/lib.rs:419-421` 自己写了“run 的覆盖面没在任何处记录”）；两句逐字错误消息
+      补全到句号并各自单独占一行（之前被截断且无标记，grep 整条会 0 命中）；“那三行都只带 `$space:`”改为
+      “三行都不带通道实参，其中两行只带 `$space:`，另一行什么实参也没有”。
+      审计判定本批主动做的四处凭据制式改动：前三处（拆开 `{a,b}` 合写、两处省略号补成完整 key）**无 finding**；
+      第四处（删 HEAD 的“0 green”）**判定为删得对** —— 它查明 `ledger passed` 的 `--count` 不是开关而被静默忽略、
+      且 `passing()` 用前缀 `LIKE` 而非子串，所以那个 0 正是“从管道数出来的”读数。
+      **审计自我披露（必须计入）**：它承认在上下文压缩前曾瞬建 `.audit_new_code.txt`/`.audit_head_code.txt`
+      两个临时文件再删，再次违反“不创建文件”的要求（压缩后改用 `diff <(…) <(…)` 重跑）；本轮已两次发生，
+      下一轮升为硬性开头提示。
+      **未做（不得当作已交付）**：只剩 `sasspile/src` 顶层约 1700 行注释；`initial_letter`、`to-gamut` 接线、
+      `missing channels` 错误消息逐字报出三个缺口本批只记不修（它们不是注释工作）；`space.rs` 仍有两处中文字间
+      游离空格（OUT-OF-SCOPE，待下一批顺修）。
+      基线 run 自此为 `zh-comments-color-core-v2`。
 
