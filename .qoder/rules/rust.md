@@ -9,10 +9,10 @@ alwaysApply: true
   `crates/ledger/src`（9.30）、`builtins` 登记骨架 + math 域（9.31）、`builtins/color/` 四文件（9.32）与
   `builtins/color/{amount,write}.rs`（9.33）与 `color/{channels,primaries,read,channel}.rs`（9.34）与
   `color/{text,space}.rs`（9.36）与 `color/mod.rs`（9.37，**`color/` 目录自此做完**）与 `env.rs`+`scope.rs`
-  （9.38）已做完，各自 `regress=0 net=0`；待批只剩 `sasspile/src` 顶层余 12 文件约 900 行（`value.rs` 116、
-  `calc.rs` 106、`unit.rs` 104、`lib.rs` 98、`operations.rs` 85、`loops.rs` 72、`axes.rs` 59、`structure.rs` 54、
-  `calls.rs` 50、`trace.rs` 49、`selector.rs` 43、`phases.rs` 40）与 `builtins/` 余下约 847 行，
-  每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行）。
+  （9.38）与 `axes.rs`（9.39）已做完，各自 `regress=0 net=0`；待批只剩 `sasspile/src` 顶层余 11 文件约 840 行
+  （`value.rs` 116、`calc.rs` 106、`unit.rs` 104、`lib.rs` 98、`operations.rs` 85、`loops.rs` 72、
+  `structure.rs` 54、`calls.rs` 50、`trace.rs` 49、`selector.rs` 43、`phases.rs` 40）与 `builtins/` 余下约 847 行，
+  每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行；会话容量不足时允许缩到单文件，闸口不得减）。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
   只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。
   **中文化不等于沿用旧文**：9.32/9.33 两批共查出七条注释在断一件归档已推翻或无根据的事（`rgb` 颜色答 hsl 轴、
@@ -38,6 +38,11 @@ alwaysApply: true
   （`Error: Undefined variable.` 全仓 23 次/15 文件，按 `hrx.rs:24` 排除 `non_conformant` 后是 20 次/12 文件）。
   同理：**审计闸不可用时就不提交**（本轮 `gc-auditor` 未注册，改动在工区多停一轮才入库，不得改用
   内置代理顶替）。
+  9.39 再把两句本身钉住：**“每个常数都是 fixture 行”这类全体式必须附一份“哪些是推导”的名单**
+  （`127.5`/`0.7163120567`/`1.01 / 1.41`/`720` 全语料 0 命中，它们就是推导）；**同一个量在注释里只能有一个尾数**
+  （HEAD 同时写了 `71.6312056863` 与 `71.6312056738`，前者 0 命中 —— 归档逐字是后者）。
+  另记两个工具坑：`perl -CSD -i -pe` 对中文串改写会静默失败（只能用编辑工具）；`ledger passed … --count`
+  不是开关且用前缀匹配，“某簇多少绿行”只能由 `failures --count` 相减得出。
   9.37 又发现三个新类（都是“凭据本身”而非句式）：**引用凭据必标明它是 input.scss 还是 output.css**
   （`values/colors/alpha_hex/initial_letter` 的 `four-digit: #AbCd` 只在前者，后者逐字要 `rgba(170, 187, 204,
   0.8666666667)`，所以“声明里的 hex 保住拼法”是实现选型而非语料律，那一行至今红）；**key 名必逐个取回**
@@ -67,12 +72,12 @@ alwaysApply: true
 ## 📌 基线（唯一副本；别处只准放指针）
    已得结论**不得凭记忆重推，也不得重做**（四个内核、真 `Err` 通道、结构化选择器/属性名、四条铁律机器闸、
    色彩三族与 math 域的已定定律均已成文，见 `state-of-the-port.md`）。当前基线 hrx **3457/11,533**（30.0%，**实质通过 3292** + 空期望蒙对 165，skipped 1264；
-   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-exec-env-v2`（终树；与 `zh-comments-color-core-v2`
-   `regress=0 net=0`，只差 9.38 的注释语言与被修正的口径；这条纯文本链往前依次是 9.37/9.36/9.35/9.34/9.33/9.32/9.31/9.30/9.29
-   的 `zh-comments-color-core-v2`、`zh-comments-color-space-v2`、`zh-comments-color-math-v2`、
-   `zh-comments-color-tables-v2`、`zh-comments-builtins-write-v2`、`zh-comments-builtins-color-v2`、
-   `zh-comments-builtins-math-v2`、`zh-comments-ledger-v2`、`zh-comments-sasslint-v2`，再到
-   `change-in-carried-space-v6`。该 v6 又是 feat 入库的
+   A/B 记录 = `reports/hrx.db` 里的具名 run `zh-comments-axes-v3`（终树；与 `zh-comments-exec-env-v2`
+   `regress=0 net=0`，只差 9.39 的注释语言与被修正的常数；这条纯文本链往前依次是
+   9.38/9.37/9.36/9.35/9.34/9.33/9.32/9.31/9.30/9.29 的 `zh-comments-exec-env-v2`、`zh-comments-color-core-v2`、
+   `zh-comments-color-space-v2`、`zh-comments-color-math-v2`、`zh-comments-color-tables-v2`、
+   `zh-comments-builtins-write-v2`、`zh-comments-builtins-color-v2`、`zh-comments-builtins-math-v2`、
+   `zh-comments-ledger-v2`、`zh-comments-sasslint-v2`，再到 `change-in-carried-space-v6`。该 v6 又是 feat 入库的
    `change-in-carried-space-v5` `regress=0 net=0`，只差 9.28 的审查收口。2026-11-04：**`color.change` 能写在
    带自己空间的色上**，13 个 Color-4 空间共 197 行里 9 个文件全绿——名字属于空间本身（`$red`/`$x`/`$chroma`），
    而 **`%` 的底数是逐通道的不是逐空间的**（`lab` 自己里面 `lightness 30%`→30、`a -40%`→-50），所以新表

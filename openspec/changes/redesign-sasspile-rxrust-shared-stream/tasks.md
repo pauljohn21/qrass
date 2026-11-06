@@ -2976,3 +2976,33 @@
       合并待下一批）。基线 run 自此为 `zh-comments-exec-env-v2`（审计收口后重测；v1 是收口前的同一棵树）。
       另：本批发现 `perl -CSD -i -pe` 对中文串改写会静默失效（三次），改用编辑工具。
 
+- [x] 9.39 **注释中文化第十二批：`axes.rs`（59 行注释 → 64 行，文件 127→132，2026-11-06）**。本批只一个文件
+      （会话容量将尽），闸口一项未减。**只改注释**：`git diff -U0` 非注释行 = **0**（审计独立复算同值，
+      代码式计数 17↔17）；`span == 0.0` 的两个分支、`saturation = span / (1.0 - (2.0 * lightness - 1.0).abs())`、
+      三个 hue 臂、`(hue / 60.0).rem_euclid(6.0)`、`sector.rem_euclid(2.0) - 1.0`、六臂三元组、
+      `offset = lightness - chroma / 2.0`、`whiteness + blackness > 100.0`、`(min, max) = (low, 1.0 - high)`
+      与 `rgb_to_hwb` 的两返回项均未动；`cargo doc` 对本文件 0 条未解析链接。
+      `gc-auditor` 判 7 条，全收。最关键的一条是**我改对了 HEAD 的伪造数字**：HEAD 的
+      「语料打 `71.6312056863%`」与同文件另一处的 `71.6312056738` 不同尾数，现量
+      `hwb/four_args.hrx` 的 `whiteness/above_max` output 逐字是
+      `  b: hsla(0, 0%, 71.6312056738%, 0.5);`，而 `71.6312056863` **全语料 0 命中**（阳性对照：同法 6738 命中 1）
+      —— 审计判“6738 修正正确”，两处已统一并把逐字 output 行写进注释。
+      其余六条都是本批该现量而未现量的：
+      • 「文档注释里**每个**常数都是 fixture 行」为假：`127.5`、`0.7163120567`、`1.01 / 1.41`、`720` 全语料
+        0 命中，`76.5` 只命中 `to_space/lch/srgb.hrx` ⇒ 页头改成带名单的作用域句，逐项标明“是推导”；
+      • `(128, 0, 128)` 的例子自相矛盾（purple 亮度 25.098% → 灰应是 64 而不是 127.5），`127.5` 属于
+        `red` 的 50% ⇒ 三元组改为 `(255, 0, 0)` 并挂上 `grayscale.hrx::legacy/max_saturation`；
+      • “曾经是唯一一处离开自己空间的地方”无指针且过宽（现量 `space.rs` 的 `converted`、`as_legacy_rgb`、
+        `as_legacy_hsl` 都离开空间）⇒ 改成现在时 + 作用域 + 列出那三条不经过这里的路线；
+      • 我新加的“`foreign/*` 家族共 6 段”口径错：同文件**三个** case，6 是 input+output 两个 marker 段⇒ 已拆写；
+      • 我把 HEAD 的 “three rows” 加粗成“**三行**”而第二组实列三个 key（HEAD 写 two）⇒ 改成**三行**与列举对齐，
+        并把两处省略号补成全名（同名 key 跨文件值不同）；
+      • 低阶：`发表成`→`打成`、`顶到`→`推到`、“两个已折过的色”补“相”并改为“逼近 720 的上界（严格小于 720，
+        因 `angle_of` 用 `rem_euclid(360.0)`）”。
+      本批自己写坏又抓回的：`hwb_to_hwb` 断链、`色相加`、`跳行`、以及把两个逐字调用拆到两行（造成
+      奇数反引号行 2，已接回）。审计另报一条 OUT-OF-SCOPE 新断链：`builtins/color/modify.rs:78` 的
+      `[`Color::transform_axes`]` 解不开（方括号内不应套 `[]`）——不在本批 diff 内，**下一批顺修**。
+      **未做**：顶层余 11 个文件约 840 行注释（`value.rs` 116、`calc.rs` 106、`unit.rs` 104、`lib.rs` 98、
+      `operations.rs` 85、`loops.rs` 72、`structure.rs` 54、`calls.rs` 50、`trace.rs` 49、`selector.rs` 43、
+      `phases.rs` 40）与 `builtins/` 余下约 847 行。基线 run 自此为 `zh-comments-axes-v3`。
+
