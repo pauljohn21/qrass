@@ -40,7 +40,7 @@ impl Color {
     ///
     /// `space` 是调用写下的 `$space:`（`hsl`、`rgb`、`srgb`）；`None` 意思是**颜色自己的空间**，而没有标签时语料
     /// 只钉住这个：`color.channel(#abcdef, "red")` → `171`，`color.channel(hsl(10 40% 60%), "hue")` → `10deg`
-    /// （`channel/rgb.hrx::local/*`、`channel/hsl.hrx::local/*`）。跳空间的读只有在标签说了话时才答
+    /// （`channel/rgb.hrx::local/*`、`channel/hsl.hrx::local/*`）。要在两个空间之间读，只有在标签说了话时才答
     /// （`channel/hsl.hrx::foreign/hue` 是 `color.channel(pink, "hue", $space: hsl)` → `349.5238095238deg`）；
     /// 不待标签就代表颜色换算一次，会发明一条没有 fixture 说过的规则。
     ///

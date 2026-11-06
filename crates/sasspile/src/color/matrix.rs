@@ -1,21 +1,18 @@
-//! The colour-space **mathematics** — the one route from any space's channels to CIE XYZ (D65) and back.
+//! 色彩空间的**数学** —— 从任意空间的通道到 CIE XYZ（D65）再回来的唯一一条路线。
 //!
-//! Split from [`super::space`] because the two halves change for different reasons: that file is the value
-//! and its printing, this one is the primaries tables, the transfer curves and the white-point adaptation.
-//! Nothing here knows about Sass; every number is the corpus's oracle (`core_functions/color/to_space/**`).
+//! 从 [`super::space`] 里分开，是因为两半因不同理由改动：那个文件是值与它的打印，这个是 primaries 表、传递
+//! 曲线与白点适应。这里没有任何东西认识 Sass；每个数都来自语料的 oracle（`core_functions/color/to_space/**`）。
 
 use super::space::{Space, Transfer, White};
 
-/// The D50 reference white, **derived rather than copied**: the srgb primaries applied to `(1, 1, 1)` are
-/// the archive's D65 white (`to_space/srgb/xyz.hrx::white` prints `color(xyz 0.9504559271 1 1.0890577508)`)
-/// and the adaptation below carries that onto D50. `xyz_to_lab` therefore divides by the very triple the
-/// adaptation lands on, so a neutral is neutral **by construction**.
+/// D50 参考白，**是推出的而不是录来的**：把 srgb primaries 作用在 `(1, 1, 1)` 上就是归档的 D65 白
+/// （`to_space/srgb/xyz.hrx::white` 打 `color(xyz 0.9504559271 1 1.0890577508)`），而下面的适应把那个携到 D50。
+/// 所以 `xyz_to_lab` 除的正是适应落到的那个三元组，于是一个中性色是**构造上**中性的。
 ///
-/// The transcribed `[0.964295675687546, 1.0, 0.825104602578703]` this replaced sat `8.3e-10` off the derived
-/// `X`, and that alone printed `lab(100.0000000018% 0.0000001274 0.0000000081)` for `color(srgb 1 1 1)` where
-/// the corpus states `lab(100% 0 0)` (`to_space/srgb/lab.hrx::white`): `a = 500 · (fx − fy)` turns a `1e-10`
-/// white mismatch into a `1.4e-7` chroma. Two literals for one white was also the second answer the file's
-/// own header forbids — the D65 side never needed its own triple, so neither does this one.
+/// 它替掉的转录值 `[0.964295675687546, 1.0, 0.825104602578703]` 在推出的 `X` 上差了 `8.3e-10`，仅那一点就把
+/// `color(srgb 1 1 1)` 打成 `lab(100.0000000018% 0.0000001274 0.0000000081)`，而语料说 `lab(100% 0 0)`
+/// （`to_space/srgb/lab.hrx::white`）：`a = 500 · (fx − fy)` 把一个 `1e-10` 的白点错位放大成 `1.4e-7` 的色度。
+/// 一个白点用两个字面量也是文件自己页头禁的第二份答案 —— D65 那侧从不需要自己的三元组，这一侧也不需要。
 fn d50() -> [f64; 3] {
     adapt(
         SRGB_PRIMARIES.map(|row| row.iter().sum::<f64>()),
@@ -24,28 +21,26 @@ fn d50() -> [f64; 3] {
     )
 }
 
-/// Bradford-type white-point matrix, D50 → D65, **solved out of the archive** rather than transcribed.
+/// Bradford 型的白点矩阵，D50 → D65，**从归档解出来的**而不是录来的。
 ///
-/// What used to sit here were the digits the CSS Color 4 prose prints (`0.9555766 -0.0230393 0.0631636 …`).
-/// The corpus does not compute with them: its D50→D65 row sums are `0.9956342097 1.0026671299 1.3221722918`
-/// (`to_space/xyz_d50/xyz.hrx::white`) while the copied table summed to `0.9957009 0.9993688 1.3289869` —
-/// worst entry off by `6.9e-3` (`1.3303659262` against `1.3372652`). Neutrals barely noticed; anything
-/// reaching D50 did, which is every `lab`, `lch` and `xyz-d50` conversion.
+/// 过去坐在这里的是 CSS Color 4 散文印出的那几个数（`0.9555766 -0.0230393 0.0631636 …`）。语料不算它们：
+/// 它的 D50→D65 行和是 `0.9956342097 1.0026671299 1.3221722918`（`to_space/xyz_d50/xyz.hrx::white`），而录来的
+/// 表加起来是 `0.9957009 0.9993688 1.3289869` —— 最差的一项差 `6.9e-3`（`1.3303659262` 对 `1.3372652`）。
+/// 中性色几乎看不出来；任何走到 D50 的就看得出来了，而那是每一个 `lab`、`lch` 与 `xyz-d50` 的换算。
 ///
-/// `cargo run -q -p sasspile --example calibrate_space` reads `to_space/xyz_d50/xyz.hrx` from disk and
-/// solves this table: `out_of_range/far` (`color(xyz-d50 -999999 0 0)`) states the first column at the
-/// archive's full resolution, and the `white` + `out_of_range/near` pair — determinant `1.6` — states the
-/// other two. Worst residual over the rows **not** used by the solve is `5.0e-11`, which is the half-step
-/// of the archive's tenth decimal place, so the table matches the corpus as closely as the corpus can be
-/// read. `tests/color_adaptation.rs` pins rows from both directions of the pair.
+/// `cargo run -q -p sasspile --example calibrate_space` 从磁盘读 `to_space/xyz_d50/xyz.hrx` 并解出这张表：
+/// `out_of_range/far`（`color(xyz-d50 -999999 0 0)`）以归档的全分辨率定下第一列，而 `white` + `out_of_range/near`
+/// 那一对（行列式 `1.6`）定下另两列。**没有**被解法用到的那些行上最差残差是 `5.0e-11`，那就是归档第十位小数的
+/// 半步，所以这张表在“能读到什么”的限度内贴着语料。`tests/color_adaptation.rs` 把那一对两个方向的行都固定住。
 ///
-/// The ceiling this route cannot pass, measured rather than asserted: a table fitted to rows printed at ten
-/// decimal places is knowable to about `5e-11` per entry, so the **derived** side of the pair keeps three
-/// rows red by one unit in that last place — `to_space/xyz/xyz_d50.hrx::gray` (archive `0.5014942182`, we
-/// print `0.5014942183`), `to_space/xyz/xyz_d50.hrx::out_of_range/far` (worst channel archive
-/// `−29627.7791422469`, we print `−29627.7791449956`: `2.75e-6` absolute, `9.3e-11` relative), and
-/// `to_space/srgb/xyz_d50.hrx::white` (archive `0.9642956764`, we print `0.9642956765`). Anything claiming
-/// better digits than that from these fixtures is reading a number the archive never printed.
+/// 这条路线越不过去的天花板，是量出来的而不是声称的：按“印到十位小数”的行拟合出的一张表，每项只能知道到
+/// 大约 `5e-11`，所以*推出的*那侧会因最后一位的一个单位而让两簇共 **6 行** 保持红（现量：
+/// `to_space/xyz/xyz_d50` 2 行、`to_space/srgb/xyz_d50` 4 行）。这里只点名其中三行为例：
+/// `to_space/xyz/xyz_d50.hrx::gray`（归档 `0.5014942182`，我们打 `0.5014942183`）、
+/// `to_space/xyz/xyz_d50.hrx::out_of_range/far`（最差通道归档 `−29627.7791422469`，我们打
+/// `−29627.7791449956`：绝对 `2.75e-6`、相对 `9.3e-11`），以及
+/// `to_space/srgb/xyz_d50.hrx::white`（归档 `0.9642956764`，我们打 `0.9642956765`）。其余三行同形（末位一个单位）。
+/// 任何从这些 fixture 声称更好位数的说法，都是在读一个归档从未印过的数。
 const BRADFORD: [[f64; 3]; 3] = [
     [
         0.955_473_421_488_075_2,
@@ -64,83 +59,70 @@ const BRADFORD: [[f64; 3]; 3] = [
     ],
 ];
 
-/// The CIE epsilon/kappa pair the Lab curves are defined with.
+/// Lab 曲线定义所用的 CIE epsilon/kappa 一对。
 const LAB_EPSILON: f64 = 216.0 / 24_389.0;
 const LAB_KAPPA: f64 = 24_389.0 / 27.0;
 
-/// `a98-rgb`'s transfer, as the archive applies it: a **pure gamma of `563/256` from the printed channel to
-/// linear light**, so the printed value is the linear one raised to `256/563`.
+/// `a98-rgb` 的传递曲线，按归档施加它的方式：一个**从打印通道到线性光的纯 gamma `563/256`**，所以打印值是
+/// 线性值升到 `256/563`。
 ///
-/// Two things were wrong where this line sits, and the second is why they stayed invisible: the exponent was
-/// the rounded `2.19921` rather than `563/256`, and it was on the **wrong side** of the pair — this file
-/// decoded with `1/2.19921` and encoded with `2.19921`, the inverse of what the corpus computes
-/// (`Srgb` and `Rec2020` already put the larger exponent on decode; `A98` was the odd arm). A pair of
-/// reciprocal exponents looks symmetric because a curve fixes 0 and 1, so only a row converted through it
-/// tells them apart. The command that says so, and the residuals it printed for each candidate, are recorded
-/// once in `openspec/…/tasks.md` 9.17; re-run
-/// `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz <exponent>` to reproduce the verdict
-/// (`hypothesis_holds=false` exits non-zero, so a refuted exponent cannot be pasted back in by someone
-/// reading only the numbers).
+/// 这一行坐着的地方有两件事错了，而第二件正是它们为何一直隐形：指数是舍入后的 `2.19921` 而不是 `563/256`，
+/// 而且它在这一对的**错的那侧** —— 本文件用 `1/2.19921` 解码、用 `2.19921` 编码，恰好是语料所算的反面（`Srgb` 与
+/// `Rec2020` 已经把较大的指数放在解码；`A98` 是那条例外的一臂）。一对倒数的指数看着对称，因为曲线钉住了 0 与 1，
+/// 所以只有一行穿过它的换算能分辨它们。说出这一点的命令，以及它给每个候选印的残差，在
+/// `openspec/…/tasks.md` 9.17 里只记一次；重跑
+/// `cargo run -q -p sasspile --example calibrate_space -- a98_rgb xyz <exponent>` 可复现那个判定（
+/// `hypothesis_holds=false` 会非零退出，所以只看数字的人没法把一个已被驳倒的指数粘回来）。
 const A98_GAMMA: f64 = 563.0 / 256.0;
 
-/// `rec2020`'s transfer, as the archive applies it: a **plain signed gamma of `2.4`** on the power branch,
-/// with no offset at all.
+/// `rec2020` 的传递曲线，按归档施加它的方式：在幂那一支上是**一个普通的带符号 gamma `2.4`**，完全没有偏移。
 ///
-/// This arm used to read `((v + (1.09929682680944 - 1)) / 1.09929682680944) ^ (1 / 0.45)` — a shifted power
-/// with an exponent of `1/0.45`, copied as a shape from prose about the space rather than read from the
-/// corpus. The scan that separates the candidates is
-/// `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz <exponent> <alpha>`, which fits the
-/// primaries under a stated curve hypothesis and reports the worst residual over the archive's own rows
-/// (`hypothesis_holds=false` exits non-zero):
+/// 这一臂过去读作 `((v + (1.09929682680944 - 1)) / 1.09929682680944) ^ (1 / 0.45)` —— 一个带平移的幂，指数是
+/// `1/0.45`，作为*形状*从关于这个空间的散文里录来，而不是从语料读出。分开那些候选的扫描是
+/// `cargo run -q -p sasspile --example calibrate_space -- rec2020 xyz <exponent> <alpha>`，它在一个声明的曲线
+/// 假设下拟合 primaries，并报告归档自己那些行上的最差残差（`hypothesis_holds=false` 非零退出）：
 ///
-/// | exponent | alpha | worst residual |
+/// | 指数 | 偏移 | 最差残差 |
 /// |---|---|---|
-/// | `2.4` | `1.0` (no offset) | `4.914e-11` — the tenth-decimal half-step, i.e. the shape is right |
-/// | `1/0.45` | `1.09929682680944` (**this file's former law**) | `0.214` |
+/// | `2.4` | `1.0`（无偏移） | `4.914e-11` —— 第十位小数的半步，也就是形状对了 |
+/// | `1/0.45` | `1.09929682680944`（**本文件先前那条律**） | `0.214` |
 /// | `2.4` | `1.09929682680944` | `0.0952` |
 /// | `2.4` | `1.055` | `0.0538` |
 /// | `2.4` | `1.019` | `0.0189` |
 /// | `2.19921875` | `1.09929682680944` | `0.292` |
 ///
-/// The mirrored direction agrees: `-- xyz rec2020 2.4 1.0` fits with a `7.70e-11` residual, so the encode side
-/// is `printed = linear ^ (1/2.4)` with the same no-offset law.
+/// 镜像方向也同意：`-- xyz rec2020 2.4 1.0` 以 `7.70e-11` 的残差拟合，所以编码侧是
+/// `printed = linear ^ (1/2.4)`，同样是无偏移那条律。
 ///
-/// **There is also no linear segment on this arm**, which is a reading rather than a preference: keeping the
-/// former `4.5×` arms at the new exponent measured `regress=0 net=85` (run `rec2020-no-offset`), removing them
-/// measured `regress=0 net=126` (run `rec2020-pure-power`) — so `net=41` is that one-variable comparison, both
-/// runs at exponent `2.4`. Which side that reading actually speaks to matters:
-/// `-- xyz rec2020 2.4 1.0` reports `smallest_linear_channel = 0.00163`, below the encode arm's `0.081`, while
-/// its `smallest_curved_printed_channel = 0.0689` sits above the decode arm's `0.081/4.5`. **The encode arm was
-/// exercised and the corpus prefers the power there; the decode arm stays unconstrained by any row.**
+/// **这一臂上也没有线性分段**，那是一个读数而不是一个偏好：在新指数下保留先前的 `4.5×` 那一臂量到
+/// `regress=0 net=85`（run `rec2020-no-offset`），去掉它们量到 `regress=0 net=126`（run `rec2020-pure-power`）
+/// —— 所以 `net=41` 就是那个单变量对比，两个 run 的指数都是 `2.4`。这个读数到底说哪一侧很要紧：
+/// `-- xyz rec2020 2.4 1.0` 报 `smallest_linear_channel = 0.00163`，低于编码那臂的 `0.081`，而它的
+/// `smallest_curved_printed_channel = 0.0689` 高于解码那臂的 `0.081/4.5`。**编码那臂被演练过，而语料在那侧偏好幂；
+/// 解码那臂仍不被任何行约束。**
 ///
-/// `prophoto-rgb` was probed the same way, and the two readings disagree in a way worth keeping straight:
-/// `net` and `regress` said nothing (`rec2020-pure-power` to `prophoto-pure-power`: `regress=0 net=0`) — so an
-/// earlier draft of this comment concluded no row reaches `1/16` or `1/512`. `ledger changed` refutes that:
-/// eleven rows changed value, and the arms are the side that matches the archive —
-/// `to_space/oklab/prophoto_rgb.hrx::missing/non_lightness` states `color(prophoto-rgb 0.016 0.016 0.016)`, the
-/// arms answer `0.0159999996 0.0160000002 0.016` (one digit off), removing them answers `0.0215443466 …`
-/// (`3.5e-3` off). Those rows are red either way because they are `missing/*` rows, which is exactly the class
-/// `net` cannot see. So: **prophoto's encode arm is positively confirmed, its decode arm is unexercised**
-/// (`smallest_curved_printed_channel = 0.1` for that pair), and the arms stay for the first reason, not the
-/// second.
+/// `prophoto-rgb` 也用同一个方式探过，而两个读数在一处不一致，值得说清：`net` 与 `regress` 什么也没说
+/// （从 `rec2020-pure-power` 到 `prophoto-pure-power`：`regress=0 net=0`）—— 所以本注释的一份早期草稿由此得出
+/// “没有行达到 `1/16` 或 `1/512`”。`ledger changed` 驳了它：十一行变了值，而那两臂才是对归档的一侧 ——
+/// `to_space/oklab/prophoto_rgb.hrx::missing/non_lightness` 说 `color(prophoto-rgb 0.016 0.016 0.016)`，
+/// 保留两臂答 `0.0159999996 0.0160000002 0.016`（差一位），去掉则答 `0.0215443466 …`（差 `3.5e-3`）。那些行
+/// 两边都红，因为它们是 `missing/*` 行 —— 那正是 `net` 看不见的类。所以：**prophoto 的编码臂被正向确认，它的
+/// 解码臂未被演练**（那一对的 `smallest_curved_printed_channel = 0.1`），而两臂留下的理由是前者，不是后者。
 const REC2020_GAMMA: f64 = 2.4;
 
-/// A signed power: the corpus pushes negative and out-of-range channels through the same curve
-/// (`to_space/srgb/lab.hrx::out_of_range/near` converts `color(srgb -1 0.4 2)` and prints real numbers), so
-/// every transfer is defined on the whole line, not clamped into `[0, 1]` first.
+/// 一个带符号的幂：语料把负值与范围外的通道也穿过同一条曲线（`to_space/srgb/lab.hrx::out_of_range/near` 换算
+/// `color(srgb -1 0.4 2)` 并打出实数），所以每条传递都在整条直线上定义，而不是先夹进 `[0, 1]`。
 ///
-/// Which spaces keep a **linear segment** next to the power is measured per space, not inherited by analogy -
-/// the three answers differ, which is why one shared rule would have been wrong. The readings behind them
-/// (residuals, `regress`, `net`, `changed`) live once, in `openspec/…/tasks.md` 9.21; this states only the
-/// conclusions, because the same digits copied into a second file is how this repository keeps acquiring a
-/// second answer:
-/// * `srgb` - the `12.92` arms are **confirmed** (removing them loses rows on both sides of the reading: some
-///   `net`, and several more that stay red either way and only show in `changed`/`shift`); its shifted power is
-///   confirmed too. The **threshold** of the segment is a transcription - no row this instrument reads enters
-///   that region, and it cannot A/B a threshold anyway (see `tasks.md` 9.21).
-/// * `rec2020` - the `4.5×` arms are **rejected** on the encode side; the decode side stays unconstrained.
-/// * `prophoto-rgb` - the `1/16` arms **survive**, on `changed` evidence rather than on `net`.
-/// Guarded by `tests/color_srgb_segment.rs`, and the segment question for the other two by their own runs.
+/// 哪些空间在幂旁边保留**一个线性分段**，是逐空间量出来的，不是靠类比承继 —— 三个答案各不相同，这就是为何
+/// 一条共享规则会是错的。那三条分段 A/B 的读数只住 `openspec/…/tasks.md` **9.21**；上面 `REC2020_GAMMA` 与
+/// `PROPHOTO` 那段引的残差、`net`、`changed` 只住 **9.20**（那两段里写的数都是对它的转述，不是第二处推导）。
+/// 这里只说结论，因为同一批数字再写一遍就是本仓库不断得到第二份答案的方式：
+/// * `srgb` —— `12.92` 那两臂是**正向确认的**（去掉它们丢的行计在 `regress=156`、`net=0`，另有几条两边都红、
+///   只在 `changed`/`shift` 里显形）；它带平移的幂也被确认。那分段的**阈值**是一项转录 —— 这台量具读到的行
+///   没有一项进入那个区域，而它也没法对一个阈值做 A/B（见 `tasks.md` 9.21）。
+/// * `rec2020` —— `4.5×` 那两臂在**编码侧被拒**；解码侧仍不受约束。
+/// * `prophoto-rgb` —— `1/16`（解码）与 `1/512`（编码）那一对臂**保住**，依据是 `changed` 而不是 `net`。
+/// 由 `tests/color_srgb_segment.rs` 守住，而其余两个的分段问题由它们各自的 run 守住。
 fn sp(value: f64, exponent: f64) -> f64 {
     if value == 0.0 {
         0.0
@@ -150,7 +132,7 @@ fn sp(value: f64, exponent: f64) -> f64 {
 }
 
 impl Transfer {
-    /// Printed channel → linear light.
+    /// 打印通道 → 线性光。
     fn decode(self, value: f64) -> f64 {
         match self {
             Self::Linear => value,
@@ -173,7 +155,7 @@ impl Transfer {
         }
     }
 
-    /// Linear light → printed channel.
+    /// 线性光 → 打印通道。
     fn encode(self, value: f64) -> f64 {
         match self {
             Self::Linear => value,
@@ -202,14 +184,13 @@ fn apply(m: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
 }
 
-/// The inverse of a 3×3 matrix, computed rather than copied: a second hand-transcribed table is how this
-/// repository keeps ending up with two answers for one fact. Only the primaries matrices go in, all of them
-/// well-conditioned, so no singularity handling is attempted here.
+/// 一个 3×3 矩阵的逆，是算出来的而不是录来的：第二份手抄的表就是本仓库不断为一个事实留下两个答案的方式。
+/// 只有 primaries 矩阵进来，它们都是条件良好的，所以这里不做任何奇异性处理。
 fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-    // Adjugate over the determinant: each entry is the cofactor of the *transposed* position.
+    // 伴随矩阵除以行列式：每一项都是*转置后*那个位置的余子式。
     [
         [
             (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det,
@@ -229,20 +210,17 @@ fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     ]
 }
 
-/// White-point conversion between D65 and D50.
+/// 白点在 D65 与 D50 之间的换算。
 ///
-/// The plain matrix product, **not** a von Kries scaling of cone ratios: `BRADFORD` already carries the
-/// white-point shift (it maps the D50 white onto the D65 white), so multiplying by cone ratios on top of it
-/// adapts twice. That mistake showed as a full unit of `a` on a saturated colour — `color(srgb 0.2 0.4 0.8)`
-/// computed `lab(45.3584412071% 20.7260166824 -57.206844096)` where the corpus says
-/// `lab(44.1210142293% 10.9543336098 -59.0857381981)` (`to_space/srgb/lab.hrx::middle`), while neutrals looked
-/// nearly right, which is how it would slip past a grey-only check.
+/// 就是一个矩阵相乘，**不是**对锥比的 von Kries 缩放：`BRADFORD` 已经带着白点的偏移（它把 D50 白映到 D65 白），
+/// 所以在它之上再乘一次锥比就是适应了两次。那个错误在一个饱和颜色上表现为整整一个 `a` 单位的偏离，而语料说
+/// `lab(44.1210142293% 10.9543336098 -59.0857381981)`（`to_space/srgb/lab.hrx::middle`）；中性色却看着几乎对，
+/// 这就是它会溜过只测灰色的那道检查的原因。
 ///
-/// The second half of that lesson, which this file initially broke again: **exactly one adaptation per
-/// route**. `to_xyz_d65` used to fold `XyzD50` here and then fold once more at its tail because the space's
-/// own white is `D50` — so an identity conversion `color(xyz-d50 0.2 0.4 0.8)` → `xyz-d50` computed
-/// `color(xyz-d50 1.0640412 …)`, the matrix applied twice to the same triple. A space whose numbers already
-/// are XYZ returns them untouched and lets the tail do the single move.
+/// 那个教训的第二半，而本文件一开始又把它弄坏了：**每条路线恰好一次适应**。`to_xyz_d65` 过去在这里折叠 `XyzD50`，
+/// 然后在尾部因空间自己的白是 `D50` 又折叠一次 —— 于是一次恒等换算 `color(xyz-d50 0.2 0.4 0.8)` → `xyz-d50` 算出
+/// `color(xyz-d50 1.0640412 …)`，同一个三元组被矩阵作用了两次。一个数字本身就是 XYZ 的空间应原样返回它们，
+/// 让尾部做那唯一一次移动。
 pub fn adapt(xyz: [f64; 3], from: White, to: White) -> [f64; 3] {
     match (from, to) {
         (White::D50, White::D65) => apply(&BRADFORD, xyz),
@@ -251,7 +229,7 @@ pub fn adapt(xyz: [f64; 3], from: White, to: White) -> [f64; 3] {
     }
 }
 
-/// The Lab curve, shared by `lab`/`lch` (D50) and reused for the `oklab` family's cube root.
+/// Lab 那条曲线，由 `lab`/`lch`（D50）共用，并为 `oklab` 族的立方根复用。
 fn lab_f(t: f64) -> f64 {
     if t > LAB_EPSILON {
         t.cbrt()
@@ -269,7 +247,7 @@ fn lab_inverse(f: f64) -> f64 {
     }
 }
 
-/// D50-referenced XYZ → `lab`.
+/// 以 D50 为基准的 XYZ → `lab`。
 fn xyz_to_lab(xyz_d50: [f64; 3]) -> [f64; 3] {
     let white = d50();
     let f = |index: usize| lab_f(xyz_d50[index] / white[index]);
@@ -282,8 +260,7 @@ fn lab_to_xyz(lab: [f64; 3]) -> [f64; 3] {
     let fy = (lab[0] + 16.0) / 116.0;
     let fx = fy + lab[1] / 500.0;
     let fz = fy - lab[2] / 200.0;
-    // The lightness branch is the CIE definition: above `L = 8` the curve is a cube, below it the linear
-    // segment the same epsilon/kappa pair states.
+    // 亮度那一支就是 CIE 的定义：`L = 8` 之上曲线是一个立方，之下则由同一对 epsilon/kappa 说出的线性分段。
     let y = if lab[0] > 8.0 {
         fy * fy * fy
     } else {
@@ -296,9 +273,8 @@ fn lab_to_xyz(lab: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// The linear-sRGB → XYZ (D65) primaries table. It lives here rather than in [`super::space`] because this
-/// file is the home of the numeric tables; [`super::space::Space::matrix`] hands the same const out, so there
-/// is still one copy.
+/// 线性 sRGB → XYZ（D65）的 primaries 表。它住在这里而不是 [`super::space`]，因为这个文件才是数值表的住所；
+/// [`super::space::Space::matrix`] 交出的就是同一个 const，所以仍然只有一份。
 pub(super) const SRGB_PRIMARIES: [[f64; 3]; 3] = [
     [
         0.412_390_799_265_934,
@@ -317,48 +293,44 @@ pub(super) const SRGB_PRIMARIES: [[f64; 3]; 3] = [
     ],
 ];
 
-/// `oklab`'s cone response, **solved out of the corpus** instead of transcribed.
+/// `oklab` 的锥响应，**从语料解出来的**而不是录来的。
 ///
-/// The domain was never the problem, only the digits. The table is applied to XYZ (D65), which is where the
-/// archive computes it: fitting `cone = C · xyz` over all six plain-output rows of
-/// `core_functions/color/to_space/xyz/oklab.hrx` (`gray`, `middle`, `out_of_range/near`, `missing/{x,y,z}`)
-/// reproduces every one to `1.2e-8` in the cone and `7.6e-8` in the channels, and answers the corpus's own D65
-/// white (`to_space/srgb/xyz.hrx::white` prints `color(xyz 0.9504559271 1 1.0890577508)`) with three cones
-/// agreeing to `1.4e-7` — that is, a neutral, which is what `to_space/srgb/oklab.hrx::white` demands.
+/// 定义域从来不是问题，问题只在数字。这张表作用在 XYZ（D65）上，而那正是归档算它的方式：对
+/// `core_functions/color/to_space/xyz/oklab.hrx` 那 12 条普通输出行**里拟合用到的那 6 条**（`gray`、`middle`、
+/// `out_of_range/near`、`missing/{x,y,z}`）拟合 `cone = C · xyz`，每一行都在锥上复现到 `1.2e-8`、在通道上到 `7.6e-8`，
+/// 而它用三个互差在 `1.4e-7` 以内的锥答语料自己的 D65 白（`to_space/srgb/xyz.hrx::white` 打
+/// `color(xyz 0.9504559271 1 1.0890577508)`）—— 也就是一个中性色，那正是 `to_space/srgb/oklab.hrx::white` 要的。
 ///
-/// What I withdrew, recorded because it was mine and it measured **downward**: earlier today I routed this
-/// through linear sRGB on the argument that the transcribed rows sum to 1.3097 / 0.9984 / 0.9808 and so cannot
-/// make `(1,1,1)` neutral. Equal row sums are a requirement on a matrix acting on linear sRGB; acting on XYZ
-/// the invariant is `C · white = equal cones`. The detour put white at
-/// `oklab(101.9416634099% 0.1844594607 0.0072495212)` against the archive's `oklab(100% 0 0)` — further from
-/// the golden than the XYZ route's `101.8011897979%`.
+/// 今天走过又放弃的那条路线，记下来是因为它是我说的、而且它量的是**向下**：我把这条路线改走线性 sRGB，理由是
+/// 录来的表行和都不等于 1，所以做不出 `(1,1,1)` 中性（那三行和的数只住在 `tasks.md` 9.11 与基线节里，这里不重抄）。
+/// 相等的行和是对一个作用于线性 sRGB 的矩阵的要求；作用于 XYZ 时那个不变量是 `C · white = equal cones`。那个弯绕
+/// 把白行推到 `oklab(101.9416634099% …)`（两个数都记在 `tasks.md`），而归档是 `oklab(100% 0 0)` —— 比走 XYZ 的
+/// `101.8011897979%` 更远离金样。
 ///
-/// **Not exact yet, and the limit is [`OKLAB_LAB`] rather than this table:** the fit is carried through that
-/// matrix's ten digits, so a neutral still prints a residue near `1e-7` instead of the archive's literal `0`.
-/// Recovering the lightness matrix independently (the `oklch` rows' hue is a constraint on it, and it must
-/// come from the archive, not from a transcription) is the open half.
+/// **还不是精确的，而天花板在 [`OKLAB_LAB`] 而不是这张表：**拟合是携着那个矩阵的十位数字跑下去的，所以一个中性色
+/// 仍打出一个接近 `1e-7` 的余数（按打印出来的**百分数刻度**：`oklab(100.000000148% …)`，也就是小数刻度的 `1.5e-9`），
+/// 而不是归档那个字面的 `0`。把亮度矩阵独立解回来（`oklch` 那些行的色相是对它的约束，
+/// 而它必须来自归档而不是某份转录）是还开着的那一半。
 ///
-/// Only one direction of each pair is written down and [`invert`] produces the other. The hand-copied inverse
-/// that used to sit here disagreed with this table's inverse, so `oklab → oklch → oklab` did not return what it
-/// started from; making the pair mutual is what turned those 13 rows green at `regress=0`, and
-/// `tests/color_space_round_trip.rs` pins the invariant.
+/// 每一对里只写下其中一个方向，另一个由 [`invert`] 产出。过去坐在这里的那份手抄逆矩阵与这张表的逆不一致，所以
+/// `oklab → oklch → oklab` 回不到出发点；让那对彼此互逆，就是把那 13 行在 `regress=0` 下变绿的动作，而
+/// `tests/color_space_round_trip.rs` 钉住那个不变量。
 const OKLAB_CONE: [[f64; 3]; 3] = [
     [0.819_022_521_501, 0.361_906_211_260, -0.128_873_797_578],
     [0.032_983_669_487, 0.929_286_875_760, 0.036_144_665_391],
     [0.048_177_206_189, 0.264_239_628_112, 0.633_547_875_735],
 ];
 
-/// `oklab`'s LMS-cube-root → lightness/chroma/hue matrix; its inverse is computed, not copied. Its rows sum
-/// to 0.9999999934, -0.0000000006 and 0.000000037 — the first is lightness as the cone root, the other two are
-/// why an equal-cone colour prints a residue near 1e-8 instead of the archive's literal `0`
-/// (`to_space/srgb/oklab.hrx::gray`). These ten digits are what caps the cone fit above.
+/// `oklab` 从 LMS 立方根到 lightness/chroma/hue 的矩阵；它的逆是算的，不是录的。它的行和是
+/// 0.9999999934、-0.0000000006 与 0.000000037 —— 第一个就是把锥开立方后的亮度，另两个就是一个等锥的颜色为何
+/// 打出接近 1e-8 的余数而不是归档那个字面的 `0`（`to_space/srgb/oklab.hrx::gray`）。就是这十位数字卡住了上面的锥拟合。
 const OKLAB_LAB: [[f64; 3]; 3] = [
     [0.210_454_255_3, 0.793_617_785_0, -0.004_072_046_9],
     [1.977_998_495_1, -2.428_592_205_0, 0.450_593_709_3],
     [0.025_904_037_1, 0.782_771_766_3, -0.808_675_766_4],
 ];
 
-/// D65-referenced XYZ → `oklab`, whose LMS cube roots are the whole definition.
+/// 以 D65 为基准的 XYZ → `oklab`，它的 LMS 立方根就是全部定义。
 fn xyz_to_oklab(xyz: [f64; 3]) -> [f64; 3] {
     let root = apply(&OKLAB_CONE, xyz).map(|value| sp(value, 1.0 / 3.0));
     apply(&OKLAB_LAB, root)
@@ -369,11 +341,10 @@ fn oklab_to_xyz(oklab: [f64; 3]) -> [f64; 3] {
     apply(&invert(&OKLAB_CONE), root.map(|value| sp(value, 3.0)))
 }
 
-/// Cartesian lightness/chroma/hue, with the hue folded into a turn (`lch(… 280.5032243387deg)`).
+/// 直角坐标的 lightness/chroma/hue，色相折进一圈（`lch(… 280.5032243387deg)`）。
 ///
-/// Reachable from [`super::space`] because `oklab`/`oklch` and `lab`/`lch` are one triple read two ways: a
-/// conversion inside such a pair must not go through XYZ, whose round trip is what turned an exactly-zero
-/// channel into a `±1e-17` one and then a `360deg` hue.
+/// 从 [`super::space`] 可达，因为 `oklab`/`oklch` 与 `lab`/`lch` 是同一个三元组的两种读法：这样一对内部的换算
+/// 不得穿过 XYZ，而它的往返正是把一个恰为零的通道变成一个 `±1e-17` 的、再变出一个 `360deg` 色相的东西。
 pub(super) fn to_polar(lab: [f64; 3]) -> [f64; 3] {
     let hue = lab[2].atan2(lab[1]).to_degrees().rem_euclid(360.0);
     let chroma = (lab[1] * lab[1] + lab[2] * lab[2]).sqrt();
@@ -385,22 +356,22 @@ pub(super) fn from_polar(lch: [f64; 3]) -> [f64; 3] {
     [lch[0], lch[1] * angle.cos(), lch[1] * angle.sin()]
 }
 
-/// This colour's channels as CIE XYZ referenced to D65. A `none` channel reads as `0`, which is what the
-/// corpus shows for `color(srgb none 0.2 0.3)` converted to `lab` (`to_space/srgb/lab.hrx::missing/red`); the
-/// powerlessness itself only survives an identity conversion, and printing keeps it via [`InSpace`].
+/// 这个颜色的通道作为以 D65 为基准的 CIE XYZ。一个 `none` 通道读成 `0`，这就是语料对
+/// `color(srgb none 0.2 0.3)` 转到 `lab` 所显示的（`to_space/srgb/lab.hrx::missing/red`）；powerlessness 本身只在
+/// 一次恒等换算里活着，而打印靠 [`InSpace`] 保住它。
 pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
     let white = space.white();
     let xyz = match space {
-        // The **inverse** curve: these channels are already Lab, so they go to XYZ. The sibling branch in
-        // [`of_xyz_d65`] is the forward one. This pair was inverted here once (the branch called
-        // `xyz_to_lab`, and `lab_to_xyz` sat unused — the dead-code warning was the finding), which a chained
-        // conversion hits as soon as a `lab` colour is read: `color.to-space(color.to-space(#abc, lab), srgb)`.
+        // **反向**的那条曲线：这些通道已经是 Lab 了，所以它们要去 XYZ。[`of_xyz_d65`] 里的孪生分支才是
+        // 正向的那条。这一对曾在这里被装反过一次（那个分支叫 `xyz_to_lab`，而 `lab_to_xyz` 坐在那里没人用 ——
+        // dead-code 警告就是那个发现），而只要读一个 `lab` 颜色，链接的换算就会碰上来：
+        // `color.to-space(color.to-space(#abc, lab), srgb)`。
         Space::Lab => lab_to_xyz(channels),
         Space::Lch => lab_to_xyz(from_polar(channels)),
         Space::Oklab => oklab_to_xyz(channels),
         Space::Oklch => oklab_to_xyz(from_polar(channels)),
         Space::Xyz => return channels,
-        // Its own numbers, at D50: the tail `adapt` below is this space's one and only white-point move.
+        // 它自己的数，在 D50 上：下面尾部那个 `adapt` 就是这个空间唯一的一次白点移动。
         Space::XyzD50 => channels,
         other => {
             let transfer = other.transfer();
@@ -411,7 +382,7 @@ pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
     adapt(xyz, white, White::D65)
 }
 
-/// XYZ (D65) as this space's channels.
+/// 把 XYZ（D65）作为这个空间的通道。
 pub fn of_xyz_d65(space: Space, xyz: [f64; 3]) -> [f64; 3] {
     match space {
         Space::Xyz => xyz,

@@ -1,38 +1,34 @@
-//! The colour **axis arithmetic**: moving a colour through the hsl axes and averaging two colours.
-//! Split out of [`super`] because it is the only place a colour leaves the space it was created in, and
-//! keeping it apart is what lets [`crate::axes`] be tested as pure `f64` while this file owns only the
-//! clamping, the wrapping and the representation the result keeps.
+//! 颜色的**轴算术**：让一个颜色穿过 hsl 轴移动，以及两个颜色求均。从 [`super`] 里拆出来，因为这是唯一一个
+//! 颜色离开它被创建时那个空间的地方；把它分开，才能让 [`crate::axes`] 作为纯 `f64` 被测试，而这个文件只拥有
+//! 夹紧、wrap 与结果保留哪种表示。
 //!
-//! The printing law that reads these results (whole bytes print as numbers or hex, anything between prints
-//! as percentages) is a separate concern and lives in [`super::text`].
+//! 读这些结果的打印律（整字节打数字或 hex，中间值打百分比）是另一件事，住在 [`super::text`]。
 
 use super::{Channel, Color, Representation};
 
 impl Color {
-    /// The same colour after a change to its **hsl axes**, wherever it is stored, with the two clamps and
-    /// the hue wrap the fixtures state:
-    /// * `saturate(plum, 100%)` and `saturate(plum, 53%)` both give `#ff7eff` — saturation clamps at 100
-    ///   and, landing on whole bytes, prints hex (`core_functions/color/saturate.hrx::{max,max_remaining}`);
-    /// * `desaturate(plum, 100%)` → `rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)` — lightness
-    ///   `(221 + 160)/2 = 190.5` of 255 is not a whole byte, so percentages (`desaturate.hrx::max`);
-    /// * `darken(red, 100%)` clamps lightness at 0 rather than going negative.
+    /// 改动过**hsl 轴**之后的同一个颜色，不论它存在哪里，带上 fixture 说的那两处夹紧与色相 wrap：
+    /// * `saturate(plum, 100%)` 与 `saturate(plum, 53%)` 都给 `#ff7eff` —— 饱和度在 100 处夹紧，且落在整字节上
+    ///   于是打 hex（`core_functions/color/saturate.hrx::two_args/{max,max_remaining}`）；
+    /// * `desaturate(plum, 100%)` → `rgb(74.7058823529%, 74.7058823529%, 74.7058823529%)` —— 亮度
+    ///   `(221 + 160)/2 = 190.5` 对 255 不是整字节，所以打百分比（`desaturate.hrx::max`）；
+    /// * `darken(red, 100%)` 把亮度夹在 0，而不是跑成负值。
     ///
-    /// `color.grayscale` is the same entry with saturation pinned to zero, which is why it no longer needs
-    /// its own path.
+    /// `color.grayscale` 就是同一个入口加上把饱和度钉在零，所以它不再需要自己的那条路径。
     pub fn transform_axes(&self, change: impl Fn([f64; 3]) -> [f64; 3]) -> Option<Self> {
-        // A colour in its own space is refused **by this judge**, which answers `None` for
-        // `Representation::InSpace`: deriving axes from the byte triple it does not carry answered
-        // `complement(color(srgb …))` with zeros, and echoing the input back claimed the operation had
-        // happened. The Color-4 rule the corpus asks for is a conversion through the named space
-        // (`complement.hrx::space/missing/modern/different` writes
-        // `color.complement(color(srgb none 100 200), $space: oklch)` and expects converted channels, and
-        // `grayscale.hrx::modern/predefined` expects `color(xyz …)` to come out changed), which this slice has
-        // not built. Said plainly, because the distinction matters to the next reader: **no corpus row reaches
-        // this refusal today** — those calls already decline at argument binding, because `$space:` is not a
-        // declared parameter of them (`builtins/mod.rs` reports the unknown label and the call keeps its text),
-        // so the error this path returns has zero measured hits. Making `$space:` a parameter of the
-        // Color-4 accessors is the precondition for the refusal ever being exercised; `tasks.md` 9.9 keeps it
-        // open.
+        // 一个在自己空间里的颜色是**由这个判者**拒掉的，它对 `Representation::InSpace` 答 `None`：从它并不持有的
+        // 字节三元组去推轴，会让 `complement(color(srgb …))` 用零作答；而把输入原样回声出去则声称那次操作已经
+        // 发生了。语料要的 Color-4 规则是一次穿过命名空间的换算（`complement.hrx::space/missing/modern/different`
+        // 写 `color.complement(color(srgb none 100 200), $space: oklch)` 并期望换算过的通道，而
+        // `grayscale.hrx::modern/predefined` 期望 `color(xyz …)` 变过才出来），这一刀还没造。
+        // 而“没有行会走到这里”是错的：`saturate.hrx::error/non_legacy` 就写 `saturate(color(srgb 1 1 1), 10%)`，
+        // 金样要的是一句错误 —— `Error: saturate() is only supported for legacy colors.`（后面接
+        // `Please use color.adjust() instead with an explicit $space argument.`），同形者还有 desaturate/darken/
+        // lighten/fade_in/fade_out 与六个通道访问器：现量
+        // `cargo run -q -p ledger -- failures <run> "error/non_legacy" --count` = **15 行仍红**。所以这里的 `None`
+        // 只保证“不错答”，并不等于满足金样；那些错误消息还没造，`$space:` 成为 Color-4 访问器的参数是另
+        // 一半前提（它现在在进 body 之前就被剔掉，那条记录住在 `tasks.md` 的 1.5 段，与
+        // `mix/named::polar_space`/`explicit_method` 同一堆）。
         let [hue, saturation, lightness] = change(self.axes_of()?);
         let axes = [
             hue.rem_euclid(360.0),
@@ -57,11 +53,11 @@ impl Color {
                 ],
                 ..self.clone()
             },
-            // A `hwb` colour cannot store an hsl change as whiteness and blackness, so it comes back as the
-            // `hsl` value it prints — and through the `rgb` round trip, which is what the corpus shows:
-            // `color.grayscale(hwb(120deg 10% 20%))` → `hsl(0, 0%, 45%)` (`grayscale.hrx::
-            // legacy/powerless/different`), hue `0` because a grey has no hue, whereas the same operation on
-            // an `hsl` colour keeps its hue (`grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)`).
+            // 一个 `hwb` 颜色存不下一个 hsl 改动作为 whiteness 与 blackness，所以它作为自己会打的 `hsl` 值回来 ——
+            // 而且是穿过 `rgb` 的往返，这正是语料显示的：
+            // `color.grayscale(hwb(120deg 10% 20%))` → `hsl(0, 0%, 45%)`
+            // （`grayscale.hrx::legacy/powerless/different`），色相是 `0` 因为一个灰没色相；而同一个操作作用在一个
+            // `hsl` 颜色上则保住它的色相（`grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)`）。
             Representation::Hwb => {
                 let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
                 let [hue, saturation, lightness] = crate::axes::rgb_to_axes(rgb[0], rgb[1], rgb[2]);
@@ -82,36 +78,34 @@ impl Color {
                     ],
                     alpha: self.alpha,
                     representation: Representation::Hsl,
-                    // A `hwb` colour moved through the axes becomes an ordinary hsl value; there is no
-                    // “as written” triple behind it beyond these axes, which `axes_of` already returns.
+                    // 一个穿过轴移动过的 `hwb` 颜色就是一个普通的 hsl 值；除了这些轴，它背后没有什么“照写的”
+                    // 三元组，而 `axes_of` 已经把它们交出来了。
                     authored: None,
                 }
             }
-            // Named, not folded into `_`: unreachable through the `?` above, and a future variant must not
-            // fall into the bytes path silently — that silence is how a space colour came to print
-            // `rgb(0, 0, 0)`.
+            // 具名而不是归进 `_`：上面那个 `?` 已经让它不可达，而以后新加的变体不得悄悄落进字节路径 —— 那份沉默
+            // 就是一个空间的颜色打出 `rgb(0, 0, 0)` 的来历。
             Representation::InSpace(..) => return None,
             _ => Self::from_axes(self, axes),
         })
     }
 
-    /// The same colour with its **hsl axes written, without clamping** — `color.change`'s law, which is
-    /// *not* the adjust family's: `color.change(plum, $saturation: 120%)` keeps 120 and prints
-    /// `hsl(300, 120%, 74.7058823529%)` (`change/hsl.hrx::saturation/above_range`), while
-    /// `saturate(plum, 100%)` clamps at 100 and prints `#ff7eff` (`saturate.hrx::max`). Two clamping
-    /// behaviours that both come from rows, so they are two entry points rather than one flag a caller has
-    /// to remember to pass.
+    /// **把 hsl 轴写进去、不夹紧**的同一个颜色 —— 那是 `color.change` 的律，*不是* adjust 族的：
+    /// `color.change(plum, $saturation: 120%)` 保住 120 并打 `hsl(300, 120%, 74.7058823529%)`
+    /// （`change/hsl.hrx::saturation/above_range`），而 `saturate(plum, 100%)` 在 100 处夹紧并打 `#ff7eff`
+    /// （`saturate.hrx::two_args/max`）。两种夹紧行为都由行说出，所以它们是两个入口，而不是一个需要调用者记得传的
+    /// 标志位。
     ///
-    /// `None` for a `hwb`-created colour: it stores whiteness and blackness, and no fixture says what
-    /// writing hsl axes into it means, so the call declines instead of inventing a round trip.
+    /// 对一个由 `hwb` 造出的颜色是 `None`：它存 whiteness 与 blackness，而没有任何 fixture 说“把 hsl 轴写进它”
+    /// 是什么意思，所以那次调用 decline，而不是发明一次往返。
     pub fn with_axes(&self, write: impl FnOnce([f64; 3]) -> [f64; 3]) -> Option<Self> {
-        // The same refusal as [`Self::transform_axes`], stated once by [`Color::axes_of`]: writing hsl axes onto
-        // a colour that carries its own space would silently throw that space away and print srgb bytes.
+        // 与 [`Self::transform_axes`] 同一个拒答，由 [`Color::axes_of`] 说一次：把 hsl 轴写到一个自带空间的颜色上，
+        // 会把那个空间悄悄抛掉并打出 srgb 字节。
         let current = self.axes_of()?;
         match self.representation {
             Representation::Hwb => None,
-            // The axes are the value, so they go straight back in — hue as a plain number of degrees and
-            // the other two as percentages, exactly as [`Color::hsl`] stores them.
+            // 轴就是值，所以它们直接放回去 —— 色相是一个普通的度数字，另两个是百分比，与 [`Color::hsl`] 存它们的
+            // 方式一模一样。
             Representation::Hsl => {
                 let [hue, saturation, lightness] = write(current);
                 Some(Self {
@@ -131,14 +125,13 @@ impl Color {
                     ],
                     alpha: self.alpha,
                     representation: Representation::Hsl,
-                    // The channels *are* the axes for an hsl colour, so there is nothing extra to remember:
-                    // an out-of-gamut hsl value prints from `axes_of`, which returns exactly these.
+                    // 对一个 hsl 颜色，通道*就是*轴，所以没多什么要记住的：一个 out-of-gamut 的 hsl 值由
+                    // `axes_of` 打，而它返回的正是这些。
                     authored: None,
                 })
             }
-            // An `rgb`-family colour keeps its own representation and gains the bytes the new axes imply;
-            // `to_css` then decides between numbers, percentages, hex, a keyword and — for axes outside the
-            // gamut, which is what makes 120% visible — the hsl form.
+            // 一个 `rgb` 族的颜色保住它自己的表示，并拿到新轴蕴含的那些字节；然后 `to_css` 在数字、百分比、hex、
+            // 关键词之间定 —— 而对 gamut 之外的轴（正是它让 120% 看得见）打 hsl 形。
             _ => {
                 let axes = write(current);
                 let rgb = crate::axes::axes_to_rgb(axes[0], axes[1], axes[2]);
@@ -149,24 +142,23 @@ impl Color {
                     }),
                     alpha: self.alpha,
                     representation: self.representation,
-                    // The axes the call named, kept for the out-of-gamut print: `with_axes` is the only path
-                    // that writes an hsl triple onto a colour built some other way, and deriving the triple
-                    // back from the implied bytes changes it when they fall outside the gamut
-                    // (`color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)`, `change/hsl.hrx`).
+                    // 这次调用点名的轴，为 out-of-gamut 的打印留着：`with_axes` 是唯一一条路径，把一个 hsl 三元组写到一个
+                    // 以别的方式造出的颜色上，而当那些字节落在 gamut 外时，再从它们推回三元组就会改掉它
+                    // （`color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)`，`change/hsl.hrx`）。
                     authored: Some(axes),
                 })
             }
         }
     }
 
-    /// The same colour with its **whiteness and blackness written**, keeping the caller's own representation:
-    /// `color.change(#cc6666, $whiteness: 80%)` → `#cccccc` (`change/hwb.hrx::whiteness/high`), while a pair
-    /// that leaves the gamut prints the hsl triple it implies —
+    /// **把 whiteness 与 blackness 写进去**的同一个颜色，保住调用方自己的表示：
+    /// `color.change(#cc6666, $whiteness: 80%)` → `#cccccc`（`change/hwb.hrx::whiteness/high`），而一对落在
+    /// gamut 外的值打它蕴含的那个 hsl 三元组 ——
     /// `color.change(#993333, $whiteness: 50%, $blackness: -20%)` → `hsl(0, 233.3333333333%, 85%)`
-    /// (`…::out_of_range`), which is [`super::Color::authored`] doing its job.
+    /// （`…::out_of_range`），那就是 [`super::Color::authored`] 在干活。
     ///
-    /// An `hsl`-created colour is not answered here: no fixture writes whiteness or blackness into one, and
-    /// inventing the round trip through bytes would be a rule nobody stated.
+    /// 一个由 `hsl` 造出的颜色不在这里答：没有任何 fixture 往它里写 whiteness 或 blackness，而发明一次穿过字节的
+    /// 往返会是一条没人说过的规则。
     pub fn with_hwb(&self, hue: f64, whiteness: f64, blackness: f64) -> Option<Self> {
         let (white, black) = crate::axes::normalise_hwb(whiteness, blackness);
         let axes = crate::axes::hwb_to_hsl(hue, white, black);
@@ -182,16 +174,16 @@ impl Color {
         })
     }
 
-    /// The colour's axes: the stored ones when it is held in hsl, the derived ones for a `hwb` colour,
-    /// otherwise the round trip ([`crate::axes`]) of its channels. `pub(super)` because
-    /// [`super::Color::hsl_channel`] reads the same axes an operation writes — one path, so an accessor and a
-    /// `darken` cannot disagree about a colour's lightness.
+    /// 颜色的轴：当它以 hsl 持有就是存着的那些，一个 `hwb` 颜色是推出的，其余是它通道的往返
+    /// （[`crate::axes`]）。定成 `pub(super)` 是因为 [`super::Color::hsl_channel`] 读的就是一个操作要写的那套轴 ——
+    /// 一条路径，所以一个访问器与一个 `darken` 不会在一个颜色的亮度上分歧。
     ///
-    /// **`None` for a colour in its own colour space**, and that is the whole point of the variant: such a
-    /// colour stores no hsl axes, so the legacy accessors have no number to hand back and decline to their
-    /// text — which is what the corpus asks for (`hue.hrx::error/non_legacy` answers
-    /// `color.hue(lch(0% 0 0deg))` with "only supported for legacy colors", not a hue). Reading the empty byte
-    /// triple instead is what produced `0%` and `rgb(85, 85, 85)` on 15 rows.
+    /// **对一个在自己色彩空间里的颜色是 `None`**，而这正是那个变体的全部意思：这样一个颜色不存 hsl 轴，所以
+    /// legacy 访问器没数字可交，只能保住自己的文本 —— 而**语料在这里要的是一句错误，不是保文本**：
+    /// `hue.hrx::error/non_legacy` 对 `color.hue(lch(0% 0 0deg))` 逐字要
+    /// `Error: color.hue() is only supported for legacy colors.`，所以那 15 行今天仍红（见
+    /// [`Self::transform_axes`] 里同一件事的现量指针）。改去读那个空的字节三元组，就是那 15 行上曾经出现的
+    /// `0%` 与 `rgb(85, 85, 85)` 的来历（`tasks.md` 9.9 逐字记着）。
     pub(super) fn axes_of(&self) -> Option<[f64; 3]> {
         match self.representation {
             Representation::Hsl => Some(self.stored_axes()),
@@ -204,30 +196,29 @@ impl Color {
         }
     }
 
-    /// The triple a colour **stores as written**: for `hsl` the hsl axes, for `hwb` hue/whiteness/blackness.
-    /// One statement, shared by [`Color::axes_of`] and the printer, so neither restates the reading.
+    /// 一个颜色**照写存下的**那个三元组：对 `hsl` 是 hsl 轴，对 `hwb` 是 hue/whiteness/blackness。只说一次，
+    /// 由 [`Color::axes_of`] 与打印机共用，所以两边都不重述这个读法。
     pub(super) fn stored_axes(&self) -> [f64; 3] {
         self.channels
             .map(|channel| super::missing_as_zero(channel.value))
     }
 
-    /// A `hwb` colour's hsl axes, derived, not stored: `hwb(0deg, 30%, 40%)` is asked for as
-    /// `hsl(0, 33.3333333333%, 45%)` (`hwb/three_args/units::hue/deg`), and `color.channel` reads that same hue
-    /// back (`channel/hwb.hrx::local/hue`). Shared by [`Color::axes_of`] and the printer for the same reason.
+    /// 一个 `hwb` 颜色的 hsl 轴，是推出的、不是存的：`hwb(0deg, 30%, 40%)` 被要成
+    /// `hsl(0, 33.3333333333%, 45%)`（`hwb/three_args/units::hue/deg`），而 `color.channel` 读回的就是同一个色相
+    /// （`channel/hwb.hrx::local/hue`）。同一个理由，由 [`Color::axes_of`] 与打印机共用。
     pub(super) fn hwb_axes(&self) -> [f64; 3] {
         let [hue, whiteness, blackness] = self.stored_axes();
         crate::axes::hwb_to_hsl(hue, whiteness, blackness)
     }
 
-    /// The hsl axes of an `rgb`-space colour, via [`crate::axes`] — the conversion is pure `f64` and is
-    /// tested there on its own, so this only hands it the channel values.
+    /// 一个 `rgb` 空间颜色的 hsl 轴，经 [`crate::axes`] —— 那个换算是纯 `f64` 并在那边单独测，所以这里只是把
+    /// 通道值递给它。
     pub(super) fn axes(&self) -> [f64; 3] {
         let [red, green, blue] = self.channels.map(|channel| channel.byte());
         crate::axes::rgb_to_axes(red, green, blue)
     }
 
-    /// Rebuild a colour of the same kind from hsl axes, keeping the channels un-rounded so the printing
-    /// rule can decide between numbers, percentages and hex.
+    /// 从 hsl 轴重建一个同种类的颜色，保持通道不取整，好让打印规则在数字、百分比与 hex 之间定。
     fn from_axes(source: &Color, [hue, saturation, lightness]: [f64; 3]) -> Self {
         let channels = crate::axes::axes_to_rgb(hue, saturation, lightness);
         Self {
@@ -237,28 +228,26 @@ impl Color {
             }),
             alpha: source.alpha,
             representation: source.representation,
-            // The axes are re-derived from these bytes on demand, which is exact while they stay in the
-            // gamut — and `transform_axes` clamps, so they do.
+            // 轴会在需要时从这些字节重推，只要它们留在 gamut 内这就是精确的 —— 而 `transform_axes` 会夹，
+            // 所以它们确实一直在内。
             authored: None,
         }
     }
 
-    /// The legacy `mix`: an **alpha-weighted** average in sRGB, whose shape only this formula explains.
-    /// Verified row by row against `core_functions/color/mix/{unweighted,explicit_weight,alpha}.hrx`:
-    /// * `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)` — with equal
-    ///   alphas the weight is a plain 0.5, giving `(145 + 1)/2 = 73` over 255;
-    /// * `color.mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → `rgba(42.7450980392%, …, 0.55)` — `w = 0`,
-    ///   `a = 0.5`, so the first colour carries `0.75`: `145 × 0.75 + 1 × 0.25 = 109`, and alpha is the
-    ///   average; the mirrored row (`0.4`/`0.9`) gives `0.25` → `37` → `14.5098039216%`;
-    /// * `color.mix(#91e16f, transparent)` → `rgba(145, 225, 111, 0.5)` — `a = 1` makes the first colour
-    ///   carry everything, and the result stays whole-byte so it prints numbers;
-    /// * the result keeps the **first** colour's representation, which is what makes that last row print
-    ///   numbers rather than a keyword when the other argument is `transparent`.
+    /// legacy 的 `mix`：一个 sRGB 里的**按 alpha 加权**的均，它的形状只有这个公式能解释。逐行对着
+    /// `core_functions/color/mix/{unweighted,explicit_weight,alpha}.hrx` 核过：
+    /// * `color.mix(#91e16f, #0144bf)` → `rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)` —— 两个 alpha
+    ///   相等时权重就是一个普通的 0.5，给出对 255 的 `(145 + 1)/2 = 73`；
+    /// * `color.mix(rgba(#91e16f, 0.8), rgba(#0144bf, 0.3))` → `rgba(42.7450980392%, …, 0.55)` —— `w = 0`、
+    ///   `a = 0.5`，所以第一个颜色携带 `0.75`：`145 × 0.75 + 1 × 0.25 = 109`，而 alpha 是均值；镜像那行
+    ///   （`0.4`/`0.9`）给 `0.25` → `37` → `14.5098039216%`；
+    /// * `color.mix(#91e16f, transparent)` → `rgba(145, 225, 111, 0.5)` —— `a = 1` 让第一个颜色携带全部，而结果
+    ///   仍是整字节，所以打数字；
+    /// * 结果保住**第一个**颜色的表示，这正是最后一行在另一侧是 `transparent` 时打数字而不是关键词的原因。
     ///
-    /// A colour held in the hsl or hwb space has no `0–255` channels to mix, so the call declines rather
-    /// than inventing a converted answer: no fixture states how `color.mix` treats those spaces, and mixing
-    /// a `hwb` colour's whiteness and blackness as if they were bytes would be a wrong value the pass count
-    /// cannot see.
+    /// 一个存在 hsl 或 hwb 空间里的颜色没有可混的 `0–255` 通道，所以那次调用 decline，而不是发明一个换算过的答：
+    /// 没有 fixture 说 `color.mix` 怎么处理那些空间，而把一个 `hwb` 颜色的 whiteness 与 blackness 当成字节去混，
+    /// 会是一个 pass 数看不见的错值。
     pub fn mixed(first: &Color, second: &Color, weight: f64) -> Option<Self> {
         let span = first.alpha - second.alpha;
         let tilt = 2.0 * (weight / 100.0).clamp(0.0, 1.0) - 1.0;
@@ -269,12 +258,11 @@ impl Color {
         } / 2.0
             + 0.5;
         let channel = |colour: &Color, index: usize| {
-            // [`Color::writes_bytes`] is the one judge of which representations store `0–255` bytes, so an
-            // `hsl`/`hwb` colour and a colour in its own space both answer `None` here: reading the byte triple
-            // the latter leaves behind would answer `rgb(0, 0, 0)` — a wrong value no pass count can see
-            // (`tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`). Mixing across
-            // spaces needs the conversion in [`crate::color::space`] driven by a common space, which is what
-            // `mix/named.hrx::polar_space` and `::rectangular_space` ask for; it is not a guess here.
+            // [`Color::writes_bytes`] 是哪个表示存 `0–255` 字节的唯一判者，所以一个 `hsl`/`hwb` 颜色与一个在自己
+            // 空间里的颜色都在这里答 `None`：去读后者留下的字节三元组，会答成 `rgb(0, 0, 0)` —— 一个 pass 数看不见的
+            // 错值（`tests/color.rs::a_colour_in_an_unimplemented_space_is_not_answered_in_srgb`）。要在两个空间之间混，需要
+            // [`crate::color::space`] 里那个由公共空间驱动的换算，那正是 `mix/named.hrx::polar_space` 与
+            // `::rectangular_space` 要的；不是在这里猜。
             colour.writes_bytes().then(|| colour.channels[index].byte())
         };
         let [red, green, blue] = [0, 1, 2].map(|index| {
