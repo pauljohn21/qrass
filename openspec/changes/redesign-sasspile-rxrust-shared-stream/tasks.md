@@ -2801,3 +2801,45 @@
       **继承的键制式不齐**（`hue.hrx`/`saturation.hrx`/`lightness.hrx` 在 `color/`、`global/color/`、`modules/color/`
       三处同名，且同一段注释里基目录在 `core_functions/` 与 `core_functions/color/` 之间来回），本批没动它们。
 
+- [x] 9.35 **注释中文化第八批：`color/{ops,matrix}.rs`（292 行注释，另修 `read.rs` 一处错字，2026-11-06）**。
+      行数（`wc -l`）：ops.rs 294→282、matrix.rs 430→401（read.rs 只动一行）。
+      **只改注释**：`git diff -U0` 非注释行 = **0**；审计用“剥掉注释后与 HEAD 逐行全等”交叉验过，四张矩阵
+      （`BRADFORD`/`SRGB_PRIMARIES`/`OKLAB_CONE`/`OKLAB_LAB`）的每个字面量、`decode`/`encode` 的十个常数、
+      `invert` 的九个余子式、`rem_euclid(360.0)`/`clamp(0.0, 100.0)`/`tilt * span == -1.0` 均未动。
+      奇数反引号行（凭据跳 `///` 断开）：ops.rs **HEAD 2 → NOW 0**（HEAD 把 `grayscale.hrx::` 与
+      `legacy/powerless/different` 拆两行）、matrix.rs 0→0；两个文件已无英文散文注释（perl 扫：剩下的无汉字行
+      只有空分隔与逐字凭据行）。
+      读数：`ledger diff zh-comments-color-tables-v2 zh-comments-color-math-v2` = **`regress=0 net=0`**、
+      `changed` = **`changed=0`**；hrx 现量 `3457/11533`、`pass_substantive=3292`、`pass_empty_expectation=165`、
+      `skipped=1264`；无效错误 **19**；sasslint count=0、fmt EXIT=0、`cargo test --workspace` EXIT=0（62 条 ok）。
+      **注释内数字多重集不再与 HEAD 全等，这是内容修正而不是回归**：删掉的是只住注释、全仓 grep 无住所的
+      反事实数字（`45.3584412071 20.7260166824 -57.206844096`、`0.1844594607`、`0.0072495212`）与已有第二住所的
+      三行和（`1.3097`/`0.9984`/`0.9808`）；新增的是可复取的 `15`/`156`/`12`/`6`/`512`/`100.000000148` 与节号
+      `9.11`/`9.20`。
+      `gc-auditor` 判 13 条 finding，全收。三条高危都是同一件事：**注释把“我们还没做”写成了“语料没要求”**：
+      • “**今天没有任何一行语料走到这个拒答**／实测零命中”是假的：`saturate.hrx::error/non_legacy` 的输入就是
+        `saturate(color(srgb 1 1 1), 10%)`，金样逐字要
+        `Error: saturate() is only supported for legacy colors.`，`desaturate`/`darken`/`lighten`/`fade_in`/
+        `fade_out` 与六个通道访问器同形，现量 `ledger failures <run> "error/non_legacy" --count` = **15 行仍红**
+        ⇒ 改成“这里的 `None` 只保证不错答，不等于满足金样”，并写下可复取的命令与行数；
+      • `axes_of` 的“语料要的就是这个（保文本）”同样错：`hue.hrx::error/non_legacy` 要的是一句错误 ⇒ 已改；
+      • 指针“`tasks.md` 9.9 记着 `$space:` 未闭”指错：9.9 区间内 `$space`/`$method` 命中 0，那条记录实在 1.5 段
+        （与 `mix/named::polar_space`/`explicit_method` 同堆）⇒ 已改指；
+      • 天花板“三行保持红”口径不准：现量 `to_space/xyz/xyz_d50` = 2 行、`to_space/srgb/xyz_d50` = 4 行，共 **6**
+        ⇒ 写成“两簇共 6 行，这里点名其中三行”；
+      • “去掉 `12.92` 丢的行一些进 `net`”与 9.21 相反（那里记的是 `regress=156 net=0`）⇒ 已改；
+      • “读数只住 9.21”既是双住所（同文件 `REC2020_GAMMA` 段转述了 9.20 的数）又是错节号 ⇒ 节号分写为
+        分段→**9.21**、曲线/行和残差→**9.20**，并把“只住一份”的作用域写清；
+      • `saturate.hrx::{max,max_remaining}` 少一级（真名 `two_args/{max,max_remaining}`；`desaturate.hrx::max` 是顶层，
+        阳性对照过）；“六条普通输出行”也不对（该文件共 **12** 条，拟合用此中 6 条）；
+      • “`1/16` 那两臂”不精确（解码 `1.0 / 16.0`、编码 `1.0 / 512.0`）；`1e-7` 未标刻度（rust.md 对同一行写 `1e-9`）
+        ⇒ 标成“按打印的百分数刻度 `100.000000148%`，即小数刻度的 `1.5e-9`”。
+      本批自己写坏的：`满住`→满足、“撕”当“撤”（改写避开该字）、粗体内多余空格。上一轮遗留的审计不可用（当日额度
+      耗尽）已说明：本批的 gc-auditor 是隔日重跑的。
+      **未做（不得当作已交付）**：`color/{mod,space,text}.rs`（215/177/127 行注释，文件分别 486/480/477 行，都贴
+      500 上限）与 `sasspile/src` 顶层约 1700 行未改；`REC2020_GAMMA`/prophoto 两段仍**转述** 9.20 的残差与 `net`
+      （已标注为转述，要不要连转述一并抽干待下一批定）；审计点名的两处第二住所（`color/primaries.rs:44-45` 的
+      A98 候选指针、`state-of-the-port.md` 里 9.17 残差的舍入副本）未动。
+      基线 run 自此为 `zh-comments-color-math-v2`（与 `zh-comments-color-tables-v2` `regress=0 net=0`，只差注释与
+      上面那些被修正的内容）。
+
