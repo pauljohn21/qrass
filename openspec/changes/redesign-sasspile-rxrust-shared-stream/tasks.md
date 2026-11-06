@@ -3041,4 +3041,8 @@
       `lib.rs` 98、`operations.rs` 85、`loops.rs` 72、`structure.rs` 54、`trace.rs` 49、`selector.rs` 43、
       `phases.rs` 40）与 `builtins/` 余下约 847 行；顺修清单：`builtins/color/modify.rs:78` 与 `lib.rs:179` 两条
       断链。基线 run 自此为 `zh-comments-calls-v2`。
+      **提交信息里的一处缺陷（已推，不改历史）**：记账 commit `73d46af` 的 subject 被打成
+      “one unc对照 zero reading”（中文“对照”泄进了英文行）。它已推到 `github/main`，重写已推的 main
+      历史属破坏性操作且未获用户授权，所以只做记录不 amend；以后的 commit subject 写完先跑
+      `git log -1 --format=%s | grep -p{Han}` 类型的检查再推。
 
