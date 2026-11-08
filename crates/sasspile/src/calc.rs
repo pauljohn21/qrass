@@ -1,39 +1,35 @@
-//! Reading the arithmetic **inside** a `calc( … )`, flattened rather than interpreted.
+//! 读 `calc( … )` **内部**的算术：扁平化读取，而不是解释执行。
 //!
-//! The GC-shaped way to do this is to build a tree of nodes that point at other nodes and walk it twice —
-//! once to simplify, once to print. This module keeps no such structure. One pass turns the lexeme run
-//! into a document-order list of **runs tagged with their depth** (`level` and `owner` are fields of the
-//! data, so nesting becomes an index, not a call stack), and the runs are then reduced **deepest level
-//! first**, which guarantees a group is already a single owned summary by the time its parent looks at it.
-//! A summary holds a folded value, the text it prints (written at the moment it was formed, never
-//! re-derived) and its precedence — no child pointers, no recursion, no traversal flags.
+//! GC 式的做法是建一棵节点互指的树、再走两遍 —— 一遍化简、一遍打印。本模块不保留这种结构：一趟遍历把
+//! 词素 run 变成 **带深度的文档序列表**（`level` 与 `owner` 是数据字段，所以嵌套成为索引，而不是调用栈），
+//! 随后运行段 **最深层级优先** 归约 —— 保证一个分组被其父级看到时，它已经是一枚 owned 摘要。摘要持有折出的
+//! 值、它打印的文本（在形成的当刻写下，绝不重新推导）以及它的优先级 —— 没有子指针、没有递归、没有遍历标志。
 //!
-//! ## The laws, each traced to a fixture
+//! ## 各条律，每条都追到一个 fixture
 //!
-//! *A chain folds while every step is computable*: `calc(1px - 2px)` → `-1px` (`operator/minus::simplified`),
-//! `calc(1px + 20px - 300px + 4000px - 50000px)` → `-46279px` and `calc(2 * 3 + 4 / 5 - 6)` → `0.8`
-//! (`operator/precedence::simplified/*`), `calc(1px * 2)` → `2px` (`operator/times::simplified`). One
-//! impossible step stops only itself: `calc(1px - 2%)` stays (`minus::preserved/number`), and a compound
-//! unit stays inside the shell (`Unit::is_plain`, `values/numbers/units/multiple::multiple_denominators`).
-//! `+`/`-` reuse [`Value::plus`]/[`Value::minus`] and `*`//`/` reuse [`Value::times`]/[`Value::divided_by`],
-//! so the unit law lives in one place, shared with the operators outside `calc`.
+//! *每一步都可算时，链折到底*：`calc(1px - 2px)` → `-1px`（`operator/minus::simplified`）、
+//! `calc(1px + 20px - 300px + 4000px - 50000px)` → `-46279px` 与 `calc(2 * 3 + 4 / 5 - 6)` → `0.8`
+//! （`operator/precedence::simplified/*`）、`calc(1px * 2)` → `2px`（`operator/times::simplified`）。一步
+//! 算不动只停它自己：`calc(1px - 2%)` 照留（`minus::preserved/number`），复合单位留在壳内
+//! （`Unit::is_plain`、`values/numbers/units/multiple::multiple_denominators`）。`+`/`-` 复用
+//! [`Value::plus`]/[`Value::minus`]、`*`/`/` 复用 [`Value::times`]/[`Value::divided_by`]，所以单位律住在
+//! 一个地方，与 `calc` 之外的算子共用。
 //!
-//! *Parentheses are decided by precedence at the moment of joining*, never copied and never re-derived by a
-//! second pass: `calc((1 + var(--c)))` → `calc(1 + var(--c))` (`operator/var::indirectly_parenthesized`),
-//! `calc(1px + (2% - 3em))` → `calc(1px + 2% - 3em)` (`precedence::preserved/additive/parens`),
-//! `calc(1px * (2 / var(--c)))` → `calc(1px * 2 / var(--c))` (`…/multiplicative/default/parens`), while
-//! `calc(1px / (2 * var(--c)))` (`…/needs_parens/parens`), `calc(1px * (2 + var(--c)))`
-//! (`…/multiplicative_then_additive/parens`) and `calc(1px - (2% + var(--c)))` (`operator/minus::preserved/plus`)
-//! keep theirs. A group holding a single operand keeps **its own** parentheses — that text belongs to the
-//! operand (`var::directly_parenthesized`), which is also what a nested `calc(var(--c))` becomes
-//! (`var::calculation`), whereas a nested `calc( … )` holding a chain splices its terms in
-//! (`precedence::preserved/additive/calculation`).
+//! *括号在拼接的当刻由优先级决定*，绝不照抄、也绝不由第二遍重新推导：`calc((1 + var(--c)))` →
+//! `calc(1 + var(--c))`（`operator/var::indirectly_parenthesized`）、`calc(1px + (2% - 3em))` →
+//! `calc(1px + 2% - 3em)`（`precedence::preserved/additive/parens`）、`calc(1px * (2 / var(--c)))` →
+//! `calc(1px * 2 / var(--c))`（`…/multiplicative/default/parens`），而
+//! `calc(1px / (2 * var(--c)))`（`…/needs_parens/parens`）、`calc(1px * (2 + var(--c)))`
+//! （`…/multiplicative_then_additive/parens`）与 `calc(1px - (2% + var(--c)))`
+//! （`operator/minus::preserved/plus`）保住自己的。只装单个操作数的分组 **保住它自己的** 括号 —— 那段
+//! 文本属于操作数（`var::directly_parenthesized`），这也是嵌套 `calc(var(--c))` 的落点
+//! （`var::calculation`）；而装着一条链的嵌套 `calc( … )` 把它的各项拼进父级
+//! （`precedence::preserved/additive/calculation`）。
 //!
-//! *What cannot be read declines*: a run whose lexemes do not alternate into operands and operators —
-//! adjacent operands are a **space-separated list** and stay as written (`calc/space.hrx::var/before`:
-//! `calc(var(--c) 1)` → `calc(var(--c) 1)`), an operator missing the whitespace `+`/`-` requires, a bracket
-//! whose group never closes inside the argument, or an interpolation whose body fails to evaluate (turning
-//! that into text would swallow a fatal error). The caller then keeps the source text untouched.
+//! *读不出来的东西 decline*：一个词素无法交替成操作数与算子的 run —— 相邻操作数是一个 **空格分隔列表**、
+//! 照写保留（`calc/space.hrx::var/before`：`calc(var(--c) 1)` → `calc(var(--c) 1)`）、`+`/`-` 缺了它要求
+//! 空格的算子、在实参内永不闭合的括号分组、或求值失败的插值（把它变成文本会吞掉一个致命错误）。调用方
+//! 随后原样保留源码文本。
 
 use crate::brackets::{
     Entry, ROOT, Run, builtin_call, is_layout, merge_calls, opens, partition, spaced, trim_layout,
@@ -45,31 +41,31 @@ use crate::lexer::Tok;
 use crate::unit::Unit;
 use crate::value::Value;
 
-/// What `calculation` needs from one argument: whether it can be read at all, whether it is a value that
-/// may leave the `calc( … )` wrapper, or what it should print inside the wrapper.
+/// `calculation` 对单个实参的需求：它到底能不能读、是不是一个可以离开 `calc( … )` 壳的值、
+/// 或它该在壳内打印什么。
 pub enum Reading {
     Declined,
     Value(Value),
     Expression(Content),
 }
 
-/// One content of a chain: the value it folded to (when every step was computable), the text it prints,
-/// and the precedence that lets its parent decide about parentheses. `3` is a single operand.
+/// 链的一项内容：它折到的值（当每步都可算时）、它打印的文本，以及让父级决定括号的优先级。`3` 是单个
+/// 操作数。
 ///
-/// This is also what a `Value::Calculation` stores, so a **bound calculation can be split back into
-/// arithmetic**: `calc($number / 1px)` over `$number: calc(1px * 1rad / 1ms / 1Hz)` cancels to
-/// `calc(1rad / 1ms / 1Hz)` (`values/numbers/units/multiple::division/cancels/numerator/once`) — which the
-/// normalised text alone could not express.
+/// 这也是 [`Value::Calculation`] 存的东西，所以**一个有界的 calculation 能拆回算术**：
+/// `calc($number / 1px)` 配上 `$number: calc(1px * 1rad / 1ms / 1Hz)` 会抵消成
+/// `calc(1rad / 1ms / 1Hz)`（`values/numbers/units/multiple::division/cancels/numerator/once`）——
+/// 归一化后的文本本身表达不了这个。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Content {
-    /// the magnitude and unit the chain folded to, when every step computed — kept as data rather than as a
-    /// `Value` so a calculation's content cannot point back into the value it belongs to
+    /// 链折到的量级与单位，当每步都可算时 —— 存成数据而不是 `Value`，好让 calculation 的内容无法指回
+    /// 它所属的值
     pub(crate) folded: Option<(f64, Unit)>,
     pub(crate) printed: String,
     pub(crate) precedence: u8,
 }
 
-/// A standalone value as content: its CSS text, and its number when it is one.
+/// 一个独立值作为内容：它的 CSS 文本，以及它是数时的那个数。
 fn content_of(value: &Value) -> Content {
     Content {
         folded: match value {
@@ -81,28 +77,27 @@ fn content_of(value: &Value) -> Content {
     }
 }
 
-/// One step of the reduced chain: an operand, or the operator that joins the next one.
+/// 归约后链的一步：一个操作数，或拼起下一个的算子。
 #[derive(Clone)]
 enum Slot {
     Operand(Content),
     Join(BinOp),
 }
 
-/// A `calc( … )` shell (case-insensitively): the only name whose body splices into the parent.
+/// 一个 `calc( … )` 壳（大小写不敏感）：唯一一个体被拼进父级的名字。
 pub(crate) fn is_calc_name(callee: &str) -> bool {
     callee.eq_ignore_ascii_case("calc")
 }
 
-/// Read one calculation argument.
+/// 读一个 calculation 实参。
 pub fn read(toks: &[Tok], env: &Env) -> Reading {
     let flat = trim_layout(&expr::release_slashes(toks));
-    // A call is **one operand**: cutting `var(--c)` into `var(`, `--c`, `)` would make it three lexemes and
-    // no chain could be read around it (the same lesson as 1.4a's bracket glue — classification cannot be
-    // finer than the lexeme). `calc(` alone keeps its brackets, because splicing a nested calculation is
-    // itself a law (`precedence::preserved/additive/calculation`).
-    // A registered builtin call that **is** the whole argument is the builtin table's business, not this
-    // module's: `calc(math.round(2.3))` → `2` (`no_operator::function/sass/namespace`). Mixed with other
-    // operands no fixture states an answer, so such a run declines instead of inventing one.
+    // 一次调用是**一个操作数**：把 `var(--c)` 切成 `var(`、`--c`、`)` 会让它变成三个词素，外围就读不出
+    // 链了（与 1.4a 的词素粘着括号同一条教训 —— 分类不能比词素更细）。单独的 `calc(` 保住它的括号，
+    // 因为拼入嵌套 calculation 本身就是一条律（`precedence::preserved/additive/calculation`）。
+    // 一个已注册的内建调用若**就是**整个实参，那是内建表的业务、不是本模块的：
+    // `calc(math.round(2.3))` → `2`（`no_operator::function/sass/namespace`）。与其他操作数混排的形状
+    // 没有任何输入/输出 fixture 给出答案，所以这样的 run decline，而不是发明一个。
     if let Some(value) = whole_call(&flat, env) {
         return match value {
             Value::Number(number, unit) if unit.is_plain() => {
@@ -120,8 +115,8 @@ pub fn read(toks: &[Tok], env: &Env) -> Reading {
     }
     let runs = partition(&merged);
     let deepest = runs.iter().map(|run| run.level).max().unwrap_or(0);
-    // Deepest first, so a group is one summary before its parent reads it. Owners are bracket indices,
-    // and a child's bracket always sits after its parent's, so a level-ordered fold is enough.
+    // 最深层优先，好让一个分组在其父级读它之前就是一份摘要。owner 是括号索引，而子级的括号总在父级
+    // 之后，所以按层级排序的折叠就够了。
     let done = (0..=deepest).rev().collect::<Vec<u32>>().into_iter().fold(
         Vec::<(usize, Content)>::new(),
         |mut reduced, level| {
@@ -140,9 +135,9 @@ pub fn read(toks: &[Tok], env: &Env) -> Reading {
         .unwrap_or(Reading::Declined)
 }
 
-/// A folded **plain** number leaves the shell (`calc(1px * 2)` → `2px`, `operator/times::simplified`);
-/// anything else, including a compound unit (`1 / 1px / 1rad`), prints inside it
-/// (`values/numbers/units/multiple::multiple_denominators`).
+/// 一个折出的**plain** 数离开壳（`calc(1px * 2)` → `2px`，`operator/times::simplified`）；其余任何
+/// 东西，包括复合单位（`1 / 1px / 1rad`），在壳内打印
+/// （`values/numbers/units/multiple::multiple_denominators`）。
 fn finishing(content: &Content) -> Reading {
     match &content.folded {
         Some((value, unit)) if unit.is_plain() => {
@@ -152,9 +147,9 @@ fn finishing(content: &Content) -> Reading {
     }
 }
 
-/// Reduce one run: split at the additive operators (the loosest level), fold each piece at its `*`/`/`
-/// operators (the tighter one), then join the pieces left to right. Two folds, so precedence needs no
-/// recursion; `1 - 2 - 3` comes out `(1 - 2) - 3` because joining walks in document order.
+/// 归约一个 run：在加性算子（最松的一级）处切开，在每段的 `*`/`/` 算子（更紧的一级）处折叠，然后
+/// 从左到右拼接各段。两次折叠，所以优先级不需要递归；`1 - 2 - 3` 出来是 `(1 - 2) - 3`，因为拼接
+/// 按文档序走。
 fn reduce(run: &Run, done: &[(usize, Content)], env: &Env) -> Option<Content> {
     let entries = run.entries.as_slice();
     let slots = entries
@@ -190,13 +185,13 @@ fn reduce(run: &Run, done: &[(usize, Content)], env: &Env) -> Option<Content> {
         .fold(None::<Content>, |left, (op, right)| match (left, op) {
             (None, _) => Some(right),
             (Some(left), Some(op)) => Some(join(left, op, right)),
-            // Two pieces with no operator between them are a list, not a sum: the run declines.
+            // 两段之间没有算子，那是列表、不是求和：这一 run decline。
             (Some(_), None) => None,
         })
 }
 
-/// Fold one multiplicative piece: operands and joining operators must alternate, exactly as in
-/// [`crate::operations`], and the strict alternation test is what rejects a run this cannot model.
+/// 折叠一个乘性段：操作数与拼接算子必须交替，与 [`crate::operations`] 里完全一样，而这个严格的
+/// 交替测试正是拒绝本模块无法建模的 run 的判据。
 fn chain(piece: Vec<Slot>) -> Option<Content> {
     let operands = piece
         .iter()
@@ -228,7 +223,7 @@ fn chain(piece: Vec<Slot>) -> Option<Content> {
     )
 }
 
-/// One lexeme as a slot: an operator that the spacing law accepts, a group already reduced, or an operand.
+/// 一个词素作为一个槽：间距律接受的一个算子、一个已归约的分组，或一个操作数。
 fn slot(
     entry: &Entry,
     index: usize,
@@ -237,8 +232,8 @@ fn slot(
     env: &Env,
 ) -> Option<Slot> {
     if let Some(op) = operator(&entry.tok) {
-        // `+`/`-` are operators only with whitespace on both sides — that law keeps `10px -5px` a
-        // two-item list. `*` and a released `/` carry no such ambiguity.
+        // `+`/`-` 只有在两侧都有空格时才是算子 —— 这条律让 `10px -5px` 保持为双项列表。`*` 与被
+        // 放行的 `/` 没有这种歧义。
         return match (op, spaced(entries, index)) {
             (BinOp::Add | BinOp::Sub, false) => None,
             _ => Some(Slot::Join(op)),
@@ -247,8 +242,8 @@ fn slot(
     operand(entry, done, env).map(Slot::Operand)
 }
 
-/// An operand: a group, resolved by the position of the bracket that opened it (which `partition` left in
-/// the parent run as the placeholder), or a single lexeme.
+/// 一个操作数：一个分组，由开启它的括号位置解析（`partition` 把它作为占位留在父 run 里），
+/// 或单个词素。
 fn operand(entry: &Entry, done: &[(usize, Content)], env: &Env) -> Option<Content> {
     if is_layout(&entry.tok) {
         return None;
@@ -262,8 +257,8 @@ fn operand(entry: &Entry, done: &[(usize, Content)], env: &Env) -> Option<Conten
     leaf(&entry.tok, env)
 }
 
-/// A group around a single operand keeps its own parentheses; a group around a chain has them re-derived
-/// by precedence (`operator/var::directly_parenthesized` vs `var::indirectly_parenthesized`).
+/// 围住单个操作数的分组保住自己的括号；围住一条链的分组由优先级重新推导
+/// （`operator/var::directly_parenthesized` 对 `var::indirectly_parenthesized`）。
 fn parenthesised(term: &Content) -> Content {
     match term.precedence {
         3 => Content {
@@ -275,9 +270,9 @@ fn parenthesised(term: &Content) -> Content {
     }
 }
 
-/// A single lexeme as a term. An interpolation is a **value** (`calc(#{1px + 2px})` → `calc(3px)`,
-/// `no_operator::interpolation/number`); a body that does not evaluate declines rather than becoming text,
-/// because swallowing that error into a string is what let a fatal `Undefined variable` disappear.
+/// 单个词素作为一个项。插值是一个 **值**（`calc(#{1px + 2px})` → `calc(3px)`，
+/// `no_operator::interpolation/number`）；求值失败的函数体 decline，而不是变成文本 —— 把那个错误
+/// 吞进字符串，正是致命 `Undefined variable` 曾消失的原因。
 fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
     let atom = |printed: String| {
         Some(Content {
@@ -289,9 +284,8 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
     match tok {
         Tok::Word(word) => Some(match crate::operations::number_lexeme(word) {
             Some((value, unit)) => number(value, &Unit::named(unit)),
-            // A word that is not a number may still be one of CSS's **calculation constants**; anything else
-            // is the unknown identifier the corpus keeps written (`…::constant/undefined/alone` answers
-            // `calc(c)` with `calc(c)`).
+            // 不是数字的词仍可能是 CSS 的四个 **calculation 常数**之一；其余任何东西都是语料照写的
+            // 未知标识符（`…::constant/undefined/alone` 用 `calc(c)` 答 `calc(c)`）。
             None => constant(word).map_or_else(
                 || Content {
                     folded: None,
@@ -301,11 +295,10 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
                 |value| number(value, &Unit::unitless()),
             ),
         }),
-        // A bound name resolves through the environment. A bound **calculation** enters as the content it
-        // already is — folded value, printed form and precedence — which is what lets
-        // `calc($number / 1px)` cancel against the bound product
-        // (`values/numbers/units/multiple::division/cancels/numerator/once`). A calculation carrying its own
-        // name (`min( … )`) keeps that name, because only `calc` splices its body into a parent.
+        // 一个有界的名字经环境解析。一个有界的 **calculation** 以它已经是的内容进入 —— 折出的值、
+        // 打印形式与优先级 —— 这才让 `calc($number / 1px)` 能与有界乘积抵消
+        // （`values/numbers/units/multiple::division/cancels/numerator/once`）。带着自己名字的
+        // calculation（`min( … )`）保住那个名字，因为只有 `calc` 会把体拼进父级。
         Tok::Var(name) => match env.get(name) {
             Ok(Value::Number(value, unit)) => Some(number(value, &unit)),
             Ok(Value::Calculation(callee, content)) => Some(if is_calc_name(&callee) {
@@ -320,9 +313,10 @@ fn leaf(tok: &Tok, env: &Env) -> Option<Content> {
             Ok(other) => atom(other.to_css()),
             Err(_) => atom(format!("${name}")),
         },
-        // A namespaced reference is a built-in module constant or nothing: no fixture puts one inside a
-        // calculation, so an unknown `upstream.$a` keeps its own text exactly as an unbound `$name` above
-        // does, instead of becoming a guess about a file this compiler never reads.
+        // 带命名空间的引用要么是内建模块常数、要么什么都不是：已知的经 `module_value` 解析
+        // （`calc(math.$pi)` → `3.1415926536`，`no_operator::variable/namespace`）；未知的没有一行
+        // fixture 放进 calculation，所以 `upstream.$a` 保住自己的文本，与上面未绑定的 `$name` 处理一致，
+        // 而不是变成对这个编译器从不读的文件的猜测。
         Tok::MemberVar(module, name) => match crate::builtins::module_value(module, name) {
             Some(Value::Number(value, unit)) => Some(number(value, &unit)),
             Some(other) => atom(other.to_css()),
@@ -344,16 +338,16 @@ fn number(value: f64, unit: &Unit) -> Content {
     }
 }
 
-/// A word that names one of CSS's four calculation constants, case-insensitively, with a sign glued to it:
-/// `values/calculation/calc/constant.hrx` reads `calc(pi)` → `3.1415926536`, `calc(pI)` the same, `calc(e)`
-/// → `2.7182818285`, `calc(infinity)` and `calc(NaN)` back as their own shells (a non-finite number has no
-/// plain-CSS spelling — [`crate::value::Value::to_css`] wraps it), and `calc(-infinity)` keeps the sign.
+/// 一个大小写不敏感、可带前导符号地命名 CSS 四个 calculation 常数之一的词：
+/// `values/calculation/calc/constant.hrx` 读得 `calc(pi)` → `3.1415926536`、`calc(pI)` 同样、
+/// `calc(e)` → `2.7182818285`、`calc(infinity)` 与 `calc(NaN)` 各自壳内返回（非有限数没有 plain CSS
+/// 拼法 —— [`crate::value::Value::to_css`] 把它包起来），而 `calc(-infinity)` 保住符号。
 ///
-/// The **numbers are not repeated here**: they come through [`crate::builtins::module_value`], the same door
-/// the `math.$pi` arm of [`leaf`] reads, so `pi` has one value in this crate. What this file owns is the
-/// **list of names**, and it is deliberately narrower than that table: the table also carries `epsilon` and
-/// `max-safe-integer`, and no golden puts those inside a calculation, so `calc(epsilon)` stays the unknown
-/// identifier `…::constant/undefined/alone` says it is.
+/// **数值不在这里重复**：它们经 [`crate::builtins::module_value`] 而来，与 [`leaf`] 的 `math.$pi`
+/// 臂同一扇门，所以 `pi` 在本 crate 只有一个值。本文件拥有的是**名字列表**，而且它有意比那张表窄：
+/// 表里还有 `epsilon` 与 `max-safe-integer`，而没有任何 golden 把它们放进 calculation
+/// （`calc(epsilon)`、`calc(max-safe-integer)` 全语料零命中），所以 `calc(epsilon)` 保持
+/// `…::constant/undefined/alone` 所说的未知标识符身份。
 fn constant(word: &str) -> Option<f64> {
     let (sign, name) = word
         .strip_prefix('-')
@@ -368,8 +362,7 @@ fn constant(word: &str) -> Option<f64> {
         })
 }
 
-/// Join two terms: fold the value when both sides are numbers and the unit law agrees, and write the text
-/// once, here, with the parentheses this position calls for.
+/// 拼接两个项：两侧都是数且单位律一致时折出值，文本在这里一次性写下，带上这个位置要求的括号。
 fn join(left: Content, op: BinOp, right: Content) -> Content {
     let level = if matches!(op, BinOp::Add | BinOp::Sub) {
         1
@@ -396,14 +389,14 @@ fn join(left: Content, op: BinOp, right: Content) -> Content {
     }
 }
 
-/// Which side of the operator a child sits on: `-` and `/` are not associative on their right.
+/// 子级位于算子的哪一侧：`-` 与 `/` 在右侧不满足结合律。
 #[derive(Clone, Copy)]
 enum Side {
     Left,
     Right,
 }
 
-/// A child is parenthesised exactly where dropping the group would change the value.
+/// 子级恰在丢掉这层括号会改变值的位置加括号。
 fn wrap(child: &Content, parent: BinOp, side: Side) -> String {
     let up = match parent {
         BinOp::Add | BinOp::Sub => 1,
@@ -424,8 +417,7 @@ fn wrap(child: &Content, parent: BinOp, side: Side) -> String {
 }
 
 impl BinOp {
-    /// The value-level law, reused rather than restated. `None` means this step is not computable, which
-    /// is what keeps the operation in the printed text.
+    /// 值级的律，复用而不是重述。`None` 表示这一步不可算，这正是把这个运算留在打印文本里的东西。
     fn fold(self, left: &Content, right: &Content) -> Option<(f64, Unit)> {
         let (Some((a, au)), Some((b, bu))) = (&left.folded, &right.folded) else {
             return None;

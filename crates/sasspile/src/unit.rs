@@ -1,39 +1,40 @@
-//! Unit — a number's **rational (compound) unit** as two order-preserving multisets, which is what
-//! makes `1px * 1em / 1rad / 1s` a value rather than a string: multiplication and division become
-//! operations on the two sides, same-name cancellation is structural (never a later clean-up pass), and
-//! the printed form follows from the data instead of from re-scanning text.
+//! Unit —— 一个数的 **有理（复合）单位**，表示为两个保序多重集，这正是让 `1px * 1em / 1rad / 1s`
+//! 成为一个值而不是字符串的东西：乘法与除法变成对两侧的运算、同名抵消是结构性的（绝不是后续的清理
+//! 步骤），打印形式由数据推出，而不是重新扫描文本。
 //!
-//! ## Order is the corpus's, not alphabetical
+//! ## 顺序是语料的，不是字母序的
 //!
-//! `core_functions/math/unit.hrx` prints **input order**: `math.unit(1px * 1em * 1rad)` → `"px*em*rad"`
-//! and `math.unit(1px * 1em / 1rad / 1s)` → `"px*em/(rad*s)"`. Sorting the multisets would give
-//! `"em*px*rad"` and fail both, so the representation keeps insertion order and only cancellation is
-//! structural. (The plan recorded "sort by name at construction"; the fixtures refute that — see the
-//! correction in `openspec/…/tasks.md` 1.4d.)
+//! `core_functions/math/unit.hrx` 打印 **输入顺序**：`math.unit(1px * 1em * 1rad)` → `"px*em*rad"`
+//! 与 `math.unit(1px * 1em / 1rad / 1s)` → `"px*em/(rad*s)"`。给多重集排序会得到 `"em*px*rad"` 而
+//! 两条全错，所以表示保留插入顺序，只有抵消是结构性的。（当初的方案记着"构造时按名字排序"，fixture
+//! 推翻了它 —— 见 `openspec/…/tasks.md` 1.4d 的修正。）
 //!
-//! ## The printed forms, each one quoted from a golden
+//! ## 打印形式，每条都引自一个 golden
 //!
-//! | unit | output | fixture |
+//! | 单位 | 输出 | fixture |
 //! |---|---|---|
-//! | none | `""` | `unit::none` |
+//! | 无 | `""` | `unit::none` |
 //! | `px` | `px` | `unit::one_numerator` |
-//! | `px`, `em`, `rad` | `px*em*rad` | `unit::multiple_numerators` |
-//! | denominator `px`, no numerator | `px^-1` | `unit::one_denominator` |
-//! | denominators `px`,`em`,`rad`, no numerator | `(px*em*rad)^-1` | `unit::multiple_denominators` |
-//! | `px` over `em` | `px/em` | `unit::numerator_and_denominator/single` |
-//! | `px`,`em` over `rad`,`s` | `px*em/(rad*s)` | `unit::numerator_and_denominator/multiple` |
+//! | `px`、`em`、`rad` | `px*em*rad` | `unit::multiple_numerators` |
+//! | 分母 `px`、无分子 | `px^-1` | `unit::one_denominator` |
+//! | 分母 `px`、`em`、`rad`、无分子 | `(px*em*rad)^-1` | `unit::multiple_denominators` |
+//! | `px` 在上 `em` 在下 | `px/em` | `unit::numerator_and_denominator/single` |
+//! | `px`、`em` 在上，`rad`、`s` 在下 | `px*em/(rad*s)` | `unit::numerator_and_denominator/multiple` |
 //!
-//! A **repeated** unit (`px * px`) has no golden anywhere in the corpus — the only occurrences are
-//! commented-out lines of `libsass-closed-issues/issue_783.hrx`, which the harness excludes — so this
-//! model keeps duplicates as written (`px*px`) rather than inventing a power form for them. That is a
-//! choice, and `unit.hrx`'s own README says the function is for debugging and "is not required to have
-//! totally consistent output across different implementations".
+//! 一个 **重复** 单位（`px * px`）没有打印形的 golden：`math.unit(1px * 1px)` 全语料零命中，而串
+//! `1px * 1px` 只活在 `libsass-closed-issues/issue_783.hrx` 的注释行（该目录不入 harness 基线）与
+//! `values/calculation/{max,min,clamp}.hrx::error/complex_unit`、
+//! `values/calculation/calc/error/known_incompatible/complex.hrx` 的 error golden（等的是
+//! `isn't compatible with CSS calculations`，不是单位串的打印）—— 所以本模型照写重复项（`px*px`），
+//! 而不是为它发明幂形式。这是一个选择，而 `unit.hrx` 自己的 README 说该函数
+//! "is intended for debugging and as such is not required to have totally consistent output across
+//! different implementations"。
 
 use std::f64::consts::PI;
 
-/// Convertible units as `(unit, family, factor to the family base)`. Sass converts only inside one
-/// family, and only these ones: `em`/`rem`/`vh`/`vw`/`vmin`/`vmax`/`ch`/`ex` are relative to a context
-/// Sass cannot see, so each stands in its own family and combines only with itself.
+/// 可换算单位表：`(单位, 族, 到族基准的因子)`。Sass 只在同族内换算，而且只有以下这些：
+/// `em`/`rem`/`vh`/`vw`/`vmin`/`vmax`/`ch`/`ex` 相对的是 Sass 看不见的上下文，所以各自独占一族、
+/// 只与自身结合。
 pub const UNITS: &[(&str, (&str, f64))] = &[
     ("px", ("length", 1.0)),
     ("cm", ("length", 96.0 / 2.54)),
@@ -55,15 +56,16 @@ pub const UNITS: &[(&str, (&str, f64))] = &[
     ("dppx", ("resolution", 96.0)),
 ];
 
-/// The table's entry for a unit — `(family, factor to the family base)` — or `None` when the unit is not in
-/// it. `em`/`rem`/`vh`/`ch`… are absent: each stands for its own context-relative family, so
-/// `math.compatible(1px, 2em)` is `false` (`core_functions/math/comparable.hrx::unit/to_different`) while
-/// `1em` vs `2em` compares as written. Comparison helpers ask this first so an unlisted unit declines instead
-/// of claiming a clash (`math.max.hrx` evidences `px` vs `s`; nothing evidences `px` vs `c`).
+/// 表里某个单位的条目 —— `(族, 到族基准的因子)` —— 单位不在表里时是 `None`。`em`/`rem`/`vh`/`ch`…
+/// 不在表里：每个各自代表一个上下文相关的族，所以 `math.compatible(1px, 2em)` 是 `false`
+/// （`core_functions/math/comparable.hrx::unit/to_different`），而 `1em` 对 `2em` 按原样比较。比较
+/// 辅助函数先问这里，好让未列出的单位 decline 而不是宣称撞单位（`math.max.hrx` 证实 `px` 对 `s`；
+/// `px` 对 `c` 全语料没有证据）。
 ///
-/// This is the only table of convertible units in the project, and `math.div`, `math.compatible`, the colour
-/// hues and `math.hypot` all read it through here — `math.rs` carried its own list of length literals until
-/// `hypot.hrx::units` needed `q` and the exact quarter-millimetre relation.
+/// 这是本项目唯一一张可换算单位表，`math.div`、`math.compatible`、颜色 hue 与 `math.hypot` 都经这里
+/// 读它 —— `math.rs` 曾自带一份长度字面量表，直到 `q` 成为必需（1q = 1/4 mm；
+/// `core_functions/math/hypot.hrx::compatible_units` 与
+/// `values/calculation/hypot.hrx::units/compatible` 两处换算都要它），表才归一到此处。
 pub fn conversion(unit: &str) -> Option<(&'static str, f64)> {
     UNITS
         .iter()
@@ -71,9 +73,8 @@ pub fn conversion(unit: &str) -> Option<(&'static str, f64)> {
         .map(|(_, entry)| *entry)
 }
 
-/// `(family, factor to the family base)`; an unknown or relative unit is its own family, so it can only
-/// ever combine with an identical unit. The family borrows its name from whichever side supplied it — the
-/// table's `'static` name or the caller's own — so no lifetime is pinned here.
+/// `(族, 到族基准的因子)`；未知或相对单位自成一族，所以它只能与完全相同的单位结合。族名借自提供
+/// 它的那一侧 —— 表里的 `'static` 名字或调用方自己的 —— 所以这里不钉死任何生命周期。
 pub fn measure(unit: &str) -> (&str, f64) {
     UNITS
         .iter()
@@ -81,18 +82,17 @@ pub fn measure(unit: &str) -> (&str, f64) {
         .map_or_else(|| (unit, 1.0), |(_, (family, factor))| (*family, *factor))
 }
 
-/// Whether a unit name is one of the angle units the table carries (`deg`, `grad`, `rad`, `turn`). Asked in
-/// three places — the colour hue read, the trigonometric arguments, and `color.change`'s hue channel — and
-/// answered here once, so "which units count as an angle" cannot disagree between them. An unknown unit (like
-/// `%` or `px`) is its own family by [`measure`]'s rule, so it is not an angle.
+/// 一个单位名是不是本表携带的角度单位之一（`deg`、`grad`、`rad`、`turn`）。有三处来问 —— 颜色 hue
+/// 读、三角函数实参、`color.change` 的 hue 通道 —— 在这里一次答完，所以"哪些单位算角度"在它们之间
+/// 不会打架。未知单位（如 `%` 或 `px`）按 [`measure`] 的规律自成一族，所以不是角度。
 pub fn is_angle(unit: &str) -> bool {
     measure(unit).0 == "angle"
 }
 
-/// One side of a rational unit: every unit name that appears there, in the order it appeared.
+/// 有理单位的一侧：出现在那里的每个单位名，按出现的顺序。
 type Names = Vec<String>;
 
-/// A unit as `numerator / denominator`, both cancelled against each other at construction.
+/// 一个单位表示为 `numerator / denominator`，两侧在构造时互相抵消。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unit {
     numerator: Names,
@@ -100,7 +100,7 @@ pub struct Unit {
 }
 
 impl Unit {
-    /// The unitless number.
+    /// 无单位的数。
     pub fn unitless() -> Self {
         Self {
             numerator: Vec::new(),
@@ -108,9 +108,8 @@ impl Unit {
         }
     }
 
-    /// A lexeme's unit text: `""` is unitless, `px` one numerator, `%` a percentage. A unit read from
-    /// source is never compound (a compound one only exists as the result of `*` or `/`), so the text is
-    /// taken whole rather than re-split on `*` or `/`.
+    /// 一个词素的单位文本：`""` 是无单位、`px` 是一个分子、`%` 是百分比。从源码读到的单位绝不复合
+    /// （复合单位只作为 `*` 或 `/` 的产物存在），所以文本整体取用，而不是按 `*` 或 `/` 重新切分。
     pub fn named(name: &str) -> Self {
         Self {
             numerator: (!name.is_empty())
@@ -125,17 +124,16 @@ impl Unit {
         self.numerator.is_empty() && self.denominator.is_empty()
     }
 
-    /// Whether a number carrying this unit may be printed **outside** a calculation: nothing at all, `%`,
-    /// or one bare name. A compound unit (`px*em`, an inverted `1/em`) is calculation-only syntax, which
-    /// is why `calc(1px / 2px)` collapses to `0.5` (`calc/operator/divide::simplified` wants `0.5px`)
-    /// while `calc(1 / 1px / 1rad)` keeps its wrapper
-    /// (`values/numbers/units/multiple::multiple_denominators`).
+    /// 带这个单位的数能否打印在 calculation **之外**：什么都没有、`%`、或一个裸名字。复合单位
+    /// （`px*em`、倒过来的 `1/em`）是 calculation 专有的语法，所以 `calc(1px / 2px)` 塌成 `0.5`
+    /// （`calc/operator/units::division` 要 `0.5`），而 `calc(1 / 1px / 1rad)` 留住外壳
+    /// （`values/numbers/units/multiple::multiple_denominators`）。
     pub fn is_plain(&self) -> bool {
         self.is_unitless() || self.single().is_some()
     }
 
-    /// The one numerator unit, when that is all this is — the shape every conversion table and every
-    /// per-unit message reads.
+    /// 当整个单位恰好是「一个分子、没有分母」时给出它 —— 可换算路径读的 `unit.single().and_then(to_base)`
+    /// 与「这个单位是不是 `%`/`deg`」这类逐单位判定（`unit.single() == Some("%")`），取的都是这一个形状。
     pub fn single(&self) -> Option<&str> {
         match (self.numerator.as_slice(), self.denominator.as_slice()) {
             ([only], []) => Some(only),
@@ -143,24 +141,22 @@ impl Unit {
         }
     }
 
-    /// Both sides as written, for a function that must judge the whole fraction rather than one name
-    /// (`builtins::dimension` compares two units by their **dimension signature**).
+    /// 原样交出两侧，给需要判断整个分式、而不是单个名字的读者：`builtins::dimension` 按**量纲签名**
+    /// 比较两个单位（`builtins/math.rs` 里它读 `unit.names()`）。
     pub fn names(&self) -> (&[String], &[String]) {
         (&self.numerator, &self.denominator)
     }
 
-    /// Cancel a **convertible pair across the fraction** and carry its factor into the magnitude: `px` on
-    /// top with `in` below is not two surviving names but `96` divided out, because the corpus cancels
-    /// `calc(96px * 1rad / 1ms / 1Hz) / 1in` down to `calc(1rad / 1ms / 1Hz)`
-    /// (`values/numbers/units/multiple::division/cancels/compatible`). Names of the same family pair off
-    /// first-to-first in the order written; what cannot be matched stays.
+    /// 消掉分式两侧的**一个可换算对**，并把它的因子搬进量值：分子上的 `px` 与分母上的 `in` 不是留下两个
+    /// 名字，而是把 `96` 除掉 —— 语料把 `calc(96px * 1rad / 1ms / 1Hz) / 1in` 消到
+    /// `calc(1rad / 1ms / 1Hz)`（`values/numbers/units/multiple::division/cancels/compatible`）。同族名字
+    /// 按书写顺序从头一对一对上；配不上的留在原地。
     pub fn cancel_convertible(&self, value: f64) -> (f64, Unit) {
         let mut denominator = self.denominator.clone();
         let mut magnitude = value;
         let mut numerator = self.numerator.clone();
-        // Each numerator name pairs off with the first denominator of the same family that is not already
-        // the same unit (`Unit::from_parts` cancels identical names before this runs); the pair leaves the
-        // fraction and `top / bottom` in base factors enters the magnitude.
+        // 每个分子名字都与同族、且尚不是同一单位的分母中**书写序最前**的那一个配对（同名的两份已由
+        // `Unit::from_parts` 先消掉）；这一对离开分式，而「分子因子 / 分母因子」折进量值。
         numerator.retain(|top| {
             let (family, top_factor) = measure(top);
             let pair = denominator
@@ -178,8 +174,8 @@ impl Unit {
         (magnitude, Unit::from_parts(numerator, denominator))
     }
 
-    /// A unit as its two sides, already cancelled. The cancellation is a multiset intersection: each name
-    /// that appears on both sides disappears once from each, and the survivors keep their order.
+    /// 由两侧直接给出的单位，构造时即已抵消。抵消是多重集求交：每个两侧都出现的名字从各侧各去掉一份，
+    /// 幸存者保留自己的顺序。
     pub fn from_parts(numerator: Names, denominator: Names) -> Self {
         let (numerator, denominator) = cancel(numerator, denominator);
         Self {
@@ -188,8 +184,7 @@ impl Unit {
         }
     }
 
-    /// `a * b`: the sides combine, so `px/em * em` is `px` — the same structural cancellation the
-    /// construction does, applied to two existing units.
+    /// `a * b`：两侧合并，所以 `px/em * em` 就是 `px` —— 构造做的结构性抵消，作用在两个既有单位上。
     pub fn times(&self, rhs: &Unit) -> Unit {
         Unit::from_parts(
             self.numerator
@@ -205,8 +200,9 @@ impl Unit {
         )
     }
 
-    /// `a / b`: the divisor's numerator goes to the denominator and its denominator comes back up, which
-    /// is what makes `calc(1 / (1 / 1px))` reach `1px` rather than `1/1/px`.
+    /// `a / b`：除数的分子落进分母、除数的分母升到分子，所以倒数的倒数直接翻回分子：
+    /// `calc(1 / (1 / 1px / 1rad))` 得到 `calc(1px * 1rad)`
+    /// （`values/numbers/units/multiple::division/by/multiple_denominators`）。
     pub fn over(&self, rhs: &Unit) -> Unit {
         Unit::from_parts(
             self.numerator
@@ -222,8 +218,8 @@ impl Unit {
         )
     }
 
-    /// The CSS form of the unit, per the table on this module. Unitless prints as nothing (a number
-    /// followed by nothing), and a pure reciprocal takes the `^-1` form the corpus states.
+    /// 本模块开头那张表给出的单位 CSS 写法。无单位就什么都不打（数后面跟空的），纯倒数用语料写明的
+    /// `^-1` 形（`core_functions/math/unit.hrx::one_denominator` 打 `"px^-1"`）。
     pub fn to_css(&self) -> String {
         let numerator = self.numerator.join("*");
         match (self.numerator.is_empty(), self.denominator.as_slice()) {
@@ -236,21 +232,19 @@ impl Unit {
         }
     }
 
-    /// A number **inside a calculation**: the magnitude is written once, then every remaining unit with
-    /// its own `1`, because a compound unit has no plain-CSS spelling and the fixtures show the product
-    /// form (`values/numbers/units/multiple.hrx`: `calc(1px * 1rad)`, `calc(1 / 1px / 1rad)`,
-    /// `calc(1px * 1rad / 1ms / 1Hz)`).
+    /// **计算壳里**的一个数：量值只写一次，其余每个单位各自带一个 `1` —— 复合单位没有纯 CSS 拼法，
+    /// 语料打的是乘积形（`values/numbers/units/multiple.hrx`：`calc(1px * 1rad)`、`calc(1 / 1px / 1rad)`、
+    /// `calc(1px * 1rad / 1ms / 1Hz)`）。
     ///
-    /// A magnitude that is **not finite** has no plain-CSS spelling either, so it takes [`calc_product`] too:
-    /// gluing `infinity` onto a unit prints `infinitypx`, which is not a CSS number, where the corpus writes
-    /// `calc(1% + infinity * 1px)` (`values/calculation/calc/constant.hrx::precedence/after_plus`) and
-    /// `calc(NaN * 1deg)` (`core_functions/math/asin.hrx::greater_than_one`).
+    /// **非有限**量值也没有纯 CSS 拼法，所以它同样走 [`calc_product`]：把 `infinity` 直接黏到单位上
+    /// 会打出 `infinitypx`，那不是 CSS 数；语料写的是 `calc(1% + infinity * 1px)`
+    /// （`values/calculation/calc/constant.hrx::precedence/after_plus`）与 `calc(NaN * 1deg)`
+    /// （`core_functions/math/asin.hrx::greater_than_one`）。
     ///
-    /// Said plainly so the next reader does not over-read this: the **colour** printers do not come through
-    /// here. `Color::legacy`/`Channel`/`text::print` write `format_number(…) + "%"` directly, so the same
-    /// bare `infinity%` is still printed there — measured as `core_functions/color/to_space/hwb/hsl::white`,
-    /// which got `hsl(0, infinity%, 100%)` against the archive's `hsl(0, 0%, 100%)`. One law, one home, is
-    /// still open work on that side.
+    /// 直说给下一位读者、免得读过头：**颜色**的打印不经过这里。`Color::legacy`/`Channel`/`text::print`
+    /// 直接拼 `format_number(…) + "%"`，所以裸 `infinity%` 仍出现在那一侧 —— 现量
+    /// `core_functions/color/to_space/hwb/hsl::white` 得 `hsl(0, infinity%, 100%)`，归档是
+    /// `hsl(0, 0%, 100%)`。「一条律只住一个家」在那一侧仍是待做的工作。
     pub fn calc_form(&self, value: f64) -> String {
         let magnitude = crate::value::format_number(value);
         if !value.is_finite() {
@@ -262,7 +256,7 @@ impl Unit {
                 .chain(rest.iter().map(|unit| with("1", unit)))
                 .collect::<Vec<String>>()
                 .join(" * "),
-            // A pure reciprocal (or a unitless number): the magnitude stands on its own in front.
+            // 纯倒数（或已无单位的数）：量值自己站在最前面，后面不跟单位。
             None => magnitude,
         };
         head + &self
@@ -272,11 +266,12 @@ impl Unit {
             .collect::<String>()
     }
 
-    /// The same shape for a magnitude that has **no plain-CSS spelling at all** — `NaN` or an infinity — where
-    /// even a single unit has to carry its own `1`: `calc(NaN * 1deg)`
-    /// (`core_functions/math/asin.hrx::greater_than_one`), `calc(-infinity / 1px)` and
-    /// `calc(infinity * 1px * 1em)` (`values/numbers/units/multiple.hrx`). [`Unit::calc_form`] cannot say
-    /// this: it writes the first numerator unit as `<magnitude>px`, which reads as `NaNdeg`.
+    /// 同一种乘积形，用在**根本没有纯 CSS 拼法**的量值上 —— `NaN` 或 infinity —— 此时连单个单位
+    /// 也得自带 `1`：`calc(NaN * 1deg)`（`core_functions/math/asin.hrx::greater_than_one`）、
+    /// `calc(-infinity / 1px)`（`values/numbers/degenerate::minus_infinity/denominator_unit`）与
+    /// `calc(infinity * 1px * 1em)`（`values/numbers/degenerate::infinity/multiple_numerator_units`）。
+    /// [`Unit::calc_form`] 自己的有限臂说不出它：那条写法把第一个分子单位黏在量值后（`<magnitude>px`，
+    /// 对 `NaN` 会读成 `NaNdeg`），所以非有限数在那里改道到这里。
     pub fn calc_product(&self, magnitude: &str) -> String {
         let (numerator, denominator) = self.names();
         magnitude.to_string()
@@ -291,9 +286,8 @@ impl Unit {
     }
 }
 
-/// Cancel the two sides against each other: every name the denominator also holds removes one copy of
-/// itself from there and one from the numerator, so `px*em / em*rad` becomes `px / rad`. What is left of
-/// each side keeps the order it was built in, which is what the corpus prints.
+/// 两侧互相抵消：每个分母也持有的名字，在分母去掉一份、在分子去掉一份，所以 `px*em / em*rad` 变成
+/// `px / rad`。两侧各自剩下的保持构造时的顺序，语料打的就是这个顺序。
 fn cancel(mut numerator: Names, mut denominator: Names) -> (Names, Names) {
     numerator.retain(
         |name| match denominator.iter().position(|held| held == name) {
