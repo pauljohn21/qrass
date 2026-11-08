@@ -1,17 +1,14 @@
-//! Pipeline phase kernels — each compile phase is a **real rxrust operator**, in the framework's
-//! own shape:
+//! 管线相位内核 —— 每个编译相位都是一个**真正的 rxrust 算子**，用框架自己的形状：
 //!
-//! * `struct Phase<S> { source }` — lazy data, no per-subscription state, `Clone`;
-//! * `PhaseObserver<O> { observer, state }` — the state lives here and is born with the
-//!   subscription; `next` does the phase's work and forwards **each** produced item with its own
-//!   `observer.next(..)`, `error`/`complete` are consumed-once pass-throughs, `is_closed`
-//!   delegates downstream so the source can stop early;
-//! * `impl ObservableType` + `impl CoreObservable<C: Context>` — `subscribe` wraps the context's
-//!   inner observer with `C::transform` (which preserves the scheduler) and hands the wrapped
-//!   context to the source.
+//! * `struct Phase<S> { source }` —— 惰性数据，不持订阅级状态，`Clone`；
+//! * `PhaseObserver<O> { observer, state }` —— 状态住在这里，随订阅出生；`next` 做相位的活，
+//!   用自己的 `observer.next(..)` 转发**每一项**产出；`error`/`complete` 是一次性消费的
+//!   透传，`is_closed` 委派给下游，让 source 可以提前停止；
+//! * `impl ObservableType` + `impl CoreObservable<C: Context>` —— `subscribe` 用 `C::transform`
+//!   包装 context 的内层 observer（保留 scheduler），再把包装过的 context 交给 source。
 //!
-//! `Err` stays generic: a phase never decides the chain's error channel, so the same kernel works
-//! on a `Local` (`!Send`) or `Shared` context and with any `Err`.
+//! `Err` 保持泛型：相位从不决定链的错误通道，所以同一个内核在 `Local`（`!Send`）或 `Shared`
+//! context 上、配任何 `Err` 都成立。
 
 use std::convert::Infallible;
 
@@ -26,10 +23,10 @@ use crate::scope::StyleRule;
 use crate::structure::{Event, MsgAcc};
 use crate::trace::Phase;
 
-// The phase handle each observer carries is `crate::trace::Phase`: a span that lives as long as the
-// subscription, so `elapsed_ms` covers the streaming rather than just the wiring of the chain.
+// 每个 observer 携带的相位句柄是 `crate::trace::Phase`：一个与订阅同寿的 span，所以
+// `elapsed_ms` 覆盖流式传输本身，而不只是链的接线。
 
-/// `char → Tok`: one emission per completed token, driven by [`LexAcc`].
+/// `char → Tok`：每完成一个词素发射一次，由 [`LexAcc`] 驱动。
 #[derive(Clone)]
 pub struct Lexer<S> {
     pub source: S,
@@ -47,8 +44,8 @@ where
     O: Observer<Tok, Err>,
 {
     fn next(&mut self, ch: char) {
-        // Destructuring keeps the accumulator, the downstream observer, the span and the counter as
-        // separate borrows, so the sink can emit straight into the stream while counting its own output.
+        // 解构让累加器、下游 observer、span 与计数各自独立借用，于是 sink 能直接往流里发射，
+        // 同时计自己的产出数。
         let LexerObserver {
             observer,
             acc,
@@ -119,7 +116,7 @@ where
     }
 }
 
-/// `Tok → Event`: structural events on the delimiters, driven by [`MsgAcc`].
+/// `Tok → Event`：按分隔符发出的结构事件，由 [`MsgAcc`] 驱动。
 #[derive(Clone)]
 pub struct Structurize<S> {
     pub source: S,
@@ -169,10 +166,9 @@ where
             mut items,
             ..
         } = self;
-        // A `@for` that the input never closed must still reach the executor as the blocks it reached: this
-        // phase used to emit an `Open` for every `{`, so dropping an unclosed run would silently lose CSS
-        // that no pass count can see (`MsgAcc::finish`). The events leave through the same sink `feed` uses
-        // and count as this phase's items.
+        // 输入从未收束的 `@for` 仍必须把它到达的块送进 executor：本相位曾对每个 `{` 发一个
+        // `Open`，所以丢掉一条未收束的 run 会静默丢失没有哪遍计数能看见的 CSS（`MsgAcc::finish`）。
+        // 事件通过与 `feed` 相同的 sink 离开，并计入本相位的 items。
         let mut downstream = observer;
         acc.finish(&mut |event| {
             downstream.next(event);
@@ -217,12 +213,11 @@ where
     }
 }
 
-/// `Event → StyleRule`: the program state (`scopes`, `env`) lives in this observer and is moved by
-/// `&mut self` per event; **0..N rules** per event go out through the sink `State::step` is handed — one
-/// `@for` closing emits one rule per iteration. A fatal failure ends the stream
-/// on the real `Err` channel (`Observer::error`), which is why the downstream observer is held as an
-/// `Option` and consumed with `take()` — terminate exactly once, the way the framework's own
-/// multi-source observers do it. Whether any kind is fatal today is the `FATAL` set in the crate root.
+/// `Event → StyleRule`：程序状态（`scopes`、`env`）住在本 observer 里，按事件以 `&mut self` 移动；
+/// 每事件 **0..N 条规则**经 `State::step` 拿到的 sink 出去 —— 收束一个 `@for` 每次迭代发一条规则。
+/// 致命失败走真正的 `Err` 通道（`Observer::error`）结束流，这正是下游 observer 持为 `Option`
+/// 并用 `take()` 消费的原因 —— 恰好终止一次，与框架自己多源 observer 的做法相同。今天是哪类
+/// 失败致命，看 crate root 的 `FATAL` 集合。
 #[derive(Clone)]
 pub struct Exec<S> {
     pub source: S,
@@ -241,10 +236,10 @@ where
 {
     fn next(&mut self, ev: Event) {
         if self.observer.is_none() {
-            return; // already terminated on the Err channel
+            return; // 已在 `Err` 通道终止
         }
-        // The phase span is entered around the whole step, so the declaration spans it opens and the rules
-        // it emits all nest inside it; the guard is released before `close` moves the timing out.
+        // 相位 span 包住整步进入，于是它打开的 declaration span 与它发出的规则都嵌套在里面；
+        // guard 在 `close` 取走 timing 之前释放。
         let ExecObserver {
             observer,
             state,
@@ -254,8 +249,8 @@ where
         } = self;
         let outcome = {
             let _current = timing.enter();
-            // 0..N rules per event: closing a `@for` settles one rule per iteration, so `step` writes into
-            // this sink instead of returning a single rule (see `crate::exec::State::step`).
+            // 每事件 0..N 条规则：收束一个 `@for` 每次迭代结算一条规则，所以 `step` 写进这个 sink，
+            // 而不是返回单条规则（见 `crate::exec::State::step`）。
             let mut emit = |rule: StyleRule| {
                 if let Some(downstream) = observer {
                     downstream.next(rule);
@@ -275,7 +270,7 @@ where
         }
     }
 
-    // The upstream is infallible; an error can only originate from this phase.
+    // 上游不会失败；错误只能源自本相位。
     fn error(self, never: Infallible) {
         match never {}
     }
@@ -328,11 +323,10 @@ where
     }
 }
 
-/// `StyleRule → String`: serialise one settled rule to expanded CSS text, 1:1, in the order the
-/// rules arrive. No task hand-off and no re-sorting: the chain is serial here, so the stream's own
-/// order **is** document order. The tail it replaces (`from_stream` per rule + `collect` +
-/// `sort_by_key`) was concurrency theatre over pure CPU work, and worse: a queued inner in
-/// `merge_all` **loses** the emissions made while it waits, which no sort can bring back.
+/// `StyleRule → String`：把一条结算好的规则序列化成展开的 CSS 文本，1:1，按规则到达的顺序。
+/// 无任务交接、无重排序：链在这里是串行的，所以流自身的顺序**就是**文档顺序。它取代的尾部
+/// （每规则 `from_stream` + `collect` + `sort_by_key`）是纯 CPU 工作上的并发表演，而且更糟：
+/// `merge_all` 里排队的内层会**丢失**等待期间做出的发射，任何排序都找不回来。
 #[derive(Clone)]
 pub struct Render<S> {
     pub source: S,

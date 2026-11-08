@@ -1,29 +1,27 @@
-//! Selector / PropName — a block head and a property name as **structured values**.
+//! Selector / PropName —— 规则块头部与属性名作为**结构化值**。
 //!
-//! The shape this replaces rendered a head to a `String` and produced the nested selector with
-//! `child.replace('&', parent)`. That makes the parent reference a *character inside an opaque string*,
-//! so every question about it — how many `&` there are, whether one is glued to an ident, whether it
-//! came from `#{&}` — had to be answered by scanning text. Here `&` is a `Piece::Parent` built from the
-//! lexeme the lexer emits ([`crate::lexer::STRUCTURAL`]) and nesting splices pieces: selectors and
-//! property names are structured values, and combining `&` is not a string replacement.
+//! 本形状取代的做法把块头渲染成 `String`，再用 `child.replace('&', parent)` 产出嵌套选择器。那让
+//! 父引用成了*不透明字符串里的一个字符*，于是关于它的一切问题 —— 有几个 `&`、某个是否粘着
+//! 标识符、它是否来自 `#{&}` —— 都只能扫文本回答。这里 `&` 是从 lexer 发出的词素
+//! （[`crate::lexer::STRUCTURAL`]）建出的 `Piece::Parent`，嵌套把 pieces 拼接进来：选择器与属性名
+//! 是结构化值，合并 `&` 不是字符串替换。
 //!
-//! This models exactly what `Exec` needs to place a rule in the document, in order. P2's full algebra
-//! (compound/combinator/pseudo-class parsing, `unify`, superselector) grows here without a re-parse.
+//! 这里建模的正是 `Exec` 按顺序把一条规则放进文档所需的全部。P2 的完整代数（复合/组合子/伪类
+//! 解析、`unify`、超选择器）日后在此原地生长，无需重新解析。
 
 use crate::lexer::canon;
 
-/// One piece of a selector head, in source order.
+/// 选择器头部的一个 piece，按源码顺序。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Piece {
-    /// resolved text of a run of lexemes; never contains a parent reference
+    /// 一段词素 run 解析后的文本；永不含父引用
     Text(String),
-    /// the parent selector, from the `&` **lexeme** (`#{&}` is different: the corpus substitutes the
-    /// parent as text there and still nests, so it arrives as a `Text` piece)
+    /// 父选择器，来自 `&` **词素**（`#{&}` 不同：语料在那里把父作为文本代入，然后照常嵌套，
+    /// 所以它以 `Text` piece 到达）
     Parent,
 }
 
-/// A selector as its pieces. Deliberately not a parsed tree: `Exec` only needs to know where the parent
-/// reference sits and how the whole thing prints.
+/// 作为 pieces 的选择器。故意不做成解析树：`Exec` 只需要知道父引用落在哪、整体怎么印出。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Selector {
     pieces: Vec<Piece>,
@@ -34,24 +32,23 @@ impl Selector {
         Self { pieces }
     }
 
-    /// The pieces back out, for the caller that builds a name from them rather than a selector.
+    /// 把 pieces 交回去，给用它们建名字而不是建选择器的调用方。
     pub fn into_pieces(self) -> Vec<Piece> {
         self.pieces
     }
 
-    /// `a & b`, `&:hover`, `&--x`: any parent reference at all means the child *replaces* it rather
-    /// than being appended as a descendant.
+    /// `a & b`、`&:hover`、`&--x`：只要有任何父引用，子选择器就是*替换*它，而不是作为后代
+    /// 追加。
     pub fn references_parent(&self) -> bool {
         self.pieces.contains(&Piece::Parent)
     }
 
-    /// Nest this child inside `parent` — the structural form of Sass's two rules: a child holding `&`
-    /// substitutes the parent at each occurrence, otherwise it is a descendant selector.
+    /// 把这条子选择器嵌进 `parent` —— Sass 两条规则的结构形式：持 `&` 的子选择器在每个出现处
+    /// 替换父，否则它是后代选择器。
     ///
-    /// A `flat_map` over owned pieces: no string is built and re-searched, and a parent that is itself
-    /// nested has already been resolved, so its pieces carry no `Parent`. An empty parent (a root-level
-    /// `&`) leaves the reference unresolved, which [`Selector::to_css`] prints as `&` — the form
-    /// `css/selector/parent::alone/first` expects.
+    /// 在 owned pieces 上做 `flat_map`：不建字符串再搜它，而自身被嵌套过的父已经解析完，所以它的
+    /// pieces 不带 `Parent`。空的父（root 层的 `&`）让引用保持未解析，[`Selector::to_css`] 把
+    /// 它印成 `&` —— `css/selector/parent::alone/first` 期望的形式。
     pub fn nest(&self, parent: &Self) -> Self {
         if parent.pieces.is_empty() {
             return self.clone();
@@ -78,15 +75,14 @@ impl Selector {
         )
     }
 
-    /// Whether the head carries nothing a rule could be printed under (the root scope's empty selector).
+    /// 头部是否不带任何可供规则印于其下的东西（root scope 的空选择器）。
     pub fn is_empty(&self) -> bool {
         self.to_css().is_empty()
     }
 
-    /// The one place a selector becomes text; [`canon`] keeps whitespace runs collapsed exactly as the
-    /// rendered-string form did, so nesting output is unchanged by this restructuring. Boundary
-    /// whitespace is already gone (the head trimmed it at the piece level), which is what makes
-    /// `a { &.b {} }` print `a.b` rather than `a .b`.
+    /// 选择器变成文本的唯一处；[`canon`] 的空白段收束与渲染字符串形式逐字相同，所以嵌套产物不被
+    /// 这次重构改变。边缘空白早已不在（头部在 piece 层修剪过），这正是 `a { &.b {} }` 印 `a.b`
+    /// 而不是 `a .b` 的原因。
     pub fn to_css(&self) -> String {
         canon(
             &self
@@ -94,16 +90,15 @@ impl Selector {
                 .iter()
                 .map(|piece| match piece {
                     Piece::Text(text) => text.clone(),
-                    // only reachable for a `&` with no parent, i.e. a root-level one
+                    // 只在无父的 `&`（即 root 层的）上可达
                     Piece::Parent => "&".to_string(),
                 })
                 .collect::<String>(),
         )
     }
 
-    /// A head whose edges carry nothing but whitespace: the pieces are the selector, and the padding
-    /// around it belongs to the source layout, not to the name. Trimming here (rather than after
-    /// splicing) is what lets `a` and `&.b` join into `a.b`.
+    /// 边缘只带空白的头部：pieces 就是选择器本身，周围的填充属于源码布局，不属于名字。在这里
+    /// 修剪（而不是拼接之后）正是 `a` 与 `&.b` 能接上成 `a.b` 的原因。
     pub fn trimmed(self) -> Self {
         let blank = |piece: &Piece| match piece {
             Piece::Text(text) => text.chars().all(char::is_whitespace),
@@ -121,11 +116,11 @@ impl Selector {
     }
 }
 
-/// A property name, with the one semantic decision a declaration needs made **once, at construction**:
-/// whether it is a custom property (`--x`), whose value is raw CSS text rather than SassScript.
+/// 属性名，把一条 declaration 需要的那个语义判定**一次、在构造时**做完：它是否是自定义属性
+/// （`--x`），其值是原始 CSS 文本而不是 SassScript。
 ///
-/// Callers ask [`PropName::is_custom`] instead of re-reading the name's shape, so the rule lives at the
-/// boundary where the structured pieces turn into a name.
+/// 调用方问 [`PropName::is_custom`] 而不是重读名字的形状，所以这条律住在结构化 pieces 变成
+/// 名字的边界上。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropName {
     text: String,
@@ -133,8 +128,8 @@ pub struct PropName {
 }
 
 impl PropName {
-    /// Build a name from the pieces of a declaration's left side. The `--` test runs on the canonical
-    /// text because leading whitespace is part of the *token run*, not of the name (`  --x: y`).
+    /// 从一条 declaration 左侧的 pieces 建名字。`--` 判定跑在规范化文本上，因为前导空白属于
+    /// *词素 run*，不属于名字（`  --x: y`）。
     pub fn from_pieces(pieces: &[Piece]) -> Self {
         let text = Selector::from_pieces(pieces.to_vec()).to_css();
         let custom = text.starts_with("--");

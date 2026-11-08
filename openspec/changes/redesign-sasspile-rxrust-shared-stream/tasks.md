@@ -3234,4 +3234,30 @@
       `builtins/` 余下约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-e2`。
 
+- [x] 9.47 **注释中文化第二十批：`selector.rs` + `phases.rs`（2 文件，2026-11-08）**。
+      `selector.rs` 全文译毕（模块 doc、`Piece`/`Selector`/`PropName` 各体、`nest`/`to_css`/
+      `trimmed`/`from_pieces` 与一处行内注释），`phases.rs` 全文译毕（模块 doc、四个相位内核的
+      observer 注释与 Exec 相位文档）。**只改注释**（`git diff -U0` 剥离注释后无未配对
+      非注释行；唯一非空白改动对是 `return;` 行尾内联注释，代码 `return;` 前后完全相同）。
+      文件读数（`wc -l` 口径）：`selector.rs` 151→146（注释行 43→38）、`phases.rs` 414→408
+      （40→34），净减均为注释行。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿）；`sasslint` count=0；
+      `cargo doc -p sasspile --no-deps` 零警告；`ledger diff zh-comments-batch-e2 zh-comments-batch-f`
+      = **`regress=0 net=0`**，`ledger changed …` = **`changed=0`**（`shape_of_text` 域同读
+      changed=0）；hrx 记为 `zh-comments-batch-f`（`3457/11533`，实质 3292 + 空期望 165，
+      skipped 1264，与前四批逐例相同）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。
+      随译现量逐个取回的凭据：`css/selector/parent.hrx::alone/first`（:1/:4）在库，是
+      「空父保留 `&`」那行期望的 case；`libsass-closed-issues/issue_1043.hrx` 在库；
+      `crate::trace::Phase`（`trace.rs:35`，`pub(crate) struct`）、`crate::lexer::canon`
+      （`lexer.rs:380`）、`crate::exec::State::step`（`exec.rs:66`）、`MsgAcc::finish`
+      （`structure.rs:121`）与 crate root 的 `FATAL`（`lib.rs:109`，`:146` 用它）五处引用均在库；
+      `trace.rs` 自有中文注释与本批「与订阅同寿」译法一致。
+      **审计闸未过（同上六批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交，不得改用内置代理顶替」，本批与
+      9.41/9.42/9.43/9.44/9.45/9.46 同处「已提交、待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/src` 顶层自此余 0 行；仍余 `builtins/` 约
+      847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-f`。
+
 

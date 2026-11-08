@@ -11,13 +11,13 @@ alwaysApply: true
   `color/{text,space}.rs`（9.36）与 `color/mod.rs`（9.37，**`color/` 目录自此做完**）与 `env.rs`+`scope.rs`
   （9.38）与 `axes.rs`（9.39）与 `calls.rs`（9.40）与 `unit.rs`+`calc.rs`+`value.rs`（9.41）与
   `lib.rs`+`lexer.rs`+`trace.rs`（9.42）与 `expr.rs`+`operations.rs`（9.43）与 `exec.rs`+`loops.rs`
-  （9.44）与 `brackets.rs`+`structure.rs`（9.45）与 `calculation.rs`（9.46）已做完，各自 `regress=0 net=0`；
-  待批只剩 `sasspile/src` 顶层余 2 文件约 83 行（`selector.rs` 43、`phases.rs` 40）
-  与 `builtins/` 余下约 847 行，
+  （9.44）与 `brackets.rs`+`structure.rs`（9.45）与 `calculation.rs`（9.46）与
+  `selector.rs`+`phases.rs`（9.47）已做完，各自 `regress=0 net=0`；**`sasspile/src` 顶层自此全部
+  中文化**，待批只剩 `builtins/` 余下约 847 行，
   （此前 9.41/9.42 与 9.43 草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
   `calculation.rs` 三件 —— 现量复核：`tasks.md` 9.29 附近的原始清点列过 `exec.rs` 204、`brackets.rs` 136、
   `calculation.rs` 127，与现测逐字一致，已在 9.43 条订正；9.45 完成后余 3 文件 210 行经逐件现量复核，
-  9.46 完成后余 2 文件 83 行经逐件现量复核。）
+  9.46 完成后余 2 文件 83 行经逐件现量复核，9.47 完成后 `sasspile/src` 顶层余 0 行。）
   每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行；会话容量不足时允许缩到单文件，闸口不得减）。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
   只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。
