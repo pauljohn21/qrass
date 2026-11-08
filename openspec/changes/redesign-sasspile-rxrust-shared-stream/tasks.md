@@ -3296,4 +3296,30 @@
       `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-g`。
 
+- [x] 9.49 **注释中文化第二十二批：`crates/sasspile/tests/math_*.rs`（4 文件，2026-11-08）**。
+      `math_exponents.rs`（pow/sqrt/log 与非有限数打印律）、`math_ordering.rs`（clamp/hypot 与成对点名
+      拒答）、`math_trig.rs`（三角函数、负零符号、atan2 的两条律与两行不断言）、`math_variables.rs`
+      （`math.$*` 常数、读取只读律、未解析成员保留文本）逐件译毕模块 doc、每个 `#[tokio::test]` 的
+      doc 与内联注释。**逐字凭据类不译**：oracle 错误/警告消息、sass-spec 的 case key、代码标识符
+      与 gold 值一律保留原文（如 `Expected 1px to have an angle unit (deg, grad, rad, turn).`、
+      `$x: 1deg and $y: 1px have incompatible units.`、`calc(NaN * 1deg)`）；英文残留扫描（注释行
+      无中文且含 ≥3 字母英文词）命中的行全部只含这类逐字凭据，无英文散文段落。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，4/4 全部逐字一致。
+      文件读数（`wc -l` 口径）：`math_exponents.rs` 174→173（注释行 27→26）、`math_ordering.rs`
+      154→150（23→19）、`math_trig.rs` 192→191（46→45）、`math_variables.rs` 111→109（32→30）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint`
+      `lint crates/sasspile/src` EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0 零警告；
+      `ledger diff zh-comments-batch-g zh-comments-batch-h` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076 fails_b=8076）；hrx 记为
+      `zh-comments-batch-h`（`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与前六批逐例
+      相同）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0（阳性对照读 1）。
+      **审计闸未过（同上八批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.48 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 26 件未译（以 `color_*`/
+      `hrx.rs` 为主）；`crates/sasspile/src/builtins/` 仍余约 847 行；顺修仍留
+      `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-h`。
+
 

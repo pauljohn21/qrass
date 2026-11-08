@@ -1,12 +1,12 @@
-//! `math.pow`, `math.sqrt`, `math.log` and the **non-finite printing form**, pinned on
-//! `core_functions/math/pow/*.hrx`, `core_functions/math/{sqrt,log}.hrx` and the `NaN` rows of
-//! `{sin,cos,tan,asin,acos,atan,atan2}.hrx`. Every input and expectation is copied from the fixture's own
-//! `input.scss` / `output.css` (`Error:` first line for the refusals).
+//! `math.pow`、`math.sqrt`、`math.log` 与**非有限数的打印形式**，钉在
+//! `core_functions/math/pow/*.hrx`、`core_functions/math/{sqrt,log}.hrx` 以及
+//! `{sin,cos,tan,asin,acos,atan,atan2}.hrx` 的 `NaN` 行上。每个输入与期望都逐字抄自
+//! fixture 自己的 `input.scss` / `output.css`（拒答取 `Error:` 首行）。
 //!
-//! The printing law is the one that unlocked 179 rows: a number that is not finite has no plain-CSS spelling,
-//! so Sass writes it inside `calc()`, and a unit rides **inside** the wrapper multiplied by one —
-//! `calc(NaN)`, `calc(infinity)`, `calc(-infinity)`, `calc(NaN * 1deg)`, `calc(infinity * 1px)`. A finite
-//! number keeps the ordinary form, so `math.pow(2, 3)` → `8` and not `calc(8)`.
+//! 这条打印律一次解锁了 179 行：非有限数没有普通 CSS 拼法，所以 Sass 把它写进 `calc()`，
+//! 而单位**在**包装内、以乘以 1 的形式随行 —— `calc(NaN)`、`calc(infinity)`、
+//! `calc(-infinity)`、`calc(NaN * 1deg)`、`calc(infinity * 1px)`。有限数保持普通形式，
+//! 所以 `math.pow(2, 3)` → `8` 而不是 `calc(8)`。
 
 use sasspile::compile;
 
@@ -23,10 +23,10 @@ async fn failure(input: &str) -> String {
     }
 }
 
-/// `math.pow($base: 2, $exponent: 3)` → `8` (`pow/arguments.hrx::named_args`), and the zero/signed cases are
-/// IEEE: `pow(0, -2)` → `calc(infinity)` (`pow/base_positive_zero.hrx::with_exponent/negative_even_integer`),
-/// `pow(-0.0, -3)` → `calc(-infinity)` while `pow(-0.0, -3.000000000001)` → `calc(infinity)` — the odd
-/// **integer** inverts the sign of zero, a non-integer exponent cannot (`pow/base_negative_zero.hrx::with_exponent/{negative_odd_integer,negative_odd_integer_fuzzy}`).
+/// `math.pow($base: 2, $exponent: 3)` → `8`（`pow/arguments.hrx::named_args`），而零/有符号情形走
+/// IEEE：`pow(0, -2)` → `calc(infinity)`（`pow/base_positive_zero.hrx::with_exponent/negative_even_integer`），
+/// `pow(-0.0, -3)` → `calc(-infinity)` 而 `pow(-0.0, -3.000000000001)` → `calc(infinity)` ——
+/// 奇**整数**反转零的符号，非整数指数不能（`pow/base_negative_zero.hrx::with_exponent/{negative_odd_integer,negative_odd_integer_fuzzy}`）。
 #[tokio::test]
 async fn pow_follows_ieee_through_zero_and_the_infinities() {
     for (input, want) in [
@@ -49,9 +49,9 @@ async fn pow_follows_ieee_through_zero_and_the_infinities() {
     }
 }
 
-/// `math.sqrt`: `-0.0` keeps its sign (`sqrt.hrx::negative_zero` → `-0`) while a negative **number** is
-/// `calc(NaN)` (`…::negative`, and `…::negative_zero_fuzzy` for `-0.000000000001`), and the fuzzy zero is
-/// small but real: `math.sqrt(0.000000000001)` → `0.000001` (`…::zero_fuzzy`).
+/// `math.sqrt`：`-0.0` 保留符号（`sqrt.hrx::negative_zero` → `-0`），而负**数**是
+/// `calc(NaN)`（`…::negative`，`-0.000000000001` 走 `…::negative_zero_fuzzy`），且模糊零
+/// 虽小却真实：`math.sqrt(0.000000000001)` → `0.000001`（`…::zero_fuzzy`）。
 #[tokio::test]
 async fn sqrt_keeps_a_signed_zero_and_refuses_a_negative() {
     for (input, want) in [
@@ -72,10 +72,10 @@ async fn sqrt_keeps_a_signed_zero_and_refuses_a_negative() {
     }
 }
 
-/// `math.log` is natural unless a base arrives, and a written `null` **is** no base:
-/// `math.log(2, null)` → `0.6931471806` equals `math.log(2)` (`log.hrx::base/null`), `math.log(2, 10)` →
-/// `0.3010299957` (`…::base/positive`), and the extremes print through `calc`: `math.log(0)` →
-/// `calc(-infinity)` (`…::base/zero`), `math.log(-1)` → `calc(NaN)` (`…::base/negative`).
+/// `math.log` 默认取自然对数，除非来了底数，而写出 `null` **就是**没有底数：
+/// `math.log(2, null)` → `0.6931471806` 等于 `math.log(2)`（`log.hrx::base/null`），
+/// `math.log(2, 10)` → `0.3010299957`（`…::base/positive`），而极端值经 `calc` 打印：
+/// `math.log(0)` → `calc(-infinity)`（`…::base/zero`），`math.log(-1)` → `calc(NaN)`（`…::base/negative`）。
 #[tokio::test]
 async fn log_takes_an_optional_base_and_prints_its_extremes_in_calc() {
     for (input, want) in [
@@ -97,9 +97,9 @@ async fn log_takes_an_optional_base_and_prints_its_extremes_in_calc() {
     }
 }
 
-/// The refusals name the failing parameter, in the same words the rest of the domain uses
-/// (`pow/arguments.hrx::error/{base_type,exponent_type,base_has_units,exponent_has_units,zero_args,one_arg,too_many_args}`,
-/// `sqrt.hrx::error/*`, `log.hrx::error/*` — including `$base:` for `math.log`'s optional parameter).
+/// 拒答点名出错的参数，措辞与该域其余部分一致
+/// （`pow/arguments.hrx::error/{base_type,exponent_type,base_has_units,exponent_has_units,zero_args,one_arg,too_many_args}`、
+/// `sqrt.hrx::error/*`、`log.hrx::error/*` —— 含 `math.log` 可选参数的 `$base:`）。
 #[tokio::test]
 async fn every_argument_is_refused_under_its_own_name() {
     for (input, want) in [
@@ -150,10 +150,9 @@ async fn every_argument_is_refused_under_its_own_name() {
     }
 }
 
-/// The printing law itself, from the functions that reach it through an argument rather than a domain
-/// refusal: `math.div(1, 0)` is an infinity, and `sin`/`cos`/`tan` of one is `calc(NaN)`
-/// (`{sin,cos,tan}.hrx::{infinity,negative_infinity}`), while `math.atan2(-1, 0)` keeps a real degree answer
-/// (`atan2/y_infinite.hrx`).
+/// 打印律本身，取自那些经参数而非域拒答到达它的函数：`math.div(1, 0)` 是无穷，而
+/// 对无穷取 `sin`/`cos`/`tan` 是 `calc(NaN)`（`{sin,cos,tan}.hrx::{infinity,negative_infinity}`），
+/// 而 `math.atan2(-1, 0)` 保留一个真实的度数答案（`atan2/y_infinite.hrx`）。
 #[tokio::test]
 async fn a_non_finite_number_prints_inside_calc() {
     for (input, want) in [
