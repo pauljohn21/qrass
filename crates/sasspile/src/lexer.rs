@@ -1,58 +1,53 @@
-//! Lexer — the owned accumulator **value** behind the `Lexer` phase kernel (`crate::phases`): a forward fold
-//! step over a single character. The `#{}`/interp depth is *data* inside the accumulator, never a call stack,
-//! and a lexeme is the finest thing any later phase may reason about — `math.$pi` is one [`Tok::MemberVar`]
-//! rather than two pieces a consumer has to re-join.
+//! Lexer —— `Lexer` 阶段内核（`crate::phases`）背后的 owned 累加器**值**：对单个字符做前向 fold
+//! 的一步。`#{}`/插值深度是累加器里的*数据*，从来不是调用栈；一个词素是后续任何阶段可以据以
+//! 推理的最细粒度 —— `math.$pi` 是**一个** [`Tok::MemberVar`]，而不是消费者必须重新拼起来的两段。
 //!
-//! [`Emit`], the sink a kernel installs, is defined here because every phase uses it: the kernel drives it
-//! with `observer.next(..)`, so a `char → 0..N Tok` fan-out is emitted item by item. There is deliberately no
-//! returned `Vec`: batching a phase's output and flattening it again downstream was the non-framework shape
-//! this refactor removes. The next phase, `Tok → 0..N Event`, is [`crate::structure`].
+//! 内核安装的汇口 [`Emit`] 定义在这里，因为每个阶段都用它：内核以 `observer.next(..)` 驱动它，
+//! 于是 `char → 0..N Tok` 的扇出逐项发出。故意不返回 `Vec`：把一个阶段的产出攒起来再到下游
+//! 摊平一次，正是这次重构要去掉的非框架形状。下一阶段 `Tok → 0..N Event` 是 [`crate::structure`]。
 //!
-//! One gap in the lexeme law is open and recorded, not glossed: a quoted string is still **not** one lexeme,
-//! so a `}`/`;`/`,` sitting inside one is emitted as a structural `Punct` and the phases below read it as real
-//! (`tasks.md` 9.8 states the measured cost and the fix).
+//! 词素律有一个缺口是开放的、被记录下来的，而不是被抹过去的：带引号的字符串仍然**不是**一个词素，
+//! 所以坐在其中的 `}`/`;`/`,` 被当作结构 `Punct` 发出，下面的阶段把它当真的读
+//! （`tasks.md` 9.8 记着实测代价与修法）。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
-    /// a verbatim run of source text (never spans whitespace or an arithmetic sign)
+    /// 一段逐字的源码文本（绝不含空白或算术符号）
     Word(String),
-    /// one whitespace character — **data**, because Sass reads `10px -5px` as a
-    /// space-separated list but `10px - 5px` as subtraction
+    /// 一个空白字符 —— 是**数据**：Sass 把 `10px -5px` 读成空格分隔的列表，
+    /// 而把 `10px - 5px` 读成减法
     Space(char),
-    /// `+`, or a `-` that stands alone at a token boundary (an operator, decided downstream by the
-    /// spacing law). A `-` that belongs to an identifier is **not** an `Op`: it stays inside the
-    /// `Word`, because a classification never gets finer than the lexer's lexemes — `-a-calc(` cut
-    /// into `Op('-')+Word("a")+…` made "is this a vendor-prefixed CSS call?" unanswerable
-    /// (`css/functions/special/prefixed/lowercase::*/script_like`).
+    /// `+`，或是在词素边界上独立出现的 `-`（一个运算符，由下游的间距律裁定）。属于标识符的
+    /// `-` **不是** `Op`：它留在 `Word` 里，因为分类的粒度不会细过 lexer 的词素 —— 把
+    /// `-a-calc(` 切成 `Op('-')+Word("a")+…` 之后，「这是不是厂商前缀的 CSS 调用？」就答不了了
+    /// （`css/functions/special/prefixed/lowercase.hrx` 与 `uppercase.hrx` 的 `*/script_like`）。
     Op(char),
     Punct(char),
-    /// a `$name` reference (name excludes the leading `$`)
+    /// 一个 `$name` 引用（名字不含开头的 `$`）
     Var(String),
-    /// a **namespaced** reference `module.$name` — `math.$pi`, `math.$max-safe-integer`.
-    /// Made one lexeme here, at the character that starts the `$`, because nothing downstream can re-join
-    /// it: with `Word("math.")` and `Var("pi")` apart, no consumer can tell `math.$pi` (a built-in module
-    /// constant) from `math . $pi` (a product) or `5.$pi`, and re-scanning the rendered text in `expr` is
-    /// the classification-granularity mistake this project has measured four times (`-a-calc(`,
-    /// `calls::split` dropping spaces, `named_argument` guessing labels).
+    /// 一个**带命名空间**的引用 `module.$name` —— `math.$pi`、`math.$max-safe-integer`。
+    /// 在这里、在 `$` 起头那个字符处就做成一个词素，因为下游没有任何东西能把它重新拼回来：
+    /// `Word("math.")` 与 `Var("pi")` 分开时，消费者分不出 `math.$pi`（内置模块常量）与
+    /// `math . $pi`（乘积）或 `5.$pi`；而在 `expr` 里重扫渲染出的文本，正是本项目已多次实测
+    /// 的分类粒度错误（`-a-calc(`、`calls::split` 丢空格、`named_argument` 猜标签）。
     MemberVar(String, String),
-    /// the inner tokens of a `#{ … }` interpolation
+    /// `#{ … }` 插值的内部词素
     Interp(Vec<Tok>),
-    /// a `// …` silent comment **including its slashes**, carried as data so each consumer
-    /// decides whether it survives into CSS: selectors and ordinary declaration values drop
-    /// it, a custom property (`--x:`) keeps it verbatim because its value is raw CSS text.
+    /// 一条 `// …` 静默注释（**含两条斜杠**），作为数据携带，好让每个消费者自己决定它是否
+    /// 活进 CSS：选择器与普通声明值丢掉它，自定义属性（`--x:`）逐字保留它，因为它的值是
+    /// 原始 CSS 文本。
     Silent(String),
 }
 
 impl Tok {
-    /// How much this lexeme moves the bracket depth — **the** statement of that law, written on the lexeme
-    /// itself so no consumer can restate it: a word carries its own balance, which is why `Word("calc(")`
-    /// opens one level and a self-closing `Word("url(x)")` nets to zero, and a bracket that stands on its own
-    /// counts exactly once too. A group argument is that standalone bracket, and the corpus has 27 rows of it
-    /// (`core_functions/list/join/empty.hrx::both/*` spells `list.join((), …)`); all 27 are measured and none
-    /// is evaluated yet — that callee has no signature, so the run keeps its text — which is to say **no
-    /// reading distinguishes this law from the one it replaced**. It is shared with the consumers in
-    /// [`crate::brackets`], [`crate::operations`] and [`crate::expr`] because two answers for one fact is how
-    /// the argument cut drifted apart from the bracket balance the same module already computed.
+    /// 这个词素把括号深度拨动多少 —— 该律**唯一**的陈述，写死在词素上，消费者无从改口：
+    /// 一个 word 携带自己的收支，所以 `Word("calc(")` 开一层，自闭的 `Word("url(x)")` 收支为零，
+    /// 而独立站着的括号也恰好各计一次。组实参就是 `()` 那种独立括号：
+    /// `core_functions/list/join/empty.hrx` 整件 27 条全被计量、全未求值（`both/*` 是其中最齐的
+    /// 一簇 7 条，写的都是 `list.join((), …)`；callee 无签名 ⇒ run 保留文本）—— 换句话说，
+    /// **没有任何读数能区分本律与被它替换的旧计数**。它与 [`crate::brackets`]、
+    /// [`crate::operations`] 共用；`expr` 只经 `operations::protected` 取用同一条律，因为同一事实
+    /// 若有两个答案，实参切分就会与同一模块早已算出的括号收支走偏。
     pub(crate) fn net(&self) -> i32 {
         match self {
             Tok::Word(word) => word.matches('(').count() as i32 - word.matches(')').count() as i32,
@@ -63,23 +58,21 @@ impl Tok {
     }
 }
 
-/// The sink a kernel installs for its downstream observer: `FnMut(Item)` that moves each
-/// produced item straight into the stream.
+/// 内核为自己的下游 observer 安装的汇口：`FnMut(Item)`，把每项产出直接送进流。
 pub type Emit<'a, T> = &'a mut dyn FnMut(T);
 
-/// The characters that always close the running lexeme and become a `Punct` of their own.
+/// 这些字符总是收束正在攒的词素，并各自成为一个 `Punct`。
 ///
-/// `&` belongs here because the parent reference has to be a **lexeme**: nesting is then decided on
-/// pieces (`crate::selector`) instead of by searching for `'&'` inside a rendered string, and no
-/// classifier can be finer than what the lexer separates. `&:hover`, `&-suffix` and `a & b` all arrive
-/// as a `Punct('&')` beside their neighbours rather than glued into one `Word`.
+/// `&` 属于这里，因为父引用必须是一个**词素**：嵌套随后按片段决定（`crate::selector`），而不是
+/// 在渲染出的字符串里搜 `'&'`，而任何分类器都不会比 lexer 切出的更细。`&:hover`、`&-suffix`
+/// 与 `a & b` 都到达为邻旁的 `Punct('&')`，而不是粘成一个 `Word`。
 const STRUCTURAL: [char; 6] = ['{', '}', ';', ':', ',', '&'];
 
 fn is_var_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
 }
 
-/// A character that continues an identifier lexeme — the test that decides a pending `-`'s role.
+/// 一个把标识符词素续下去的字符 —— 决定待定 `-` 角色的判据。
 fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
@@ -89,35 +82,33 @@ pub struct LexAcc {
     buf: String,
     hash: bool,
     var: Option<String>,
-    /// the module prefix cut off the pending word by [`LexAcc::take_module_prefix`], waiting for the `$name`
-    /// that completes a [`Tok::MemberVar`]
+    /// 被 [`LexAcc::take_module_prefix`] 从待定 word 上切下的模块前缀，等那个补全 [`Tok::MemberVar`]
+    /// 的 `$name`
     member: Option<String>,
     interp: Vec<Vec<Tok>>,
     slash: bool,
     block: bool,
     block_star: bool,
-    /// inside a `// … end-of-line` comment, collecting its text
+    /// 正处在一行 `// …` 到行尾的注释中，收集其文本
     line: bool,
-    /// the run being collected for [`Tok::Silent`] (starts with `//`)
+    /// 正为 [`Tok::Silent`] 收集的段落（以 `//` 起头）
     comment: String,
-    /// last source character consumed outside comments — the lookbehind that keeps a
-    /// protocol slash (`url(http://x)`, `url(//cdn/x)`) from reading as a silent comment
+    /// 注释之外消费的上一个源码字符 —— 这段回看让协议斜杠（`url(http://x)`、`url(//cdn/x)`）
+    /// 不被读成静默注释
     prev: Option<char>,
-    /// a `-` seen at a token boundary whose role is not decided yet: Sass's spacing law needs the
-    /// next character, exactly like the pending-slash fold
+    /// 在词素边界见过的 `-`，角色尚未定：Sass 的间距律需要下一个字符，与待定斜杠的折叠同理
     minus: bool,
-    /// the quote character of the string literal we are inside, if any. Today its only effect is that
-    /// `$` stays text rather than starting a reference — Sass resolves no variable inside a quoted
-    /// string (`core_functions/selector/extend/simple/pseudo/arg::class/equal` passes
-    /// `selector.extend(":c(@#$)", …)` and must not fail).
+    /// 我们正处其中的字符串字面量的引号字符（若有）。今天它唯一的作用是让 `$` 留作文本而不是
+    /// 起头一个引用 —— Sass 不在带引号的字符串里解析变量
+    /// （`core_functions/selector/extend/simple/pseudo/arg::class/equal` 传的
+    /// `selector.extend(":c(@#$)", ":c(@#$)", "e")` 必须不失败）。
     quote: Option<char>,
-    /// a backslash seen inside a string: it escapes the next character, so `\"` does not close it
+    /// 字符串里见过的反斜杠：它转义下一个字符，所以 `\"` 不会闭合它
     escaped: bool,
 }
 
 impl LexAcc {
-    /// A completed token: an open interpolation still collects its own inner tokens, at the top
-    /// level the token goes straight into the stream.
+    /// 一个已完成的词素：插值还开着时，它继续把内部词素收进自己那一层；到了顶层，词素直接进流。
     fn push(&mut self, tok: Tok, emit: Emit<'_, Tok>) {
         match self.interp.last_mut() {
             Some(inner) => inner.push(tok),
@@ -132,10 +123,9 @@ impl LexAcc {
         }
     }
 
-    /// When the pending word ends in `.` and holds something before it, that tail is a **module prefix**:
-    /// cut it off so the `$name` that follows can be lexed as one [`Tok::MemberVar`]. Whatever precedes the
-    /// dot is returned whole (`a.math` from `a.math.$pi`), so a name outside the module table still renders
-    /// back as the source spelled it.
+    /// 待定 word 以 `.` 结尾且前面还有东西时，那个尾巴是**模块前缀**：把它切下来，好让后面的
+    /// `$name` 被切成一个 [`Tok::MemberVar`]。点之前的部分整个返回（`a.math.$pi` 得到 `a.math`），
+    /// 于是不在模块表里的名字也能按源码拼写渲染回去。
     fn take_module_prefix(&mut self) -> Option<String> {
         let head = self.buf.strip_suffix('.')?;
         if head.is_empty() {
@@ -146,7 +136,7 @@ impl LexAcc {
         Some(prefix)
     }
 
-    /// Push the `// …` text collected so far as one [`Tok::Silent`] and restart the run.
+    /// 把目前收集到的 `// …` 文本作为一个 [`Tok::Silent`] 发出，并重启段落。
     fn take_comment(&mut self, emit: Emit<'_, Tok>) {
         if !self.comment.is_empty() {
             let text = std::mem::take(&mut self.comment);
@@ -154,10 +144,10 @@ impl LexAcc {
         }
     }
 
-    /// Feed one character, emitting 0..N owned tokens into `emit`.
+    /// 喂进一个字符，把 0..N 个 owned 词素发进 `emit`。
     pub fn feed(&mut self, ch: char, emit: Emit<'_, Tok>) {
         if self.block {
-            // inside /* .. */ loud comment: consume until */
+            // 在 /* .. */ 响注释里：吃到 */ 为止
             if self.block_star && ch == '/' {
                 self.block = false;
                 self.block_star = false;
@@ -167,16 +157,15 @@ impl LexAcc {
             return;
         }
         if self.line {
-            // A comment swallows the line, but never a declaration terminator: a custom
-            // property keeps its `// …` text and still ends at `;` (`--b: c // comment;`).
+            // 注释吃掉整行，但绝不吃声明终止符：自定义属性保留它的 `// …` 文本，且仍在 `;` 收尾
+            // （`--b: c // comment;`）。
             match ch {
                 '\n' => {
                     self.line = false;
                     self.take_comment(emit);
-                    // The line break that ended the comment is **whitespace**, so it is emitted as a
-                    // `Space` lexeme. It used to be pushed into the word buffer, which turned it into a
-                    // `Word(" ")` — a fake identifier that hid the `$name` of a following binding from any
-                    // lexeme-level test (`// c\n$ids: ();` stopped binding `$ids`).
+                    // 结束注释的那个换行是**空白**，所以发成一个 `Space` 词素。它曾被推进 word 缓冲，
+                    // 变成 `Word(" ")` —— 一个假标识符，把紧随其后绑定的 `$name` 从任何词素级判据
+                    // 藏起来（`// c\n$ids: ();` 一度不再绑定 `$ids`）。
                     self.push(Tok::Space(' '), emit);
                 }
                 ';' => {
@@ -188,16 +177,14 @@ impl LexAcc {
             return;
         }
         if let Some(open) = self.quote {
-            // Inside a quoted string the character is content: a backslash escapes the next one, the
-            // matching quote ends the literal, and `$` must not be read as a variable reference
-            // (`core_functions/selector/extend/simple/pseudo/arg::class/equal`).
+            // 在带引号的字符串里，字符就是内容：反斜杠转义下一个，配对的引号结束字面量，
+            // 而 `$` 不得被读成变量引用（`core_functions/selector/extend/simple/pseudo/arg::class/equal`）。
             //
-            // Making the literal one lexeme (so a `}`/`;`/`,` inside it stops reaching the structural arms)
-            // was attempted twice on this branch and is **not** done: the second attempt measured
-            // `net=1 changed=70` with unexpected errors `17 → 39` and it broke
-            // `tests/lexer.rs::dollar_inside_a_quoted_string_is_text`, because `#` is ambiguous inside a
-            // literal (a lone `#` is text, `#{` opens SassScript) and deciding that needs the pending-`#`
-            // state to cover the *whole* run up to the `{`, not one character. See `tasks.md` 9.8.
+            // 把字面量做成一个词素（好让它内部的 `}`/`;`/`,` 不再走到结构臂）在本分支尝试过两次，
+            // 但**没有**做成：第二次尝试实测 `net=1 changed=70`、意外错误 `17 → 39`，并弄红
+            // `tests/lexer.rs::dollar_inside_a_quoted_string_is_text` —— 因为 `#` 在字面量里是有歧义的
+            // （孤立的 `#` 是文本，`#{` 开头 SassScript），而裁定它需要 pending-`#` 状态覆盖到 `{`
+            // 之前的*整段*，而不是一个字符。见 `tasks.md` 9.8。
             if self.escaped {
                 self.escaped = false;
             } else if ch == '\\' {
@@ -248,9 +235,8 @@ impl LexAcc {
                 None => self.push(Tok::Var(name), emit),
             }
         }
-        // A pending `-` resolves against this character: an identifier char continues the lexeme
-        // (vendor prefix, or an in-ident hyphen), anything else makes the `-` a standalone
-        // operator/sign and lets `ch` be handled on its own below.
+        // 待定的 `-` 据此字符了结：标识符字符把词素续下去（厂商前缀，或标识符里的连字符），
+        // 其余一切让 `-` 成为独立的运算符/符号，并让 `ch` 在下面按自身处理。
         if self.minus {
             self.minus = false;
             if is_ident_char(ch) {
@@ -260,14 +246,12 @@ impl LexAcc {
                 self.push(Tok::Op('-'), emit);
             }
         }
-        // Lookbehind for the slash rule below: capture the previous character, then record
-        // the one about to be consumed.
+        // 为下面的斜杠律做回看：先取上一个字符，再记下这个即将被消费的字符。
         let prev = self.prev;
         self.prev = Some(ch);
         match ch {
-            // A slash only opens a pending comment/division when it cannot be part of a
-            // URL authority (`http://`, `url(//cdn`); the pending-flag fold resolves the
-            // second slash in the next step.
+            // 只有当斜杠不可能是 URL authority 的一部分时（`http://`、`url(//cdn`）才起一个待定的
+            // 注释/除法标志；第二根斜杠由下一步的待定标志折叠裁定。
             '/' if prev != Some(':') && prev != Some('(') => self.slash = true,
             '#' => {
                 self.flush_word(emit);
@@ -296,20 +280,19 @@ impl LexAcc {
                 self.flush_word(emit);
                 self.push(Tok::Op(ch), emit);
             }
-            // `*` is never part of an identifier or a URL, and a `/*` comment is consumed by the block
-            // state above, so it can be its own lexeme outright. Leaving it inside the word made
-            // `1px * 1em` unreadable as an operation (`Word("1px * 1em")`), which is what 1.4d's unit
-            // algebra needs. `/` deliberately stays inside the word: outside `calc( … )` it is a list
-            // separator (`font: 12px/1.5`, `a {b: 1/2}`), and `url(http://x)` relies on that too.
+            // `*` 从不属于标识符或 URL，`/*` 注释又已被上面的块状态吃掉，所以它可以直接做自己的
+            // 词素。把它留在 word 里曾让 `1px * 1em` 读不出运算（`Word("1px * 1em")`），而 1.4d 的
+            // 单位代数正需要读出它。`/` 故意留在 word 里：在 `calc( … )` 之外它是列表分隔符
+            // （`font: 12px/1.5`、`a {b: 1/2}`），`url(http://x)` 也靠这一点。
             '*' => {
                 self.flush_word(emit);
                 self.push(Tok::Op(ch), emit);
             }
-            // Defer: whether a `-` is Sass's operator (whitespace on both sides) or part of an
-            // identifier (`-a-calc(`, `10px -5px`) is only knowable once the next char arrives.
+            // 推迟：一个 `-` 是 Sass 的运算符（两侧都有空白）还是标识符的一部分（`-a-calc(`、
+            // `10px -5px`），只有等下一个字符到了才知道。
             '-' => self.minus = true,
-            // A quote opens a string literal; its counterpart closes it above. The lexeme keeps the
-            // quote characters, so rendering still reproduces the source exactly.
+            // 引号开头一个字符串字面量；配对的引号在上面闭合它。词素保留引号字符，所以渲染仍逐字
+            // 复现源码。
             quote @ ('"' | '\'') if self.quote.is_none() => {
                 self.quote = Some(quote);
                 self.buf.push(quote);
@@ -319,15 +302,13 @@ impl LexAcc {
     }
 }
 
-/// Render a token run back to source text (P0: values/selectors pass through verbatim; the
-/// full `Value`/`Expr` algebra arrives in P1). Interpolation is glued with no extra space.
-/// A silent comment is **dropped** — see [`render_raw`] for the context that keeps it.
+/// 把一段词素渲染回源码文本（P0：值/选择器逐字透传；完整的 `Value`/`Expr` 代数随 P1 到来）。
+/// 插值拼合时不加多余空格。静默注释**丢掉** —— 保留它的场景见 [`render_raw`]。
 pub fn render(toks: &[Tok]) -> String {
     canon(&text_of(toks, false))
 }
 
-/// Like [`render`] but keeps `// …` comment text, for a custom-property value whose content
-/// is raw CSS and must survive untouched.
+/// 同 [`render`]，但保留 `// …` 注释文本 —— 给内容本身就是原始 CSS、必须原样存活的自定义属性值。
 pub fn render_raw(toks: &[Tok]) -> String {
     canon(&text_of(toks, true))
 }
@@ -340,8 +321,8 @@ fn text_of(toks: &[Tok], keep_silent: bool) -> String {
             Tok::Op(c) => c.to_string(),
             Tok::Punct(c) => c.to_string(),
             Tok::Var(n) => format!("${n}"),
-            // Whole, as written: the prefix was taken out of the pending word, so this is the only place it
-            // survives — a declined run has to print `math.$pi` back exactly.
+            // 整个、按书写顺序：前缀是从待定 word 上切下来的，所以这里是它唯一存活的地方 ——
+            // declined 的 run 必须把 `math.$pi` 逐字打回去。
             Tok::MemberVar(module, n) => format!("{module}.${n}"),
             Tok::Interp(inner) => text_of(inner, keep_silent),
             Tok::Silent(c) if keep_silent => c.clone(),
@@ -350,30 +331,28 @@ fn text_of(toks: &[Tok], keep_silent: bool) -> String {
         .collect()
 }
 
-/// One token as source text, silent comments dropped — the piece an interpolated run is
-/// assembled from without re-scanning the rendered string.
+/// 一个词素形式的源码文本，静默注释丢掉 —— 插值 run 拼装的件，无需重扫渲染出的字符串。
 pub fn token_text(tok: &Tok) -> String {
     text_of(std::slice::from_ref(tok), false)
 }
 
-/// A declaration flag on a binding: `!` glued to an identifier (`!default`, `!global`). The lexer keeps
-/// it as one `Word`, so the test never re-scans rendered text.
+/// 绑定上的声明标志：`!` 粘在标识符上（`!default`、`!global`）。lexer 把它保留为一个 `Word`，
+/// 所以判据从不重扫渲染文本。
 fn is_flag(tok: &Tok) -> bool {
     matches!(tok, Tok::Word(word) if word.starts_with('!')
         && word.len() > 1
         && word[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
-/// A **binding's** value without its trailing declaration flags: `!default` / `!global` describe the
-/// binding, they are not part of the value, and Sass never serialises them —
-/// `$a: b !default !default;` then `c {d: $a}` prints `d: b`
-/// (`variables/double_flag.hrx::default`; the `!global` twin is `::global`). Repeated flags are
-/// deprecated but still parsed, which is exactly what those two fixtures state.
+/// **绑定的**值去掉尾部声明标志：`!default` / `!global` 描述绑定，不是值的一部分，Sass 也从不
+/// 序列化它们 —— `$a: b !default !default;` 之后 `c {d: $a}` 打出 `d: b`
+/// （`variables/double_flag.hrx::default`；`!global` 的双子用例是 `::global`）。重复标志已废弃
+/// 但仍被解析，那两个 fixture 说的正是这件事。
 ///
-/// Only a binding goes through this. In an ordinary declaration `!important` is CSS text and must
-/// survive (P7 7.1), so [`crate::exec`] must not call this there. The *meaning* of `!default` (do not
-/// overwrite an existing binding) is likewise untouched here — the only fixtures for it configure a
-/// module (`directives/use/with/*`), so it belongs to P3.6/P5.1, not to this peel.
+/// 只有绑定走这里。普通声明里的 `!important` 是 CSS 文本、必须存活（P7 7.1），所以
+/// [`crate::exec`] 不得在那里调用本函数。`!default` 的*含义*（不要覆盖已有绑定）在这里同样
+/// 未被触碰 —— 它唯一的 fixture 都是配置模块（`directives/use/with/*`），属于 P3.6/P5.1，
+/// 不属于这次剥皮。
 pub fn without_flags(toks: &[Tok]) -> &[Tok] {
     let meaningful: Vec<usize> = toks
         .iter()
@@ -387,8 +366,8 @@ pub fn without_flags(toks: &[Tok]) -> &[Tok] {
     if !ends_with_flag {
         return toks;
     }
-    // Cut after the last meaningful lexeme that is not a flag, so the whole trailing run goes —
-    // `b !default !default` yields `b`, not `b !default`.
+    // 在最后一个不是标志的有效词素之后切，让整段尾部一起走 —— `b !default !default` 得 `b`，
+    // 不是 `b !default`。
     let cut = meaningful
         .iter()
         .rev()
@@ -397,7 +376,7 @@ pub fn without_flags(toks: &[Tok]) -> &[Tok] {
     &toks[..cut]
 }
 
-/// Collapse runs of whitespace to single spaces and trim, the canonical CSS text form.
+/// 把空白段落折成单个空格并去两端空白 —— 规范 CSS 文本形式。
 pub fn canon(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

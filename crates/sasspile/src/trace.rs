@@ -1,37 +1,28 @@
-//! The pipeline's own diagnostic shell — the only place that decides *what is observable*, so no other
-//! module imports `tracing` types beyond macros.
+//! 流水线自己的诊断外壳 —— 唯一决定「什么是可观测的」的地方，所以其他模块除宏之外不 import `tracing` 类型。
 //!
-//! Two levels, because they answer different questions:
-//! * [`Phase`] — one compile phase, counted in items and milliseconds. It has to outlive `subscribe`,
-//!   which is why the handle is carried inside the phase's observer (see `crate::phases`);
-//! * [`ValueRead`] — one declaration's value: what the source said, what it became, and whether this
-//!   compiler read it at all. That is the question every conformance round ends up asking ("why did this
-//!   line stay verbatim?"), and answering it today means adding a throwaway probe and rebuilding.
+//! 两个层级，因为它们回答不同的问题：
+//! * [`Phase`] —— 一条编译阶段，按条目数与毫秒计。它必须活得比 `subscribe` 长，所以句柄住在该阶段的
+//!   observer 里（见 `crate::phases`）；
+//! * [`ValueRead`] —— 一条声明的值：源码写了什么、它变成了什么、以及本编译器到底读没读它。每一轮
+//!   合规对到最后都在问这个问题（「为什么这行还是逐字？」），而今天回答它意味着加一个临时探针并重编。
 //!
-//! Both are opened at `DEBUG`, so a normal run pays only the field borrows and `RUST_LOG` decides.
+//! 两者都在 `DEBUG` 打开，所以正常运行只付字段借用的代价，由 `RUST_LOG` 拍板。
 //!
-//! The field *list* is the pipeline convention in `.qoder/rules/rust.md` and is not restated here; what is
-//! settled here is **what each field refers to on each surface**, because a log line is only searchable if
-//! the same name always means the same thing:
-//! * a `phase` span — `stage` is the phase, `module` the code module whose work it drives, `items` and
-//!   `elapsed_ms` its output and duration. It carries no `id`: there is exactly one of each phase per
-//!   compile, so the identity that names *which program* is on the enclosing `compile` span
-//!   ([`source_label`]) and the four phases nest under it;
-//! * a `value` span — `module` is the property or variable the value belongs to and `id` the block it sits
-//!   in, alongside `raw_value`/`resolved`, the pair that shows a decline as a decline rather than as an
-//!   empty string;
-//! * the decision events (`call`, `calculation read`) — `module` is the sub-stage speaking, and
-//! * the loss warning in [`crate::exec`] — `module` stays the code module, while the selectors it lost go
-//!   in `dropped`/`inside` rather than borrowing `module`/`id`.
+//! 字段*清单*是 `.qoder/rules/rust.md` 里的流水线约定，这里不复述；这里定死的是**每个字段在每个面上
+//! 指什么**，因为一行日志只有在同名永远同义时才可搜：
+//! * `phase` span —— `stage` 是阶段，`module` 是它驱动工作的代码模块，`items` 与 `elapsed_ms`
+//!   是其产出与耗时。它不带 `id`：每次编译每个阶段恰好一条，所以命名「哪份程序」的身份在外层
+//!   `compile` span（[`source_label`]）上，四个阶段嵌套其下；
+//! * `value` span —— `module` 是该值所属的属性或变量，`id` 是它所在的块，另有 `raw_value`/`resolved`
+//!   这一对，把 decline 显示成 decline 而不是一段空字符串；
+//! * 决策事件（`call`、`calculation read`）—— `module` 是说话的子阶段。
 //!
-//! Two surfaces do share `module` with different referents — a phase's code module and a value's owning
-//! property — because they answer different questions (`stage`+`module` joins the pipeline phases, the
-//! value pair asks about one line of CSS), and that is stated rather than left implicit. No surface puts a
-//! *selector* in `module`: those have their own names, and a field whose meaning changes per line is a
-//! field nobody can grep.
+//! 两个面共用 `module` 但指称不同 —— 阶段的代码模块与值的所属属性 —— 因为它们回答不同的问题
+//! （`stage`+`module` 串起流水线阶段，值那一对只问一行 CSS）；这一点写明而不是留白。没有任何面把
+//! *选择器*放进 `module`：选择器有自己的名字，而一个含义逐行变化的字段是没人能 grep 的字段。
 
-/// The label a stream is named by in a trace: its first non-blank line, cut short. Nothing else about the
-/// source is invented here, so an empty program says so instead of printing a blank field.
+/// 流在 trace 里被称呼用的标签：第一行非空行，截短。这里不编造源码的其他信息，所以空程序明说，
+/// 而不是打一个空字段。
 pub(crate) fn source_label(program: &str) -> String {
     let first = program.lines().find(|line| !line.trim().is_empty());
     first.map_or_else(
@@ -40,15 +31,15 @@ pub(crate) fn source_label(program: &str) -> String {
     )
 }
 
-/// One compile phase: the span plus the clock that starts when the observer is created.
+/// 一个编译阶段：span 加上 observer 创建时起的时钟。
 pub(crate) struct Phase {
     span: tracing::Span,
     started: std::time::Instant,
 }
 
 impl Phase {
-    /// `stage` is the phase in the pipeline, `module` the one whose code does the work — the two differ,
-    /// because `Render` serialises what `crate::exec` built.
+    /// `stage` 是流水线里的阶段，`module` 是干这份工作的那个代码模块 —— 两者不同，
+    /// 因为 `Render` 序列化的正是 `crate::exec` 建好的东西。
     pub(crate) fn new(stage: &'static str, module: &'static str) -> Self {
         Self {
             span: tracing::debug_span!(
@@ -62,17 +53,16 @@ impl Phase {
         }
     }
 
-    /// The span to work under, so what a phase emits nests inside it.
+    /// 在其下干活的 span，好让阶段发出的东西嵌套在它里面。
     pub(crate) fn enter(&self) -> tracing::span::Entered<'_> {
         self.span.enter()
     }
 
-    /// End the phase: record its output and duration, then release this handle, which is what closes the
-    /// span. Swapping in the empty span also makes a second call (a phase that failed *and* completed)
-    /// a no-op instead of a double close.
+    /// 结束这个阶段：记下它的产出与耗时，然后放掉这个句柄 —— 放掉就是关闭 span。把 span 换成空的，
+    /// 也让第二次调用（一个既失败*又*走完的阶段）成为 no-op，而不是二次关闭。
     ///
-    /// The duration is a fractional millisecond: the mandated field name is `elapsed_ms`, but whole
-    /// milliseconds would report every small phase as `0`, which reads as "instantaneous" and is a lie.
+    /// 耗时是带小数的毫秒：强制字段名是 `elapsed_ms`，但整数毫秒会把每个小阶段都报成 `0`，
+    /// 读起来像「瞬时」，那是谎。
     pub(crate) fn close(&mut self, items: usize) {
         self.span.record("items", items as i64);
         self.span.record("elapsed_ms", millis(self.started));
@@ -80,21 +70,20 @@ impl Phase {
     }
 }
 
-/// A duration in fractional milliseconds, the unit the pipeline convention names.
+/// 带小数的毫秒时长 —— 流水线约定点名的单位。
 fn millis(since: std::time::Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1_000.0
 }
 
-/// One declaration value's read. Closing happens on drop, so the `?` paths are recorded too — a failure
-/// is exactly the case a diagnostic must not swallow.
+/// 一条声明值的读取。关闭发生在 drop，所以 `?` 的路径也被记录 —— 失败恰恰是诊断必须不吞的情形。
 pub(crate) struct ValueRead {
     span: tracing::Span,
     started: std::time::Instant,
 }
 
 impl ValueRead {
-    /// `module` is what the value belongs to (a property name, or the variable a binding names), `id`
-    /// the block it sits in, `raw_value` the source text of the run.
+    /// `module` 是该值所属的东西（属性名，或绑定所命名的变量），`id` 是它所在的块，
+    /// `raw_value` 是这段 run 的源码文本。
     pub(crate) fn begin(module: &str, id: &str, raw_value: &str) -> Self {
         Self {
             span: tracing::debug_span!(
@@ -109,7 +98,7 @@ impl ValueRead {
         }
     }
 
-    /// What the read produced: a value, an explicit decline, or a failure that travels the `Err` channel.
+    /// 这次读取产出了什么：一个值、一次显式 decline、或一个走 `Err` 通道的失败。
     pub(crate) fn record(
         self,
         outcome: &Result<Option<crate::value::Value>, crate::SassError>,
