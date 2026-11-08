@@ -3526,4 +3526,38 @@
       11 条（下一批次候选）；中文化待译项全仓已清零（`src/` 顶层 + `builtins/` + `tests/`）。
       基线 run 自此为 `zh-comments-batch-o`。
 
+- [x] 9.56 **rustdoc strict 清零：全 workspace 21 条告警修复（9 文件 / 三 crate，2026-11-08）**。
+      用户「整体优化」指令下，把 `cargo doc --workspace --no-deps --document-private-items`
+      的全部告警清零：sasspile 11 条（10 unresolved + 1 redundant）、sasslint 3 条
+      （private_intra_doc_links）、ledger 8 条（invalid_html_tags）。分三类修法：
+      **(a) 抬层域相对链接**（`color/mod.rs` 对 `channel`/`channels`/`primaries` 的声明带外层
+      `///`，子模块 `//!` 的 `super::` 解析到 crate 根）：`channel.rs:5` 改裸名 `[`Color`]`（去
+      显式目标消除 redundant）、`channel.rs:35` 改 `[`crate::color::Color::with_space_channel`]`
+      （项级 doc 不抬层，`super::space::Color` 走的是私有模块里的不存在项）。
+      **(b) 私有模块/项不可被 intra-doc 链接**：`channels.rs`（`super::space`/`super::primaries`
+      两处）与 `primaries.rs`（`super::space`）指模块拆分史，改纯文本 `` `space` ``/`` `primaries` ``；
+      `color/mod.rs` 的 `color::matrix`（私有 `mod matrix`）与 `crate::builtins::color::amount::byte`
+      （`builtins::color` 私有、链外不可见）改纯文本；`selector.rs` 的 `crate::lexer::STRUCTURAL`
+      （私有常量）改 `` `STRUCTURAL` ``；`unit.rs` 的 `[`calc_product`]`（方法名不在模块作用域）
+      改 `[`crate::unit::Unit::calc_product`]`；sasslint 公开文档链私有项 3 条（`FileFacts`、
+      `is_comment`、`FileFacts::line_findings`）改纯文本保留路径。
+      **(c) HTML 尖括号**：ledger usage 块的 `<run-name>`/`<a>`/`<b>`/`<run>`/`<key-prefix>`
+      8 处包进反引号（`` `<a>` ``）消除未闭合标签告警。
+      **只改注释**：`/tmp/strip_comments` 剥离后 9/9 文件与 HEAD 逐字一致（含 ledger、sasslint
+      两个同名 lib.rs）。strict 读数 **21 → 0**，默认 doc 亦保持 0。
+      闸口：`cargo test --workspace` 全绿；`cargo fmt --all -- --check` EXIT=0；`sasslint` count=0；
+      `HRX_RUN=zh-comments-batch-p cargo test -p sasspile --test hrx` 记为 `zh-comments-batch-p`
+      （`3457/11533`，与 batch-o 逐例相同）；`ledger diff zh-comments-batch-o zh-comments-batch-p`
+      = **`regress=0 net=0`**；`ledger changed` = **`changed=0`**；怪字扫描（36 字表，全域）= 0
+      （阳性对照 4 字符读 4）；英文扫描：改动文件命中全为反引号内 fixture/CLI 语法逐字引用，
+      无散文引入。
+      **审计闸未过（同上十五批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.55 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「整体优化」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：全 workspace `cargo doc`（默认与 strict）自此零告警；
+      `crates/ledger/tests/` 七件与 `crates/sasslint/tests/` 仍全英文（既有状态，9.30 只做了
+      `ledger/src`），是中文化的下一批候选；`sasspile` 中文化维持清零。
+      基线 run 自此为 `zh-comments-batch-p`。
+
 

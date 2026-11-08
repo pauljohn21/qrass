@@ -358,7 +358,7 @@ pub(super) fn from_polar(lch: [f64; 3]) -> [f64; 3] {
 
 /// 这个颜色的通道作为以 D65 为基准的 CIE XYZ。一个 `none` 通道读成 `0`，这就是语料对
 /// `color(srgb none 0.2 0.3)` 转到 `lab` 所显示的（`to_space/srgb/lab.hrx::missing/red`）；powerlessness 本身只在
-/// 一次恒等换算里活着，而打印靠 [`InSpace`] 保住它。
+/// 一次恒等换算里活着，而打印靠 [`crate::color::InSpace`] 保住它。
 pub fn to_xyz_d65(space: Space, channels: [f64; 3]) -> [f64; 3] {
     let white = space.white();
     let xyz = match space {

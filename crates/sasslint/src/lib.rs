@@ -8,10 +8,10 @@
 //! * [`SUBSTRING_BANS`] / [`LINE_START_BANS`] — 单凭一行就带着那个签名；
 //! * [`AND_BANS`] — 只有**同一行上的两个签名**才认出这个形状，所以任一签名的合法用法
 //!   （当源的 `from_iter`、词素解析上的 `.ok()`）都不会触发；
-//! * [`FileFacts`] — 关于整个文件的规则（“原样兜底必须配一个致命性判定”），任何单行都无从表述。
+//! * `FileFacts` — 关于整个文件的规则（“原样兜底必须配一个致命性判定”），任何单行都无从表述。
 //!
 //! 后两种只是铁律的**代理**，从来不是证明：它们是照着本仓库真正删掉过的那些形状校准出来的，
-//! 并且会跳过注释（见 [`is_comment`]）。
+//! 并且会跳过注释（见 `is_comment`）。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,7 +93,7 @@ pub const AND_BANS: &[(&str, &[(&str, &str)])] = &[
     ("require-err-channel", &[(".ok()", "eval")]),
 ];
 
-/// [`FileFacts::line_findings`] 里那些文件级检查所发出的 id。用具名常量而不是切片里的位置：某个调用
+/// `FileFacts::line_findings` 里那些文件级检查所发出的 id。用具名常量而不是切片里的位置：某个调用
 /// 点如果从 `FILE_RULE_IDS[0..3]` 取错了下标，就会给一条命中贴错标签，而每个 id 仍然在别处发出过，
 /// 阳性对照看不见这件事。
 pub const REQUIRE_ERR_CHANNEL: &str = "require-err-channel";

@@ -2,7 +2,7 @@
 //! 未写的通道）。
 //!
 //! 从父模块里拆出来，是因为颜色级的构造子与打印分派已经长过了本仓库的行数预算，而代码早就画好的那道接缝就是
-//! 这里：[`Color`](super::Color) 决定*一个颜色是什么*；这里的一个通道决定*一个写下的数怎么行为*。本文件里没有
+//! 这里：[`Color`] 决定*一个颜色是什么*；这里的一个通道决定*一个写下的数怎么行为*。本文件里没有
 //! 任何东西知道色彩空间、表示或打印。
 
 use crate::value::Value;
@@ -32,7 +32,7 @@ pub(super) fn missing_as_zero(value: Option<f64>) -> f64 {
 /// `lab(50% 0 0)`（`change/unusual_numbers.hrx::negative_zero`），而 `rgb(-0, 0, 0, 0.5)` 答
 /// `rgba(0, 0, 0, 0.5)`（`rgb/four_args/clamped.hrx::red/negative_zero`）—— 而 `f64` 会把符号穿过每一步算术保住，
 /// 打出 `-0`。这条律只有这一处说法；下面的字节尺度夹紧与
-/// [`Color::with_space_channel`](super::space::Color::with_space_channel) 都读这里。
+/// [`Color::with_space_channel`](crate::color::Color::with_space_channel) 都读这里。
 pub(super) fn without_negative_zero(value: f64) -> f64 {
     value + 0.0
 }

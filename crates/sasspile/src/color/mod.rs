@@ -52,7 +52,7 @@ mod channels;
 mod matrix;
 mod ops;
 /// primaries 表，在那些表与它们的出处把 [`space`] 顶过行数预算时从那里拆出。这里是四张字面表，第五张
-/// （`srgb`）是对 [`color::matrix`] 里那个常数的委派；每一张**被拟合过**的都点名量出它的命令，而每个拟合数字
+/// （`srgb`）是对 `matrix` 里那个常数的委派；每一张**被拟合过**的都点名量出它的命令，而每个拟合数字
 /// 背后的读数只住一份，在该批的 `openspec/…/tasks.md` 里。
 mod primaries;
 mod read;
@@ -386,7 +386,7 @@ impl Color {
     ///
     /// 值是个 `Option`，因为调用可以写**缺**：`color.change(black, $red: none)` → `rgb(none 0 0)`，
     /// green 与 blue 同理（`change/rgb.hrx::{red,green,blue}/none`）。`adjust` 与 `scale` 永远不会带着 `None`
-    /// 走到这里 —— 它们的读者是 [`crate::builtins::color::amount::byte`]，它直接拒绝一个 `none`
+    /// 走到这里 —— 它们的读者是 `byte`，它直接拒绝一个 `none`
     /// （`amount::written_byte` 是唯一允许它的读者，而它是 `change` 一家到这里唯一的路），所以没有 fixture 要一
     /// 个 shift 或 scale 去移动一个缺。
     ///

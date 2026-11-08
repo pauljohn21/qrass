@@ -15,13 +15,13 @@
 //! 组合子链；所有输出都走 `tracing`（无 println）。
 //!
 //! Usage:
-//!   ledger import <run-name> <file.tsv> [more.tsv...]   (run 名对所有文件生效)
-//!   ledger diff <a> <b> [key-prefix]                        (回归 / 净增，给了前缀就按簇)
-//!   ledger changed <a> <b> [key-prefix]                 (两个 run 都失败、详情却不同的行：那是
+//!   ledger import `<run-name>` <file.tsv> [more.tsv...]   (run 名对所有文件生效)
+//!   ledger diff `<a>` `<b>` [key-prefix]                    (回归 / 净增，给了前缀就按簇)
+//!   ledger changed `<a>` `<b>` [key-prefix]             (两个 run 都失败、详情却不同的行：那是
 //!                                                         `regress=0` 看不见的形状变化)
 //!   ledger runs                                           (汇总表)
-//!   ledger failures <run> [key-or-detail-substring] [--count]
-//!   ledger passed   <run> <key-prefix>
+//!   ledger failures `<run>` [key-or-detail-substring] [--count]
+//!   ledger passed   `<run>` `<key-prefix>`
 //!
 //! `passed` 之所以存在，是因为存储是不对称的：只有失败才是行，所以“这个簇现在哪些用例 PASS”没有
 //! 直接表示。它**只对一个具名簇**作答：在该前缀下某处记录过的 key，减去这个 run 失败的那些。前缀是

@@ -236,7 +236,7 @@ impl Unit {
     /// 语料打的是乘积形（`values/numbers/units/multiple.hrx`：`calc(1px * 1rad)`、`calc(1 / 1px / 1rad)`、
     /// `calc(1px * 1rad / 1ms / 1Hz)`）。
     ///
-    /// **非有限**量值也没有纯 CSS 拼法，所以它同样走 [`calc_product`]：把 `infinity` 直接黏到单位上
+    /// **非有限**量值也没有纯 CSS 拼法，所以它同样走 [`crate::unit::Unit::calc_product`]：把 `infinity` 直接黏到单位上
     /// 会打出 `infinitypx`，那不是 CSS 数；语料写的是 `calc(1% + infinity * 1px)`
     /// （`values/calculation/calc/constant.hrx::precedence/after_plus`）与 `calc(NaN * 1deg)`
     /// （`core_functions/math/asin.hrx::greater_than_one`）。
