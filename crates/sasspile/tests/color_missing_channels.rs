@@ -1,48 +1,40 @@
-//! The law this file keeps: **a `none` channel survives `color.to-space` in the position it was written,
-//! but only inside the index-aligned family.**
+//! 本文件守的律：**`none` 通道经 `color.to-space` 后留在写下的位置，但只在索引对齐族内。**
 //!
-//! The archive separates two behaviours and states each with its own rows:
+//! 归档把两种行为分开，各用自己的行陈述：
 //!
-//! * **Inside the family whose channels are one index-aligned RGB-or-XYZ triple** (`srgb`, `srgb-linear`,
-//!   `display-p3`, `display-p3-linear`, `a98-rgb`, `prophoto-rgb`, `rec2020`, `xyz`, `xyz-d50`), a missing
-//!   channel stays missing at the **same index** while the other two are computed — which also proves the
-//!   missing channel still contributes `0` to the maths: `to_space/srgb/xyz.hrx::missing/red` answers
-//!   `color(xyz none 0.028962782 0.0735618977)`, and those two numbers are what `0` for red produces.
-//! * **Everywhere else the missing channel is substituted**, so the triple becomes three numbers. Both
-//!   directions of that are covered by the same condition in `Color::converted` (one side derived ⇒ no
-//!   propagation); the green witness is the derived-**source** direction,
-//!   `to_space/lab/srgb.hrx::missing/lightness` → `color(srgb 0.1653748669 -0.0646023407 -0.1599982587)`.
-//!   The derived-**target** direction is stated by the same rows in the archive but is still red in the
-//!   tenth decimal (`to_space/srgb/lab.hrx::missing/red` wants `-7.7361660103`, we print `-7.7361660069`),
-//!   which is the ceiling `tasks.md` 9.14 records — this batch did not earn it and does not claim it.
-//! * **All three missing is all three missing** into a space: `to_space/srgb/lab.hrx::missing/all` →
-//!   `lab(none none none)` and `to_space/srgb/oklab.hrx::missing/all` → `oklab(none none none)`. The
-//!   `hsl` target is the exception the archive states in its own row —
-//!   `to_space/srgb/hsl.hrx::missing/all` → `hsl(0, 0%, 0%)`, zeros, because that form has no way to print
-//!   `none`. (`hwb` is a separate open question: `to_space/hwb/hwb.hrx::missing/non_hue` *does* print
-//!   `hwb(10deg none none)` and that file uses no mixin, yet `color.to-space` declines the `hwb` target
-//!   altogether — named in `tasks.md` 9.15.)
+//! * **在通道是索引对齐的 RGB 或 XYZ 三元组的族内**（`srgb`、`srgb-linear`、`display-p3`、
+//!   `display-p3-linear`、`a98-rgb`、`prophoto-rgb`、`rec2020`、`xyz`、`xyz-d50`），缺的通道留在
+//!   **同一索引**、另两个照常算——这也证明缺通道仍给算术贡献 `0`：`to_space/srgb/xyz.hrx::missing/red`
+//!   答 `color(xyz none 0.028962782 0.0735618977)`，那两个数正是 red 取 `0` 的产物。
+//! * **其余地方缺通道被代入**，三元组变成三个数。两个方向由 `Color::converted` 里同一条件覆盖（一侧
+//!   派生 ⇒ 不传播）；绿证人在派生**源**方向：`to_space/lab/srgb.hrx::missing/lightness` →
+//!   `color(srgb 0.1653748669 -0.0646023407 -0.1599982587)`。派生**目标**方向由归档同一批行陈述，但仍在
+//!   第十位红（`to_space/srgb/lab.hrx::missing/red` 要 `-7.7361660103`，本实现印 `-7.7361660069`）——
+//!   那是 `tasks.md` 9.14 记录的天花板；这批没挣到、也不声称。
+//! * **三缺则三缺**进入空间：`to_space/srgb/lab.hrx::missing/all` → `lab(none none none)`、
+//!   `to_space/srgb/oklab.hrx::missing/all` → `oklab(none none none)`。`hsl` 目标是归档用自己行陈述的
+//!   例外——`to_space/srgb/hsl.hrx::missing/all` → `hsl(0, 0%, 0%)`，零，因为该形式没法印 `none`。
+//!   （`hwb` 是另一个未决问题：`to_space/hwb/hwb.hrx::missing/non_hue` *确实*印 `hwb(10deg none none)`，
+//!   且那文件不用 mixin，而 `color.to-space` 干脆拒绝 `hwb` 目标——点名于 `tasks.md` 9.15。）
 //!
-//! No fixture states what an all-missing **rectangular** colour converts to another rectangular space, so
-//! this file does not assert one: the positional rule covers it (`none` stays at its index), but that is my
-//! reading of the rule, not a row the archive prints.
+//! 没有 fixture 陈述「全缺的**矩形**颜色换算到另一矩形空间」是什么，故本文件不断言：位置规则覆盖它
+//! （`none` 留在自己索引），但那是我的读法，不是归档印出的一行。
 //!
-//! What this file deliberately does **not** pin, with the measured reason each time:
+//! 本文件**故意**不钉的，每次都附实测理由：
 //!
-//! * **The polar pair (`lab`↔`lch`, `oklab`↔`oklch`) is unimplemented.** Its 22 `missing/*` rows
-//!   (`lab/lch` 5, `lch/lab` 6, `oklab/oklch` 5, `oklch/oklab` 6) fit one candidate law on 20 of them —
-//!   carry the lightness by position, and let a derived channel be `none` only when **all** the channels it
-//!   is computed from are `none` (`lab(10% none 30)` → `lch(10% 30 90deg)`, `lab(10% none none)` →
-//!   `lch(10% none none)`, `lch(10% none 30deg)` → `lab(10% 0 0)`, `oklch(none none 10deg)` →
-//!   `oklab(none 0 0)`). Two rows break it, both in `lch` → `lab`: `to_space/lch/lab.hrx::missing/lightness`
-//!   (`lch(none 20 30deg)` → `lab(none none none)`) and `…::missing/non_hue` (`lch(none none 10deg)` →
-//!   `lab(none none none)`), where the same shapes through `oklch` → `oklab` follow the law. So the break is
-//!   specific to `lab`, not to the pair algebra — and writing the law to fit 20 rows would silently invent
-//!   those two, so nothing here claims a rule for the family.
-//! * `to_space/xyz_d50/srgb.hrx::missing/y` — the `none` is right now and one digit is not
-//!   (`0.6863615753` against the archive's `0.6863615754`), the tenth-decimal ceiling of `tasks.md` 9.14.
-//! * `to_space/xyz/xyz_d50.hrx::gray` — same ceiling, on the side of the pair the library derives
-//!   (`0.5014942182` against our `0.5014942183`).
+//! * **polar 对（`lab`↔`lch`、`oklab`↔`oklch`）未实现。** 它的 22 条 `missing/*` 行（`lab/lch` 5、
+//!   `lch/lab` 6、`oklab/oklch` 5、`oklch/oklab` 6）中 20 条合一条候选律——按位置携带明度，且仅当派生
+//!   通道所依赖的通道**全**缺时它才 `none`（`lab(10% none 30)` → `lch(10% 30 90deg)`、
+//!   `lab(10% none none)` → `lch(10% none none)`、`lch(10% none 30deg)` → `lab(10% 0 0)`、
+//!   `oklch(none none 10deg)` → `oklab(none 0 0)`）。两行破律，都在 `lch` → `lab`：
+//!   `to_space/lch/lab.hrx::missing/lightness`（`lch(none 20 30deg)` → `lab(none none none)`）与
+//!   `…::missing/non_hue`（`lch(none none 10deg)` → `lab(none none none)`），而同形经 `oklch` →
+//!   `oklab` 合律。所以破的是 `lab` 自己，不是对代数——而把律写成合 20 行会悄悄发明那两行，故此处不对
+//!   该族声称规则。
+//! * `to_space/xyz_d50/srgb.hrx::missing/y` —— `none` 现在对、差一位数（`0.6863615753` 对归档
+//!   `0.6863615754`），`tasks.md` 9.14 的第十位小数天花板。
+//! * `to_space/xyz/xyz_d50.hrx::gray` —— 同一天花板，在库所派生的那一侧（`0.5014942182` 对本实现
+//!   `0.5014942183`）。
 
 use sasspile::compile;
 
@@ -52,7 +44,7 @@ async fn css(scss: &str) -> String {
         .unwrap_or_else(|error| panic!("compiling {scss:?}: {error}"))
 }
 
-/// The index-aligned family: `none` stays at its own index, the other channels keep their numbers.
+/// 索引对齐族：`none` 留在自己索引，其余通道保留各自数字。
 #[tokio::test]
 async fn a_missing_channel_stays_missing_at_its_own_index() {
     let cases = [
@@ -86,8 +78,7 @@ async fn a_missing_channel_stays_missing_at_its_own_index() {
     }
 }
 
-/// A derived target takes no `none` from a single missing channel — the same colour that keeps `none` on
-/// the way to `xyz` becomes three numbers on the way to `srgb`.
+/// 派生目标不接受单个缺通道的 `none`——同一颜色去 `xyz` 保留 `none`，去 `srgb` 变成三个数。
 #[tokio::test]
 async fn a_derived_target_substitutes_the_missing_channel() {
     let built = css("a {b: color.to-space(lab(none 20 30), srgb)}").await;
@@ -97,8 +88,7 @@ async fn a_derived_target_substitutes_the_missing_channel() {
     );
 }
 
-/// And the rule that predates this batch stays: a colour with nothing at all is powerless into a space,
-/// while a legacy target — which has no way to print `none` — substitutes zeros.
+/// 早于这批的规则继续成立：全然无写的颜色进空间时 powerless；而 legacy 目标——无法打印 `none`——代入零。
 #[tokio::test]
 async fn a_colour_with_no_channels_at_all_is_powerless_or_substituted_by_target_form() {
     let built = css("a {b: color.to-space(color(srgb none none none), lab)}").await;

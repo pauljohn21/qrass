@@ -3355,4 +3355,31 @@
       847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-i`。
 
+- [x] 9.51 **注释中文化第二十四批：`crates/sasspile/tests/color_*` 两件（2 文件，2026-11-08）**。
+      `color_legacy_missing.rs`（legacy 三元组携缺：同一性换算保文本、索引对齐族按位传播、派生目标代入、
+      改缺通道拒答不发明、带缺的兄弟通道仍可改、`change` 能写缺、通道代入不改动共用路线）、
+      `color_missing_channels.rs`（`none` 只在索引对齐族按索引留存、派生目标代入、全缺 powerless、
+      `hsl` 目标例外、polar 对 22 行中 20 条合律 2 行破律）逐件译毕模块 doc、每个 `#[tokio::test]` 的 doc
+      与内联注释。**逐字凭据类不译**：oracle 消息、sass-spec case key、代码标识符与 gold 值一律保留原文
+      （如 `to_space/rgb/lab.hrx::missing/all`、`color(srgb 0.1653748669 -0.0646023407 -0.1599982587)`、
+      `rgb(none none none)`）；英文残留扫描仅命中 1 处逐字错误消息（`There … support modifying missing
+      channels (color: rgb(none 0 0))` 的折行部分，属「逐字引用错误消息」允许保留类），其余 0。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，2/2 逐字一致（剥离 diff 的差异均为注释
+      行数变化带出的空行，非空行序列零改动）。
+      文件读数（`wc -l` 口径）：`color_legacy_missing.rs` 209→196、`color_missing_channels.rs` 119→109。
+      闸口：`cargo test -p sasspile` EXIT=0（全绿）；`sasslint lint crates/sasspile/src` EXIT=0 count=0；
+      `cargo doc -p sasspile --no-deps` EXIT=0 零警告；`HRX_RUN=zh-comments-batch-j cargo test -p sasspile --test hrx`
+      记为 `zh-comments-batch-j`（`3457/11533`，实质 3292 + 空期望 165，skipped 1264）；
+      `ledger diff zh-comments-batch-i zh-comments-batch-j` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076 fails_b=8076）；怪字扫描
+      （拄/殫/一遗/癲）= 0（阳性对照 4/4 命中）。
+      **审计闸未过（同上十批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.50 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 21 件未译（现量：全量 43 件、
+      已译 22 件，余 `color_*` 七件与 `hrx.rs` 等基础件）；`crates/sasspile/src/builtins/` 仍余约
+      847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-j`。
+
 
