@@ -1,13 +1,12 @@
-//! `hwb` / `color.hwb`, pinned on `core_functions/color/hwb/**` and `channel/hwb.hrx`. Each input and each
-//! expectation is that fixture's own `input.scss` / `output.css` line.
+//! `hwb` / `color.hwb`，钉在 `core_functions/color/hwb/**` 与 `channel/hwb.hrx` 上。
+//! 每个输入与每条期望都是该 fixture 自身的 `input.scss` / `output.css` 行。
 //!
-//! Two laws here are unlike anything in `rgb`/`hsl`, and both come from rows rather than from reasoning:
-//! * a `hwb` colour **prints as hsl** (`hwb(0deg, 30%, 40%)` → `hsl(0, 33.3333333333%, 45%)`) yet keeps its
-//!   whiteness and blackness readable (`color.channel(hwb(10deg 70% 50%), "whiteness")` → `58.3333333333%`,
-//!   i.e. `70/120` — the overflow is normalised **at creation**);
-//! * a whole-byte `hwb` colour whose bytes name a keyword prints **that keyword** (`red`), which an `rgb`
-//!   call does not do (`rgb(0, 0, 0)` prints itself); the corpus does not say why, so nothing here
-//!   generalises it.
+//! 这里有两条不同于 `rgb`/`hsl` 任何行为的定律，且都来自行而非推理：
+//! * `hwb` 颜色**打印为 hsl**（`hwb(0deg, 30%, 40%)` → `hsl(0, 33.3333333333%, 45%)`），
+//!   却保持白度与黑度可读（`color.channel(hwb(10deg 70% 50%), "whiteness")` → `58.3333333333%`，
+//!   即 `70/120`——溢出在**创建时**归一化）；
+//! * 字节命名到关键字的整字节 `hwb` 颜色打印**该关键字**（`red`），而 `rgb` 调用不这样做
+//!   （`rgb(0, 0, 0)` 打印自身）；语料库未说明原因，所以此处不做任何推广。
 
 use sasspile::compile;
 
@@ -17,8 +16,8 @@ async fn css(input: &str) -> String {
         .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
 }
 
-/// `hwb/three_args/units.hrx`: the hue follows the `hsl` angle law, and a unit that is **not** an angle is
-/// taken as a plain number instead of being rejected (`hwb/three_args/named.hrx` binds the labels).
+/// `hwb/three_args/units.hrx`：hue 遵循 `hsl` 的角度定律，而**非**角度的单位
+/// 被视为普通数字而非被拒绝（`hwb/three_args/named.hrx` 绑定标签）。
 #[tokio::test]
 async fn hwb_prints_as_hsl_and_folds_its_hue() {
     for (input, want) in [
@@ -32,8 +31,8 @@ async fn hwb_prints_as_hsl_and_folds_its_hue() {
             "a {b: color.hwb($hue: 0, $whiteness: 30%, $blackness: 40%)}",
             "hsl(0, 33.3333333333%, 45%)",
         ),
-        // The namespaced spelling, and the alpha: one returns the three-argument form, zero does not
-        // (`hwb/global.hrx::alpha/in_gamut/{opaque,transparent}`).
+        // 命名空间拼写，以及 alpha：为 1 时返回三参数形式，为 0 时不返回
+        // （`hwb/global.hrx::alpha/in_gamut/{opaque,transparent}`）。
         (
             "a {b: color.hwb(0, 30%, 40%)}",
             "hsl(0, 33.3333333333%, 45%)",
@@ -63,10 +62,10 @@ async fn hwb_prints_as_hsl_and_folds_its_hue() {
     }
 }
 
-/// Whiteness and blackness are not clamped, but a pair that overflows the colour is **normalised by its
-/// sum** — `hwb(0 101% 40%)` gives `1.01 / 1.41`, and a negative whiteness is left to push the saturation
-/// past 100% (`hwb/one_arg.hrx::{whiteness/above_max,whiteness/below_min}`, same numbers as the
-/// comma-spelled `hwb/four_args` rows).
+/// 白度与黑度不被钳制，但溢出颜色的组合**按其和归一化**——`hwb(0 101% 40%)` 给出
+/// `1.01 / 1.41`，负白度则被留下把饱和度推过 100%
+/// （`hwb/one_arg.hrx::{whiteness/above_max,whiteness/below_min}`，与逗号拼写的
+/// `hwb/four_args` 行数字相同）。
 #[tokio::test]
 async fn overflowing_whiteness_and_blackness_normalise() {
     for (input, want) in [
@@ -80,7 +79,7 @@ async fn overflowing_whiteness_and_blackness_normalise() {
             "a {b: hwb(0, -1%, 40%, 0.5)}",
             "hsla(0, 103.3898305085%, 29.5%, 0.5)",
         ),
-        // The normalisation is visible when the channels are read back (`channel/hwb.hrx::local/normalized`).
+        // 当通道被读回时归一化可见（`channel/hwb.hrx::local/normalized`）。
         (
             "a {b: color.channel(hwb(10deg 70% 50%), \"whiteness\")}",
             "58.3333333333%",
@@ -98,10 +97,10 @@ async fn overflowing_whiteness_and_blackness_normalise() {
     }
 }
 
-/// `hwb/four_args::alpha/percent/max`: `color.hwb(0, 0%, 0%, 100%)` is pure red and prints **`red`** —
-/// while `rgb(0, 0, 0)` prints itself (`rgb/three_args/unitless::numbers`). A non-keyword `hwb` colour keeps
-/// the hsl form, and a `hwb` colour moved by an axis operation loses its hue when the result is a grey
-/// (`grayscale.hrx::legacy/powerless/different`), which is why that path returns an `hsl` colour.
+/// `hwb/four_args::alpha/percent/max`：`color.hwb(0, 0%, 0%, 100%)` 是纯红并打印
+/// **`red`**——而 `rgb(0, 0, 0)` 打印自身（`rgb/three_args/unitless::numbers`）。非关键字的
+/// `hwb` 颜色保持 hsl 形式，而经轴操作移动过的 `hwb` 颜色在结果为灰色时失去 hue
+/// （`grayscale.hrx::legacy/powerless/different`），这就是该路径返回 `hsl` 颜色的原因。
 #[tokio::test]
 async fn a_hwb_colour_prints_its_keyword_and_loses_hue_when_greyed() {
     for (input, want) in [
@@ -111,7 +110,7 @@ async fn a_hwb_colour_prints_its_keyword_and_loses_hue_when_greyed() {
             "a {b: color.grayscale(hwb(120deg 10% 20%))}",
             "hsl(0, 0%, 45%)",
         ),
-        // An `hwb` colour answers its own channels, and `hue` is the stored angle.
+        // `hwb` 颜色回答自身的通道，`hue` 是存储的角度。
         ("a {b: color.channel(hwb(10 30% 40%), \"hue\")}", "10deg"),
         (
             "a {b: color.channel(pink, \"whiteness\", $space: hwb)}",
@@ -130,8 +129,8 @@ async fn a_hwb_colour_prints_its_keyword_and_loses_hue_when_greyed() {
     }
 }
 
-/// A `var(` argument makes the whole call unreadable, and every such row keeps its text — including the
-/// interior spaces (`hwb/one_arg.hrx::{hue/var,whiteness/var,blackness/var/no_alpha}`).
+/// `var(` 实参使整个调用不可读，每个这样的行保持其文本——包括内部空格
+/// （`hwb/one_arg.hrx::{hue/var,whiteness/var,blackness/var/no_alpha}`）。
 #[tokio::test]
 async fn an_unreadable_hwb_argument_keeps_the_run_verbatim() {
     for call in [

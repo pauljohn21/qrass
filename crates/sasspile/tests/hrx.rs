@@ -1,16 +1,14 @@
-//! hrx ledger harness — runs `sass-spec/*.hrx` cases through the SOLE public exit
-//! `sasspile::compile` and emits a `STATUS\tkey[\tdetail]` snapshot for `ledger` A/B.
-//! Not a pass/fail assert on individual cases (the compiler is deliberately incomplete);
-//! it produces a stable per-case pass/fail set so `ledger diff <base> <run>` yields
-//! `regress = 0` as features are wired in. Test scaffolding lives in `tests/` (product
-//! code stays in `src/`).
+//! hrx 账本测试台——把 `sass-spec/*.hrx` 用例经唯一公共出口 `sasspile::compile`
+//! 运行，并为 `ledger` A/B 发出 `STATUS\tkey[\tdetail]` 快照。
+//! 它不对单个用例做通过/失败断言（编译器是故意不完整的）；它产生稳定的逐用例
+//! 通过/失败集合，以便在功能接入时 `ledger diff <base> <run>` 给出 `regress = 0`。
+//! 测试脚手架位于 `tests/`（产品代码留在 `src/`）。
 //!
-//! Two environment knobs shape what a run touches:
-//! * `HRX_RUN=<name>` (+ optional `HRX_DB=<path>`) records the verdict set into the ledger;
-//! * `HRX_CASE=<key substring>` narrows the run to the cases whose ledger key contains it — the way to
-//!   look at **one** case's trace, because 11,533 spans are not a diagnostic view. It is mutually
-//!   exclusive with `HRX_RUN`: a partial measurement written into the record would pose as a comparable
-//!   run total (see the guard below).
+//! 两个环境旋钮决定一次运行触及什么：
+//! * `HRX_RUN=<name>`（加可选 `HRX_DB=<path>`）把判定集合记入账本；
+//! * `HRX_CASE=<key 子串>` 把运行收窄到账本 key 含它的用例——这是查看**单个**
+//!   用例 trace 的方式，因为 11,533 个 span 不是诊断视图。它与 `HRX_RUN`
+//!   互斥：部分测量被写进记录会冒充可比的运行总量（见下方守卫）。
 
 #[path = "common/tracing_bridge.rs"]
 mod tracing_bridge;
@@ -21,13 +19,13 @@ use std::path::{Path, PathBuf};
 
 use sasspile::compile;
 
-/// The in-scope oracle directories. Excluded by policy: `non_conformant` (documents behaviour the
-/// spec itself calls non-conformant), `libsass*` (legacy engine issues), and `helpers` (not tests).
+/// 在域内的 oracle 目录。按策略排除：`non_conformant`（记录规范本身称为
+/// 非一致的行为）、`libsass*`（旧引擎问题）、`helpers`（非测试）。
 ///
-/// `operators`, `parser` and `variables` were missing here until P1.3, although the change's own task
-/// 1.6 cites `operators/**` as its golden source — 79 cases were never measured, which is how a
-/// coverage gap turns into an unfalsifiable "regress=0". Adding them is a scope change: the total moves,
-/// and the acceptance rule is that no previously-covered case may move from PASS to FAIL.
+/// `operators`、`parser` 与 `variables` 直到 P1.3 都不在此处，尽管该变更自身的
+/// 任务 1.6 引 `operators/**` 为其 golden 来源——79 个用例从未被测量，这正是覆盖
+/// 缺口如何变成不可证伪的“regress=0”。加入它们是范围变更：总量会移动，验收规则
+/// 是任何先前覆盖的用例不得从 PASS 移到 FAIL。
 const SPEC_DIRS: [&str; 9] = [
     "core_functions",
     "directives",
@@ -40,12 +38,12 @@ const SPEC_DIRS: [&str; 9] = [
     "variables",
 ];
 
-/// One parsed Hyrax case: keyed by its directory path inside the `.hrx`.
+/// 一个解析后的 Hyrax 用例：以 `.hrx` 内的目录路径为键。
 #[derive(Default)]
 struct Case {
     input: Option<String>,
     output: Option<String>,
-    /// the case's `error` section, verbatim (`None` when the case expects CSS)
+    /// 用例的 `error` 段落，逐字（用例期望 CSS 时为 `None`）
     error: Option<String>,
     extra_inputs: usize,
     has_options: bool,
@@ -64,8 +62,8 @@ fn walk_hrx(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Split a `.hrx` into `(case_key, Case)`. A section is `<===> <path>` up to the next
-/// `<===>`; the bare `<===>` + `====` separator carries no path and is ignored.
+/// 把 `.hrx` 拆成 `(case_key, Case)`。一个段落是 `<===> <path>` 直到下一个
+/// `<===>`；裸 `<===>` + `====` 分隔符不带路径，被忽略。
 fn parse_hrx(text: &str) -> BTreeMap<String, Case> {
     let mut cases: BTreeMap<String, Case> = BTreeMap::new();
     let lines: Vec<&str> = text.lines().collect();
@@ -110,7 +108,7 @@ fn parse_hrx(text: &str) -> BTreeMap<String, Case> {
     cases
 }
 
-/// `unitless/to_unit/input.scss` → (`unitless/to_unit`, `input.scss`).
+/// `unitless/to_unit/input.scss` → (`unitless/to_unit`, `input.scss`)。
 fn split_case(path: &str) -> (String, &str) {
     match path.rsplit_once('/') {
         Some((dir, file)) => (dir.to_string(), file),
@@ -118,34 +116,33 @@ fn split_case(path: &str) -> (String, &str) {
     }
 }
 
-/// The ledger key for one case: its path **relative to `spec/`** (`.hrx` dropped) plus the case
-/// directory inside the file.
+/// 一个用例的账本 key：其相对 `spec/` 的路径（去掉 `.hrx`）加上文件内的用例目录。
 ///
-/// It used to be `<basename>.hrx::<case>`, and that silently merged different cases: the corpus has
-/// `css/plain/function.hrx`, `css/function.hrx`, `css/supports/syntax/function.hrx`, … all folding
-/// onto `function.hrx::…`. `ledger` keys a run by case, so a merged pair lets one file's PASS hide
-/// the other's FAIL — measured: `ledger diff` reported `regress=0 net=266` where a per-case set diff
-/// was `+385 / -3`. Any conclusion about regressions therefore has to come from unique keys.
+/// 它曾是 `<basename>.hrx::<case>`，那会静默合并不同用例：语料库有
+/// `css/plain/function.hrx`、`css/function.hrx`、`css/supports/syntax/function.hrx`、…
+/// 全都折叠到 `function.hrx::…`。`ledger` 按用例为运行加键，所以被合并的对会让
+/// 一个文件的 PASS 掩盖另一个的 FAIL——实测：`ledger diff` 报告 `regress=0 net=266`，
+/// 而逐用例集合 diff 是 `+385 / -3`。因此关于回归的任何结论都必须来自唯一 key。
 fn case_id(root: &Path, file: &Path, key: &str) -> String {
     let rel = file.strip_prefix(root).unwrap_or(file).with_extension("");
     format!("{}::{}", rel.display(), key)
 }
 
-/// The oracle message for a failing case: the first non-empty line of its `error` section with the
-/// leading `Error:` removed — the corpus states the message on that line and puts the source span
-/// underneath (`css/comment.hrx::error/loud/interpolation/failure`).
+/// 失败用例的 oracle 消息：其 `error` 段落首条非空行去掉前导 `Error:`——
+/// 语料库在该行声明消息，把源 span 放在下面
+/// （`css/comment.hrx::error/loud/interpolation/failure`）。
 ///
-/// A section that does not open with `Error:` (a `DEPRECATION WARNING` or `Warning:`) has no message
-/// we can produce yet; P7 7.2 brings diagnostics, so such a case must count as a mismatch. This is what
-/// makes an `error` case a real assertion: before it, the harness passed on **any** error at all, and
-/// measured 385 of 385 flipping `FATAL` "gained" cases whose oracle was an unrelated message.
+/// 不以 `Error:` 开头的段落（`DEPRECATION WARNING` 或 `Warning:`）有我们尚不能
+/// 产生的消息；P7 7.2 带来诊断，所以这样的用例必须计为不匹配。这正是使 `error`
+/// 用例成为真实断言之物：在此之前，测试台对**任何**错误都通过，并实测 385 个 385
+/// 翻转的 FATAL“获得”用例，其 oracle 是不相关的消息。
 fn oracle_header(text: &str) -> Option<String> {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
     line.strip_prefix("Error:")
         .map(|message| message.trim().to_string())
 }
 
-/// Normalise CSS for comparison: trim each line, drop blank lines, join with `\n`.
+/// 规范化比较用 CSS：逐行 trim，丢弃空行，以 `\n` 拼接。
 fn norm(css: &str) -> String {
     css.lines()
         .map(str::trim_end)
@@ -159,8 +156,8 @@ async fn hrx_run() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sass-spec/spec");
     let _span = tracing::info_span!("hrx").entered();
     tracing_bridge::init();
-    // The single-case selector, read once. `Option<str>` so the loop below can ask the same question
-    // without a special case: `None` measures everything.
+    // 单用例选择器，读取一次。`Option<str>` 使下面的循环能以同一问题询问而不需要
+    // 特例：`None` 测量一切。
     let only = std::env::var("HRX_CASE").ok();
     let selected = |id: &str| {
         only.as_ref()
@@ -173,10 +170,10 @@ async fn hrx_run() {
 
     let mut rows: Vec<String> = Vec::new();
     let (mut total, mut pass, mut skipped) = (0usize, 0usize, 0usize);
-    // Of the passes, how many were earned against an **empty** expected output. They are legitimately
-    // correct (Sass really emits nothing for e.g. `@if true {}`), but they are also what a compiler that
-    // produces nothing scores, so they must never be read as evidence that a feature works — measured at
-    // 176 of 635 overall, and 39 of 39 in `directives/{{if,for,while}}` before loops/branches existed.
+    // 在通过中，有多少是对**空**期望输出赢得的。它们合法地正确（Sass 对例如
+    // `@if true {}` 确实什么都不输出），但它们也是什么都不产出的编译器的得分，
+    // 所以绝不可被读作功能有效的证据——实测总体 635 中 176，而在循环/分支存在
+    // 之前 `directives/{{if,for,while}}` 是 39 分之 39。
     let mut trivial_empty = 0usize;
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut collision: Vec<String> = Vec::new();
@@ -186,7 +183,7 @@ async fn hrx_run() {
             continue;
         };
         for (key, case) in parse_hrx(&text) {
-            // Runnable only as a single-input, single-output (or single-error) case.
+            // 只可作为单输入、单输出（或单错误）用例运行。
             if case.extra_inputs > 0 || case.has_options || case.input.is_none() {
                 skipped += 1;
                 continue;
@@ -196,8 +193,8 @@ async fn hrx_run() {
                 continue;
             }
             let id = case_id(&root, file, &key);
-            // A case outside `HRX_CASE` is not measured: it counts toward neither `total` nor the rows,
-            // so a filtered run cannot be mistaken for a full one by anything reading the numbers.
+            // `HRX_CASE` 之外的用例不被测量：它既不进 `total` 也不进行，
+            // 所以任何读数字的东西都不会把过滤运行误当完整运行。
             if !selected(&id) {
                 continue;
             }
@@ -216,7 +213,7 @@ async fn hrx_run() {
                     }
                     rows.push(format!("PASS\t{id}"));
                 }
-                // An error case is satisfied only by the message the oracle states, never by any error.
+                // 一个 error 用例只由 oracle 声明的消息满足，绝不靠任何错误满足。
                 (Err(e), _, Some(want)) if e.message == want => {
                     pass += 1;
                     rows.push(format!("PASS\t{id}"));
@@ -243,9 +240,9 @@ async fn hrx_run() {
         }
     }
 
-    // Every failure as an event too. The record (`ledger failures <run>`) stays the durable read, but under
-    // `trace` the got/want pair should show up where it happened, next to the spans that produced it —
-    // which is how a case is diagnosed without re-deriving the oracle by hand.
+    // 每个失败也作为事件发出。记录（`ledger failures <run>`）仍是持久读取，但在
+    // `trace` 下 got/want 对应出现在它发生之处，紧邻产生它的 span——这正是无需
+    // 手工重新推导 oracle 就能诊断用例的方式。
     rows.iter().for_each(|row| {
         let (status, rest) = row.split_once('\t').unwrap_or(("?", ""));
         if status == "FAIL" {
@@ -254,17 +251,16 @@ async fn hrx_run() {
         }
     });
 
-    // The record is the ledger database, never a file. `HRX_RUN=<name>` writes this run straight into
-    // `reports/hrx.db` (`HRX_DB=<path>` aims it at another database, which is how the mandated fresh-empty
-    // A/B re-check is done); without `HRX_RUN` the harness only measures and logs, leaving no artefact.
-    // This replaces the old `target/hrx-snapshot.tsv` + `ledger import <file>` hop, which forced every A/B
-    // to hold two files — and made me rebuild the “before” side with `git stash`, the maneuver that once
-    // collided with `index.lock` and left a stale number in the transcript.
+    // 记录是账本数据库，绝不是文件。`HRX_RUN=<name>` 把本次运行直接写入
+    // `reports/hrx.db`（`HRX_DB=<path>` 把它指向另一个数据库，强制的全新空库
+    // A/B 复检就是这样做的）；没有 `HRX_RUN` 时测试台只测量并记录日志，不留产物。
+    // 这替代了旧的 `target/hrx-snapshot.tsv` + `ledger import <file>` 两步，它强制
+    // 每次 A/B 持两个文件——并让我曾用 `git stash` 重建“前”侧，这个操作一次撞上
+    // `index.lock`，在转录里留下一个过期数字。
     //
-    // A filtered run and a recorded run cannot coexist. `run.total` is what makes `ledger diff` mean
-    // "the same population, twice"; storing a 1-case measurement under a run name would hand the next
-    // A/B a number that looks comparable and is not, which is the exact failure mode this project has
-    // been bitten by repeatedly. Diagnose with `HRX_CASE`, record with the full run.
+    // 过滤运行与记录运行不能共存。`run.total` 是使 `ledger diff` 意为“同一群体，
+    // 两次”之物；把单用例测量存到运行名下会交给下一次 A/B 一个看起来可比其实不可比
+    // 的数字，这正是本项目反复吃亏的失败模式。用 `HRX_CASE` 诊断，用完整运行记录。
     assert!(
         !(only.is_some() && std::env::var("HRX_RUN").is_ok()),
         "HRX_CASE selects a subset for diagnosis and must not be combined with HRX_RUN, which would \
@@ -276,8 +272,8 @@ async fn hrx_run() {
             .join(std::env::var("HRX_DB").unwrap_or_else(|_| "../../reports/hrx.db".into()));
         let (stored_total, stored_pass) = ledger::record(&name, &db, &rows)
             .unwrap_or_else(|e| panic!("ledger record {name}: {e}"));
-        // The database is now the only record, so what it stored must equal what was measured: a silent
-        // mismatch would make every later `ledger diff` compare the wrong sets.
+        // 数据库现在是唯一记录，所以它存储的必须等于所测量的：静默不匹配会让
+        // 之后每次 `ledger diff` 比较错误的集合。
         assert_eq!(
             stored_total,
             rows.len(),
@@ -290,10 +286,9 @@ async fn hrx_run() {
         name
     });
 
-    // Sanity: the harness found and ran cases. Individual failures are expected (the
-    // compiler is incomplete); regress tracking is via `ledger diff`, not this assert. With `HRX_CASE`
-    // this doubles as the positive control a selector needs: a typo would otherwise report "0 of 0"
-    // and read as an empty, harmless run.
+    // 健全性：测试台发现并运行了用例。单个失败是预期的（编译器不完整）；回归
+    // 跟踪经 `ledger diff`，不是此断言。配合 `HRX_CASE`，这兼任选择器所需的阳性
+    // 对照：否则一个拼写错误会报告“0 之 0”，读作空的无害运行。
     assert!(
         total > 0,
         "harness found no runnable cases{} under {root:?}",
@@ -301,8 +296,8 @@ async fn hrx_run() {
             .map(|needle| format!(" matching HRX_CASE {needle:?}"))
             .unwrap_or_default()
     );
-    // The guard against the defect above: two cases sharing a key makes `ledger diff` able to hide a
-    // regression, so the run is invalid rather than merely noisy.
+    // 防上面缺陷的守卫：两个用例共享 key 使 `ledger diff` 能掩盖回归，
+    // 所以运行无效，而不只是有噪声。
     assert!(
         collision.is_empty(),
         "{} duplicate case keys, first few: {:?}",
@@ -313,9 +308,9 @@ async fn hrx_run() {
         stage = "hrx",
         total,
         pass,
-        // What a selector narrowed the population to, so a partial run cannot be read as a whole one.
+        // 选择器把群体收窄到什么，使部分运行不能被读作整体。
         selector = only.as_deref().unwrap_or("<none>"),
-        // The number a round must actually move: passes earned against a non-empty expected output.
+        // 一轮必须真正移动的数：对非空期望输出赢得的通过。
         pass_substantive = pass - trivial_empty,
         pass_empty_expectation = trivial_empty,
         skipped,

@@ -3459,4 +3459,39 @@
       `loops.rs`）；`crates/sasspile/src/builtins/` 仍余约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-l`。
 
+- [x] 9.54 **注释中文化第二十七批：`crates/sasspile/tests/` 余下七件（7 文件，2026-11-08）**。
+      `calibrate_fit.rs`（量具数学首次被纳入测试目标：`fit.rs` 自 `examples/calibrate_space.rs` 拆出的
+      承诺由此坐实、接受拟合与拒绝非关系矩阵双方向并用、`invert` 往返与正向一致、曲线侧探针只答
+      被点名的侧）、`channel.rs`（颜色自身空间直读、`$space:` 跨空间读法、未实现空间拒绝而非猜数、
+      rgb 族的 hwb 读已被 `tests/hwb.rs` 取代故不再列为限制）、`color.rs`（rgb 表示/钳制/hex/
+      百分比律、hsl hue 折叠与饱和度不钳制、hsl 色不答 rgb 通道、rgb 答 hsl 轴、`grayscale` 往返与
+      整字节打印、旧式 hsl 操纵器、被拒调用保文本仍解析变量、关键字来源打印、`color.mix` 按 alpha
+      加权、未实现空间不用 sRGB 答、未知参数标签即拒绝）、`fallback.rs`（错误策略边界：未绑定引用
+      必须走 `Err` 通道、转义美元与纯 CSS at-rule 体保文本、特殊调用名字忽略大小写不失败、无夹具的
+      `progid:` 情形不发明）、`hrx.rs`（账本 oracle 自身：唯一 key 防 PASS 掩盖 FAIL、`HRX_RUN`/
+      `HRX_CASE` 互斥、空期望通过不计作功能证据、`oracle_header` 只认 `Error:` 头与首条非空行）、
+      `hwb.rs`（打印 hsl 与创建时归一化、关键字反向打印、`var(` 不可读保原样）、`loops.rs`
+      （`through`/`to` 端点律、引用边界头部一次性决定、分数边界不臆造区间）逐件译毕模块 doc、
+      每个测试的 doc 与内联注释。**逐字凭据类不译**：case key、sass-spec 文件名、代码标识符与
+      gold 值（`#aBcD` 大小写原文、`58.3333333333%`、`rgb(30%, 30%, 30%)`、`hsl(0, 0%, 0%)`）与
+      日志字符串一律保留原文；英文残留扫描 0 命中（`color.rs` 原命中一行为 fixture 值行，加引导词
+      「值行：」消除）。**只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，7/7 逐字一致。
+      文件读数（`wc -l` 口径）：`calibrate_fit.rs` 144→143（注释 22→21）、`channel.rs`
+      111→108（20→17）、`color.rs` 482→478（93→90）、`fallback.rs` 95→90（22→18）、`hrx.rs`
+      326→321（41→38）、`hwb.rs` 148→147（22→21）、`loops.rs` 103→101（27→25）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint lint crates/sasspile/src`
+      EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0 零警告；`cargo fmt --all -- --check` EXIT=0；
+      `HRX_RUN=zh-comments-batch-m cargo test -p sasspile --test hrx` 记为 `zh-comments-batch-m`
+      （`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与既有各批逐例相同）；
+      `ledger diff zh-comments-calls-v2 zh-comments-batch-m` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed zh-comments-batch-l zh-comments-batch-m` = **`changed=0`**
+      （fails_a=8076 fails_b=8076）；怪字扫描（拄/殫/一遗/癲）= 0（阳性对照 4 字符读 4）。
+      **审计闸未过（同上十三批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.53 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 43 件**自此全部中文化**；余批只剩
+      `crates/sasspile/src/builtins/` 约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-m`。
+
 

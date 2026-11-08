@@ -1,6 +1,6 @@
-//! The colour law, pinned on `core_functions/color/rgb/**` goldens. Each expectation is that fixture's own
-//! `output.css`, not a derivation: the representation a colour was created in decides how it prints, so
-//! the same channels come out as `rgb(…)`, `rgb(…%…)`, `rgba(…)`, or `#112233`.
+//! 颜色定律，钉在 `core_functions/color/rgb/**` 的 golden 上。每条期望是该 fixture 自身的
+//! `output.css`，不是推导：颜色被创建的表示决定它如何打印，所以相同通道会输出为
+//! `rgb(…)`、`rgb(…%…)`、`rgba(…)` 或 `#112233`。
 
 use sasspile::compile;
 
@@ -10,8 +10,8 @@ async fn css(input: &str) -> String {
         .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
 }
 
-/// `rgb/three_args/unitless`: channels print as written, and out-of-range ones clamp to `0–255`
-/// (`clamped/{red,green,blue}`).
+/// `rgb/three_args/unitless`：通道按所写打印，越界者钳制到 `0–255`
+/// （`clamped/{red,green,blue}`）。
 #[tokio::test]
 async fn unitless_channels_print_and_clamp() {
     for (input, want) in [
@@ -30,8 +30,8 @@ async fn unitless_channels_print_and_clamp() {
     }
 }
 
-/// `rgb/three_args/percents`: a percentage anywhere makes the whole colour percentage-form, so a unitless
-/// channel is converted (`173` → `67.8431372549%`) while a written percentage is kept exactly as spelled.
+/// `rgb/three_args/percents`：任一位置的百分比使整个颜色成为百分比形式，所以无单位
+/// 通道被转换（`173` → `67.8431372549%`），而写出的百分比严格保留拼写。
 #[tokio::test]
 async fn one_percentage_channel_makes_all_percentages() {
     assert_eq!(
@@ -44,9 +44,9 @@ async fn one_percentage_channel_makes_all_percentages() {
     );
 }
 
-/// `rgb/two_args::opaque_to/*` and `rgb/four_args/clamped/*`: a colour built from hex prints as hex while
-/// opaque and as `rgba(…)` the moment it is translucent, and an alpha argument selects the four-argument
-/// spelling. A negative zero is `0`, not `-0`.
+/// `rgb/two_args::opaque_to/*` 与 `rgb/four_args/clamped/*`：由 hex 建的颜色在不透明时
+/// 打印为 hex，一旦半透明即打印为 `rgba(…)`，alpha 实参选择四参数拼写。
+/// 负零是 `0`，不是 `-0`。
 #[tokio::test]
 async fn representation_and_alpha_choose_the_spelling() {
     for (input, want) in [
@@ -64,11 +64,11 @@ async fn representation_and_alpha_choose_the_spelling() {
     }
 }
 
-/// `hsl/three_args/units.hrx` and `…/bounds.hrx`, read row by row: the **hue is folded to degrees and
-/// wrapped into `0–360`** (`60rad` → `197.7467707849`, `0deg` → `0`), saturation and lightness **always**
-/// carry a `%` (`50` → `50%`), and unlike an `rgb` channel they are **not clamped** (`500%` stays).
-/// `hsl/four_args/alpha.hrx` adds the alpha law: a percentage alpha converts, and an alpha of one returns
-/// the three-argument spelling.
+/// `hsl/three_args/units.hrx` 与 `…/bounds.hrx`，逐行读取：**hue 被折叠为度数并
+/// 环绕进 `0–360`**（`60rad` → `197.7467707849`，`0deg` → `0`），饱和度与亮度
+/// **总是**带 `%`（`50` → `50%`），而且与 `rgb` 通道不同，它们**不被钳制**（`500%` 保留）。
+/// `hsl/four_args/alpha.hrx` 补充 alpha 定律：百分比 alpha 转换，为 1 的 alpha 返回
+/// 三参数拼写。
 #[tokio::test]
 async fn hsl_folds_hue_and_prints_percentages() {
     for (input, want) in [
@@ -84,8 +84,8 @@ async fn hsl_folds_hue_and_prints_percentages() {
         ("a {b: hsl(0, 0%, 0%, 100%)}", "hsl(0, 0%, 0%)"),
         ("a {b: hsl(0, 0%, 0%, 250%)}", "hsl(0, 0%, 0%)"),
         ("a {b: hsl(0, 0%, 0%, -10%)}", "hsla(0, 0%, 0%, 0)"),
-        // Labels bind, for `hsl` and `rgb` alike — the reason the registry carries optional parameters at
-        // all (`hsl/three_args/named.hrx`, `rgb/three_args/unitless::named`).
+        // 标签绑定，对 `hsl` 与 `rgb` 都一样——这正是注册表带可选参数的理由
+        // （`hsl/three_args/named.hrx`、`rgb/three_args/unitless::named`）。
         (
             "a {b: hsl($hue: 0, $saturation: 100%, $lightness: 50%)}",
             "hsl(0, 100%, 50%)",
@@ -94,7 +94,7 @@ async fn hsl_folds_hue_and_prints_percentages() {
             "a {b: rgb($red: 0, $green: 255, $blue: 127)}",
             "rgb(0, 255, 127)",
         ),
-        // An unmodellable argument keeps the call as written (`hsl/three_args/special_functions::var/*`).
+        // 不可建模的实参保持调用原样（`hsl/three_args/special_functions::var/*`）。
         ("a {b: hsl(var(--foo), 2%, 3%)}", "hsl(var(--foo), 2%, 3%)"),
     ] {
         assert_eq!(
@@ -105,11 +105,10 @@ async fn hsl_folds_hue_and_prints_percentages() {
     }
 }
 
-/// What must **not** happen. An argument the colour law cannot read declines the call, and the run keeps
-/// its verbatim text — `three_args::1_of_3` (`var()` is substituted before parsing, so the list can hold
-/// anything) is a golden of exactly that. And a hex written straight into a declaration is not a `Color`
-/// at all: `values/colors/alpha_hex/initial_letter` prints `#AbCd`, capitalisation intact, so normalising
-/// it here would be a regression dressed as a win.
+/// **不应**发生之事。颜色定律无法读取的实参拒绝该调用，行保留其逐字文本——
+/// `three_args::1_of_3`（`var()` 在解析前被替换，所以列表可含任何内容）正是这样的
+/// golden。而直接写进声明的 hex 根本不是 `Color`：`values/colors/alpha_hex/initial_letter`
+/// 打印 `#AbCd`，大小写完好，所以在此归一化它就是伪装成胜利的回归。
 #[tokio::test]
 async fn unmodellable_arguments_decline_and_hex_is_left_alone() {
     assert_eq!(
@@ -118,49 +117,49 @@ async fn unmodellable_arguments_decline_and_hex_is_left_alone() {
     );
     assert_eq!(css("a {b: #AbCd}").await, "a {\n  b: #AbCd;\n}\n");
     assert_eq!(css("a {b: #98765432}").await, "a {\n  b: #98765432;\n}\n");
-    // Channels are numbers or percentages; `px` is neither, and no error message is invented for it (P7).
+    // 通道是数字或百分比；`px` 两者皆非，且不为其发明错误消息（P7）。
     assert_eq!(
         css("a {b: rgb(1px, 2px, 3px)}").await,
         "a {\n  b: rgb(1px, 2px, 3px);\n}\n"
     );
 }
 
-/// The `color.*` accessors, and with them the audit that option (a) promised: the keyword table comes from
-/// the `color` crate's keyword table, so every expectation here is a name the **corpus itself** pins.
-/// `gray` is fixed twice over — `equality.hrx` states `gray == hsl(none 0% 50.196078431373%)` (128/255) and
-/// `color.invert(gray)` → `#7f7f7f` (128 inverted is 127); `springgreen` is what
-/// `rgb/three_args/unitless::springgreen` writes for `rgb(0, 255, 127)`; `purple` and `pink` come from
-/// `equality.hrx` and `channel/hwb::foreign/whiteness` (`75.2941176471%` is `192/255`).
+/// `color.*` 访问器，以及选项 (a) 承诺的审计：关键字表来自 `color` crate 的关键字表，
+/// 所以这里每条期望都是**语料库自身**钉住的名称。`gray` 被双重钉住——`equality.hrx`
+/// 声明 `gray == hsl(none 0% 50.196078431373%)`（128/255）且 `color.invert(gray)` →
+/// `#7f7f7f`（128 取反是 127）；`springgreen` 是 `rgb/three_args/unitless::springgreen`
+/// 为 `rgb(0, 255, 127)` 所写的；`purple` 与 `pink` 来自 `equality.hrx` 与
+/// `channel/hwb::foreign/whiteness`（`75.2941176471%` 是 `192/255`）。
 #[tokio::test]
 async fn accessors_read_channels_and_the_keyword_table_matches_the_corpus() {
     for (input, want) in [
-        // The fixture rows themselves (`core_functions/color/red.hrx::{max,min,middle,named}`).
+        // fixture 行自身（`core_functions/color/red.hrx::{max,min,middle,named}`）。
         ("a {b: color.red(rgb(255, 0, 0))}", "255"),
         ("a {b: color.red(rgb(0, 0, 0))}", "0"),
         ("a {b: color.red(rgb(123, 0, 0))}", "123"),
         ("a {b: color.red($color: rgb(234, 0, 0))}", "234"),
-        // `color.alpha` (`alpha.hrx::color/{max,middle,min,named}`).
+        // `color.alpha`（`alpha.hrx::color/{max,middle,min,named}`）。
         ("a {b: color.alpha(red)}", "1"),
         ("a {b: color.alpha(rgba(red, 0.42))}", "0.42"),
         ("a {b: color.alpha(rgba(red, 0))}", "0"),
         ("a {b: color.alpha($color: rgba(red, 0.73))}", "0.73"),
-        // Keyword parsing, cross-checked against the corpus values above.
+        // 关键字解析，与上面的语料库值交叉核对。
         ("a {b: color.red(black)}", "0"),
         ("a {b: color.red(white)}", "255"),
         ("a {b: color.red(gray)}", "128"),
-        // The CSS `-grey` spellings are the same entry, and the corpus does use them (`invert(grey)`,
-        // `color.adjust(grey, …)`), so the alias has to resolve to the same bytes.
+        // CSS 的 `-grey` 拼写是同一条目，语料库确实使用它们（`invert(grey)`、
+        // `color.adjust(grey, …)`），所以别名必须解析到相同字节。
         ("a {b: color.red(grey)}", "128"),
         ("a {b: color.green(springgreen)}", "255"),
         ("a {b: color.blue(springgreen)}", "127"),
         ("a {b: color.red(purple)}", "128"),
         ("a {b: color.blue(pink)}", "203"),
-        // A hex argument arrives as text and is read from there, not from a parsed declaration value.
+        // hex 实参以文本到达，并从那里读取，而不是从解析后的声明值读取。
         ("a {b: color.red(#123)}", "17"),
-        // `transparent` is a keyword the dependency knows and the old hand-list did not carry: the two
-        // alphas below are `rgb/two_args::transparent_to/{partial,transparent}`. The third row of that
-        // group, `rgb(transparent, 1)` → `black`, is **not** covered here — printing a colour as its name
-        // is the reverse-lookup law, still open.
+        // `transparent` 是依赖知道而旧手写清单没有的关键字：下面两个 alpha 是
+        // `rgb/two_args::transparent_to/{partial,transparent}`。该组的第三行
+        // `rgb(transparent, 1)` → `black` **不**在此覆盖——把颜色打印为其名称是
+        // 反查定律，仍未完成。
         ("a {b: rgb(transparent, 0.5)}", "rgba(0, 0, 0, 0.5)"),
         ("a {b: rgb(transparent, 0)}", "rgba(0, 0, 0, 0)"),
     ] {
@@ -172,13 +171,12 @@ async fn accessors_read_channels_and_the_keyword_table_matches_the_corpus() {
     }
 }
 
-/// The honest edge: a colour held in the **hsl** space has no `0–255` channels to hand out.
+/// 诚实的边界：**hsl** 空间中的颜色没有可交付的 `0–255` 通道。
 ///
-/// This one is measured rather than assumed, unlike the reverse direction below: `grep`ing every `.hrx`
-/// under `spec/` for `color.(red|green|blue)(…hsl(…))` returns **zero rows** — the hsl-space fixtures read
-/// the hsl axes instead (`channel/hsl.hrx` reads `hue`/`saturation`/`lightness`), so there is no golden to
-/// write an `hsl`→`rgb` conversion against. Reporting a number computed off the wrong axes would be a
-/// wrong answer scored as a pass, so the call declines and the text stands.
+/// 这一条是测量而非假设，与下面的反方向不同：`grep` 在 `spec/` 下每个 `.hrx` 中搜
+/// `color.(red|green|blue)(…hsl(…))` 返回**零行**——hsl 空间的 fixture 改为读取 hsl 轴
+/// （`channel/hsl.hrx` 读 `hue`/`saturation`/`lightness`），所以没有 golden 可对照写
+/// `hsl`→`rgb` 转换。报告从错误轴算出的数字会是判为通过错答案，所以该调用拒绝，文本保留。
 #[tokio::test]
 async fn an_hsl_colour_declines_an_rgb_channel() {
     assert_eq!(
@@ -187,18 +185,18 @@ async fn an_hsl_colour_declines_an_rgb_channel() {
     );
 }
 
-/// `color.hue` / `color.saturation` / `color.lightness`, one output per fixture row and one input per row
-/// actually read out of `core_functions/color/{hue,saturation,lightness}.hrx` — including the axis units,
-/// which no reasoning would supply: a hue prints `359deg`, saturation and lightness print `42%`.
+/// `color.hue` / `color.saturation` / `color.lightness`，每条 fixture 行一个输出，每行读出的
+/// 一个输入来自 `core_functions/color/{hue,saturation,lightness}.hrx`——包括推理不会给出的
+/// 轴单位：hue 打印 `359deg`，饱和度与亮度打印 `42%`。
 ///
-/// Every value row in these three files feeds an `hsl(…)` colour, so this slice needs **no** rgb→hsl
-/// conversion; the non-`hsl` arguments in them (`1`, `lch(0% 0 0deg)`, `red, green`) are `error/*` rows
-/// wanting messages this project has not built (P7).
+/// 这三个文件中的每条值行都喂给 `hsl(…)` 颜色，所以本切片**不需要** rgb→hsl 转换；
+/// 其中的非 `hsl` 实参（`1`、`lch(0% 0 0deg)`、`red, green`）是 `error/*` 行，要求本项目
+/// 尚未构建的消息（P7）。
 #[tokio::test]
 async fn hue_saturation_lightness_read_the_hsl_axes() {
     for (input, want) in [
         ("a {b: color.hue(hsl(359, 50%, 50%))}", "359deg"),
-        // The fold happened at creation (`hsl/three_args/units.hrx`), the accessor only reads it back.
+        // 折叠发生在创建时（`hsl/three_args/units.hrx`），访问器只是读回它。
         ("a {b: color.hue(hsl(540, 50%, 50%))}", "180deg"),
         ("a {b: color.hue(hsl(0, 50%, 50%))}", "0deg"),
         ("a {b: color.hue(hsl(123, 50%, 50%))}", "123deg"),
@@ -219,18 +217,18 @@ async fn hue_saturation_lightness_read_the_hsl_axes() {
     }
 }
 
-/// The **other** direction. Three of these rows are fixtures — `core_functions/modules/color/{hue,
-/// saturation,lightness}.hrx` each feeds an `rgb`-space colour to a hsl accessor, which is what overturned
-/// the earlier version of this file (it declined every such call as "no golden exists"). The expectations
-/// are the corpus's own numbers, printed with the units it states:
-/// * `color.hue(#abcdef)` → `210deg`, `color.saturation(#abcdef)` → `68%`, `color.lightness(#abcdef)` →
-///   `80.3921568627%` (`#abcdef` = `(171, 205, 239)`).
+/// **另一个**方向。其中三行是 fixture——`core_functions/modules/color/{hue,saturation,
+/// lightness}.hrx` 各自把一个 `rgb` 空间颜色喂给 hsl 访问器，这正是推翻本文件早期版本的
+/// 证据（它把每个这样的调用以“没有 golden”拒绝）。期望是语料库自身的数字，用其声明的
+/// 单位打印：
+/// * 值行：`color.hue(#abcdef)` → `210deg`，`color.saturation(#abcdef)` → `68%`，
+///   `color.lightness(#abcdef)` → `80.3921568627%`（`#abcdef` = `(171, 205, 239)`）。
 ///
-/// The last two rows are **not** fixture rows; they are the same formula checked against a statement the
-/// corpus does make: `values/colors/equality.hrx` writes `purple == hsl(300, 100%, 25.098039215686%)`, and
-/// `purple` = `(128, 0, 128)` gives exactly hue `300` and saturation `100%` here. A grey is deliberately not
-/// asserted: the same file states `gray == hsl(none 0% 50.196078431373%)`, and how `color.hue` prints a
-/// colour with no hue is not something these three rows settle.
+/// 最后两行**不是** fixture 行；它们是同一公式对照语料库确有声明的话检验：
+/// `values/colors/equality.hrx` 写 `purple == hsl(300, 100%, 25.098039215686%)`，而
+/// `purple` = `(128, 0, 128)` 在这里给出恰好的 hue `300` 与 saturation `100%`。灰色刻意
+/// 不作断言：同一文件声明 `gray == hsl(none 0% 50.196078431373%)`，而 `color.hue`
+/// 如何打印无 hue 的颜色不是这三行能解决的。
 #[tokio::test]
 async fn rgb_colours_answer_hsl_axis_questions() {
     for (input, want) in [
@@ -248,10 +246,10 @@ async fn rgb_colours_answer_hsl_axis_questions() {
     }
 }
 
-/// The hsl round trip and the printing rule it exposes, one assertion per fixture row
-/// (`core_functions/color/grayscale.hrx`). The pair `#633736` / `#494949` is the whole law: the same
-/// operation prints `rgb(30%, 30%, 30%)` when the round trip lands between bytes and `#494949` when it
-/// lands on one — so rounding belongs to printing, not to the conversion.
+/// hsl 往返与其暴露的打印规则，每条 fixture 行一条断言
+/// （`core_functions/color/grayscale.hrx`）。`#633736` / `#494949` 这对就是全部定律：
+/// 同一操作在往返落在字节之间时打印 `rgb(30%, 30%, 30%)`，落在字节上时打印 `#494949`
+/// ——所以舍入属于打印，不属于转换。
 #[tokio::test]
 async fn grayscale_round_trips_and_prints_by_whole_bytes() {
     for (input, want) in [
@@ -262,13 +260,12 @@ async fn grayscale_round_trips_and_prints_by_whole_bytes() {
             "a {b: color.grayscale(rgba(#633736, 0.3))}",
             "rgba(30%, 30%, 30%, 0.3)",
         ),
-        // `color.grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)` is a real row of the same file and
-        // is **not** claimed here: its input is the modern space-separated spelling, which this compiler
-        // does not parse yet, while its output is the legacy comma form.
+        // `color.grayscale(hsl(120deg 10% 20%))` → `hsl(120, 0%, 20%)` 是同文件的真实行，
+        // 此处**不**声明：其输入是现代空格分隔拼写，本编译器尚不能解析，而其输出是
+        // 旧式逗号形式。
         //
-        // The one hsl-source case that is legacy-shaped (`hsl(120, 10%, 20%)`) has no golden either, so no
-        // output is asserted for it — printing an hsl colour from a converted hsl colour stays unclaimed
-        // until a fixture states it.
+        // 唯一旧式形状的 hsl 源用例（`hsl(120, 10%, 20%)`）也没有 golden，所以不为其断言
+        // 输出——从转换后的 hsl 颜色打印 hsl 颜色在 fixture 声明它之前保持未声明。
     ] {
         assert_eq!(
             css(input).await,
@@ -278,8 +275,8 @@ async fn grayscale_round_trips_and_prints_by_whole_bytes() {
     }
 }
 
-/// The CSS overload that motivated the variadic registration: `grayscale(10%)` is a filter function, not a
-/// colour call, so it must survive untouched (`saturate.hrx` states the same for `saturate(50%)`).
+/// 促成可变参数注册的 CSS 重载：`grayscale(10%)` 是滤镜函数，不是颜色调用，
+/// 所以它必须不受影响地保留（`saturate.hrx` 对 `saturate(50%)` 声明同样的话）。
 #[tokio::test]
 async fn a_filter_argument_is_not_a_colour_call() {
     assert_eq!(
@@ -288,15 +285,14 @@ async fn a_filter_argument_is_not_a_colour_call() {
     );
 }
 
-/// The legacy hsl manipulators, one assertion per row read out of `darken.hrx` / `lighten.hrx` /
-/// `desaturate.hrx`. They exercise both halves of the axis law at once: `desaturate(plum, 100%)` and
-/// `desaturate(plum, 48%)` are the same colour because saturation clamps at 100, and the two printings
-/// (`rgb(74.7058823529%, …)` vs `rgba(0, 0, 0, 0.2)`) differ only because one lands between whole bytes.
+/// 旧式 hsl 操纵器，从 `darken.hrx` / `lighten.hrx` / `desaturate.hrx` 逐行读出的一条断言。
+/// 它们同时演练轴定律的两半：`desaturate(plum, 100%)` 与 `desaturate(plum, 48%)` 是同一颜色，
+/// 因为饱和度在 100 钳制，而两种打印（`rgb(74.7058823529%, …)` vs `rgba(0, 0, 0, 0.2)`）
+/// 只因一个落在整字节之间而不同。
 ///
-/// Rows whose expected output is a colour **name** (`desaturate(plum, 0%)` → `plum`, `darken(red, 100%)` →
-/// `black`) are not claimed here — reverse name printing is still open. `saturate` is registered nowhere
-/// yet: see tasks.md 1.5 for the decline-path defect that would turn `saturate($c)` into un-substituted
-/// text.
+/// 期望输出是颜色**名称**的行（`desaturate(plum, 0%)` → `plum`、`darken(red, 100%)` →
+/// `black`）此处不声明——反向名称打印仍未完成。`saturate` 尚未在任何地方注册：
+/// 见 tasks.md 1.5 中会把 `saturate($c)` 变成未替换文本的拒绝路径缺陷。
 #[tokio::test]
 async fn legacy_hsl_manipulators_move_the_axes_and_clamp() {
     for (input, want) in [
@@ -326,21 +322,21 @@ async fn legacy_hsl_manipulators_move_the_axes_and_clamp() {
     }
 }
 
-/// What a **declined** call must keep. Rebuilding the call from its evaluated arguments was tried first and
-/// measured as 40 regressions, so this pins the three rules the corpus actually asks for; the code keeps the
-/// token run and resolves only its variable reads (`expr::interpolated`).
+/// **被拒绝**的调用必须保留什么。最初先尝试从求值后的实参重建调用，度量出 40 处回归，
+/// 所以这里钉住语料库实际要求的三条规则；代码保留 token 行，只解析其中的变量读取
+/// （`expr::interpolated`）。
 #[tokio::test]
 async fn a_declined_call_keeps_its_text_and_still_resolves_variables() {
     for (input, want) in [
-        // A Sass variable becomes its value (`saturate.hrx::css_overload/with_sass_var`).
+        // Sass 变量变为其值（`saturate.hrx::css_overload/with_sass_var`）。
         ("$c: 1;\na {b: saturate($c)}", "saturate(1)"),
-        // Spaces inside one argument survive: `rgb(18 52 none)` is a single modern-syntax argument whose
-        // channel is unmodellable (`rgb/one_arg/no_alpha::missing/red`), and the run is printed as written.
+        // 一个实参内部的空格保留：`rgb(18 52 none)` 是单个现代语法实参，其通道不可建模
+        // （`rgb/one_arg/no_alpha::missing/red`），行按所写打印。
         ("a {b: rgb(none 52 66)}", "rgb(none 52 66)"),
-        // So does the space before a comma inside another function's argument
-        // (`rgb/three_args/special_functions::attr/arg_1`).
+        // 另一个函数实参内部逗号前的空格也保留
+        // （`rgb/three_args/special_functions::attr/arg_1`）。
         ("a {b: rgb(attr(c, %), 2, 3)}", "rgb(attr(c, %), 2, 3)"),
-        // A CSS filter spelling is not a colour call at all (`saturate.hrx::css_overload/unit`).
+        // CSS 滤镜拼写根本不是颜色调用（`saturate.hrx::css_overload/unit`）。
         ("a {b: saturate(50%)}", "saturate(50%)"),
     ] {
         assert_eq!(
@@ -351,27 +347,27 @@ async fn a_declined_call_keeps_its_text_and_still_resolves_variables() {
     }
 }
 
-/// A colour **created from a keyword** prints that keyword again while its bytes still name one, and the
-/// corpus separates this from a value-only rule: a colour built from `rgb(0, 0, 0)` prints
-/// `rgb(0, 0, 0)`, not `black` (six rows under `core_functions/color/rgb/**`), so the origin is what matters.
+/// **由关键字创建**的颜色在其字节仍命名该关键字时再次打印该关键字，而语料库把这与
+/// 纯值的规则分开：由 `rgb(0, 0, 0)` 建的颜色打印 `rgb(0, 0, 0)`，而非 `black`
+/// （`core_functions/color/rgb/**` 下的六行），所以来源才是关键。
 ///
-/// The keyword list itself carries no RGB values — every name resolves through `color::parse_color` — so
-/// these rows also audit the spellings: a mistyped name would not parse and would print hex instead.
+/// 关键字表本身不携带 RGB 值——每个名称经 `color::parse_color` 解析——所以这些行
+/// 也审计拼写：写错的名称解析失败，会打印 hex。
 #[tokio::test]
 async fn a_keyword_created_colour_prints_its_keyword() {
     for (input, want) in [
-        // Unchanged value, same keyword back (`lighten.hrx::min`, `darken.hrx::min`).
+        // 值不变，同一关键字返回（`lighten.hrx::min`、`darken.hrx::min`）。
         ("a {b: lighten(red, 0%)}", "red"),
         ("a {b: darken(red, 0%)}", "red"),
-        // Greys keep the keyword they were made from (`grayscale.hrx::{max,min}`).
+        // 灰色保留其来源关键字（`grayscale.hrx::{max,min}`）。
         ("a {b: color.grayscale(white)}", "white"),
         ("a {b: color.grayscale(black)}", "black"),
-        // A colour with no saturation is unchanged (`desaturate.hrx::min`).
+        // 无饱和度的颜色不变（`desaturate.hrx::min`）。
         ("a {b: desaturate(plum, 0%)}", "plum"),
-        // `transparent` is a keyword too; at alpha 1 its bytes name `black`
-        // (`rgb/two_args::transparent_to/opaque`).
+        // `transparent` 也是关键字；在 alpha 1 时其字节命名 `black`
+        // （`rgb/two_args::transparent_to/opaque`）。
         ("a {b: rgb(transparent, 1)}", "black"),
-        // The built-from-numbers case, which must **not** become a keyword.
+        // 由数字构建的用例，**不**变成关键字。
         ("a {b: rgb(0, 0, 0)}", "rgb(0, 0, 0)"),
     ] {
         assert_eq!(
@@ -382,12 +378,12 @@ async fn a_keyword_created_colour_prints_its_keyword() {
     }
 }
 
-/// `color.mix`, one row per fixture in `core_functions/color/mix/{unweighted,explicit_weight,alpha,units}.hrx`.
-/// The two `rgba` rows are what pins the **alpha-weighted** formula rather than a plain average: with
-/// `0.8`/`0.3` the first colour carries `0.75` (`145 × 0.75 + 1 × 0.25 = 109` → `42.7450980392%`), and the
-/// mirrored `0.4`/`0.9` row gives `0.25` → `37` → `14.5098039216%`. Alpha itself is the average, and the
-/// result keeps the **first** colour's representation — which is why `mix(#91e16f, transparent)` prints
-/// whole-byte numbers while `mix(#91e16f, #0144bf)` prints percentages (73 of 255 is not a whole byte).
+/// `color.mix`，`core_functions/color/mix/{unweighted,explicit_weight,alpha,units}.hrx` 中
+/// 每条 fixture 一行。两条 `rgba` 行正是钉住**按 alpha 加权**公式而非简单平均之物：以
+/// `0.8`/`0.3`，第一色承载 `0.75`（`145 × 0.75 + 1 × 0.25 = 109` → `42.7450980392%`），
+/// 镜像行 `0.4`/`0.9` 给出 `0.25` → `37` → `14.5098039216%`。alpha 本身是平均，结果
+/// 保留**第一个**颜色的表示——这就是为什么 `mix(#91e16f, transparent)` 打印整字节数字
+/// 而 `mix(#91e16f, #0144bf)` 打印百分比（255 中的 73 不是整字节）。
 #[tokio::test]
 async fn mix_averages_channels_weighted_by_alpha() {
     for (input, want) in [
@@ -399,7 +395,7 @@ async fn mix_averages_channels_weighted_by_alpha() {
         ),
         ("a {b: color.mix(#91e16f, #0144bf, 100%)}", "#91e16f"),
         ("a {b: color.mix(#91e16f, #0144bf, 0%)}", "#0144bf"),
-        // A weight is read as a percentage whatever unit it carries (`mix/units.hrx`).
+        // 权重无论带什么单位都按百分比读取（`mix/units.hrx`）。
         (
             "a {b: color.mix(#91e16f, #0144bf, 50px)}",
             "rgb(28.6274509804%, 57.4509803922%, 59.2156862745%)",
@@ -420,7 +416,7 @@ async fn mix_averages_channels_weighted_by_alpha() {
             "a {b: color.mix(transparent, #0144bf)}",
             "rgba(1, 68, 191, 0.5)",
         ),
-        // Labels bind (`mix/named.hrx`'s rectangular rows are the same numbers with `$weight: 92%`).
+        // 标签绑定（`mix/named.hrx` 的矩形行是相同数字配 `$weight: 92%`）。
         (
             "a {b: color.mix($color1: #91e16f, $color2: #0144bf, $weight: 92%)}",
             "rgb(52.3450980392%, 83.3098039216%, 46.0392156863%)",
@@ -434,9 +430,9 @@ async fn mix_averages_channels_weighted_by_alpha() {
     }
 }
 
-/// A colour written in a space this compiler has not implemented must not be answered in sRGB. The parser
-/// behind the keyword table would happily read `color(display-p3 1 0 0)`; refusing parenthesised text is
-/// what keeps those rows verbatim instead of a wrong value (`mix/predefined.hrx`).
+/// 用本编译器未实现的空间写出的颜色不得在 sRGB 中作答。关键字表背后的解析器会乐意读
+/// `color(display-p3 1 0 0)`；拒绝括号文本正是让这些行保持逐字而非错误值的东西
+/// （`mix/predefined.hrx`）。
 #[tokio::test]
 async fn a_colour_in_an_unimplemented_space_is_not_answered_in_srgb() {
     let input = "a {b: color.mix(color(display-p3 1 0 0), color(display-p3 0 1 0), 20%)}";
@@ -446,14 +442,14 @@ async fn a_colour_in_an_unimplemented_space_is_not_answered_in_srgb() {
     );
 }
 
-/// What the registry now refuses, and what it must still resolve.
+/// 注册表现在拒绝什么，以及它仍必须解析什么。
 ///
-/// A `$label:` that names no parameter of the callee's signature is not this builtin's call to answer, so
-/// the run keeps its own text: answering `color.mix(…, $method: oklab)` with a legacy sRGB mix would be a
-/// wrong value that the pass count cannot see, because those rows were already failing for other reasons
-/// (`mix/explicit_method`, `named::polar_space`, `hue_interpolation`). Declared labels keep working, and a
-/// declined call with **no** label still resolves its variables — the row this rule nearly broke
-/// (`saturate.hrx::css_overload/with_sass_var`) is pinned here so it cannot be "fixed" by guessing again.
+/// 命名被调用者签名中不存在参数的 `$label:` 不是本内建要回答的调用，所以行保留自身文本：
+/// 用旧式 sRGB 混合回答 `color.mix(…, $method: oklab)` 会是一个通过数看不见的错误值，
+/// 因为这些行本就因其他原因失败（`mix/explicit_method`、`named::polar_space`、
+/// `hue_interpolation`）。已声明的标签继续工作，而**无**标签的拒绝调用仍解析其变量——
+/// 这条规则几乎破坏的行（`saturate.hrx::css_overload/with_sass_var`）被钉在此处，
+/// 使其不能靠再次猜测被“修复”。
 #[tokio::test]
 async fn an_unknown_parameter_label_is_a_refusal_not_a_legacy_answer() {
     for (input, want) in [
@@ -465,12 +461,12 @@ async fn an_unknown_parameter_label_is_a_refusal_not_a_legacy_answer() {
             "a {b: color.mix(#91e16f, #0144bf, $space: hsl)}",
             "color.mix(#91e16f, #0144bf, $space: hsl)",
         ),
-        // The same call with a declared label still mixes.
+        // 带已声明标签的同一调用仍混合。
         (
             "a {b: color.mix($color1: #91e16f, $color2: #0144bf, $weight: 100%)}",
             "#91e16f",
         ),
-        // And a decline with no label still resolves the variable (`css_overload/with_sass_var`).
+        // 以及无标签的拒绝仍解析变量（`css_overload/with_sass_var`）。
         ("$c: 1;\na {b: saturate($c)}", "saturate(1)"),
     ] {
         assert_eq!(
