@@ -3209,4 +3209,29 @@
       （3 件共 210 行）**与 `builtins/` 余下约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-e`。
 
+- [x] 9.46 **注释中文化第十九批：`calculation.rs`（1 文件，2026-11-08）**。
+      承 9.45 未完的 `calculation.rs` 全文译毕（含模块级 doc、`Outcome` 各体、`value`/`to_value`/
+      `arguments`/`classify`/`decline_to_text`/`one_argument_value`/`folded` 与收尾三段
+      `collapsible`/`inside`/`rendered`）。**只改注释**（`git diff -U0` 非注释行 = 0，逐行核过）。
+      文件读数（`wc -l` 口径）：`calculation.rs` 323→307（注释行 127→111）。
+      闸口：`cargo test -p sasspile` EXIT=0（全绿）；`sasslint` count=0；`cargo doc -p sasspile --no-deps`
+      零警告；`ledger diff zh-comments-batch-e zh-comments-batch-e2` = **`regress=0 net=0`**，
+      `ledger changed …` = **`changed=0`**（`shape_of_text` 域同读 changed=0）；hrx 记为
+      `zh-comments-batch-e2`（`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与批 E1 逐例相同）；
+      怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。
+      随译现量逐个取回的凭据：`core_functions/color/color/degenerate.hrx::arg1/nan`（:21/:24）金样
+      逐字为 `color(srgb calc(NaN) 0 0)` → `color(srgb 0 0 0)`；
+      `core_functions/color/hsl/four_args/out_of_gamut.hrx::hue/degenerate/positive_infinity`（:1/:4）
+      逐字为 `hsl(calc(infinity), 100%, 50%)` → `hsl(0, 100%, 50%)`；同文件
+      `::lightness/degenerate/positive_infinity`（:81/:84）确以 `calc(infinity * 1%)` 原文保留壳，
+      正是注释所写「语料保留壳」实例；`Unit::is_plain`（`unit.rs:131`）、`Unit::calc_form`
+      （`unit.rs:248`）、`crate::value::Value::to_css`（`value.rs:57`）三处代码引用均在库。
+      **审计闸未过（同上五批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交，不得改用内置代理顶替」，本批与
+      9.41/9.42/9.43/9.44/9.45 同处「已提交、待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：顶层余 **`selector.rs` 43、`phases.rs` 40（2 件共 83 行）**与
+      `builtins/` 余下约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-e2`。
+
 
