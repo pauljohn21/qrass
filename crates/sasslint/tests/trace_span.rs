@@ -1,8 +1,7 @@
-//! The gate's `trace` feature must produce a real trace.
+//! 闸门的 `trace` feature 必须产出一条真 trace。
 //!
-//! Pinned together with the plain reading on purpose: the CLI is a CI gate, and a diagnostic path that
-//! swallowed `count=…` (or exited differently) would turn "we looked" into "we passed" — the failure this
-//! project has already been bitten by once (`cli_directory.rs`).
+//! 特意与普通读数钉在一起：这个 CLI 是 CI 闸，而一个吞掉 `count=…`（或退出码不同的）诊断路径会把
+//! 「我们看过了」变成「我们通过了」——这个项目已经被这种失败咬过一次（`cli_directory.rs`）。
 
 #![cfg(feature = "trace")]
 

@@ -1,8 +1,7 @@
-//! The CLI must lint **the directory it was given**. The first version read `argv[1]` as the path, so the
-//! documented `sasslint lint crates/sasspile/src` scanned a nonexistent directory named `lint` and printed
-//! `count=0` while the same code made `gate_sasspile_is_clean` red. An always-passing gate is worse than no
-//! gate, so both halves are pinned here: a planted violation in the named directory must exit non-zero, and
-//! a clean directory must exit zero.
+//! CLI 必须扫**它被给定的那个目录**。第一版把 `argv[1]` 读成路径，于是文档里的
+//! `sasslint lint crates/sasspile/src` 去扫了一个叫 `lint` 的不存在目录，打印 `count=0`，而同一份
+//! 代码让 `gate_sasspile_is_clean` 变红。永远通过的闸比没有闸更糟，所以两半都钉在这里：具名目录
+//! 里的植入违规必须非零退出，干净目录必须零退出。
 
 use std::fs;
 use std::path::PathBuf;
@@ -17,9 +16,9 @@ fn scratch_dir(label: &str) -> PathBuf {
 #[test]
 fn the_lint_verb_lints_the_given_directory() {
     let dirty = scratch_dir("dirty");
-    // A batch shell: `scan_map(` with a `Vec<` on the same line is `no-batch-shell`'s own signature —
-    // written exactly as the rule reads it. (A `Vec::<u8>` turbofish does **not** contain `Vec<`, which is
-    // how the first draft of this test planted a violation that was legitimately clean.)
+    // 一个 batch shell：同行里出现 `scan_map(` 与 `Vec<` 正是 `no-batch-shell` 自己的签名——按规则
+    // 原文的写法写。（`Vec::<u8>` turbofish **不**含 `Vec<`，本测试的第一稿就是这么植入了一个
+    // 本就合规的违规。）
     fs::write(
         dirty.join("bad.rs"),
         "acc = acc.scan_map(|a, tok| -> Vec<Tok> { a.feed(tok) });\n",
@@ -48,7 +47,7 @@ fn the_lint_verb_lints_the_given_directory() {
         String::from_utf8_lossy(&pass.stderr)
     );
 
-    // The other half of the defect: a path that does not exist is *not* a clean bill of health.
+    // 缺陷的另一半：不存在的路径*不是*一张健康证明。
     let missing = Command::new(env!("CARGO_BIN_EXE_sasslint"))
         .args(["lint", dirty.join("nope").to_str().unwrap()])
         .output()

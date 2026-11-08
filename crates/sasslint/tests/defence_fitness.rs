@@ -1,15 +1,13 @@
-//! The defence's own fitness function. Four things are asserted here, each against a claim that has
-//! silently rotted before in this repository:
+//! 防线自己的适应度函数。这里断四件事，每件都对着一个曾在本仓库静默腐坏的论断：
 //!
-//! 1. **Every gate the engine can emit has a working positive control.** The id list is *derived from
-//!    the engine's own tables* (`sasslint::SUBSTRING_BANS` / `AND_BANS` / `LINE_START_BANS` /
-//!    `FILE_RULE_IDS`), never copied into this file — a hand-written copy is the same fact twice, and
-//!    one such copy is exactly how a gate id vanished from a list unnoticed.
-//! 2. **The tree under police stays clean**, which is what keeps a gate from being widened past the
-//!    doctrine it encodes (measured twice this session: a `0` reading came out of the instrument).
-//! 3. **A doctrine-shaped file produces no findings** — the lower bound. Without it, "every rule fires"
-//!    could be satisfied by rules that fire on everything.
-//! 4. **A deferred gate is recorded with its debt**, so a gap is legible instead of invisible.
+//! 1. **引擎能发出的每道闸都有可用的阳性对照。** id 列表*从引擎自己的表*推导
+//!    （`sasslint::SUBSTRING_BANS` / `AND_BANS` / `LINE_START_BANS` / `FILE_RULE_IDS`），从不抄进
+//!    本文件——手抄一份就是同一事实住两处，而这样一份手抄正是某道闸 id 从清单上悄悄消失的方式。
+//! 2. **被管的树保持干净**，这正是闸不被放宽到超出其所编码教义的原因（本会话量过两次：量具给出
+//!    过一个 `0` 读数）。
+//! 3. **教义形状的源文件零 findings** —— 下界。没有它，「每条规则都触发」可以由「见什么触发
+//!    什么」的规则满足。
+//! 4. **缓做闸连同其债一起记录**，让缺口可读而不是隐形。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,7 +16,7 @@ use sasslint::{
     AND_BANS, FILE_RULE_IDS, Finding, LINE_START_BANS, SUBSTRING_BANS, scan_dir, scan_file,
 };
 
-/// Every id the engine is capable of emitting, read off the engine.
+/// 引擎能发出的每个 id，从引擎本身读出。
 fn engine_rule_ids() -> Vec<&'static str> {
     SUBSTRING_BANS
         .iter()
@@ -29,8 +27,8 @@ fn engine_rule_ids() -> Vec<&'static str> {
         .collect()
 }
 
-/// One source that carries every forbidden shape. Each line is written the way the offending code was
-/// actually written in this repository at some point, not as a comment mentioning the rule.
+/// 一份携带每条禁令形状的源。每行都按本仓库某个时点违规代码的实际写法写，而不是作为提及规则的
+/// 注释。
 const PLANTED: &str = "\
 pub struct Rule { pub children: Vec<Rule> }
 type Stage<T> = Box<dyn Fn(T) -> T>;
@@ -69,10 +67,9 @@ fn every_gate_the_engine_can_emit_has_a_positive_control() {
     fs::remove_dir_all(&dir).ok();
 }
 
-/// The gate must find a second table **behind a doc comment** and report the arm line, not some other
-/// line. This exists because the first version of the fix computed the arm line inside the
-/// comment-stripped string while `scan_file` reports lines of the original file — a two-line comment
-/// made the gate miss the file entirely, and no other fixture had a comment, so nothing failed.
+/// 该闸必须找到**文档注释背后**的第二张表，并报臂行，而不是别的行。它的存在是因为修复的第一版
+/// 在剥注释后的字符串里计算臂行，而 `scan_file` 报的是原文件的行号——两行注释就让该闸整个漏掉
+/// 这个文件，而当时没有别的 fixture 带注释，所以什么也没失败。
 #[test]
 fn a_table_behind_comments_is_still_caught_at_its_arm_line() {
     let path = std::env::temp_dir().join("sasslint_commented_table.rs");
@@ -102,14 +99,13 @@ fn a_table_behind_comments_is_still_caught_at_its_arm_line() {
     );
 }
 
-/// A gate that disappears is as silent as a gate that never worked: coverage derives from the engine,
-/// so the *count* is pinned here. If this fails, either a gate was deleted (restore it) or one was
-/// added (plant its shape above and update the number deliberately).
+/// 一道消失的闸和一道从未生效的闸一样静默：覆盖面从引擎推导，所以这里的*计数*被钉住。它若
+/// 失败，要么某道闸被删了（恢复它），要么新增了一道（在上面植入它的形状并有意识地更新数字）。
 #[test]
 fn the_gate_count_is_pinned() {
     let mut ids = engine_rule_ids();
     ids.sort_unstable();
-    ids.dedup(); // `require-err-channel` is emitted by both a same-line pair and a file-level check
+    ids.dedup(); // `require-err-channel` 同时由同行对与文件级检查发出
     assert_eq!(
         ids.len(),
         14,
@@ -128,9 +124,8 @@ fn the_production_tree_is_clean() {
     );
 }
 
-/// A source shaped the way the doctrine asks for — real operator kernels, `SingleAssignment` slots
-/// parked before subscribing, `filter` for branching, units listed in an array rather than on `=>` arms
-/// — must produce no findings at all.
+/// 一个按教义要求的形状写的源——真实的算子内核、订阅前先停好的 `SingleAssignment` 槽、用 `filter`
+/// 分支、单位列在数组里而不是 `=>` 臂上——必须完全不产生 findings。
 #[test]
 fn a_doctrine_shaped_file_produces_no_findings() {
     let path = std::env::temp_dir().join("sasslint_doctrine_clean.rs");
@@ -162,24 +157,19 @@ fn branch(items: Vec<Item>) { items.into_iter().filter(|item| item.keep) }
     );
 }
 
-/// The one gate this plan planned and did **not** land, kept on the record with the size of the debt.
-/// `rust.md` bans `if/else if` chains outright (its only exception is a single guard `if` without
-/// `else`), so the existing sites are stock debt rather than legal shapes — and a needle that cannot
-/// tell them apart would have flagged the tree on day one. When they are reworked, implement the gate
-/// and delete this test, which fails if either half of the record stops being true. The count walks the
-/// whole tree, so a new chain in a file nobody listed here cannot hide behind a hardcoded file list;
-/// it counts the `} else if` spelling, which is what the engine's own branch chain looks like.
+/// 本计划规划了却**没有**落地的那一道闸，连同债务规模一起留在记录里。`rust.md` 彻底
+/// 禁掉 `if/else if` 链（它唯一的例外是不带 `else` 的单个守卫 `if`），所以现存各址是存量债
+/// 而非合法形状——而一根分不清二者的 needle 第一天就会把整棵树标红。等它们被重构时，实现该闸并
+/// 删掉本测试；记录的两半任一不再为真，本测试就会失败。计数走的是整棵树，所以某个没人列出的文件
+/// 里的新链无法藏在硬编码清单后面；它数 `} else if` 拼写——引擎自己的分支链就是这个样子。
 ///
-/// The number only ever moves **down**: paying a site off is recorded here with its reason (2026-10-29:
-/// `loops::for_loop`'s `through`/`to` ladder became a search over the two words, 7 → 6), and adding one
-/// is a doctrine violation the assertion catches. Implementing `no-else-if-chain` before the debt
-/// reaches zero would flag the tree and invite skipping those sites, which is relaxing the gate. The six
-/// still standing are not one kind of thing: five are classifiers whose replacement must be measured
-/// against rows (`color/read.rs:109`'s space choice, `builtins/math.rs:114`'s unit choice, and the
-/// character dispatch at `lexer.rs:199/201/206`), and the sixth is a shape branch on a fold's accumulator —
-/// `expr::space_run` asking whether a group is open yet — which no category table expresses, so it needs
-/// its decomposition reconsidered rather than a rewrite that only moves the ladder where this needle
-/// cannot see it.
+/// 这个数字只朝**下**走：还掉一址就在这里连同理由记录（2026-10-29：`loops::for_loop` 的
+/// `through`/`to` 阶梯改成对两个词的搜索，7 → 6），而新增一处是断言会抓住的教义违规。在债清零
+/// 之前实现 `no-else-if-chain` 会把整棵树标红并招来「跳过这些址」，那是放宽闸。仍存在的六个不是
+/// 一类东西：五个是分类器，替换必须对着行量过（`color/read.rs:109` 的 space 选择、
+/// `builtins/math.rs:114` 的单位选择，以及 `lexer.rs:199/201/206` 的字符分派），第六个是 fold 累加
+/// 子上的形状分支——`expr::space_run` 在问一个组是否已打开——没有任何类别表表达它，所以它需要
+/// 重新考虑分解，而不是一次只把阶梯挪到本 needle 看不见的地方的改写。
 #[test]
 fn the_deferred_branch_gate_stays_recorded() {
     assert!(
@@ -205,9 +195,8 @@ fn the_deferred_branch_gate_stays_recorded() {
     );
 }
 
-/// Every `.rs` file under `dir`. Test-only: tooling may recurse, the ban is on the compiled pipeline
-/// walking a tree. The debt record has to see the whole tree, or a new chain in a file nobody listed
-/// would keep the record green.
+/// `dir` 下的每个 `.rs` 文件。仅测试可用：工具可以递归，禁令针对的是编译产物管线走树。债务记录
+/// 必须看见整棵树，否则没人列出的文件里的新链会让记录保持绿色。
 fn rust_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![dir.to_path_buf()];

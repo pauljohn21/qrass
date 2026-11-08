@@ -1,4 +1,4 @@
-//! Tests for the `sasslint` rule engine.
+//! `sasslint` 规则引擎的测试。
 
 use std::fs;
 use std::path::PathBuf;
@@ -47,10 +47,9 @@ fn ignores_comments() {
     fs::remove_file(&path).ok();
 }
 
-/// CI gate: `sasspile/src` must be free of iron-rule violations — and it is now, because P0′ landed
-/// the kernels (0′.1/.2), the stream-produced order (0′.4) and the real `Err` channel (0′.3). This is
-/// the machine half of tasks 0′.6: re-introducing a batch shell, an ordering sort, a swallowed `Err`
-/// or a slotless higher-order subscription fails the test suite instead of relying on a grep habit.
+/// CI 闸：`sasspile/src` 必须没有铁律违规——现在没有了，因为 P0′ 落地了内核（0′.1/.2）、流产生的
+/// 顺序（0′.4）与真正的 `Err` 通道（0′.3）。这是任务 0′.6 的机器那一半：重新引入 batch shell、
+/// 用排序恢复顺序、吞掉 `Err` 或无槽高阶订阅，都会让测试套件失败，而不是依赖 grep 习惯。
 #[test]
 fn gate_sasspile_is_clean() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src");
@@ -61,19 +60,19 @@ fn gate_sasspile_is_clean() {
     );
 }
 
-/// The four P0′.6 rules fire on the shapes they name.
+/// P0′.6 的四条规则对它们点名的形状触发。
 #[test]
 fn detects_the_p0_prime_shapes() {
     let path = std::env::temp_dir().join("sasslint_p0prime.rs");
     fs::write(
         &path,
         [
-            // a phase batching its output, then flattening it again: the shell P0′.1/.2 deleted
+            // 一个 phase 先批处理输出、再展平：P0′.1/.2 删掉的那个壳
             "acc = acc.scan_map(|a, tok| -> Vec<Tok> { a.feed(tok) });",
             "stream.flat_map(|toks| Local::from_iter(toks));",
-            // an evaluation failure turned into `None`, i.e. never reaching the Err channel
+            // 求值失败被变成 `None`，即永远不到达 Err 通道
             "let v = expr.eval(&env).ok();",
-            // order restored by sorting instead of by the emission moment (P0′.4)
+            // 顺序靠排序而不是发射时刻恢复（P0′.4）
             "rules.sort_by_key(|r| r.order);",
             "rows.sort_unstable_by(|a, b| a.cmp(b));",
         ]
@@ -96,8 +95,8 @@ fn detects_the_p0_prime_shapes() {
     fs::remove_file(&path).ok();
 }
 
-/// A verbatim fallback is only the corpus-defined passthrough when the file also decides fatality by
-/// kind; without that decision it is the blanket `.ok()` shape P0′.3 replaced.
+/// 逐字兜底只有在文件还按种类决定致命性时才是语料定义的放行；没有那个决定，它就是 P0′.3 替换掉
+/// 的 blanket `.ok()` 形状。
 #[test]
 fn verbatim_fallback_needs_a_fatality_decision() {
     let bad = std::env::temp_dir().join("sasslint_fallback_bad.rs");
@@ -121,8 +120,8 @@ fn verbatim_fallback_needs_a_fatality_decision() {
     fs::remove_file(&good).ok();
 }
 
-/// rc.6 hands a higher-order source's subscription to a `SingleAssignment` slot **before**
-/// subscribing; subscribing one without a slot loses what the inner emits while it waits.
+/// rc.6 在订阅**之前**把高阶源的订阅交给 `SingleAssignment` 槽；无槽就订阅会丢掉内部等待期间
+/// 发出的东西。
 #[test]
 fn higher_order_subscribe_needs_a_slot() {
     let bad = std::env::temp_dir().join("sasslint_slot_bad.rs");
@@ -146,10 +145,9 @@ fn higher_order_subscribe_needs_a_slot() {
     fs::remove_file(&good).ok();
 }
 
-/// The negative half, which is what makes the four rules usable as a CI gate: the **legal** use of one
-/// half of a conjunction must not fire. `from_iter` is the pipeline's own source, a 1:1 kernel's
-/// `source.subscribe(..)` is the framework's `map` shape, and a lexeme parse's `.ok()` is not an
-/// evaluation swallow — `sasspile/src` today is exactly this code, so it passes the gate above.
+/// 负的那一半，正是它让四条规则可作 CI 闸：合取之一的**合法**使用不得触发。`from_iter` 是管线自己的
+/// 源，1:1 内核的 `source.subscribe(..)` 是框架的 `map` 形状，词素解析的 `.ok()` 不是求值吞掉——
+/// 今天的 `sasspile/src` 恰好就是这些代码，所以它过了上面那道闸。
 #[test]
 fn legal_stream_shapes_are_not_flagged() {
     let path = std::env::temp_dir().join("sasslint_legal.rs");
@@ -171,7 +169,7 @@ fn legal_stream_shapes_are_not_flagged() {
 
 #[test]
 fn detects_state_machine_in_operator_clothing() {
-    // the meta-error: a hand-rolled driver disguised as an iterator/rxrust operator
+    // 元错误：一个手搓的驱动器伪装成迭代器/rxrust 算子
     let path = std::env::temp_dir().join("sasslint_sm.rs");
     fs::write(
         &path,
@@ -192,7 +190,7 @@ fn detects_state_machine_in_operator_clothing() {
 
 #[test]
 fn detects_mutable_accumulator_drives() {
-    // a fold accumulator holding a frame stack / @if chain to DRIVE traversal
+    // 一个 fold 累加子，持有帧栈 / @if 链来*驱动*遍历
     let path = std::env::temp_dir().join("sasslint_acc.rs");
     fs::write(
         &path,
@@ -240,9 +238,8 @@ fn mcp_protocol_handshake_and_review() {
     fs::remove_dir_all(&dir).ok();
 }
 
-/// Positive control for `no-stage-layer`: a hand-rolled `Stage`/`drain`/`fail` layer is exactly the
-/// shape that made rxrust run the project's own control flow, so the gate must fire on it. The
-/// kernel source that rxrust actually asks for must not fire — that is the lower bound.
+/// `no-stage-layer` 的阳性对照：手搓的 `Stage`/`drain`/`fail` 层正是让 rxrust 跑起项目自身控制流的
+/// 形状，所以该闸必须在它上面触发。rxrust 真正索要的内核源不得触发——那是下界。
 #[test]
 fn planted_framework_layer_is_caught_and_a_kernel_is_not() {
     let planted = std::env::temp_dir().join("sasslint_planted_layer.rs");
@@ -283,8 +280,7 @@ fn planted_framework_layer_is_caught_and_a_kernel_is_not() {
     );
 }
 
-/// The gates are measured against the tree they police: the production source must stay clean, so a
-/// gate cannot have been widened past what the doctrine bans.
+/// 各闸对着它们所管的树量：生产源必须保持干净，所以一道闸不可能被放宽到超出教义所禁。
 #[test]
 fn the_new_gates_leave_the_production_tree_clean() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sasspile/src");
@@ -301,10 +297,9 @@ fn the_new_gates_leave_the_production_tree_clean() {
     }
 }
 
-/// Positive control for `single-table`: the shape this project actually shipped twice — a `match` over
-/// unit literals carrying its own conversion factors — must be caught in any file except the single
-/// source of truth (`crates/sasspile/src/unit.rs`, whose table is an array of `(unit, (family, factor))`
-/// rather than `match` arms).
+/// `single-table` 的阳性对照：本项目实际交付过两次的形状——一张对单位字面量做 `match`、自带换算
+/// 系数的表——必须在除唯一真相源之外的任何文件里被抓住（`crates/sasspile/src/unit.rs` 的表是
+/// `(unit, (family, factor))` 数组而不是 `match` 臂）。
 #[test]
 fn a_second_unit_table_is_caught_and_the_shared_one_is_not() {
     let planted = std::env::temp_dir().join("sasslint_planted_table.rs");
@@ -334,10 +329,9 @@ fn a_second_unit_table_is_caught_and_the_shared_one_is_not() {
     );
 }
 
-/// The blind spot that made the previous version of this gate almost decorative: a factor table written as
-/// an **array of tuples** (the shape `unit::UNITS` itself uses) was invisible to a rule that only looked at
-/// `=>` arms. And the sanctioned table is now recognised by what it defines (`pub const UNITS`), not by its
-/// filename — so a copy parked in a file called `unit.rs` is still caught.
+/// 让该闸的上一版几乎沦为装饰的盲区：写成**元组数组**的系数表（`unit::UNITS` 本身用的形状）对只看
+/// `=>` 臂的规则不可见。如今被认可的表靠它定义什么（`pub const UNITS`）识别，而不是靠文件名——
+/// 所以停在一个叫 `unit.rs` 的文件里的拷贝照样被抓住。
 #[test]
 fn a_tuple_array_table_is_caught_even_when_the_file_is_named_unit_rs() {
     let array_table = std::env::temp_dir().join("sasslint_planted_tuple_table.rs");

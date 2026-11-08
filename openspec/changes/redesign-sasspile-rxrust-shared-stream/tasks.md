@@ -3591,4 +3591,39 @@
       自此维持清零（src 与 tests 均完）。
       基线 run 自此为 `zh-comments-batch-q`。
 
+- [x] 9.58 **注释中文化第三十批：`crates/sasslint/tests/` 四件（4 文件，2026-11-08）**。
+      候选来自 9.57「未做」条：`sasslint/tests` 是全仓中文化最后一个全英文目录。
+      口径沿用历史各批：散文注释（`//!`/`///`/行内 `//`）中文化；代码标识符、函数名、`expect`/
+      `assert` 字符串消息、CLI 语法（`--features trace`、`count=0`）、夹具字面量（`PLANTED`
+      内的 `Vec<Rule>`/`scan_map`/`to_base` 形状）与写入夹具的模拟源码注释一律保留英文原文。
+      四件：`trace_span`（闸的 `trace` feature 必须产出真 trace：`Span #`/`path`/自身读数仍打印，
+      吞掉 `count=…` 的诊断路径会把「看过了」变成「通过了」）、`cli_directory`（CLI 必须扫被给定的
+      目录：第一版把 `argv[1]` 读成路径，植入违规必须非零、干净目录零、不存在的路径必须失败，
+      永远通过的闸比没有闸更糟）、`defence_fitness`（四道防线适应度：id 列表从引擎推导而不手抄、
+      被管树零违规、教义形源零 findings、`no-else-if-chain` 债务记录 6 处不变）、`lint`（14 条规则
+      引擎测试：CI 闸清零、P0′ 四形状、逐字兜底需致命性决定、高阶订阅先停槽、合法形状下界、状态机
+      伪算子、可变累加器驱动、MCP 握手、`no-stage-layer` 阳性+内核下界、`single-table` 三张单位表）。
+      **只改注释**：`/tmp/strip_comments` 剥离后去空行逐字比对 4/4 与 HEAD 全等（代码零改动坐实）；
+      行数（`wc -l`）：trace_span 37→36、cli_directory 63→62、defence_fitness 229→218、lint 373→367；
+      `git diff --stat` 71 insertions(+)/90 deletions(-)。
+      闸口：`cargo test --workspace` 全绿（sasslint 21 条 ok：cli_directory 1 + defence_fitness 6 +
+      lint 14；trace_span 无 feature 时整件跳过）；`cargo test -p sasslint --features trace` 补跑
+      trace_span **1 条 ok**；`cargo fmt --all -- --check` EXIT=0；`cargo doc --workspace --no-deps
+      --document-private-items` EXIT=0 警告 0；`sasslint lint crates/sasspile/src` count=0；
+      `HRX_RUN=zh-comments-batch-r cargo test -p sasspile --test hrx` 记为 `zh-comments-batch-r`
+      （`3457/11533`，与 batch-q 逐例相同）；`ledger diff zh-comments-batch-q zh-comments-batch-r`
+      = **`regress=0 net=0`**（fails 8076/8076）；`ledger changed` = **`changed=0`**；怪字扫描
+      （`拄/殫/一遗/癲`，crates/ 全域）= 0（阳性对照 4 读 4）；U+FFFD = 0（字节扫描，阳性对照
+      命中）；英文扫描（4 件注释行无汉字且含 3+ 连续字母）= 0 处真残留——3 处命中均为写入夹具
+      的模拟被扫描源码的注释（`defence_fitness.rs:78-79`、`lint.rs:40`、`lint.rs:160`），按口径
+      保留。
+      **审计闸未过（同上十七批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.57 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后执行候选」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`sasspile`/`ledger` 中文化维持清零；`sasspile/src`（9.55 收尾）、
+      `sasspile/tests`（9.48~9.54）、`sasslint/src`（9.29）、`ledger/src`（9.30）、`ledger/tests`
+      （9.57）、`sasslint/tests`（本批）之后，`crates/` 全域 src 与 tests 中文化候选清零。
+      基线 run 自此为 `zh-comments-batch-r`。
+
 
