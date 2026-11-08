@@ -1,7 +1,6 @@
-//! The builtin call spine (tasks 1.7a), pinned on `core_functions/math/div.hrx` goldens: argument
-//! splitting, `$label:` binding, the division unit law, and the two signature-generic arity messages.
-//! The last test is the boundary — a call we have no signature for, or a run whose value this compiler
-//! cannot model yet, must keep its verbatim text rather than be half-evaluated.
+//! 内建调用主干（tasks 1.7a），钉在 `core_functions/math/div.hrx` 的金样上：实参拆分、`$label:` 绑定、
+//! 除法的单位律，以及两条签名无关的 arity 消息。最后一个测试是边界 —— 一个我们没有签名的调用、
+//! 或一次本编译器尚不能建模其值的运行，必须保留逐字文本，而不是被半求值。
 
 use sasspile::compile;
 
@@ -11,8 +10,8 @@ async fn css(input: &str) -> String {
         .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
 }
 
-/// `unitless/{whole,fraction}` + `unit/{numerator,same}`: same unit cancels, a unitless divisor keeps the
-/// numerator's unit, and a lone number argument is still an expression inside a call.
+/// `unitless/{whole,fraction}` + `unit/{numerator,same}`：同单位相消，无单位的除数保留
+/// 被除数的单位，而单独的数字实参在调用内仍是一个表达式。
 #[tokio::test]
 async fn div_evaluates_number_arguments() {
     assert_eq!(css("a {b: math.div(6, 3)}").await, "a {\n  b: 2;\n}\n");
@@ -21,8 +20,8 @@ async fn div_evaluates_number_arguments() {
     assert_eq!(css("a {b: math.div(6px, 3px)}").await, "a {\n  b: 2;\n}\n");
 }
 
-/// `unit/compatible`: convertible units are converted before cancelling, and `1in = 96px` is the only
-/// factor the corpus evidences (`math.div(6in, 3px)` → `192`).
+/// `unit/compatible`：可换算的单位先换算再相消，而 `1in = 96px` 是语料唯一佐证的
+/// 因子（`math.div(6in, 3px)` → `192`）。
 #[tokio::test]
 async fn div_converts_lengths_it_can_prove() {
     assert_eq!(
@@ -31,8 +30,8 @@ async fn div_converts_lengths_it_can_prove() {
     );
 }
 
-/// `unitless/named`: a `$label:` argument binds by parameter name, wherever it is written — and the
-/// label itself is never looked up as a variable (the 1.2b refusal, now resolved through a signature).
+/// `unitless/named`：`$label:` 实参按参数名绑定，写在哪儿都一样 —— 而标签本身
+/// 绝不作为变量查表（1.2b 的拒答，现在经由签名解决）。
 #[tokio::test]
 async fn named_arguments_bind_by_label() {
     assert_eq!(
@@ -45,9 +44,9 @@ async fn named_arguments_bind_by_label() {
     );
 }
 
-/// `error/{too_few_args,too_many_args}`: the messages come from the signature, and the harness compares
-/// the oracle's `Error:` header, so these must match word for word — including the English plural, which
-/// the corpus shows declining on both counts independently.
+/// `error/{too_few_args,too_many_args}`：消息由签名给出，而夹具比较 oracle 的 `Error:` 头，
+/// 所以这些必须逐字匹配 —— 包括英文复数形式，语料显示两个计数各自独立地以复数
+/// 形式措辞。
 #[tokio::test]
 async fn arity_diagnostics_are_the_oracle_words() {
     for (input, want) in [
@@ -68,9 +67,9 @@ async fn arity_diagnostics_are_the_oracle_words() {
     }
 }
 
-/// `core_functions/math/{round,abs,ceil,floor}.hrx` — the rounding family the spine makes cheap: one
-/// `Builtin` each, same parameter name, unitless results matched exactly. `round` breaks ties away from
-/// zero (`-5.6` → `-6`) and a value just under `.5` inside Sass's precision still gives `1`.
+/// `core_functions/math/{round,abs,ceil,floor}.hrx` —— 主干使其廉价的取整家族：每个一个
+/// `Builtin`，同名参数，无单位结果精确匹配。`round` 在平点处远离零断开（`-5.6` → `-6`），
+/// 而 Sass 精度内恰低于 `.5` 的值仍给出 `1`。
 #[tokio::test]
 async fn rounding_family_matches_goldens() {
     assert_eq!(css("a {b: math.round(2.2)}").await, "a {\n  b: 2;\n}\n");
@@ -89,10 +88,10 @@ async fn rounding_family_matches_goldens() {
     assert_eq!(css("a {b: math.floor(-1.2)}").await, "a {\n  b: -2;\n}\n");
 }
 
-/// The type contract differs **per function**, and the corpus is what says so: `round` wants
-/// `$number: c is not a number.` (value rendered in CSS form — a bare identifier unquoted, a string
-/// quoted), while `div.hrx::non_numeric/numerator` expects a deprecation **warning** and a real output.
-/// So `div` declines on a non-number instead of inventing an error the oracle does not state.
+/// 类型契约**逐函数**不同，而这么说的正是语料：`round` 要
+/// `$number: c is not a number.`（值按 CSS 形式渲染 —— 裸标识符不加引号、字符串加引号），
+/// 而 `div.hrx::non_numeric/numerator` 要的是一条弃用**警告**与真实输出。
+/// 所以 `div` 在非数字上拒答，而不是编造一条 oracle 未声明的错误。
 #[tokio::test]
 async fn number_parameters_validate_their_own_way() {
     for (input, want) in [
@@ -111,11 +110,11 @@ async fn number_parameters_validate_their_own_way() {
     );
 }
 
-/// The variadic pair. `min`/`max` compare under the unit law and return the **original** argument (never
-/// a value rewritten into a common unit): `max(2px, 1)` → `2px` (a unitless argument is comparable),
-/// `max(1px, 1in, 1cm)` → `1in` (lengths scaled by the factors the oracle itself states in
-/// `libsass/units/conversion/size.hrx`). Their messages differ from a fixed-arity signature's: no
-/// `$parameter:` prefix (`c is not a number.`) and `At least one argument must be passed.`.
+/// 可变实参的这一对。`min`/`max` 按单位律比较并返回**原始**实参（绝不重写成公共单位的值）：
+/// `max(2px, 1)` → `2px`（无单位实参可比较），`max(1px, 1in, 1cm)` → `1in`
+/// （长度按 oracle 自己在 `libsass/units/conversion/size.hrx` 里声明的因子缩放）。
+/// 它们的消息与固定 arity 签名不同：没有 `$parameter:` 前缀（`c is not a number.`），
+/// 以及 `At least one argument must be passed.`。
 #[tokio::test]
 async fn variadic_extremes_compare_units_and_keep_the_original() {
     assert_eq!(css("a {b: math.max(1, 2)}").await, "a {\n  b: 2;\n}\n");
@@ -145,13 +144,12 @@ async fn variadic_extremes_compare_units_and_keep_the_original() {
     }
 }
 
-/// Two more guards on the same code path, both about **not guessing**: a unit outside the shared conversion
-/// table is not evidence of a clash (`max.hrx` only contrasts `px` with `s`), and a variadic call with a
-/// `$label:` has no parameter to bind to, so it keeps its text.
+/// 同一代码路径上的另两道守卫，都关于**不猜**：共用换算表之外的单位不是冲突的证据
+/// （`max.hrx` 只把 `px` 与 `s` 对照），而带 `$label:` 的可变实参调用没有参数可绑，所以保留文本。
 ///
-/// The unlisted example used to be `2q`; `hypot.hrx::units` put `q` in the table (it converts against `cm`
-/// and `in` there), so it now compares as the absolute length it is — and `rem`/`ch` stand in for what the
-/// corpus has not evidenced, since no fixture converts either.
+/// 未列出的例子曾是 `2q`；`hypot.hrx::units` 把 `q` 放进了表（它在那里对 `cm` 与 `in` 换算），
+/// 所以现在按它本身就是的那段绝对长度比较 —— 而 `rem`/`ch` 代表语料尚未佐证的情形，
+/// 因为没有 fixture 换算它们中的任何一个。
 #[tokio::test]
 async fn unknown_units_and_labels_on_a_variadic_decline() {
     assert_eq!(
@@ -165,11 +163,11 @@ async fn unknown_units_and_labels_on_a_variadic_decline() {
     );
 }
 
-/// The boolean-returning family, which needed `Value::Bool` (and the corpus’s own spelling of a name:
-/// the file is `unitless.hrx`, the function is `math.is-unitless`). `math.compatible` answers only for
-/// units whose dimension is evidenced — `px` against `em` is `false` (`comparable.hrx::unit/to_different`),
-/// `px` against `q` is `true` now that `hypot.hrx::units` converts `q`, and a unit no fixture converts
-/// (`ch`) declines to verbatim rather than guessing.
+/// 返回布尔的这一族，它需要 `Value::Bool`（以及语料自己的名字拼法：文件是 `unitless.hrx`，
+/// 函数是 `math.is-unitless`）。`math.compatible` 只对维度被佐证的单位作答 ——
+/// `px` 对 `em` 是 `false`（`comparable.hrx::unit/to_different`），`px` 对 `q` 现在是 `true`，
+/// 因为 `hypot.hrx::units` 换算 `q`；而没有任何 fixture 换算的单位（`ch`）拒答为逐字文本，
+/// 而不是猜。
 #[tokio::test]
 async fn booleans_and_unit_strings() {
     assert_eq!(
@@ -196,11 +194,11 @@ async fn booleans_and_unit_strings() {
     );
 }
 
-/// `math.percentage` is where Sass's **ten-significant-digit** output becomes visible: `0.246 × 100` must
-/// print `24.6`, not the f64 tail. The clamp in `format_number` applies only when the natural rendering is
-/// longer than ten significant digits, so short values keep their text (and no currently-passing case
-/// moved when it landed — measured `regress=0`). A unit on the argument is the corpus’s message, plural
-/// “units” even for one, exactly as the fixture writes it.
+/// `math.percentage` 是 Sass 的**十位有效数字**输出变得可见的地方：`0.246 × 100` 必须
+/// 打印 `24.6`，而不是 f64 的尾巴。`format_number` 的夹紧只在自然渲染长过十个有效数字时
+/// 生效，所以短的值保留文本（且落地时没有任何当前通过的用例移动 —— 实测 `regress=0`）。
+/// 实参带单位时的消息是语料规定的，即使只有一个也写作复数 “units”，与 fixture
+/// 逐字一致。
 #[tokio::test]
 async fn percentage_scales_and_respects_precision() {
     for (input, want) in [
@@ -223,10 +221,10 @@ async fn percentage_scales_and_respects_precision() {
     assert_eq!(err.message, "$number: Expected 1% to have no units.");
 }
 
-/// A builtin's result is a value, so it also has to be *spelled* the way Sass spells it:
-/// `values/calculation/calc/constant::infinity/math/unsimplified/from_variable` binds
-/// `$var: math.div(1, 0)` and prints `calc(infinity * (1% + 1px))` — Rust's `inf` would not read as CSS.
-/// `NaN` already agrees, which is why the sibling `nan` fixture passes without a special case.
+/// 内建的结果是值，所以它也必须按 Sass 的拼法*拼写*：
+/// `values/calculation/calc/constant::infinity/math/unsimplified/from_variable` 绑定
+/// `$var: math.div(1, 0)` 并打印 `calc(infinity * (1% + 1px))` —— Rust 的 `inf` 读起来
+/// 不像 CSS。`NaN` 本来就已一致，所以同簇的 `nan` fixture 无需特例就通过。
 #[tokio::test]
 async fn infinite_results_use_sass_spelling() {
     assert_eq!(
@@ -235,19 +233,19 @@ async fn infinite_results_use_sass_spelling() {
     );
 }
 
-/// The boundary, in both directions. A callee with no signature (`color.contrast`, `map.merge`) falls back to
-/// its source text — no invented number, no invented error — and so does a result whose unit is **compound**,
-/// because a compound unit is calculation-only (`Unit::is_plain`; the corpus never prints one alone, and the
-/// only file that states the rejection is a commented-out `libsass-closed-issues` line).
+/// 两个方向上的边界。没有签名的被调者（`color.contrast`、`map.merge`）回落到源码文本 ——
+/// 不编造数字、不编造错误 —— 单位是**复合**的结果也一样，因为复合单位只属于计算
+/// （`Unit::is_plain`；语料从不单独打印一个，而唯一声明该拒绝的是一个被注释掉的
+/// `libsass-closed-issues` 行）。
 ///
-/// `color.hwb` was this test's example until `hwb` gained a signature; using a now-implemented name to prove
-/// a fall-back would only record the old state, so the example moved to `color.contrast`, which is still
-/// unregistered. What `hwb` produces instead is pinned by `tests/hwb.rs`, per fixture row.
+/// `color.hwb` 曾是本测试的例子，直到 `hwb` 有了签名；用一个现已实现的名字去证明回落，
+/// 只会记录旧状态，所以例子换成 `color.contrast` —— 它仍未注册。`hwb` 现在产出什么由
+/// `tests/hwb.rs` 逐 fixture 行钉住。
 ///
-/// What *does* evaluate now is a run that merely contains a call: `math.div(…) * 1px` is an operation, and
-/// the fixtures use exactly that shape — `core_functions/math/div.hrx::unit/denominator`
-/// (`math.div(6, 3px) * 1px` → `2`), `…::unit/incompatible` (`math.div(6in, 3s) * 1s` → `2in`) and
-/// `…::unit/unknown` (`math.div(6c, 3d) * 1d` → `2c`).
+/// 现在*确实*会求值的是只含一次调用的运行：`math.div(…) * 1px` 是一个运算，而 fixture 正是
+/// 这个形状 —— `core_functions/math/div.hrx::unit/denominator`（`math.div(6, 3px) * 1px` → `2`）、
+/// `…::unit/incompatible`（`math.div(6in, 3s) * 1s` → `2in`）与
+/// `…::unit/unknown`（`math.div(6c, 3d) * 1d` → `2c`）。
 #[tokio::test]
 async fn what_the_spine_does_not_know_stays_verbatim() {
     assert_eq!(

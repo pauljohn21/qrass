@@ -1,7 +1,6 @@
-//! Value-floor goldens — pin what P0 guarantees about declaration values: a rendered token
-//! run is adopted as an owned `Value` and serialises **verbatim** at the single `to_css`
-//! seam (no evaluation, so no CSS meaning may change). Everything is observed through the
-//! sole `compile` exit; nothing internal to the crate is leaked `pub` for these tests.
+//! 值地板金样 —— 钉住 P0 对声明值的保证：一条渲染出的 token 串被收为 owned `Value`，
+//! 在唯一的 `to_css` 接缝处**逐字**序列化（不求值，所以任何 CSS 含义都不许改变）。
+//! 一切唯经唯一的 `compile` 出口观察；没有任何 crate 内部件为这些测试泄为 `pub`。
 
 use sasspile::compile;
 
@@ -20,8 +19,8 @@ async fn raw_value_is_carried_verbatim() {
 
 #[tokio::test]
 async fn slash_stays_a_separator_not_division() {
-    // P1 owns the value algebra; until then `/` must survive untouched (protects
-    // `font: 12px/1.5`, `grid: 1/2`, `w: 1/2`).
+    // 值代数归 P1；在此之前 `/` 必须原样存活（保卫
+    // `font: 12px/1.5`、`grid: 1/2`、`w: 1/2`）。
     assert_eq!(
         css("a { font: 12px/1.5; }").await,
         "a {\n  font: 12px/1.5;\n}\n"
@@ -71,7 +70,7 @@ async fn convertible_units_normalise_into_the_left_operand_unit() {
 
 #[tokio::test]
 async fn unspaced_sign_is_a_list_item_not_subtraction() {
-    // Sass reads `10px -5px` as a two-item space list, so nothing may be evaluated.
+    // Sass 把 `10px -5px` 读成两项空格列表，所以什么都不能求值。
     assert_eq!(
         css("a { w: 10px -5px; }").await,
         "a {\n  w: 10px -5px;\n}\n"
@@ -80,15 +79,15 @@ async fn unspaced_sign_is_a_list_item_not_subtraction() {
 
 #[tokio::test]
 async fn incompatible_units_keep_the_text_instead_of_guessing() {
-    // The Sass error travels once the stream carries `Result` (P1 next step); until then the
-    // run must survive verbatim rather than invent a number.
+    // 等流携带 `Result` 后 Sass 的错误才会传递（P1 下一步）；在那之前该运行必须逐字存活，
+    // 而不是编造一个数字。
     assert_eq!(css("a { w: 5px + 3s; }").await, "a {\n  w: 5px + 3s;\n}\n");
 }
 
 #[tokio::test]
 async fn a_lone_number_value_is_still_verbatim_text() {
-    // A single number is only a number once an expression consumes it; as a declaration
-    // value it must survive with its exact source digits (`010` is not Sass's `10`).
+    // 单个数字只有在表达式消费它时才是数字；作为声明值它必须带着确切的源码数字存活
+    // （`010` 不是 Sass 的 `10`）。
     assert_eq!(css("a { w: 10px; }").await, "a {\n  w: 10px;\n}\n");
     assert_eq!(css("a { w: 010; }").await, "a {\n  w: 010;\n}\n");
     assert_eq!(

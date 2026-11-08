@@ -1,12 +1,10 @@
-//! Document order is a property of the **stream**, not of a key. Up to `Render` the chain is serial,
-//! so rules reach it in the order their blocks settle (see `exec::State::step`: a pending
-//! declaration run settles when a nested block opens, the rest when a block closes). No `order`
-//! field, no `collect`, no `sort_by_key`, and no per-rule task hand-off — real concurrency returns
-//! only at P5 (independent module subgraphs), where the extra constraint is that a queued inner
-//! observable must not have produced anything before it was subscribed.
+//! 文档序是**流**的属性，不是键的属性。到 `Render` 为止链条是串行的，所以规则按各自块
+//! 落定的次序到达（见 `exec::State::step`：待结的 declaration 运行在嵌套块开启时落定，
+//! 其余在块闭合时）。没有 `order` 字段、没有 `collect`、没有 `sort_by_key`、也没有逐规则
+//! 的任务交接 —— 真正的并发只随 P5（独立模块子图）回来，那里的额外约束是排队的内层
+//! observable 在被订阅之前不得已产出任何东西。
 //!
-//! The multi-thread runtime below is kept deliberately: it proves the pipeline is order-correct even
-//! when the caller drives it from several workers.
+//! 下面有意保留多线程运行时：它证明即使调用方从多个 worker 驱动，管线依然保持序正确。
 
 use sasspile::compile;
 
@@ -30,8 +28,8 @@ async fn many_independent_items_still_merge_in_document_order() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn nested_blocks_close_early_but_still_merge_parent_first() {
-    // A child block closes before its parent, yet the parent's own declaration run leads — it
-    // settles when the child opens, not when the parent closes.
+    // 子块比父块先闭合，然而父块自己的 declaration 运行仍在前 —— 它随子块开启而落定，
+    // 而不是随父块闭合。
     assert_eq!(
         css("a { p: 1; b { q: 2 } c { r: 3 } }".to_string()).await,
         "a {\n  p: 1;\n}\na b {\n  q: 2;\n}\na c {\n  r: 3;\n}\n"

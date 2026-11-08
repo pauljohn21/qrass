@@ -3260,4 +3260,40 @@
       847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-f`。
 
+- [x] 9.48 **注释中文化第二十一批：`crates/sasspile/tests/` 十件核心测试（10 文件，2026-11-08）**。
+      本批首次进入测试目录：`calculation.rs`（计算族）、`builtins.rs`/`lexer.rs`/`value.rs`/
+      `operators.rs`/`order.rs`/`flags.rs` 六件基础测试，加 `common/` 三件（`fit.rs` 量具数学核、
+      `hrx_read.rs` HRX 归档读取、`tracing_bridge.rs` 订阅者桥）。逐件译毕模块 doc、每个
+      `#[tokio::test]` 的 doc 与内联注释：`calculation.rs` 的优先级/折叠/未读文本/非有限常数/
+      反三角壳层与多实参拒答，`fit.rs` 的求解/残差/条件数/伴随矩阵求逆，`hrx_read.rs` 的
+      `Side`/`Hypothesis`/`Reading` 与 readings/whites，`tracing_bridge.rs` 的 OTel/fmt 订阅者
+      配置，`builtins.rs` 的 div/取整族/可变实参/未注册回落，`lexer.rs` 的引号内 `$` 文本保全/
+      未闭合右花括号饱和计数/截断循环体，`value.rs` 的斜杠保护/空格列表/未兼容单位回落，
+      `operators.rs` 的标识符拼接与加减号边界，`order.rs` 的文档序不变量，`flags.rs` 的
+      `!default`/`!global` 与自定义属性边界。**逐字凭据类不译**：oracle 错误/警告消息、sass-spec
+      的 case key、代码标识符一律保留原文（如 `Expected 0.5px to have unit "%" or no units.`、
+      `unexpected error`、`At least one argument must be passed.`）；英文残留扫描（注释行无中文
+      且含 ≥3 字母英文词）命中的行全部只含这类逐字凭据，无英文散文段落。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，10/10 全部逐字一致（无任何非注释行
+      改动）。
+      文件读数（`wc -l` 口径）：`calculation.rs` 372→368（注释行 109→105）、`builtins.rs`
+      273→271（59→57）、`fit.rs` 216→201（71→56）、`hrx_read.rs` 185→177（54→46）、
+      `tracing_bridge.rs` 49→48（19→18）、`flags.rs` 42→42（10→10）、`lexer.rs` 119→116
+      （33→30）、`operators.rs` 64→61（17→14）、`order.rs` 39→37（11→9）、`value.rs`
+      114→113（11→10）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint`
+      `lint crates/sasspile/src` EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0
+      零警告；`ledger diff zh-comments-batch-f zh-comments-batch-g` = **`regress=0 net=0`**
+      （fails_a=8076 fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076
+      fails_b=8076）；hrx 记为 `zh-comments-batch-g`（`3457/11533`，实质 3292 + 空期望 165，
+      skipped 1264，与前五批逐例相同）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0（阳性对照各读 1）。
+      **审计闸未过（同上七批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41/9.42/9.43/9.44/
+      9.45/9.46/9.47 同处「已提交、待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 30 件未译（以
+      `color_*`/`math_*`/`hrx.rs` 为主）；`crates/sasspile/src/builtins/` 仍余约 847 行；顺修仍留
+      `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-g`。
+
 

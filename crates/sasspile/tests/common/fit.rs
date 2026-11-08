@@ -1,31 +1,25 @@
-//! The pure mathematics of the calibration instrument — split out of `examples/calibrate_space.rs` because
-//! that file had reached 491 of this repository's 500 permitted lines, and the split point is one the
-//! instrument already drew in its own words: **read the archive** (`hrx_read.rs`), **solve and judge** (this
-//! file), **parse arguments and print** (the example). Nothing here touches the filesystem, and nothing here
-//! is a claim about any colour space: every constant is either an exponent under test passed in by the caller
-//! or a resolution bound derived from how the archive prints.
+//! 校准量具的纯数学部分 —— 从 `examples/calibrate_space.rs` 拆出，因为那个文件已到本仓库 500 行上限的
+//! 491 行，而拆点正是量具自己用词划出的那条：**读归档**（`hrx_read.rs`）、**求解与判定**（本文件）、
+//! **解析参数并打印**（示例）。这里不碰文件系统，也不对任何色彩空间作声言：每个常数要么是调用方
+//! 传进来的受检指数，要么是从归档打印方式推出的分辨率界。
 //!
-//! Keeping the maths separate also means it can be tested without running a command; the bound constants in
-//! particular are what decides whether a fitted digit may replace a transcribed one, and that decision has
-//! been the subject of every correction in `tasks.md` 9.14 through 9.20.
+//! 把数学单独放还意味着它能在不跑命令的情况下测试；那几个界常数尤其决定了拟合出的数字能否替换
+//! 转录来的数字，而这个决定正是 `tasks.md` 9.14 到 9.20 每次订正的主题。
 
 use crate::hrx_read::{Hypothesis, Reading, Side};
 
-/// How far the fit's own noise may sit above the archive's resolution before the hypothesis behind it has to
-/// be called refuted. The floor per row is the coarser of the archive's tenth-decimal half-step and the
-/// floating-point step of the value it printed; the headroom of `16.0` is that floor multiplied by the
-/// **measured** worst entry spread of one fit against its mirror (`2.6e-10` over a `1.6e-11` half-step ≈ 16),
-/// which is what a single well-conditioned digit can drift by. A refuted hypothesis exits non-zero, so it
-/// cannot be pasted into a table by someone reading only the numbers.
+/// 拟合自身的噪声能比归档分辨率高出多少，才必须判定其背后的假设被推翻。每行的下限取两者中较粗的：
+/// 归档第十位小数的半步、以及它打印的值的浮点步长；`16.0` 的余量是那个下限乘以**实测**的
+/// 同一拟合对镜像的最坏逐项散布（`1.6e-11` 半步上的 `2.6e-10` ≈ 16），也就是单个良态数字
+/// 能漂移的量。被推翻的假设以非零码退出，所以只读数字的人无法把它贴进表。
 pub const RESOLUTION_HALF_STEP: f64 = 5e-11;
 pub const SPREAD_HEADROOM: f64 = 16.0;
 
-/// The first entry of one output row, straight off the `out_of_range/far` row, whose input is
-/// `(-999999, 0, 0)` in the archive's own print (and its linearised equivalent when one side is
-/// linearised): that single nonzero channel means the printed output **is** the entry times the input, so
-/// dividing recovers the entry at the row's full relative precision. The `1e6`-scale input is also why the
-/// far row, not `white`, is the tightest constraint on that column: the archive's own miss is a step in its
-/// last printed digit, and dividing by `1e6` shrinks it to about `1.2e-16` relative on the entry.
+/// 一条输出行的第一个表项，直接取自 `out_of_range/far` 行 —— 它的输入按归档自己的打印是
+/// `(-999999, 0, 0)`（一侧被线性化时则是其线性化等价）：单一非零通道意味着打印输出**就是**
+/// 表项乘输入，所以相除能在该行的完整相对精度下还原表项。`1e6` 量级的输入也正是 far 行（而不是
+/// `white`）对该列约束最紧的原因：归档自己的误差是它最后一位打印数字里的一步，
+/// 除以 `1e6` 后在表项上缩到约 `1.2e-16` 的相对量级。
 pub fn entry_one(row: &Reading, index: usize) -> f64 {
     assert!(
         row.input[1] == 0.0 && row.input[2] == 0.0,
@@ -35,15 +29,14 @@ pub fn entry_one(row: &Reading, index: usize) -> f64 {
     row.output[index] / row.input[0]
 }
 
-/// The other two entries of one output row, from the `white` and the `out_of_range/near` row. Those two are
-/// chosen for their **conditioning**, not for convenience: with the first entry known, `white` states
-/// `b + c` (its input is `(1,1,1)` whatever the print, since a curve fixes 0 and 1) and `near` states
-/// `n₁·b + n₂·c`, so the two separate only as far as `n₂ − n₁` allows — `1.6` for the archive's
-/// `(-1, 0.4, 2)`. The general form is kept because a **linearised** `near` input is no longer that triple.
-/// The `(0.1 0.2 0.3)`/`(0.2 0.4 0.8)` pair — the one a first attempt used — has `n₂ − n₁ = 0.04`, and the
-/// archive's `5e-11` print rounding divides through by that, putting `1.25e-9` on an entry whose every
-/// effect is read at the tenth decimal; the table it produced missed that decimal on rows of order one. Hence
-/// the floor below, which rejects `0.04` and keeps `1.6`.
+/// 一条输出行的另外两个表项，取自 `white` 与 `out_of_range/near` 行。选这两行是出于**条件数**，
+/// 不是图方便：第一表项已知时，`white` 给出 `b + c`（无论怎么打印其输入都是 `(1,1,1)`，
+/// 因为曲线把 0 和 1 固定住），`near` 给出 `n₁·b + n₂·c`，所以两者只能分离到 `n₂ − n₁` 允许的
+/// 程度 —— 归档的 `(-1, 0.4, 2)` 是 `1.6`。保留一般形式是因为**线性化**后的 `near` 输入
+/// 不再是那个三元组。`(0.1 0.2 0.3)`/`(0.2 0.4 0.8)` 这一对（最初尝试用的就是它）的
+/// `n₂ − n₁ = 0.04`，归档的 `5e-11` 打印舍入被它除穿，把 `1.25e-9` 压到一个每个效应都按
+/// 第十位小数读的表项上；它产出的表在量级为一的行上正好错过那位小数。所以有下面的下限：
+/// 它拒掉 `0.04`，保留 `1.6`。
 pub fn row_of(white: &Reading, near: &Reading, far: &Reading, index: usize) -> [f64; 3] {
     let first = entry_one(far, index);
     let sum = white.output[index] - first;
@@ -61,17 +54,15 @@ pub fn row_of(white: &Reading, near: &Reading, far: &Reading, index: usize) -> [
     [first, second, third]
 }
 
-/// The solved matrix, one output row at a time: the archive's `out_of_range/far` gives the first entry,
-/// `white` and `out_of_range/near` the other two, and every remaining concrete row is left for
-/// [`residual`] to check against.
+/// 解出的矩阵，一次一条输出行：归档的 `out_of_range/far` 给出第一表项，`white` 与
+/// `out_of_range/near` 给出另外两个，其余每条具体行留给 [`residual`] 去核对。
 ///
-/// Rows are found by **case name** rather than by their literal triples, because a linearised channel is no
-/// longer the number printed in the file (a first attempt looked up `[-1.0, 0.4, 2.0]` and panicked on
-/// `a98-rgb` for exactly that reason). It is **not** the case that every `to_space/**` file carries these
-/// three cases: `to_space/xyz_d50/a98_rgb.hrx` has only `in_range`, `out_of_range` and `missing/*`, and its
-/// `in_range` converts between two xyz-d50 colours, so it states no xyz_d50→a98-rgb relation at all. The
-/// panic message therefore prints the cases it did find, and a missing one is a wrong pair, not a broken
-/// archive.
+/// 行是按**用例名**找到的，而不是按字面三元组，因为线性化后的通道已不是文件里打印的数字
+/// （最初尝试查找 `[-1.0, 0.4, 2.0]`，在 `a98-rgb` 上正是因为这一点 panic）。**并非**
+/// 每个 `to_space/**` 文件都带这三个用例：`to_space/xyz_d50/a98_rgb.hrx` 只有 `in_range`、
+/// `out_of_range` 与 `missing/*`，而它的 `in_range` 在两种 xyz-d50 颜色之间换算，
+/// 所以根本不含 xyz_d50→a98-rgb 的关系。因此 panic 消息会打印它确实找到的用例，
+/// 缺一个说明配对错了，不是归档坏了。
 pub fn solve(rows: &[Reading]) -> [[f64; 3]; 3] {
     let one = |case: &str| {
         rows.iter().find(|row| row.case == case).unwrap_or_else(|| {
@@ -91,13 +82,12 @@ pub fn solve(rows: &[Reading]) -> [[f64; 3]; 3] {
     std::array::from_fn(|index| row_of(white, near, far, index))
 }
 
-/// Whether a fit's rows are reproduced within what the archive can express, given the hypothesis it was
-/// fitted under. This is a **verdict field** rather than a number to eyeball, because the instrument prints a
-/// plausible-looking matrix either way: a wrong exponent on a curved pair (`rec2020` under `2.2`, worst
-/// residual `0.19`) and a hypothesis that holds (`a98-rgb` under `563/256`, worst `5.0e-11`) otherwise differ
-/// by eight orders of magnitude in the same field name, and nothing in the earlier shape of this output told
-/// the reader which one they were holding. The bound per channel is the coarser of the archive's tenth-decimal
-/// half-step and the floating-point step of the value it printed, times [`SPREAD_HEADROOM`].
+/// 给定拟合所依据的假设，拟合的行是否在归档可表达的范围内被复现。这是一个**判定字段**，
+/// 不是供人眼估的数字，因为量具两种情况下都会打印出看起来合理的矩阵：曲面族上错误的指数
+/// （`rec2020` 按 `2.2`，最坏残差 `0.19`）与成立的假设（`a98-rgb` 按 `563/256`，
+/// 最坏 `5.0e-11`）在同一个字段名上相差八个数量级，而这份输出早先的形状没有任何东西告诉读者
+/// 手里拿的是哪一种。每通道的界取两者中较粗的：归档的第十位小数半步、以及它打印的值的
+/// 浮点步长，再乘 [`SPREAD_HEADROOM`]。
 pub fn verdict(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (bool, f64) {
     rows.iter().fold((true, 0.0_f64), |(holds, worst), row| {
         let (worst_here, holds_here) = apply(matrix, row.input)
@@ -115,12 +105,11 @@ pub fn verdict(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (bool, f64) {
     })
 }
 
-/// The smallest nonzero **printed** channel on the curved side only. A piecewise transfer decides its branch on
-/// the printed value of its own channels (`prophoto-rgb` against `1/16` in `src/color/matrix.rs`), so
-/// this — not a pooled figure over both sides, and not the linearised value — is what says whether the segment
-/// branch was exercised by these rows at all. `None` when neither side is curved: there is no segment to have
-/// exercised. (A first version pooled both sides and reported prophoto's `0.0276` — that is an *XYZ output*,
-/// while the archive's prophoto channels printed as a source never drop below `0.1`.)
+/// 只在曲面一侧的最小非零**打印**通道。分段转移函数按自己通道的打印值决定分支
+/// （`src/color/matrix.rs` 里 `prophoto-rgb` 对 `1/16`），所以是它 —— 不是两侧合并的数、
+/// 也不是线性化后的值 —— 回答这些行有没有真正走到分段分支。两侧都不曲时返回 `None`：
+/// 没有分段可走。（最初版本合并两侧，报出 prophoto 的 `0.0276` —— 那是 *XYZ 输出*，
+/// 而归档里作为源打印的 prophoto 通道从不落到 `0.1` 以下。）
 pub fn smallest_curved_printed(rows: &[Reading], curved: Option<Hypothesis>) -> Option<f64> {
     let minimum = rows
         .iter()
@@ -137,9 +126,8 @@ pub fn smallest_curved_printed(rows: &[Reading], curved: Option<Hypothesis>) -> 
         .filter(|_| minimum.is_finite())
 }
 
-/// The smallest nonzero channel in the linearised space the fit actually solved in. Compared against a
-/// segment threshold that lives on the linear side (an encode arm like `1/512` or `0.081`) this is the field
-/// that answers; the printed figure does not.
+/// 拟合实际求解的线性化空间里的最小非零通道。与住在这一侧的分段阈值（像 `1/512` 或 `0.081`
+/// 这样的编码臂）比较时，回答问题的是这个字段；打印值不是。
 pub fn smallest_linear(rows: &[Reading]) -> f64 {
     rows.iter()
         .flat_map(|row| row.input.into_iter().chain(row.output))
@@ -148,7 +136,7 @@ pub fn smallest_linear(rows: &[Reading]) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// A 3×3 applied to a vector.
+/// 3×3 矩阵作用于一个向量。
 pub fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
     std::array::from_fn(|row| {
         (0..3)
@@ -157,12 +145,10 @@ pub fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
     })
 }
 
-/// The worst `|predicted - printed|` over a set of rows, reported **per channel** together with that same
-/// channel's relative miss and printed magnitude. Taking the two maxima independently would let a `1e-5`
-/// miss on a `-999999` channel borrow the relative error of a `0.5` channel — a rounding story told as
-/// though it were one. A channel the archive printed as `0` has no relative miss to report, so the row is
-/// named for its absolute miss and the share is left at `0`: an `inf` in that field reads as a measurement
-/// and is not one.
+/// 一组行上最坏的 `|predicted - printed|`，**按通道**报告，同时带上同一通道的相对误差与打印量级。
+/// 若两个最大值各自独立取，`-999999` 通道上的 `1e-5` 误差就能借用到 `0.5` 通道的相对误差 ——
+/// 一个舍入故事被讲成另一个。归档打印为 `0` 的通道没有可报的相对误差，所以该行按绝对误差命名、
+/// 份额留 `0`：那个字段里的 `inf` 读起来像测量值，其实不是。
 pub fn residual(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (String, f64, f64, f64) {
     rows.iter()
         .flat_map(|row| {
@@ -190,10 +176,9 @@ pub fn residual(matrix: &[[f64; 3]; 3], rows: &[Reading]) -> (String, f64, f64, 
         )
 }
 
-/// A 3×3 inverse by cofactors over the determinant, so the instrument can line the two directions of one
-/// fit up against each other and print their per-entry spread. The library computes its own inverse the
-/// same way (`matrix::invert`, private to it); this exists only to compare readings, never to produce a
-/// table the library then copies from in the other direction.
+/// 用行列式的代数余子式求 3×3 逆，好让量具把一次拟合的两个方向对齐、打印它们逐项的散布。
+/// 库自己以同样方式算逆（`matrix::invert`，是它的私有件）；这一份只为比较读数而存在，
+/// 绝不产出库随后从另一方向照抄的表。
 pub fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let cofactor = |row: usize, column: usize| -> f64 {
         let rest = |skip: usize| -> Vec<usize> { (0..3).filter(|index| *index != skip).collect() };
@@ -204,11 +189,11 @@ pub fn invert(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
         sign * minor
     };
     let whole = det(*m);
-    // Adjugate over the determinant: entry (i, j) is the cofactor of (j, i).
+    // 行列式上的伴随阵：表项 (i, j) 是 (j, i) 的代数余子式。
     std::array::from_fn(|i| std::array::from_fn(|j| cofactor(j, i) / whole))
 }
 
-/// A determinant of a 3×3 written as rows.
+/// 按行写法的 3×3 行列式。
 pub fn det(m: [[f64; 3]; 3]) -> f64 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])

@@ -13,7 +13,8 @@ alwaysApply: true
   `lib.rs`+`lexer.rs`+`trace.rs`（9.42）与 `expr.rs`+`operations.rs`（9.43）与 `exec.rs`+`loops.rs`
   （9.44）与 `brackets.rs`+`structure.rs`（9.45）与 `calculation.rs`（9.46）与
   `selector.rs`+`phases.rs`（9.47）已做完，各自 `regress=0 net=0`；**`sasspile/src` 顶层自此全部
-  中文化**，待批只剩 `builtins/` 余下约 847 行，
+  中文化**，待批只剩 `builtins/` 余下约 847 行；9.48 转入 `crates/sasspile/tests/`，首批十件
+  核心测试已译（余 30 件），
   （此前 9.41/9.42 与 9.43 草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
   `calculation.rs` 三件 —— 现量复核：`tasks.md` 9.29 附近的原始清点列过 `exec.rs` 204、`brackets.rs` 136、
   `calculation.rs` 127，与现测逐字一致，已在 9.43 条订正；9.45 完成后余 3 文件 210 行经逐件现量复核，
