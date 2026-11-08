@@ -1,26 +1,23 @@
-//! The law this file keeps: **the white-point adaptation is the archive's own matrix, not a transcription.**
+//! 本文件守的律：**白点适应是归档自己的矩阵，不是一份转录。**
 //!
-//! `color/matrix.rs` used to carry the Bradford table as copied from the CSS Color 4 prose
-//! (`0.9555766 -0.0230393 0.0631636 …`). The corpus does not compute with it: the archive's D50→D65 row sums
-//! are `0.9956342097 1.0026671299 1.3221722918` (`to_space/xyz_d50/xyz.hrx::white`) while the copied table
-//! summed to `0.9957009 0.9993688 1.3289869` — worst entry off by `6.9e-3` (`1.3303659262` against
-//! `1.3372652`). A neutral barely noticed; anything reaching D50 did, which is every `lab`, `lch` and
-//! `xyz-d50` conversion. The replacement was **solved out of the archive** by
-//! `cargo run -q -p sasspile --example calibrate_space`, which reads `to_space/xyz_d50/xyz.hrx` from disk,
-//! takes the first column off `out_of_range/far` (a `-999999` input makes that entry knowable to `5e-17`)
-//! and the other two off the `white` + `out_of_range/near` pair (determinant `1.6`), then reports the worst
-//! residual over the rows the solve did not use: `5.0e-11`, exactly the half-step of the archive's tenth
-//! decimal place.
+//! `color/matrix.rs` 曾把 Bradford 表从 CSS Color 4 散文照抄（`0.9555766 -0.0230393 0.0631636 …`）。
+//! 语料算的不是它：归档的 D50→D65 行和是 `0.9956342097 1.0026671299 1.3221722918`
+//! （`to_space/xyz_d50/xyz.hrx::white`），而抄表行和是 `0.9957009 0.9993688 1.3289869`——最差项差
+//! `6.9e-3`（`1.3303659262` 对 `1.3372652`）。一个中性色几乎看不出来；凡够到 D50 的换算都看得出，
+//! 而每个 `lab`、`lch` 与 `xyz-d50` 换算都够得到。替代者是**从归档解出**的：
+//! `cargo run -q -p sasspile --example calibrate_space` 从磁盘读 `to_space/xyz_d50/xyz.hrx`，第一列取自
+//! `out_of_range/far`（`-999999` 输入让该项可分辨到 `5e-17`），另两列取自 `white` 与
+//! `out_of_range/near` 这一对（行列式 `1.6`），然后报告求解未用到的行上的最差残差：`5.0e-11`，
+//! 恰是归档第十位小数的半个步进。
 //!
-//! What this file deliberately does **not** pin, and the measured reason: only one direction is written
-//! down in the library, so the derived side of `to_space/xyz/xyz_d50.hrx` keeps two rows red — `gray`, the
-//! archive's `0.5014942182` against our `0.5014942183` (`1e-10` absolute), and `out_of_range/far`, whose
-//! worst channel is `−29627.7791422469` against our `−29627.7791449956` (`2.75e-6` absolute, `9.3e-11`
-//! relative). `to_space/srgb/xyz_d50.hrx::white` is red the same way: the archive prints
-//! `color(xyz-d50 0.9642956764 1 0.8251046025)` and we print `0.9642956765`. All three are one unit in the
-//! tenth decimal, which is where a table fitted to ten-decimal rows can be expected to sit; they are named
-//! in `openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md` rather than copied into an
-//! assertion, because pinning my own answer would freeze it as a requirement.
+//! 本文件**故意**不钉的，及其实测理由：库里只写下了一个方向，故 `to_space/xyz/xyz_d50.hrx` 的派生侧
+//! 仍有两行红——`gray`，归档 `0.5014942182` 对本实现 `0.5014942183`（绝对 `1e-10`）；
+//! `out_of_range/far`，其最差通道 `−29627.7791422469` 对本实现 `−29627.7791449956`（绝对 `2.75e-6`，
+//! 相对 `9.3e-11`）。`to_space/srgb/xyz_d50.hrx::white` 同样红：归档印
+//! `color(xyz-d50 0.9642956764 1 0.8251046025)`，我们印 `0.9642956765`。三者都差在第十位小数的
+//! 半个单位，而这正是按十位小数行拟合的表可以预期的落点；它们点名在
+//! `openspec/changes/redesign-sasspile-rxrust-shared-stream/tasks.md`，而不是抄成断言——钉住我
+//! 自己的答案会把它冻成要求。
 
 use sasspile::compile;
 
@@ -30,10 +27,9 @@ async fn css(scss: &str) -> String {
         .unwrap_or_else(|error| panic!("compiling {scss:?}: {error}"))
 }
 
-/// The direction the table is fitted to: `to_space/xyz_d50/xyz.hrx`. Every concrete row of that file is
-/// asserted here — the fit used three of them, so the rest are independent evidence, and a re-transcribed
-/// digit fails on the tenth decimal. The `missing/*` rows of that file are absent: they ask for a second
-/// capability (a `none` that survives a conversion), not for these numbers.
+/// 表所拟合的方向：`to_space/xyz_d50/xyz.hrx`。该文件的每条具体行都在此断言——求解用掉其中三条，
+/// 故其余各行是独立证据，且重抄错一位数字就会在第十位小数上失败。该文件的 `missing/*` 行不在
+/// 此处：它们要的是另一种能力（一个能挺过换算的 `none`），不是这些数字。
 #[tokio::test]
 async fn xyz_d50_converts_to_xyz_on_the_archives_own_numbers() {
     let cases = [
@@ -67,10 +63,8 @@ async fn xyz_d50_converts_to_xyz_on_the_archives_own_numbers() {
     }
 }
 
-/// The direction the library derives (`invert` of the table above), read through
-/// `to_space/xyz/xyz_d50.hrx`. Six of that file's eight concrete rows are reproducible at the archive's
-/// resolution; `gray` and `out_of_range/far` are held by the red rows themselves, for the reason stated at
-/// the top of this file.
+/// 库里派生的方向（上表的 `invert`），经 `to_space/xyz/xyz_d50.hrx` 读出。该文件八条具体行中有六条
+/// 能在归档的分辨率下复现；`gray` 与 `out_of_range/far` 由红行自己按住，理由在本文件头部陈述。
 #[tokio::test]
 async fn xyz_converts_to_xyz_d50_through_the_computed_inverse() {
     let cases = [
@@ -99,11 +93,10 @@ async fn xyz_converts_to_xyz_d50_through_the_computed_inverse() {
     }
 }
 
-/// The row that shows the transcription was wrong rather than merely imprecise, and the one measured while
-/// the old digits were still in place: with the CSS Color 4 table, `color(xyz-d50 1 1 1)` answered
-/// `color(xyz 0.9957009 0.9993688 1.3289869)` — three channels all off, the worst by `6.8e-3` — while the
-/// archive's `to_space/xyz_d50/xyz.hrx::white` states
-/// `color(xyz 0.9956342097 1.0026671299 1.3221722918)`.
+/// 这一行表明转录是错的、而不只是不精，且那个读数是在旧数字还在位时实测的：用 CSS Color 4 表时，
+/// `color(xyz-d50 1 1 1)` 曾答 `color(xyz 0.9957009 0.9993688 1.3289869)`——三个通道全错，最差
+/// `6.8e-3`——而归档的 `to_space/xyz_d50/xyz.hrx::white` 写的是
+/// `color(xyz 0.9956342097 1.0026671299 1.3221722918)`。
 #[tokio::test]
 async fn the_white_row_is_what_a_transcription_used_to_miss() {
     let built = css("a {b: color.to-space(color(xyz-d50 1 1 1), xyz)}").await;
@@ -113,12 +106,11 @@ async fn the_white_row_is_what_a_transcription_used_to_miss() {
     );
 }
 
-/// The invariant the two tables have to hold **together**, and the reason the D50 white in
-/// `color/matrix.rs` is derived instead of copied: a neutral converted to `lab` must have `a = b = 0` and
-/// `L = 100`, digit for digit (`to_space/srgb/lab.hrx::white`). With the transcribed white this compiler
-/// answered `lab(100.0000000018% 0.0000001274 0.0000000081)` — the `8.3e-10` mismatch between that literal
-/// and the triple the adaptation actually lands on, multiplied by the `500 · (fx − fy)` in `xyz_to_lab`.
-/// Deriving it makes the equality structural, so a second white literal cannot come back.
+/// 两张表必须**共同**守住的不变量，也是 `color/matrix.rs` 的 D50 白改为导出、而非照抄的理由：
+/// 一个中性色换算到 `lab` 必须 `a = b = 0` 且 `L = 100`，逐位一致（`to_space/srgb/lab.hrx::white`）。
+/// 用照抄的白时，本编译器曾答 `lab(100.0000000018% 0.0000001274 0.0000000081)`——那个字面量与适应
+/// 实际落到的三元组之间 `8.3e-10` 的失配，被 `xyz_to_lab` 里的 `500 · (fx − fy)` 放大。导出它让
+/// 这个相等成为结构性事实，于是第二个白字面量再也回不来。
 #[tokio::test]
 async fn a_neutral_converts_to_a_neutral_lab() {
     let built = css("a {b: color.to-space(color(srgb 1 1 1), lab)}").await;

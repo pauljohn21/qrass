@@ -1,21 +1,19 @@
-//! `color.scale`, pinned row by row on `core_functions/color/scale/{rgb,hsl,hwb,no_space,global}.hrx`.
-//! Every input and expectation is copied from the fixture's own `input.scss` / `output.css`.
+//! `color.scale`,在 `core_functions/color/scale/{rgb,hsl,hwb,no_space,global}.hrx` 上逐行钉住。
+//! 每一条输入与期望,都照抄各夹具自己的 `input.scss` / `output.css`。
 //!
-//! The refusals and messages a scale raises (`$hue: Channel isn't scalable.`, the `%` requirement on an
-//! amount, the `-100%…100%` range) are in [`tests/color_diagnostics.rs`](crate), which holds the three
-//! families' shared diagnostic law.
+//! scale 抛出的拒绝与措辞(`$hue: Channel isn't scalable.`、amount 必带 `%`、
+//! `-100%…100%` 区间)在 [`tests/color_diagnostics.rs`](crate),那里收着三个函数族的共同诊断律。
 //!
-//! The law this file exists for: a scale moves a channel **toward whichever bound its sign points at, by that
-//! share of the distance still between the channel and that bound** — so `sienna`'s red `160` with
-//! `$red: 12%` is `160 + (255 − 160) × 0.12`, and `-33%` of `lightcoral`'s red `240` is
-//! `240 − 240 × 0.33 = 160.8`.
-//! Because the target is the bound itself, a scale can never leave the gamut: `100%` lands **on** it, which is
-//! why `scale/rgb.hrx` has no `above_max` row while `adjust/rgb.hrx` does.
+//! 本文件要钉的律:scale 把一个通道**沿其符号所指的方向,移动该通道到那个端点之间剩余距离的
+//! 对应份额**——`sienna` 的 red `160` 配 `$red: 12%` 即 `160 + (255 − 160) × 0.12`,
+//! `lightcoral` 的 red `240` 配 `-33%` 即 `240 − 240 × 0.33 = 160.8`。
+//! 因为目标就是端点本身,scale 永远不会越出色域:`100%` **正好落在**端点上,这正是
+//! `scale/rgb.hrx` 没有 `above_max` 行而 `adjust/rgb.hrx` 有的原因。
 //!
-//! The other half of what this file pins is the **argument's reading**: as a share (`-33%` means 33), not as a
-//! channel value (`byte()` would make `100%` into 255). That mistake was made here first and it sent every
-//! `scale/rgb` row out of the gamut, so the rows that catch it are asserted twice over — once through a
-//! keyword result (`red/max` → `red`) and once through a fractional one (`red/high` → `89.5137254902%`).
+//! 本文件钉的另一半是**参数的读法**:当份额读(`-33%` 即 33),不是当通道值读
+//! (`byte()` 会把 `100%` 变成 255)。这里先前犯过那个错,害得每一条 `scale/rgb` 行都越出
+//! 色域,所以能抓住它的行都断言两遍——一遍过关键字结果(`red/max` → `red`),
+//! 一遍过小数结果(`red/high` → `89.5137254902%`)。
 
 use sasspile::compile;
 
@@ -25,11 +23,11 @@ async fn css(input: &str) -> String {
         .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
 }
 
-/// Bytes move toward `0` or `255` (`scale/rgb.hrx`). `black` with `$red: 100%` is `red` and `red` with
-/// `-100%` is `black` — the bounds themselves; `lightcoral` (red 240) at `-33%` is `160.8` =
-/// `63.0588235294%`, and `turquoise` (red 64) at `86%` is `228.26` = `89.5137254902%`. A whole-byte result
-/// keeps the colour's own origin: `blue/max` → `blue` by name, `salmon` at `$blue: 42%` → percentages
-/// because the moved blue `224.34` is not a whole byte.
+/// 字节朝 `0` 或 `255` 移动(`scale/rgb.hrx`)。`black` 配 `$red: 100%` 是 `red`,`red` 配
+/// `-100%` 是 `black`——即端点本身;`lightcoral`(red 240)配 `-33%` 得 `160.8` =
+/// `63.0588235294%`,`turquoise`(red 64)配 `86%` 得 `228.26` = `89.5137254902%`。
+/// 结果是整字节时保留颜色自身的出处:`blue/max` → 按名字叫 `blue`;
+/// `salmon` 配 `$blue: 42%` → 百分比,因为移动后的 blue `224.34` 不是整字节。
 #[tokio::test]
 async fn bytes_move_toward_the_bound_the_sign_points_at() {
     for (input, want) in [
@@ -69,10 +67,10 @@ async fn bytes_move_toward_the_bound_the_sign_points_at() {
     }
 }
 
-/// Three channels in one call, the labelled colour, and the alpha arguments — `scale/rgb.hrx::{all,named,
-/// alpha_input,alpha_arg}`. `sienna` (160, 82, 45) scaled by 12 / 24 / 48% toward 255 is
-/// `rgb(67.2156862745%, 48.4392156863%, 57.1764705882%)` whichever way the colour is named, and `$alpha: -70%`
-/// moves the alpha from 1 toward 0 by that share → `0.3`, the same number `rgba(sienna, 0.3)` arrives at.
+/// 一次调用移动三个通道、带标签的颜色、以及 alpha 参数——`scale/rgb.hrx::{all,named,
+/// alpha_input,alpha_arg}`。`sienna` (160, 82, 45) 朝 255 按 12 / 24 / 48% 缩放,无论颜色怎么
+/// 称呼都得 `rgb(67.2156862745%, 48.4392156863%, 57.1764705882%)`;`$alpha: -70%` 把 alpha 从
+/// 1 朝 0 按该份额移动 → `0.3`,与 `rgba(sienna, 0.3)` 到达同一个数。
 #[tokio::test]
 async fn one_call_can_move_several_channels_and_the_alpha() {
     let sienna = "rgb(67.2156862745%, 48.4392156863%, 57.1764705882%)";
@@ -102,10 +100,10 @@ async fn one_call_can_move_several_channels_and_the_alpha() {
     }
 }
 
-/// The same formula on the hsl axes, whose bounds are `0–100` (`scale/hsl.hrx`). plum's own saturation is
-/// 47.2868217054%, so `100%` reaches 100 → `#ff7eff` and `0%` leaves it exactly `plum`; red's lightness 50
-/// scaled by `94%` gives 97, whose bytes are `rgb(100%, 94%, 94%)` — the lightness never prints here, because
-/// a scale cannot leave the gamut for the out-of-gamut rule to react to.
+/// 同一公式作用于 hsl 轴,其端点界为 `0–100`(`scale/hsl.hrx`)。plum 自身饱和度是
+/// 47.2868217054%,故 `100%` 到达 100 → `#ff7eff`,`0%` 恰好还是 `plum`;red 的 lightness 50
+/// 按 `94%` 缩放得 97,对应字节为 `rgb(100%, 94%, 94%)`——这里 lightness 从不打印,因为
+/// scale 不能越出色域,越域规则无从触发。
 #[tokio::test]
 async fn the_hsl_axes_scale_between_zero_and_a_hundred() {
     for (input, want) in [
@@ -151,12 +149,12 @@ async fn the_hsl_axes_scale_between_zero_and_a_hundred() {
     }
 }
 
-/// Whiteness and blackness scale toward `100` and `0` too, and a pair that then overflows is **normalised by
-/// its sum** exactly as `adjust` does it: `#66cc99` (w 40, b 20) with `$whiteness: 100%` becomes w 100 / b 20,
-/// which is 83.3333333333% / 16.6666666667% after the normalisation — the grey `rgb(83.3333333333%, …)`
-/// (`scale/hwb.hrx::whiteness/max`). `$whiteness: -100%` empties whiteness instead, giving `#00cc66`
-/// (`…::whiteness/min`), and `#33cc80` at `50%` keeps a fractional blue (`70.0653594771%`) because the hue
-/// survives the round trip (`…::whiteness/high`).
+/// 白度与黑度同样朝 `100` 与 `0` 缩放,随后溢出的一对**按两者和归一化**,做法与 `adjust`
+/// 完全一致:`#66cc99`(w 40, b 20)配 `$whiteness: 100%` 变成 w 100 / b 20,归一化后为
+/// 83.3333333333% / 16.6666666667%——即灰 `rgb(83.3333333333%, …)`
+/// (`scale/hwb.hrx::whiteness/max`)。`$whiteness: -100%` 则抽空白度,得 `#00cc66`
+/// (`…::whiteness/min`);`#33cc80` 配 `50%` 保留小数 blue(`70.0653594771%`),因为 hue
+/// 扛过了往返(`…::whiteness/high`)。
 #[tokio::test]
 async fn whiteness_and_blackness_scale_then_normalise() {
     for (input, want) in [
@@ -201,10 +199,10 @@ async fn whiteness_and_blackness_scale_then_normalise() {
     }
 }
 
-/// The alpha's bounds are `0–1`, and a call naming **nothing else** is a no-op rather than an error
-/// (`scale/no_space.hrx`). `rgba(red, 0.5)` with `$alpha: 100%` becomes opaque again — and an opaque colour
-/// made from a keyword prints the keyword; `0%` changes nothing; `-100%` empties it. `14%` of the way from
-/// 0.5 to 1 is `0.57`, and `-36%` of the way from 0.3 to 0 is `0.192`.
+/// alpha 的端点界为 `0–1`,而只点名 **alpha 之外什么也没点名** 的调用是空操作而非报错
+/// (`scale/no_space.hrx`)。`rgba(red, 0.5)` 配 `$alpha: 100%` 重新变不透明——且由关键字
+/// 构成的不透明颜色打印该关键字;`0%` 什么也没变;`-100%` 抽空它。从 0.5 到 1 的 `14%`
+/// 处是 `0.57`,从 0.3 到 0 的 `-36%` 处是 `0.192`。
 #[tokio::test]
 async fn the_alpha_scales_between_zero_and_one_and_nothing_named_is_a_no_op() {
     for (input, want) in [
@@ -227,8 +225,8 @@ async fn the_alpha_scales_between_zero_and_one_and_nothing_named_is_a_no_op() {
             "a {b: color.scale(rgba(red, 0.3), $alpha: -36%)}",
             "rgba(255, 0, 0, 0.192)",
         ),
-        // The legacy global spelling is the same function (`scale/global.hrx::legacy`): pink's blue 203
-        // moved 20% of the 52 left below 255.
+        // 旧式全局拼写是同一个函数(`scale/global.hrx::legacy`):pink 的 blue 203 移动了
+        // 255 之下剩余 52 的 20%。
         (
             "a {b: scale-color(pink, $blue: 20%)}",
             "rgb(100%, 75.2941176471%, 83.6862745098%)",
@@ -242,26 +240,24 @@ async fn the_alpha_scales_between_zero_and_one_and_nothing_named_is_a_no_op() {
     }
 }
 
-/// A boundary of **this slice**, not a corpus row: the calls whose *output* this compiler cannot produce keep
-/// the call's text — `$space:` for a space it has no conversion for, and a modern `color(…)` colour it refuses
-/// to read into sRGB. Those rows stay red, and pinning the text is what stops a later change from quietly
-/// answering them in the wrong space.
+/// 这是**本切片**的边界,不是语料行:输出为本编译器无法产出的调用,保留调用文本——
+/// `$space:` 指向它没有转换的空间,以及它拒绝读入 sRGB 的现代 `color(…)` 颜色。
+/// 那些行保持红色,而钉住文本正是拦住后续改动悄悄用错误空间回答它们的手段。
 ///
-/// A `none` channel is **not** in this list any more, and the corpus is why: `scale/no_channels.hrx::missing`
-/// asks for `color.scale(rgb(none none none))` and prints `rgb(none none none)` — an answer, not the call's
-/// text. That row was red in the baseline run `instrument-split-and-guards` and green from run
-/// `legacy-missing-channel` onward (`reports/hrx.db`), so keeping it here would have pinned a behaviour the
-/// archive contradicts.
+/// `none` 通道**不再**在此列表中,语料是原因:`scale/no_channels.hrx::missing` 请求
+/// `color.scale(rgb(none none none))` 并打印 `rgb(none none none)`——是回答,不是调用文本。
+/// 该行在基线运行 `instrument-split-and-guards` 中为红,自运行 `legacy-missing-channel` 起为绿
+/// (`reports/hrx.db`),所以把它留在这里会钉住与语料库矛盾的行为。
 ///
-/// The hue is not here either: `color.scale(white, $hue: 10%)` is answered with the corpus's own message,
-/// pinned in `tests/color_diagnostics.rs` (`scale/error/args.hrx::hue`).
+/// hue 也不在此:`color.scale(white, $hue: 10%)` 用语料自带的消息作答,钉在
+/// `tests/color_diagnostics.rs`(`scale/error/args.hrx::hue`)。
 #[tokio::test]
 async fn calls_this_slice_cannot_answer_keep_their_text() {
     for call in [
-        // `$space:` asks for a space this compiler has no conversion for (`scale/no_channels.hrx::identical`
-        // is the oklch row, whose own expectation the text does not match — that row stays red on purpose).
+        // `$space:` 要求本编译器没有转换的空间(`scale/no_channels.hrx::identical`
+        // 是 oklch 行,其文本与该行自身期望不符——该行有意保持红色)。
         "color.scale(oklch(50% 0.2 0deg), $space: lab)",
-        // A modern colour written as text is not read into sRGB (`scale/out_of_gamut.hrx::above_gamut/up`).
+        // 以文本书写的现代颜色不读入 sRGB(`scale/out_of_gamut.hrx::above_gamut/up`)。
         "color.scale(color(srgb 1.2 0.5 0.7), $red: 10%)",
     ] {
         assert_eq!(

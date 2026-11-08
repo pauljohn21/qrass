@@ -1,12 +1,10 @@
-//! `color.change` on the **`rgb` channels**, pinned row by row on `core_functions/color/change/rgb.hrx` and
-//! its namespaced twin `core_functions/modules/color/change.hrx`. Every input and expectation below is copied
-//! from the fixture's own `input.scss` / `output.css` — including the case names, which are not a grammar I
-//! may invent (`change/rgb.hrx` has exactly `red|green|blue/{max,min,low,high,out_of_range,none}` plus
-//! `alpha_arg`; there is no "mixed channels" row to assert).
+//! `color.change` 落在 **`rgb` 通道**上，逐行钉在 `core_functions/color/change/rgb.hrx` 与命名空间
+//! 孪件 `core_functions/modules/color/change.hrx` 上。下面每条输入与期望都抄自 fixture 自己的
+//! `input.scss` / `output.css`——含 case 名，而那不是我可以发明的语法（`change/rgb.hrx` 恰好是
+//! `red|green|blue/{max,min,low,high,out_of_range,none}` 加 `alpha_arg`；没有「混合通道」行可断言）。
 //!
-//! The point of this file is the **label**: `color.change(black, $red: 500)` and
-//! `color.change(black, $green: -50)` each carry one number and must land on different colours, which is what
-//! the registry's positional argument list could not express.
+//! 本文件的主旨是**标签**：`color.change(black, $red: 500)` 与 `color.change(black, $green: -50)`
+//! 各携一个数，必须落到不同颜色上，而这正是 registry 的位置参数表无法表达的东西。
 
 use sasspile::compile;
 
@@ -16,8 +14,8 @@ async fn css(input: &str) -> String {
         .unwrap_or_else(|e| panic!("{input} failed: {}", e.message))
 }
 
-/// A changed channel keeps the colour's own origin: a keyword-created colour prints a keyword when the new
-/// bytes still name one, and hex otherwise (`red/max`, `green/max`, `blue/max`, `red/min`, `red/low`).
+/// 被改的通道保住颜色自己的出处：由关键字造出的颜色在新字节仍命名一个关键字时印关键字，否则印
+/// hex（`red/max`、`green/max`、`blue/max`、`red/min`、`red/low`）。
 #[tokio::test]
 async fn change_keeps_the_colour_origin() {
     for (input, want) in [
@@ -28,7 +26,7 @@ async fn change_keeps_the_colour_origin() {
         ("a {b: color.change(red, $red: 100)}", "#640000"),
         ("a {b: color.change(black, $red: 200)}", "#c80000"),
         ("a {b: color.change(blue, $blue: 100)}", "#000064"),
-        // The `@use "sass:color"` spelling reaches the same function (`modules/color/change.hrx`).
+        // `@use "sass:color"` 拼法到达同一个函数（`modules/color/change.hrx`）。
         ("a {b: color.change(lime, $green: 0)}", "black"),
     ] {
         assert_eq!(
@@ -39,11 +37,10 @@ async fn change_keeps_the_colour_origin() {
     }
 }
 
-/// **An out-of-gamut result prints in the hsl form**, because an out-of-range byte is a value Sass carries
-/// rather than one it clamps: `red/out_of_range` is `color.change(black, $red: 500)` →
-/// `hsl(0, 5000%, 98.0392156863%)` and `blue/out_of_range` is `color.change(black, $blue: 256)` →
-/// `hsl(240, 100.7874015748%, 50.1960784314%)`. Clamping the second to `rgb(0, 0, 255)` would print a
-/// different colour, and rounding would flatten `100.7874015748%` into `100%`.
+/// **越域结果以 hsl 形式印出**，因为越界字节是 Sass 携带的值而不是它夹紧的值：`red/out_of_range`
+/// 是 `color.change(black, $red: 500)` → `hsl(0, 5000%, 98.0392156863%)`，`blue/out_of_range` 是
+/// `color.change(black, $blue: 256)` → `hsl(240, 100.7874015748%, 50.1960784314%)`。把第二个夹到
+/// `rgb(0, 0, 255)` 会印出另一个颜色，而舍入会把 `100.7874015748%` 压平为 `100%`。
 #[tokio::test]
 async fn an_out_of_gamut_change_prints_hsl() {
     for (input, want) in [
@@ -64,22 +61,20 @@ async fn an_out_of_gamut_change_prints_hsl() {
     }
 }
 
-/// **The hsl axes the call names** replace the colour's own: `color.change(plum, $saturation: 100%)` →
-/// `#ff7eff` (origin kept, bytes whole), `color.change(red, $lightness: 63%)` → `rgb(100%, 26%, 26%)`
-/// (fractional bytes ⇒ percentages), and an out-of-range axis prints the hsl triple **as written**:
-/// `color.change(red, $lightness: 120%)` → `hsl(0, 100%, 120%)` (`change/hsl.hrx::lightness/above_range`).
+/// 调用点名的 **hsl 轴**替换颜色自己的：`color.change(plum, $saturation: 100%)` → `#ff7eff`
+/// （出处保住，字节是整数），`color.change(red, $lightness: 63%)` → `rgb(100%, 26%, 26%)`（分数字节
+/// ⇒ 百分比），而越域轴**逐字**印出所写的 hsl 三元组：`color.change(red, $lightness: 120%)` →
+/// `hsl(0, 100%, 120%)`（`change/hsl.hrx::lightness/above_range`）。
 ///
-/// Deriving that triple back from the implied bytes would print `hsl(180, -100%, 120%)` instead — a negative
-/// chroma rotates the hue — which is why a colour built by `change` remembers the axes it was given. The
-/// gamut is judged on **those axes**, and their low ends are asymmetric, both by rows: a saturation below
-/// zero is still a colour that prints its bytes (`color.change(plum, $saturation: -20%)` →
-/// `rgb(69.6470588235%, 79.7647058824%, 69.6470588235%)`, `…::saturation/below_range`), while a lightness
-/// below zero is not (`color.change(red, $lightness: -20%)` → `hsl(0, 100%, -20%)`,
-/// `…::lightness/below_range`).
+/// 从隐含字节反推那个三元组会印成 `hsl(180, -100%, 120%)`——负 chroma 转动色相——这正是 `change`
+/// 造出的颜色记住自己所得轴的原因。色域按**那些轴**判定，而它们的低端不对称，两样都由行证明：
+/// 零以下的彩度仍是能印自己字节的颜色（`color.change(plum, $saturation: -20%)` →
+/// `rgb(69.6470588235%, 79.7647058824%, 69.6470588235%)`，`…::saturation/below_range`），而零以下的
+/// 明度不是（`color.change(red, $lightness: -20%)` → `hsl(0, 100%, -20%)`，
+/// `…::lightness/below_range`）。
 ///
-/// The `units/hue/*` rows also show that `60deg`, `60` and `60in` all mean the same number; those fixtures
-/// carry a deprecation warning the harness does not compare, so matching their output is not deprecation
-/// support.
+/// `units/hue/*` 各行也表明 `60deg`、`60` 与 `60in` 都指同一个数；那些 fixture 带一条 harness 不比较
+/// 的弃用警告，故对上它们的输出不算弃用支持。
 #[tokio::test]
 async fn change_writes_the_hsl_axes_too() {
     for (input, want) in [
@@ -115,7 +110,7 @@ async fn change_writes_the_hsl_axes_too() {
             "a {b: color.change(black, $hue: 12, $saturation: 24%, $lightness: 48%)}",
             "rgb(59.52%, 41.088%, 36.48%)",
         ),
-        // An alpha named alongside the channels (`change/rgb.hrx::alpha_arg`).
+        // 与通道并列点名的 alpha（`change/rgb.hrx::alpha_arg`）。
         (
             "a {b: color.change(black, $red: 12, $green: 24, $blue: 48, $alpha: 0.3)}",
             "rgba(12, 24, 48, 0.3)",
@@ -129,13 +124,12 @@ async fn change_writes_the_hsl_axes_too() {
     }
 }
 
-/// **Whiteness and blackness can be written without any `$space:` label** — the name itself says which space
-/// it means (`change/hwb.hrx`; contrast `color.channel`, which needs `$space:` to *read* across spaces).
-/// Every row below is that file's own pair, and they pin three things at once: the origin is kept
-/// (`#cc6666` → `#cc0000`, hex, not `rgb(…)`), an overflowing pair is normalised by its sum
-/// (`color.change(#cc6666, $whiteness: 100%)` → all three channels `83.3333333333%`, i.e. `100/120`), and a
-/// pair that leaves the gamut prints the hsl triple (`color.change(#993333, $whiteness: 50%, $blackness: -20%)`
-/// → `hsl(0, 233.3333333333%, 85%)`).
+/// **白度与黑度可以不带任何 `$space:` 标签写入**——名字本身就说它属于哪个空间（`change/hwb.hrx`；
+/// 对照 `color.channel`，它跨空间*读*才需要 `$space:`）。下面每行都是该文件自己的对子，同时钉住
+/// 三件事：出处保住（`#cc6666` → `#cc0000`，hex，而不是 `rgb(…)`），一对溢出按其和归一化
+/// （`color.change(#cc6666, $whiteness: 100%)` → 三通道全
+/// `83.3333333333%`，即 `100/120`），以及一对离域的打印 hsl 三元组
+/// （`color.change(#993333, $whiteness: 50%, $blackness: -20%)` → `hsl(0, 233.3333333333%, 85%)`）。
 #[tokio::test]
 async fn change_writes_whiteness_and_blackness() {
     for (input, want) in [
@@ -157,7 +151,7 @@ async fn change_writes_whiteness_and_blackness() {
             "a {b: color.change(#993333, $whiteness: 50%, $blackness: -20%)}",
             "hsl(0, 233.3333333333%, 85%)",
         ),
-        // Hue travels with the whiteness/blackness pair, by position and by label.
+        // 色相随白/黑对一起走，无论位置还是标签。
         (
             "a {b: color.change(blue, $hue: 150, $whiteness: 20%, $blackness: 40%)}",
             "#339966",
@@ -175,41 +169,38 @@ async fn change_writes_whiteness_and_blackness() {
     }
 }
 
-/// Rows this file does **not** claim, of two different kinds. Some need a `none` written into an **axis**,
-/// which the axes triple still cannot hold: `color.change(hsl(0deg 100% 50%), $hue: none)` →
-/// `hsl(none 100% 50%)` (`change/hsl.hrx::hue/none`) and `color.change(hwb(180deg 30% 50%), $whiteness: none)`
-/// → `hwb(180deg none 50%)` (`change/hwb.hrx::whiteness/none`) keep their text for that reason.
+/// 本文件**不**认领的行，分两种。一种要把 `none` 写进**轴**，而轴三元组还携不了：
+/// `color.change(hsl(0deg 100% 50%), $hue: none)` → `hsl(none 100% 50%)`（`change/hsl.hrx::hue/none`）
+/// 与 `color.change(hwb(180deg 30% 50%), $whiteness: none)` → `hwb(180deg none 50%)`
+/// （`change/hwb.hrx::whiteness/none`）正因如此保留文本。
 ///
-/// The byte half of that list is gone: `color.change(black, $red: none)` → `rgb(none 0 0)`
-/// (`change/rgb.hrx::{red,green,blue}/none`, and `color.change(pink, $red: none)` → `rgb(none 192 203)` at
-/// `change/space.hrx::missing/arg/legacy/same/implicit`) is answered as of this batch: the row first turned
-/// green in run `change-writes-absence` and is green in the recorded baseline `change-writes-absence-v4` (the
-/// run whose 42 regressions forced the read-order fix, `change-writes-absence-v2`, is the first form worth
-/// keeping), so pinning it as a decline would have asserted the opposite of the archive. It is pinned as an
-/// answer instead in
-/// `tests/color_legacy_missing.rs::change_can_write_absence_into_a_byte_channel`.
+/// 那张单子的字节半边已经不在：`color.change(black, $red: none)` → `rgb(none 0 0)`
+/// （`change/rgb.hrx::{red,green,blue}/none`，以及 `change/space.hrx::missing/arg/legacy/same/implicit`
+/// 处的 `color.change(pink, $red: none)` → `rgb(none 192 203)`）自本批起有答案：该行在 run
+/// `change-writes-absence` 里首次转绿，在已入库基线 `change-writes-absence-v4` 里也绿（那 42 条
+/// 逼出读序修复的 run `change-writes-absence-v2` 是第一个值得留的形状），故把它钉成拒答就断言了
+/// 归档的反面。它作为答案钉在
+/// `tests/color_legacy_missing.rs::change_can_write_absence_into_a_byte_channel`。
 ///
-/// One is a space this compiler cannot convert (`change/space.hrx::identical`), where keeping the text happens
-/// to match what the corpus prints.
+/// 一个是本编译器无法转换的空间（`change/space.hrx::identical`），保留文本恰好对上语料印出的。
 ///
-/// And one pair is **unexplained and left red rather than fitted**: `change/hwb.hrx::alpha_input` and
-/// `…::alpha_arg` print the same colour as `rgba(20%, 60%, 40%, 0.7)` once an alpha is named, while
-/// `…::all` prints it as `#339966` opaque (asserted above) and `rgb(#123, 0.5)` prints decimal channels
-/// (`rgb/two_args::opaque_to/partial`). No mechanism here reconciles those three; inventing one would trade
-/// two visible red rows for a wrong value the pass count cannot see.
+/// 还有一对是**未解释、留红而不是拟合**：`change/hwb.hrx::alpha_input` 与 `…::alpha_arg` 在点名
+/// alpha 后印出与 `rgba(20%, 60%, 40%, 0.7)` 相同的颜色，而 `…::all` 把它印成不透明的 `#339966`
+/// （已在上方断言），`rgb(#123, 0.5)` 又印小数字节（`rgb/two_args::opaque_to/partial`）。此处没有
+/// 任何机制能调和三者；发明一个会用两条看得见的红行换一个通过数看不见的错值。
 ///
-/// A third disagreement sits in the hue derivation itself: `change/rgb.hrx::green/out_of_range` writes
-/// `hsl(120, 100%, -9.8039215686%)` for `(0, -50, 0)` where the legacy hsl formula gives hue `300` and
-/// saturation `-100%`, while that file's `red/` and `blue/out_of_range` rows both agree with the formula.
+/// 还有第三处分歧在 hue 推导自身：`change/rgb.hrx::green/out_of_range` 为 `(0, -50, 0)` 写
+/// `hsl(120, 100%, -9.8039215686%)`，而 legacy hsl 公式给 hue `300` 与彩度 `-100%`，该文件的
+/// `red/` 与 `blue/out_of_range` 各行却都与公式一致。
 #[tokio::test]
 async fn what_change_still_declines() {
     for call in [
-        // `change/hsl.hrx::hue/none` — the axes triple has no way to carry a `none` yet.
+        // `change/hsl.hrx::hue/none` —— 轴三元组还携不了 `none`。
         "color.change(hsl(0deg 100% 50%), $hue: none)",
-        // `change/hwb.hrx::whiteness/none` — and again on a `hwb` colour.
+        // `change/hwb.hrx::whiteness/none` —— 在 `hwb` 颜色上再来一次。
         "color.change(hwb(180deg 30% 50%), $whiteness: none)",
-        // `change/space.hrx::identical` — a request about spaces this compiler cannot convert; the corpus
-        // itself leaves the colour untouched, so keeping the text matches its output.
+        // `change/space.hrx::identical` —— 关于本编译器无法转换的空间的请求；语料自己也不动
+        // 那个颜色，故保留文本正好对上它的输出。
         "color.change(oklch(50% 0.2 0deg), $space: lab)",
     ] {
         assert_eq!(

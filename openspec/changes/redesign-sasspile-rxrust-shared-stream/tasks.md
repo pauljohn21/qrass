@@ -3382,4 +3382,46 @@
       847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-j`。
 
+- [x] 9.52 **注释中文化第二十五批：`crates/sasspile/tests/color_*` 七件（7 文件，2026-11-08）**。
+      `color_adaptation.rs`（Bradford 矩阵系从归档 `to_space/xyz_d50/xyz.hrx` 最小二乘解出、非 CSS Color 4
+      转录，D50→D65 行和 `0.9956342097 1.0026671299 1.3221722918` 与抄表最差差 `6.9e-3`、残差 `5.0e-11`
+      即归档第十位小数半步）、`color_adjust.rs`（字节沿符号方向加减并夹紧 `0..255`、hsl 轴不取 legacy
+      夹紧、hwb 加后按和归一化、与 `saturate` 的分界）、`color_args.rs`（Color 4 单参数读法、空格列表
+      词素排版、越域百分比失 `%` 变 byte 律、斜杠后 alpha 结构）、`color_change.rs`（直接设置通道与带
+      标签覆盖、越域结果保留并以 hsl 打印、白黑度免 `$space:` 写入、未引号 `none` 写缺通道）、
+      `color_change_space.rs`（空间专属通道词汇、逐通道独立百分比底数 0..100 与 ±125 与 ±0.4、角度
+      折叠与负 chroma 翻转半圈、单位拒答）、`color_diagnostics.rs`（三动词族独立报错措辞：`change`
+      接受未引号 `none`、`scale` 强检 `%` 份额与 `-100%…100%` 范围、双空间通道混用点名拒答）、
+      `color_scale.rs`（沿符号方向按剩余距离的份额移动、端点即界永不越域、份额读法而非 `byte()` 读法、
+      hwb 加后归一化、alpha `0–1`、空点名即 no-op、本切片边界：`none` 通道与 hue 已移出列表的语料
+      考证）逐件译毕模块 doc、每个 `#[tokio::test]` 的 doc 与内联注释。**逐字凭据类不译**：oracle 消息、
+      sass-spec case key、代码标识符、gold 值与错误原文一律保留（如 `$hue: Channel isn't scalable.`、
+      `scale/error/args.hrx::hue`、`color.scale(rgb(none none none))` → `rgb(none none none)`、
+      `rgba(83.3333333333%, …)`、`89.5137254902%`）；英文残留扫描命中 8 行全属这类逐字凭据（错误消息 4、
+      case key 与代码文本 3、指针 1），无英文散文段落。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，7/7 逐字一致（差异仅注释行数带出的空行）。
+      文件读数（`wc -l` 口径）：`color_adaptation.rs` 134→126（注释 42→34）、`color_adjust.rs` 259→255
+      （56→52）、`color_args.rs` 170→165（40→35）、`color_change.rs` 221→212（72→63）、
+      `color_change_space.rs` 248→243（60→55）、`color_diagnostics.rs` 308→304（58→54）、
+      `color_scale.rs` 273→269（59→55）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint lint crates/sasspile/src`
+      EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0 零警告；`cargo fmt --all -- --check` EXIT=0；
+      `HRX_RUN=zh-comments-batch-k cargo test -p sasspile --test hrx` 记为 `zh-comments-batch-k`
+      （`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与既有各批逐例相同）；
+      `ledger diff zh-comments-batch-j zh-comments-batch-k` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076 fails_b=8076）；怪字扫描
+      （拄/殫/一遗/癲）= 0（阳性对照各读 1）。
+      **附带两处清理**：删除自述「用完即删」的两个未跟踪临时探针 `examples/probe_args.rs`/`probe_math.rs`
+      （从未入库）；修 9.41 遗留的 `src/value.rs:30` doc 注释缩进，`cargo fmt --all -- --check` 自此干净
+      （纯空白、零逻辑）。
+      **审计闸未过（同上十一批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.51 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **`crates/sasspile/tests/color_*` 九件自此全部译完。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 14 件未译（现量：全量 43 件、
+      已译 29 件，余 `hrx.rs` 等基础件 14 件）；`crates/sasspile/src/builtins/` 仍余约 847 行；
+      顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-k`。
+
 
