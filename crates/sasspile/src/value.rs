@@ -30,10 +30,10 @@ pub enum Value {
     /// 存字符串，才让一个有界的 calculation 能重新参与算术
     /// （`values/numbers/units/multiple::division/cancels/numerator/once`）。
     Calculation(String, Content),
-/// 一个由函数**造出**的颜色（`rgb(18, 52, 86)` → 它自己，`rgb(#123, 1)` → `#112233`）。直接写进
-/// declaration 的 hex 保持 `Raw` —— 实现选型，不是语料律：`values/colors/alpha_hex/initial_letter`
-/// 的 `four-digit` 属性在 input.scss 是 `#AbCd`，而 output.css 逐字要 `rgba(170, 187, 204, 0.8666666667)`，
-/// 那行仍红 —— 见 [`crate::color`]。
+    /// 一个由函数**造出**的颜色（`rgb(18, 52, 86)` → 它自己，`rgb(#123, 1)` → `#112233`）。直接写进
+    /// declaration 的 hex 保持 `Raw` —— 实现选型，不是语料律：`values/colors/alpha_hex/initial_letter`
+    /// 的 `four-digit` 属性在 input.scss 是 `#AbCd`，而 output.css 逐字要 `rgba(170, 187, 204, 0.8666666667)`，
+    /// 那行仍红 —— 见 [`crate::color`]。
     Color(crate::color::Color),
     /// 一个**空格分隔列表**，`Expr::Space` 的值形式：`rgb(18 52 86)` 是一个装三个数的实参，不是三个实参
     /// （`core_functions/color/rgb/one_arg/no_alpha.hrx`，同一文件的 `$channels:` 行表明一个标签绑的是
