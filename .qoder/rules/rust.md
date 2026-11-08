@@ -9,9 +9,14 @@ alwaysApply: true
   `crates/ledger/src`（9.30）、`builtins` 登记骨架 + math 域（9.31）、`builtins/color/` 四文件（9.32）与
   `builtins/color/{amount,write}.rs`（9.33）与 `color/{channels,primaries,read,channel}.rs`（9.34）与
   `color/{text,space}.rs`（9.36）与 `color/mod.rs`（9.37，**`color/` 目录自此做完**）与 `env.rs`+`scope.rs`
-  （9.38）与 `axes.rs`（9.39）与 `calls.rs`（9.40）已做完，各自 `regress=0 net=0`；待批只剩 `sasspile/src`
-  顶层余 10 文件约 790 行（`value.rs` 116、`calc.rs` 106、`unit.rs` 104、`lib.rs` 98、`operations.rs` 85、
-  `loops.rs` 72、`structure.rs` 54、`trace.rs` 49、`selector.rs` 43、`phases.rs` 40）与 `builtins/` 余下约 847 行，
+  （9.38）与 `axes.rs`（9.39）与 `calls.rs`（9.40）与 `unit.rs`+`calc.rs`+`value.rs`（9.41）与
+  `lib.rs`+`lexer.rs`+`trace.rs`（9.42）与 `expr.rs`+`operations.rs`（9.43）已做完，各自 `regress=0 net=0`；
+  待批只剩 `sasspile/src` 顶层余 7 文件约 676 行（`exec.rs` 204、`brackets.rs` 136、
+  `calculation.rs` 127、`loops.rs` 72、`structure.rs` 54、`selector.rs` 43、`phases.rs` 40）
+  与 `builtins/` 余下约 847 行，
+  （此前 9.41/9.42 与本批草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
+  `calculation.rs` 三件 —— 现量复核：`tasks.md` 9.29 附近的原始清点列过 `exec.rs` 204、`brackets.rs` 136、
+  `calculation.rs` 127，与现测逐字一致，已在 9.43 条订正。）
   每批一个 `regress=0 net=0` 的纯文本 commit（每批 250~350 行；会话容量不足时允许缩到单文件，闸口不得减）。
   同一批试点在上一会话因中文输出错字率过高而回退，见 `tasks.md` 9.28 —— 所以每批收尾必须「读回全文逐句核」，
   只扫 diff 不够；行数与宽度一律按 `wc -l` / `wc -m` 写口径（编辑器会把末行后的幻影空行也算进去）。

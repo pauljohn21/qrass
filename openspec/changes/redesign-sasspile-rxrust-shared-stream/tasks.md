@@ -3046,3 +3046,112 @@
       历史属破坏性操作且未获用户授权，所以只做记录不 amend；以后的 commit subject 写完先跑
       `git log -1 --format=%s | grep -p{Han}` 类型的检查再推。
 
+- [x] 9.41 **注释中文化第十四批：`unit.rs` + `calc.rs` + `value.rs`（3 文件，2026-11-08）**。
+      **只改注释**（`git diff -U0` 非注释行 = 0）。文件读数（`wc -l` 口径）：`unit.rs` 308→302
+      （注释行 100→95）、`calc.rs` 477→469（83→77）、`value.rs` 308→292（83→70）。
+      闸口：`cargo test -p sasspile` EXIT=0；`sasslint` count=0；`ledger diff zh-comments-calls-v2
+      zh-comments-batch-a` = **`regress=0 net=0`**、`changed=0`；hrx 记为 `zh-comments-batch-a`
+      （`3457/11533`）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。逐句核时现量收紧/订正的凭据：
+      • `unit.rs`：`px * px` 无打印 golden —— `math.unit(1px * 1px)` 全语料零命中；`1px * 1px` 只活在
+        `libsass-closed-issues/issue_783.hrx` 的注释行（harness 排除 `libsass*`）与
+        `values/calculation/{max,min,clamp}.hrx::error/complex_unit`、
+        `values/calculation/calc/error/known_incompatible/complex.hrx` 的 error（等的是
+        `isn't compatible with CSS calculations`，非单位串打印）；
+      • `unit.rs`：`math.rs` 曾自带长度字面量表 —— 归一凭据是 `q`（1q = 1/4 mm）出现在
+        `core_functions/math/hypot.hrx::compatible_units` 与 `values/calculation/hypot.hrx::units/compatible`；
+      • `unit.rs`：`calc(1px / 2px)` 落点由 `calc/operator/divide::simplified` 改为
+        `values/calculation/calc/operator/units.hrx::division`，golden 是 `0.5`（原注 `0.5px`）；
+        `1 / (1 / 1px)` 例订正为 `calc(1 / (1 / 1px / 1rad))` → `calc(1px * 1rad)`
+        （`values/numbers/units/multiple::division/by/multiple_denominators`）；纯倒数 `^-1` 形标注
+        `core_functions/math/unit.hrx::one_denominator`；`calc_product` 的
+        `calc(-infinity / 1px)`/`calc(infinity * 1px * 1em)` 钉
+        `values/numbers/degenerate::minus_infinity/denominator_unit` 与 `::infinity/multiple_numerator_units`；
+      • `unit.rs`：`calc_form` 颜色侧免责句落现量 —— `Color::legacy`/`Channel`/`text::print` 直拼
+        `format_number(…) + "%"`，`core_functions/color/to_space/hwb/hsl::white` 得
+        `hsl(0, infinity%, 100%)`，归档是 `hsl(0, 0%, 100%)`；
+      • `calc.rs`：`calc($number / 1px)` 例钉
+        `values/numbers/units/multiple::division/cancels/numerator/once`；`calc(math.round(2.3))` → `2`
+        钉 `no_operator::function/sass/namespace`、`calc(math.$pi)` → `3.1415926536` 钉
+        `no_operator::variable/namespace`；`calc(epsilon)`、`calc(max-safe-integer)` 全语料零命中，
+        `calc(epsilon)` 保持未知标识符（`…::constant/undefined/alone`）；
+      • `value.rs`：函数造色与直接写 hex 的界线**标为选型而非语料律** ——
+        `values/colors/alpha_hex/initial_letter` 的 `four-digit` 属性 input 是 `#AbCd`、output.css 逐字
+        `rgba(170, 187, 204, 0.8666666667)`，那行仍红；
+      • `value.rs`：`rgb(18 52 86 / 0.5)` 与 `rgb(list.slash(0 255 127, 0))` 同输出的配对行钉
+        `rgb/one_arg/alpha.hrx::{slash_list,in_gamut/transparent}`；非有限例钉
+        `math/asin.hrx::greater_than_one`、`math/pow/base_positive_zero.hrx::with_exponent/*`、
+        `degenerate::minus_infinity/denominator_unit`；零除例 `math.div(1, 0)` → `infinity` 钉
+        `values/calculation/calc/constant::infinity`；
+      • `value.rs`（format_number）：`0.246 × 100` 例按 golden 补 `%`（`math/percentage.hrx::small` 是
+        `24.6%`）；`-0` 截断双例钉 `change/hsl.hrx::lightness/fraction` 与
+        `rgb/four_args/clamped.hrx::red/negative_zero`。
+      **9.42 收尾复审批A 全部 20 处新 key，又抓回一处**：`initial_letter::four-digit` 把 CSS 属性名当
+      case 目录名用 —— 该 hrx 是单 case 文件（ledger key 为 `values/colors/alpha_hex/initial_letter.hrx::`），
+      已改为「file + 属性」分写；其余 19 处 grep 全部命中。
+      **未做（不得当作已交付）**：顶层余 `lib.rs`/`lexer.rs`/`trace.rs`（下一批）与 `operations.rs` 85、
+      `loops.rs` 72、`structure.rs` 54、`selector.rs` 43、`phases.rs` 40，`builtins/` 余下约 847 行；
+      顺修仍留 `builtins/color/modify.rs:78`。基线 run 自此为 `zh-comments-batch-a`；**审计闸未过，见
+      9.42 条末**。
+
+- [x] 9.42 **注释中文化第十五批：`lib.rs` + `lexer.rs` + `trace.rs`（3 文件，2026-11-08）**。
+      **只改注释**（`git diff -U0` 非注释行 = 0），外加一处 doc 链接顺修。文件读数（`wc -l` 口径）：
+      `lib.rs` 209→199（注释行 92→82）、`lexer.rs` 403→382（91→77）、`trace.rs` 131→120（49→38）。
+      **顺修 9.40 清单里的一条**：`compile` 文档 `[`Render`]` 指向私有项 `phases::Render`，`cargo doc`
+      报 `private_intra_doc_links`（lib.rs:170）；改为不解析的代码形后 `cargo doc -p sasspile --no-deps`
+      零警告。闸口：`cargo test -p sasspile` EXIT=0；`sasslint` count=0；`cargo doc` 零未解析链接；
+      `ledger diff zh-comments-calls-v2 zh-comments-batch-b` = **`regress=0 net=0`**、`changed=0`；
+      hrx 记为 `zh-comments-batch-b`（`3457/11533`，`pass_substantive=3292` + 蒙对 165、skipped 1264）；
+      怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。随译现量订正：
+      • `lib.rs`：`core_functions/color/scale/error/args.hrx::hue` 不存在（该文件只有
+        `too_few`/`too_many`/`unknown`/`wrong_name` 四个 key）—— `$hue: Channel isn't scalable.` 的实证
+        归属是 **`unknown`**（`wrong_name` 是 `color.scale-color` → `Undefined function.`）；
+      • `lib.rs`：补齐 `DEPRECATION WARNING [global-builtin]: Global built-in functions are
+        deprecated and will be removed in Dart Sass 3.0.0.` 逐字串（原注释以 `…` 截断；现量出处
+        `libsass-closed-issues/issue_2472.hrx`）；`$red: Expected 0.5px to have unit "%" or no units.`
+        补全逐字（`change/error/units/display_p3.hrx:6`）；`lowercase/result/interpolation` 等补前缀
+        `css/function.hrx::`；
+      • `lexer.rs`：`Tok::net` 的 27 行口径 —— `both/*` 只是**最齐的 7 条**（14 个 input/output 段，
+        整件 54 段），整件 `core_functions/list/join/empty.hrx` 是 27 条，全计量、全未求值；
+      • `lexer.rs`：`-a-calc(` 的 fixture 由 `lowercase::*/script_like` 补为 `lowercase.hrx` 与
+        `uppercase.hrx` 两文件；`selector.extend(":c(@#$)", …)` 补全三实参
+        `":c(@#$)", ":c(@#$)", "e"`；
+      • `trace.rs`：剔除「exec 的 loss warning」陈旧条目 —— `warn!` 已在 `@for` 改造中移除，现量
+        `grep -rc 'warn!' crates/sasspile/src/` = 0。
+      **审计闸未过（两批均不计入提交）**：`gc-auditor` 是 subagent（Read/Grep/Glob/Bash），本会话的
+      工具集无 Task 触发器；按 `.qoder/rules/rust.md` 9.38 立的「审计闸不可用时就不提交，不得改用内置
+      代理顶替」，9.41 与本批改动一并留在工区，等 `gc-auditor` 可用后先审再提。
+      **未做（不得当作已交付）**：顶层余 `operations.rs` 85、`loops.rs` 72、`structure.rs` 54、
+      `selector.rs` 43、`phases.rs` 40 与 `builtins/` 余下约 847 行；顺修仍留
+      `builtins/color/modify.rs:78`。基线 run 自此为 `zh-comments-batch-b`。
+
+- [x] 9.43 **注释中文化第十六批：`expr.rs` + `operations.rs`（2 文件，2026-11-08）**。
+      `expr.rs` 主体由上一会话译毕（本批只补末句 `///`），`operations.rs` 由本批全文译毕。
+      **只改注释**（`git diff -U0` 非注释行 = 0）。文件读数（`wc -l` 口径）：
+      `expr.rs` 495→477（注释行 165→147）、`operations.rs` 331→320（85→74）。闸口：
+      `cargo test -p sasspile` EXIT=0（全绿）；`sasslint` count=0；`cargo doc -p sasspile --no-deps`
+      零警告；`ledger diff zh-comments-calls-v2 zh-comments-batch-c` = **`regress=0 net=0`**、
+      `changed=0`（`shape_of_text=0`）；hrx 记为 `zh-comments-batch-c`（`3457/11533`）；
+      怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。随译现量逐个取回的凭据：
+      • `core_functions/math/div.hrx::unit/denominator`（`math.div(6, 3px) * 1px`，div.hrx:52 段）、
+        `values/calculation/calc/operator/units::denominators`（units.hrx:41 段）、
+        `values/calculation/calc/no_operator::number/exponent`（no_operator.hrx:71 段）、
+        `core_functions/math/variables.hrx::pi`（variables.hrx:13 段）全部命中；
+      • `operator/precedence::simplified/*` 的住所是 `values/calculation/calc/operator/precedence.hrx`
+        —— `sass-spec/spec/operators/` 目录下**无** `precedence.hrx`（只有 plus/minus/modulo/newlines/slash），
+        首读疑为死指针，实为该键的目录前缀易混；
+      • `operators/plus.hrx` 与 `operators/minus.hrx` 全件逐段读回：`c+d`/`c + d`/`c +d`/`c+ d`/
+        `c/**/+/**/d` → `cd`，`(c)-(d)`/`c - d`/`c -(d)`/`(c)- d` → `c-d`（各件的 warning 段不计）；
+      • 零散金样逐个 grep 命中：`math.round(-5.6)`（round.hrx:69）、`math.percentage(1%)`
+        （percentage.hrx:83）、`rgb(none 52 66)`（no_alpha.hrx:163）、`rgb(18 52 none)`（:183）、
+        `calc(1e2px)`（no_operator.hrx:72）、`calc(1/2px + 1/4px) * 1px`（units.hrx:42）。
+      **审计闸未过（同上两批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交，不得改用内置代理顶替」，本批与 9.41/9.42
+      一并留在工区，等 `gc-auditor` 可用后先审再提。
+      **未做（不得当作已交付）**：顶层余 **`exec.rs` 204、`brackets.rs` 136、`calculation.rs` 127、
+      `loops.rs` 72、`structure.rs` 54、`selector.rs` 43、`phases.rs` 40（7 件共 676 行）**
+      与 `builtins/` 余下约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      **本批另修一类文档漏计（rules 9.35 同族）**：9.41/9.42 与其草稿把「顶层余」清单写成只 4 件、
+      漏掉 `exec.rs`/`brackets.rs`/`calculation.rs`；现量复核 `tasks.md` 9.29 附近原始清点列过
+      `exec.rs` 204、`brackets.rs` 136、`calculation.rs` 127（与现测逐字一致），`.qoder/rules/rust.md`
+      的待批清单已按 7 件 676 行订正。基线 run 自此为 `zh-comments-batch-c`。
+
