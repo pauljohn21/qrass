@@ -3178,4 +3178,35 @@
       `selector.rs` 43、`phases.rs` 40（5 件共 400 行）**与 `builtins/` 余下约 847 行；
       顺修仍留 `builtins/color/modify.rs:78`。基线 run 自此为 `zh-comments-batch-d`。
 
+- [x] 9.45 **注释中文化第十八批：`brackets.rs` + `structure.rs`（2 文件，2026-11-08）**。
+      `brackets.rs` 全文译毕（含 `CALCULATION_NAMES` 上一段遗留的英文段落：行族清单与九个数字名），
+      `structure.rs` 全文译毕（含 `finish` 里一处行内英文注释）。**只改注释**（`git diff -U0`
+      非注释行 = 0，逐行核过）。文件读数（`wc -l` 口径）：`brackets.rs` 460→435（注释行 136→111）、
+      `structure.rs` 161→156（54→49）。
+      闸口：`cargo test -p sasspile` EXIT=0（全绿）；`sasslint` count=0；`cargo doc -p sasspile --no-deps`
+      零警告；`ledger diff zh-comments-batch-d zh-comments-batch-e` = **`regress=0 net=0`**，
+      `ledger changed …` = **`changed=0`**；hrx 记为 `zh-comments-batch-e`（`3457/11533`，
+      实质 3292 + 空期望 165，skipped 1264，与批 D 逐例相同）；怪字扫描
+      （拄/殫/一遗/癲/U+FFFD）= 0。
+      随译现量逐个取回的凭据：`values/calculation/{acos,asin,atan,atan2}.hrx::simplification`
+      四行逐字命中（`acos(3px - 1px + var(--c))` → `acos(2px + var(--c))`、
+      `atan2(3px - 1px + var(--c), -7px / 4em * 1em)` → `atan2(2px + var(--c), -1.75px)`，
+      `hypot(1px + 2px - var(--c), -7px + 4em)` 输出 `hypot(3px - var(--c), -7px + 4em)`、
+      `log(3px - 1px + var(--c), var(--e))` 输出 `log(2px + var(--c), var(--e))`）；
+      `css/functions/special/prefixed/lowercase::calc/script_like`（:21）存在；
+      `crate::unit::conversion` 存在（`unit.rs:69`）；
+      `core_functions/math/comparable.hrx::unit/to_different`（:45）存在；`tasks.md` 1.7b 的
+      「三个前置」逐条在库（前置 2 = 用户函数必须赢过全局内置）。**读数复核**：
+      `ledger diff shell-arity abs-sign-rem` 重跑 = `regress=0 net=5`，五条 NET 行与注释所写
+      逐字相同（`sign::negative_zero`、`sign::simplification`、`sign::zero`、`abs::simplification`、
+      `rem::simplification`）；`rem::negative_zero` 在 `number-shells` 的 got 现量取回，
+      正是注释所写的逐字 `math.div(1, rem(-7, 7))`。
+      **审计闸未过（同上四批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交，不得改用内置代理顶替」，本批与
+      9.41/9.42/9.43/9.44 同处「已提交、待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：顶层余 **`calculation.rs` 127、`selector.rs` 43、`phases.rs` 40
+      （3 件共 210 行）**与 `builtins/` 余下约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-e`。
+
 
