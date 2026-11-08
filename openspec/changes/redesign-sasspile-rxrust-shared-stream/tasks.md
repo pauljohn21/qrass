@@ -3424,4 +3424,39 @@
       顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-k`。
 
+- [x] 9.53 **注释中文化第二十六批：`crates/sasspile/tests/` 基础件七件（7 文件，2026-11-08）**。
+      `callables.rs`（可调用声明处不执行：`@mixin`/`@function` 体不求值直到调用，旧误报 29 例
+      `Undefined variable`；纯 CSS at-rule `@function --a()` 的边界；嵌套 `@mixin` 不分裂外层规则）、
+      `hue_periodicity.rs`（hwb 分支 hue 越过整圈：三行以 `aqua` 答 540、无行练到 hwb 两 hue 之和、
+      有意不复制 `color_adjust.rs` 的绝对值、两分支相互不一致才转红）、`interleaved.rs`（文档序契约：
+      声明先于嵌套块沉淀、块关闭时沉淀其所持有；次序由 stream 串行产生而非排序恢复）、
+      `multicast.rs`（`publish().ref_count()` 同步源下先订阅分支抽干共享上游、事件与最终状态配对、
+      `Shared::subject` 总线一个推多个收）、`named_args.rs`（命名实参是标签非引用，旧误报 1,611 例；
+      `hwb` 签名后对照 `output.css` 校验、map 字面量参数、命名空间被调者、未绑定引用仍中止 stream）、
+      `pairing.rs`（配对不能携带按位状态、状态即 `scan` 发出的累积项、同步内层摊平已有序）、
+      `selector.rs`（结构化头部：`&` 的三种贴附、伪类函数实参内 `&` 原位拼接、`#{&}` 即父、
+      静默注释的换行是空白）逐件译毕模块 doc、每个测试的 doc 与内联注释。**逐字凭据类不译**：
+      case key（`css/selector/parent.hrx` 的 `alone/first`/`compound`/`suffix`）、sass-spec 文件名、
+      代码标识符与 gold 值（`hsla(180, 33.3333333333%, 45%, 0.4)`、`Word(" ")`、`60 * ((171 - 205) / 68 + 4)`）
+      一律保留原文；英文残留扫描仅命中 1 行 case key 片段（`// `suffix``），无英文散文段落。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，7/7 逐字一致（差异仅注释行数带出的空行）。
+      文件读数（`wc -l` 口径）：`callables.rs` 60→56（注释 17→13）、`hue_periodicity.rs` 46→42
+      （25→21）、`interleaved.rs` 44→44（8→8）、`multicast.rs` 54→54（10→10）、`named_args.rs`
+      55→53（21→19）、`pairing.rs` 40→39（9→8）、`selector.rs` 75→74（17→16）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint lint crates/sasspile/src`
+      EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0 零警告；`cargo fmt --all -- --check` EXIT=0；
+      `HRX_RUN=zh-comments-batch-l cargo test -p sasspile --test hrx` 记为 `zh-comments-batch-l`
+      （`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与既有各批逐例相同）；
+      `ledger diff zh-comments-batch-k zh-comments-batch-l` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076 fails_b=8076）；怪字扫描
+      （拄/殫/一遗/癲）= 0（阳性对照各读 1）。
+      **审计闸未过（同上十二批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.52 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 7 件未译（现量：全量 43 件、
+      已译 36 件，余 `calibrate_fit.rs`/`channel.rs`/`color.rs`/`fallback.rs`/`hrx.rs`/`hwb.rs`/
+      `loops.rs`）；`crates/sasspile/src/builtins/` 仍余约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-l`。
+
 
