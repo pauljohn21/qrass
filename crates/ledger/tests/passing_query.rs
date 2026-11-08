@@ -1,16 +1,15 @@
-//! The “what passes today” reading. Needed because the ledger stores **only failures**, so a run's
-//! passing set has no row to list — and a behaviour change authored without that list can destroy a case
-//! that already passes (the exact shape of `no_operator::function/css`, where the corpus itself wants the
-//! untouched `calc(c())` shell).
+//! 「今天哪些过了」的读数。它必须存在，因为本库**只存失败**：一个 run 的通过集合没有行可列——而
+//! 在没有那份清单的情况下写出的行为变更，可能毁掉一个本已通过的对（`no_operator::function/css`
+//! 正是这个形状：语料自己要的是原样的 `calc(c())` 壳）。
 //!
-//! Pinned here, in the order each one would have fooled me:
-//! • a **positive control** — a case known to pass must be listed and a known failure must be absent; a
-//!   query that returns nothing for both reads as a clean slate (the current implementation excludes the
-//!   `0` sentinel an unknown key gets written with, so a `0` id would surface as an empty key here);
-//! • the **scope trap** — a PASS row registers its key but grows no row of its own, so a case another run
-//!   measured (and this run never saw) is indistinguishable from a passing one. That is why the command
-//!   takes a required cluster prefix instead of listing the whole ledger; the test states the trap in the
-//!   only form the record itself allows (the corpus, not the ledger, decides whether a run covered it).
+//! 在这里钉住，按每一条当初会骗到我的顺序：
+//! • **阳性对照** —— 一个已知通过的用例必须被列出、一个已知失败的必须缺席；两样都返回空的查询
+//!   读作「一切正常」（现实现排除了未知 key 被写入的 `0` 哨兵，所以一个 `0` id 在这里会显示为一个
+//!   空 key）；
+//! • **作用域陷阱** —— 一条 PASS 行只登记它的 key、不新增自己的行，所以一个被别的 run 量过（而本
+//!   run 从没见过）的用例，与一个通过的用例无从区分。这就是为什么命令要求一个具名簇前缀而不是
+//!   列出整个库；测试以记录本身唯一允许的形式陈述这个陷阱（是不是一个 run 覆盖了它，由语料说了
+//!   算，不是本库）。
 
 use ledger::{passing, record};
 use rusqlite::Connection;
@@ -43,8 +42,8 @@ fn a_currently_passing_case_is_listed_and_a_failing_one_is_not() {
         vec!["calc/cluster::already_right".to_string()],
         "the passing case must be listed and the failing one must not: {listed:?}"
     );
-    // The positive control's other half: a name nothing ever recorded yields nothing, so the single hit
-    // above cannot be an “everything matches” artefact.
+    // 阳性对照的另一半：一个谁都没记录过的名字必须什么也不返回，所以上面那一命中不可能是
+    // 「什么都能匹配」的假象。
     assert!(
         passing(&conn, "base", "calc/nothing_here")
             .expect("query")
@@ -57,8 +56,8 @@ fn a_currently_passing_case_is_listed_and_a_failing_one_is_not() {
 #[test]
 fn a_key_recorded_by_another_run_reads_as_passing_here() {
     let db = scratch_db("scope");
-    // One harness measured both cases; the later one lost `operators` from its directory list (0.6 is
-    // exactly this history: the run before it never scanned the cluster).
+    // 一个 harness 量了两个用例；后一个从它的目录列表里丢了 `operators`（0.6 正是这段历史：
+    // 它前一个 run 从没扫过这个簇）。
     record(
         "wide",
         &db,

@@ -1,9 +1,9 @@
-//! The positive control for `ledger shift`: the classifier has to tell "closer" from "farther" from
-//! "changed kind", and a reading that cannot be shown to move in both directions is not a reading.
+//! `ledger shift` 的阳性对照：分类器必须能分辨「更近」「更远」与「换了种类」，而一个无法被证明会
+//! 双向移动的读数不算读数。
 //!
-//! Without this, a batch could describe its own `changed` rows as progress on the strength of a tally that
-//! silently counts a row going the wrong way — the mistake `tasks.md` 9.11 records (`changed=816` **不得说成
-//! 进步**), and the reason the split exists as a command instead of as a habit of squinting at two listings.
+//! 没有它，一批可以凭一份统计把自己 `changed` 里的行说成进步，而那统计悄悄数着反向行走的行——
+//! 那正是 `tasks.md` 9.11 记下的错误（`changed=816` **不得说成进步**），也是这个拆分作为一条命令
+//! 存在（而不是作为眯眼比对两份清单的习惯）的理由。
 
 #[path = "../src/shift_impl.rs"]
 mod shift_impl;
@@ -52,13 +52,13 @@ fn a_smaller_distance_counts_as_closer_and_a_larger_one_as_farther() {
         (1, 1, 0, 0, 0),
         "got {tally:?}"
     );
-    // The row going the wrong way is named, not just counted.
+    // 反向行走的那行被点名，而不只是被计数。
     assert_eq!(tally.farther_keys, ["to_space/srgb/lab::gray"]);
 }
 
 #[test]
 fn a_row_that_changed_kind_is_never_a_distance() {
-    // An honest verbatim that became a computed value: same key, different *kind* of answer.
+    // 一个诚实的逐字行变成了算出的值：同一 key，*种类*不同的答案。
     let verbatim_to_value = line(
         "to_space/xyz_d50/srgb::missing/red",
         "a { b: color.to-space(color(xyz-d50 none 0.2 0.3), srgb); }",
@@ -70,8 +70,7 @@ fn a_row_that_changed_kind_is_never_a_distance() {
         Verdict::Shape(Reason::ShapeOfText),
         "a verbatim that became a value is not closer"
     );
-    // A row whose expectation is an error message has no distance to travel, and the reason is its own
-    // bucket — an answer that *became* an error must never be counted as a row that got closer.
+    // 期望是错误消息的行没有距离可走，其理由有自己的桶——一个*变成*错误的答案绝不得被数成更近的一行。
     let expects_error = "to_gamut/space::error/unknown | a: expected error \"Unknown gamut method.\", \
                         got \"a { b: 1; }\" | b: expected error \"Unknown gamut method.\", got \"a { b: 2; }\"";
     assert_eq!(
@@ -100,13 +99,12 @@ fn the_mask_keeps_the_text_and_forgets_only_the_digits() {
         skeleton("color(xyz-d50 0.5103421984 0.5014942183)"),
         "color(xyz-d# # #)"
     );
-    // An exponent stays inside one number, so `1e-5` and `2e-5` mask alike and align positionally.
+    // 指数留在同一个数里，所以 `1e-5` 与 `2e-5` 一样掩掉、按位置对齐。
     assert_eq!(skeleton("calc(1e-5px) calc(2e-5px)"), "calc(#px) calc(#px)");
-    // A sign is part of the number, so a value that flipped its sign is a **big distance**, not a change
-    // of kind — the rules call a wrong sign a wrong value, and a wrong value is something to measure.
+    // 符号是数的一部分，所以一个翻符号的值是**大距离**，不是种类变化——规则把错符号叫错值，而错值就是可量的东西。
     assert_eq!(numbers("0.1 -0.2 1e-3"), vec![0.1, -0.2, 0.001]);
     assert_eq!(skeleton("-0.2"), skeleton("0.2"));
-    // `none` in the expectation and a digit in the answer is a kind difference, and masks apart.
+    // 期望里的 `none` 与答案里的数字是种类差异，掩码也把它们分开。
     assert_ne!(
         skeleton("color(xyz none 0.2 0.3)"),
         skeleton("color(xyz 0.1 0.2 0.3)")

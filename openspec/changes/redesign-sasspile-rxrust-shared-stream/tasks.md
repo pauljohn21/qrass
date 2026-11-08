@@ -3560,4 +3560,35 @@
       `ledger/src`），是中文化的下一批候选；`sasspile` 中文化维持清零。
       基线 run 自此为 `zh-comments-batch-p`。
 
+- [x] 9.57 **注释中文化第二十九批：`crates/ledger/tests/` 七件（7 文件，2026-11-08）**。
+      候选来自 9.56「未做」条：`ledger/tests` 与 `sasslint/tests` 是全仓中文化最后两个全英文目录。
+      口径沿用历史各批：散文注释（`//!`/`///`/行内 `//`）中文化；代码标识符、函数名、`expect`/`assert`
+      字符串消息、夹具 key（如 `calc/cluster::a`）、gold 值、CLI 语法（`--count`/`--db=`）一律保留英文原文。
+      七件：`trace_span`（trace 桥必须真导出 span 且普通判定行仍打印）、`reimport`（同 run 重导入整体
+      替换判定，残留 `run_fail` 会把修好的用例变幻影 REGRESS）、`passing_query`（「今天哪些过了」的
+      读数 + 作用域陷阱阳性对照）、`changed_details`（两 run 同失败但细节异形的读数，附 fails 计数守卫）、
+      `scoped_diff`（逐簇 A/B：零匹配作用域同样报 `regress=0 net=0` 的陷阱）、`shift_split`（近/远/
+      种类三分类的阳性对照，`changed=816` 不得说成进步）、`failures_query`（`LIKE` 过滤、`--count` 切分、
+      多 needle AND 而非手工拼接）。
+      **只改注释**：中文断行使各件 `//!` 块行数减少，故 9.56 口径的「逐字比对」需升级——
+      `/tmp/strip_comments` 剥离后**去空行**逐字比对 7/7 与 HEAD 全等（代码零改动坐实）；行数（`wc -l`）：
+      trace_span 56→55、reimport 75→74、passing_query 86→85、changed_details 97→96、scoped_diff
+      113→112、shift_split 114→112、failures_query 166→164；`git diff --stat` 83 insertions(+)/92
+      deletions(-)。
+      闸口：`cargo test --workspace` 全绿（ledger 10 条 ok；`--features trace` 补跑 trace_span 1 条 ok）；
+      `cargo fmt --all -- --check` EXIT=0；`cargo doc --workspace --no-deps --document-private-items`
+      警告 0；`sasslint lint crates/sasspile/src` count=0；`HRX_RUN=zh-comments-batch-q cargo test -p
+      sasspile --test hrx` 记为 `zh-comments-batch-q`（`3457/11533`，与 batch-p 逐例相同）；
+      `ledger diff zh-comments-batch-p zh-comments-batch-q` = **`regress=0 net=0`**（fails 8076/8076）；
+      `ledger changed` = **`changed=0`**；怪字扫描（`拄/殫/一遗/癲`，crates/ 全域）= 0（阳性对照
+      4 读 4）；U+FFFD = 0（perl 扫描，阳性对照命中）；英文扫描（7 件注释行无汉字且含 3+ 连续字母）= 0。
+      **审计闸未过（同上十六批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.56 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后执行候选」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasslint/tests/` 4 件（`trace_span`/`cli_directory`/
+      `defence_fitness`/`lint`，702 行）仍全英文，是中文化最后的候选；`sasspile`、`ledger` 中文化
+      自此维持清零（src 与 tests 均完）。
+      基线 run 自此为 `zh-comments-batch-q`。
+
 

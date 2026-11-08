@@ -1,10 +1,9 @@
-//! Scoped A/B. The plan's regress policy is per cluster (`tasks.md`: 每簇维护自己基线), so `diff_runs`
-//! must answer *that* question — otherwise every cluster-level gate gets rebuilt in the shell with
-//! `sort | comm` over exported key lists, which is the `reports/hrx-*.tsv` sprawl this crate replaced,
-//! just in `/tmp`.
+//! 带作用域的 A/B。计划的回归策略是逐簇的（`tasks.md`：每簇维护自己基线），所以 `diff_runs` 必须
+//! 回答*那个*问题——否则每一道簇级闸都会在 shell 里用导出 key 列表上的 `sort | comm` 重建，那正是
+//! 本 crate 取代的 `reports/hrx-*.tsv` 蔓延，只不过换到 `/tmp` 里。
 //!
-//! The trap pinned first: a scope that matches no key reports `regress=0 net=0` too. Zero regressions is
-//! only a verdict if the scope actually contained cases, which is what `fails_a`/`fails_b` are for.
+//! 先钉住的陷阱：一个匹配不到任何 key 的作用域同样报 `regress=0 net=0`。零回归只有在作用域真的含
+//! 有用例时才是判定——`fails_a`/`fails_b` 就是为此而在。
 
 use ledger::{diff_runs, record};
 use rusqlite::Connection;
@@ -24,9 +23,9 @@ fn a_scope_restricts_the_verdict_to_one_cluster() {
         "base",
         &db,
         &[
-            // the cluster this increment owns: one case fails before…
+            // 本增量所属的那一簇：一个用例此前失败……
             "FAIL\tvalues/calculation/calc/no_operator::number/integer\tgot \"calc(1px)\" want \"1px\"".to_string(),
-            // …and another one in the same cluster that is untouched by it.
+            // ……以及同簇里另一个不受它影响的。
             "FAIL\tvalues/calculation/calc/no_operator::operator\tgot \"a\" want \"b\"".to_string(),
         ],
     )
@@ -35,9 +34,9 @@ fn a_scope_restricts_the_verdict_to_one_cluster() {
         "after",
         &db,
         &[
-            // the fixed case is simply absent from the failure set
+            // 修好的用例只是从失败集里消失
             "FAIL\tvalues/calculation/calc/no_operator::operator\tgot \"a\" want \"b\"".to_string(),
-            // a regression somewhere else must NOT pollute this cluster's verdict
+            // 别处的回归不得污染本簇的判定
             "PASS\tvalues/calculation/calc/no_operator::number/integer".to_string(),
             "FAIL\tcore_functions/math/div::unit\tsomething broke here".to_string(),
         ],
@@ -102,7 +101,7 @@ fn an_unmatched_scope_is_not_mistaken_for_a_clean_verdict() {
         "zero counts inside the scope are the only signal that this reading measured nothing"
     );
 
-    // Positive control: the same runs, with the scope the keys actually live in, do see the case.
+    // 阳性对照：同样的两次运行，用 key 真正所在的作用域，就看得见那个用例。
     let seen = diff_runs(&conn, "base", "after", "sass/one").expect("query");
     assert_eq!(
         (seen.fails_a, seen.fails_b),

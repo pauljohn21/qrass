@@ -19,7 +19,8 @@ alwaysApply: true
   9.48~9.54 转入 `crates/sasspile/tests/`，43 件全部中文化（首批十件 + `math_*.rs` 四件 +
   `color_*` 十五件 + 基础件十四件）；9.55 核验 `builtins/` 收尾并顺修域内 5 条断链，9.56
   清全 workspace 21 条 rustdoc 告警（抬层域相对链接 / 私有项不可链改纯文本 / 尖括号参数包
-  反引号），**全 workspace `cargo doc`（默认与 strict）自此零告警**；
+  反引号），**全 workspace `cargo doc`（默认与 strict）自此零告警**；9.57 中文化
+  `crates/ledger/tests/` 七件（散文注释译中文，代码标识符/字符串/夹具 key/gold 保留英文原文）；
   （此前 9.41/9.42 与 9.43 草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
   `calculation.rs` 三件 —— 现量复核：`tasks.md` 9.29 附近的原始清点列过 `exec.rs` 204、`brackets.rs` 136、
   `calculation.rs` 127，与现测逐字一致，已在 9.43 条订正；9.45 完成后余 3 文件 210 行经逐件现量复核，

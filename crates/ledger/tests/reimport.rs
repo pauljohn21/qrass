@@ -1,6 +1,5 @@
-//! Re-importing a run must replace its verdict wholesale. Only failures are stored, so a stale
-//! `run_fail` row left over from an earlier snapshot turns a fixed case into a phantom REGRESS in
-//! `ledger diff` — which would make the project's main safety net lie.
+//! 重新导入一个 run 必须整体替换它的判定。库只存失败，所以上一份快照残留的 `run_fail` 行会把一个
+//! 已修好的用例变成 `ledger diff` 里的幻影 REGRESS——那将让本项目的主安全网说谎。
 
 use std::path::PathBuf;
 
@@ -40,7 +39,7 @@ fn a_case_that_now_passes_stops_being_reported_as_failed() {
     assert_eq!(fails(&conn, "r1"), vec!["fixed".to_string()]);
     drop(conn);
 
-    // Same run name, second snapshot: the case is fixed, so nothing may remain failed.
+    // 同一 run 名，第二份快照：该用例已修好，所以不得有任何失败残留。
     record(
         "r1",
         &db,

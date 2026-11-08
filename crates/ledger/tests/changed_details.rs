@@ -1,8 +1,7 @@
-//! The reading `ledger diff` structurally cannot give: a case that fails in **both** runs, but with a
-//! different detail. Neither pass count nor `regress`/`net` moves for it, yet it is where an honest
-//! verbatim row becomes a wrong value, or a wrong value becomes an invented error — the exact blind spot
-//! that let one batch of this project add 6 invalid errors while reporting `regress=0`. Pinned here so the
-//! gap is closed by a command, not by remembering to eyeball two listings.
+//! `ledger diff` 在结构上给不出的读数：一个在**两个** run 里都失败、但细节不同的用例。通过数、
+//! `regress`/`net` 都不为它动，而它正是「一个诚实的逐字行变成错值、或一个错值变成发明的错误」
+//! 的所在地——本项目曾有一批在这样的盲区里加了 6 条无效错误还报着 `regress=0`。在这里钉住，
+//! 好让缺口由一个命令闭合，而不是靠记着去目测两份清单。
 
 use ledger::record;
 use rusqlite::Connection;
@@ -31,11 +30,11 @@ fn only_a_case_failing_both_runs_with_a_different_detail_is_listed() {
         "b",
         &db,
         &[
-            // detail changed: this is the row the reading must catch.
+            // 细节变了：这正是该读数必须抓住的那行。
             "FAIL\tabs::simplification\tgot \"abs(2px)\" want \"2px\"".to_string(),
-            // unchanged detail: an honest verbatim that stayed honest.
+            // 细节未变：一个保持诚实的逐字行。
             "FAIL\tabs::overridden\tgot \"abs(-2)\" want \"-2\"".to_string(),
-            // newly failing: that is `net`, and it is not this reading's business.
+            // 新失败的：那是 `net`，不属本读数的事。
             "FAIL\tabs::positive\tunexpected error \"not a number\"".to_string(),
         ],
     )
@@ -49,20 +48,20 @@ fn only_a_case_failing_both_runs_with_a_different_detail_is_listed() {
         "got {:?}",
         changed.rows
     );
-    // Both sides' text is in the line, so the reader can judge the *kind* of shape change.
+    // 行里带着两侧的文本，读者才得以判断形状变化的*种类*。
     assert!(
         changed.rows[0].contains("abs(1px + 2px)") && changed.rows[0].contains("abs(2px)"),
         "got {}",
         changed.rows[0]
     );
-    // The scope totals travel with the answer: they are what make a `changed = 0` mean something.
+    // 作用域总数随答案一起给：正是它们让 `changed = 0` 有意义。
     assert_eq!(
         (changed.fails_a, changed.fails_b),
         (2, 3),
         "got {changed:?}"
     );
 
-    // Scoped: the same answer inside the cluster, nothing outside it.
+    // 带作用域：同一答案只含簇内，簇外为零。
     assert_eq!(
         ledger::changed_details(&conn, "a", "b", "abs::")
             .expect("scoped")
@@ -77,9 +76,9 @@ fn only_a_case_failing_both_runs_with_a_different_detail_is_listed() {
             .len(),
         0
     );
-    // The guard the counts exist for: a scope where both runs fail **identically** reports zero changes
-    // while still showing rows compared — the reading that distinguishes "no shape change" from "this
-    // scope held nothing to look at", which is how a clean `regress=0` was once misread.
+    // 这些计数存在的理由所在：一个两次运行都*完全相同*失败的作用域报告零变化，而仍显示比较过的行数
+    // ——这正是区分「没有形状变化」与「这片作用域本就无可看」的读数，也是一次干净的 `regress=0` 曾
+    // 被误读的方式。
     let unchanged =
         ledger::changed_details(&conn, "a", "b", "abs::overridden").expect("same-detail scope");
     assert!(unchanged.rows.is_empty(), "got {:?}", unchanged.rows);
@@ -88,8 +87,8 @@ fn only_a_case_failing_both_runs_with_a_different_detail_is_listed() {
         (1, 1),
         "a matched scope must report its own totals, not silence"
     );
-    // The positive control for the empty answer: comparing a run with itself must be zero because the
-    // details are identical, not because the query found nothing to look at.
+    // 空答案的阳性对照：拿一个 run 与它自己比较必须为零——因为细节相同，而不是因为查询没找到东西
+    // 可看。
     let self_pair = ledger::changed_details(&conn, "b", "b", "").expect("self-pair");
     assert!(self_pair.rows.is_empty(), "got {:?}", self_pair.rows);
     assert_eq!((self_pair.fails_a, self_pair.fails_b), (3, 3));

@@ -1,10 +1,9 @@
-//! The `trace` feature must actually produce a trace, or it is a Cargo flag and nothing more.
+//! `trace` feature 必须真的产出一条 trace，否则它只是一个 Cargo flag 而已。
 //!
-//! This matters more than the average feature test because the failure mode is silent in both
-//! directions: a bridge that never exports leaves the operator with no output and no error, and a bridge
-//! that replaces the ordinary subscriber would hide the reading (`NET`/`REGRESS`/`AB diff`) that the tool
-//! exists to produce. So the assertion is both halves: a span **was** exported, and the plain verdict
-//! line **still** printed.
+//! 它比一般的 feature 测试更要紧，因为失败模式在两个方向上都是静默的：一个从不导出的桥让操作者
+//! 既没有输出也没有错误，而一个替换掉普通 subscriber 的桥会藏起本工具存在的理由——那些读数
+//! （`NET`/`REGRESS`/`AB diff`）。所以断言是两半都要：一个 span **已经**被导出，而普通的判定行
+//! **仍然**打印。
 
 #![cfg(feature = "trace")]
 
