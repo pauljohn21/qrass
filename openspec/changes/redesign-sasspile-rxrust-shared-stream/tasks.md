@@ -3322,4 +3322,37 @@
       `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-h`。
 
+- [x] 9.50 **注释中文化第二十三批：`crates/sasspile/tests/color_*` 六件（6 文件，2026-11-08）**。
+      `color_srgb_segment.rs`（近黑 `12.92` 分段臂的删臂 A/B 读数与不钉阈值）、`color_space_round_trip.rs`
+      （oklab↔oklch 单表互逆构造不变量与不钉 oklab↔XYZ 绝对值）、`color_display_p3.rs`（primaries 仅覆盖
+      可分辨两项与七项保留发表数字）、`color_prophoto.rs`（primaries 拟合自携 D65 白点、不二次色适应）、
+      `color_rec2020.rs`（纯有符号 `2.4` 幂、无偏移无分段、表行和不变量）、`color_a98.rs`（`563/256`
+      伽马方向与表按散布保留）逐件译毕模块 doc、每个 `#[tokio::test]` 的 doc 与内联注释。**逐字凭据类不译**：
+      oracle 消息、sass-spec case key、代码标识符与 gold 值一律保留原文（如 `color(xyz 0.9504559271 1
+      1.0890577508)`、`lab(100% -0.0000000002 -0.0000000025)`、`display-p3-two-entries`）；英文
+      残留扫描（注释行无中文且含 ≥3 字母英文词）6/6 命中 0，带纯英文行阳性对照读 1。
+      **只改注释**：剥离注释并剔空行后逐文件与 HEAD 比对，6/6 逐字一致（工具经加 stdin 支持与规范化
+      重编译，并按阳性/阴性对照自验；代码字节数非零，无空输出假阳性）。
+      **新译断言现量复核**：`color_display_p3.rs` 的「每个 case 改动前红、改动后绿」逐 key 现量证实
+      （旧 run `missing-rectangular-v2` 对 `xyz/display_p3::{white,middle}`、`display_p3_linear/xyz::
+      {white,gray,middle}`、`display_p3/xyz::middle` 六 key 全读 1 红；`display-p3-two-entries` 与
+      `zh-comments-batch-i` 同六 key 全读 0 绿）。
+      文件读数（`wc -l` 口径）：`color_srgb_segment.rs` 50→45（注释行 25→20）、`color_space_round_trip.rs`
+      44→41（19→16）、`color_display_p3.rs` 81→74（27→20）、`color_prophoto.rs` 52→47（25→20）、
+      `color_rec2020.rs` 68→61（33→26）、`color_a98.rs` 61→56（26→21）。
+      闸口：`cargo test -p sasspile` EXIT=0（42 套件全绿、195 用例 0 败）；`sasslint`
+      `lint crates/sasspile/src` EXIT=0 count=0；`cargo doc -p sasspile --no-deps` EXIT=0 零警告；
+      `ledger diff zh-comments-batch-h zh-comments-batch-i` = **`regress=0 net=0`**（fails_a=8076
+      fails_b=8076），`ledger changed …` = **`changed=0`**（fails_a=8076 fails_b=8076）；hrx 记为
+      `zh-comments-batch-i`（`3457/11533`，实质 3292 + 空期望 165，skipped 1264，与前七批逐例
+      相同）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0（阳性对照各读 1）。
+      **审计闸未过（同上九批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.49 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/tests/` 自此余 23 件未译（现量：全量 43 件、
+      已译 20 件，余 `color_*` 九件与 `hrx.rs` 等基础件）；`crates/sasspile/src/builtins/` 仍余约
+      847 行；顺修仍留 `builtins/color/modify.rs:78`。
+      基线 run 自此为 `zh-comments-batch-i`。
+
 
