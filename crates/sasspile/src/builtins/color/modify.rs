@@ -5,7 +5,7 @@
 //! （`change/rgb.hrx::{red,green}/out_of_range`）。没有参数名，这两个调用到函数体看见时已经无从区分，
 //! 这就是 [`Given`] 存在的原因。
 //!
-//! 一个 [`route`] 服务这三个，按 [`Writing`] 分流——置值、按偏移移动、或朝界限移动——并按 [`Space`] 分流
+//! 一个 [`route`] 服务这三个，按 [`Writing`] 分流——置值、按偏移移动、或朝界限移动——并按 [`super::write::Space`] 分流
 //! （字节、hsl 轴、hwb 轴）。每一个这样的分叉都是一条语料律的住所，所以代码说出是哪一行定的它，而一个本族
 //! 用不上的实参用归档自己的消息作答，不是沉默。各自目录
 //! `core_functions/color/{change,adjust,scale}/error/` 下的文件并不齐（现量：change 有 args/bounds/incompatible_channel/
@@ -20,7 +20,7 @@ use crate::value::Value;
 /// `color.change(black, $green: 255)` → `lime` 与 `color.change(black, $red: 500)` →
 /// `hsl(0, 5000%, 98.0392156863%)` —— 出自 `core_functions/color/change/rgb.hrx` 的四行。前三行保住这个颜色
 /// 自己的打印（`Representation::Named` 在字节仍能点到一个名字时写关键词，否则写 hex）；第四行是
-/// [`Color::to_css`] 的 out-of-gamut 规则。
+/// [`crate::color::Color::to_css`] 的 out-of-gamut 规则。
 ///
 /// 声明成**带名字的 variadic**，好让 `$red:` 能绑定，而一个不认识的标签仍按 unknown decline；由函数体判
 /// 哪些通道被点了名——这正是它认标签的全部理由。
@@ -75,7 +75,7 @@ fn needs_labels(args: Vec<Value>) -> Result<Value, SassError> {
 ///   按写下的轴打印（`…::whiteness/min`）；
 /// * hsl **不**走 legacy 的夹紧：`color.adjust(plum, $saturation: 53%)` 保住 100.2868217054% 并打 hsl
 ///   （`adjust/hsl.hrx::saturation/max_remaining`），而 legacy 的 `saturate(plum, 53%)` 在 100 处夹紧并打
-///   `#ff7eff`（`saturate.hrx::two_args/max_remaining`）——所以 [`Color::transform_axes`] 继续作为 legacy
+///   `#ff7eff`（`saturate.hrx::two_args/max_remaining`）——所以 [`crate::color::Color::transform_axes`] 继续作为 legacy
 ///   入口，这里不用它。只有饱和度的**下**界会夹（`…::saturation/{min,min_remaining}` 要的是零饱和度给出的
 ///   那个灰），而 `$lightness: -100%` 保持负值并打 `hsl(0, 100%, -50%)`（`…::lightness/min`）；
 /// * 一次不点名任何通道的调用是 no-op，而单有 `$alpha:` 仍会移动 alpha——夹紧到 `0–1`

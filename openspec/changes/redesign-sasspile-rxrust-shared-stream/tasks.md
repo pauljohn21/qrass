@@ -3494,4 +3494,36 @@
       `crates/sasspile/src/builtins/` 约 847 行；顺修仍留 `builtins/color/modify.rs:78`。
       基线 run 自此为 `zh-comments-batch-m`。
 
+- [x] 9.55 **注释中文化第二十八批：`crates/sasspile/src/builtins/` 收尾核验 + 三文件 doc 链接顺修（3 文件，2026-11-08）**。
+      核验结论：`builtins/` 11 文件（登记骨架 `mod.rs`、math 域五件、color 域五件）经 9.31~9.33 已
+      全部中文化；旧账「余约 847 行」经逐件现量复核是**注释总行数**（`wc -l` 口径含缩进行）而非
+      待译行数（9.54 条目此处记法一并订正）。本批清掉该域 `cargo doc --document-private-items`
+      的 5 条 strict 断链：`color/modify.rs` 3 条（`[`Space`]` → `[`super::write::Space`]`、
+      `[`Color::to_css`]`/`[`Color::transform_axes`]` →
+      `[`crate::color::Color::{to_css,transform_axes}`]`）、`color/write.rs` 1 条
+      （`[`super::modify`]` → `[`modify`]`）、`color/transfer.rs` 1 条（`[`crate::color::space`]`
+      → `[`crate::color::Space`]` 公共再导出）。**根因经 `/tmp/scope` 最小镜像探针坐实**：父模块
+      声明处附带 `///` 外层 doc 时，子模块内层 `//!` 的相对链接解析域被上抬一层（`super` 被当作
+      祖父模块，故 `write.rs` 的 `super::modify` 报 `no item named modify in module builtins`——
+      同级模块在该类文档里要用裸名）；私有模块（`mod space;`）不可被 intra-doc 链接直引，只能指向
+      公共再导出项。strict 读数 16 → 11，减少 5 恰为修复数；逐条定位余下 11 条全在域外
+      （`color/{channel.rs ×2, channels.rs ×3, mod.rs ×2, matrix.rs ×1, primaries.rs ×1}`、
+      `selector.rs`、`unit.rs`），**`builtins/` 域自此 strict-clean**。
+      **只改注释**：`/tmp/strip_comments` 剥离注释后 3/3 文件与 HEAD 逐字一致；行数不变
+      （`modify.rs` 195→195、`write.rs` 308→308、`transfer.rs` 49→49）。
+      闸口：`cargo test -p sasspile` EXIT=0；`cargo run -p sasslint --bin sasslint` count=0；
+      `cargo doc -p sasspile --no-deps` 零警告、`--document-private-items` 读数 11（域内 0）；
+      `cargo fmt -p sasspile -- --check` EXIT=0；`HRX_RUN=zh-comments-batch-o cargo test -p sasspile
+      --test hrx` 记为 `zh-comments-batch-o`（`3457/11533`，与 batch-n 逐例相同，实质 3292 +
+      空期望 165、skipped 1264）；`ledger diff zh-comments-batch-n zh-comments-batch-o` =
+      **`regress=0 net=0`**；`ledger changed` = **`changed=0`**；怪字扫描（36 字表）= 0
+      （阳性对照 4 字符读 4）；英文扫描 57 命中全为反引号内 fixture/错误消息逐字引用。
+      **审计闸未过（同上十四批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交」，本批与 9.41~9.54 同处「已提交、
+      待 `gc-auditor` 可用后先审」状态。
+      **本批按用户「推送后继续」指示，commit 后即经 `git push github main` 推送。**
+      **未做（不得当作已交付）**：`crates/sasspile/src/builtins/` 域 strict 断链清零，域外仍留
+      11 条（下一批次候选）；中文化待译项全仓已清零（`src/` 顶层 + `builtins/` + `tests/`）。
+      基线 run 自此为 `zh-comments-batch-o`。
+
 
