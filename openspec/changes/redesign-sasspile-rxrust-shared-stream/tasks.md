@@ -3155,3 +3155,27 @@
       `exec.rs` 204、`brackets.rs` 136、`calculation.rs` 127（与现测逐字一致），`.qoder/rules/rust.md`
       的待批清单已按 7 件 676 行订正。基线 run 自此为 `zh-comments-batch-c`。
 
+- [x] 9.44 **注释中文化第十七批：`exec.rs` + `loops.rs`（2 文件，2026-11-08）**。
+      `exec.rs` 主体由上一会话译毕（本批收尾），`loops.rs` 由本批全文译毕（本批补 `for_loop`、
+      `known_direction`、`integer` 三段与一处行内注释）。**只改注释**（`git diff -U0` 非注释行 = 0）。
+      文件读数（`wc -l` 口径）：`exec.rs` 471→436（注释行 204→169）、`loops.rs` 170→159（72→61）。
+      闸口：`cargo test -p sasspile` EXIT=0（全绿）；`sasslint` count=0；`cargo doc -p sasspile --no-deps`
+      零警告；`ledger diff zh-comments-calls-v2 zh-comments-batch-d` 与
+      `ledger diff zh-comments-batch-c zh-comments-batch-d` 均 = **`regress=0 net=0`**；
+      两条 `ledger changed … shape_of_text` 均 **`changed=0`**；hrx 记为 `zh-comments-batch-d`
+      （`3457/11533`，与批 C 逐例相同）；怪字扫描（拄/殫/一遗/癲/U+FFFD）= 0。
+      随译现量逐个取回的凭据：`sass-spec/spec/directives/for/for.hrx` 的
+      `inclusive_forward/scss`（:1）、`inclusive_backward`（:33）、`empty/scss`（:49）、
+      `exclusive_forward`（:67）、`negative_to_positive`（:112）、`to_scope`（:177）、
+      `unit/same`（:212）与 `error/{from_type,from_float,to_type,to_float,unit_coersion_to_float,incompatible_units}`
+      （:277/:289/:301/:313/:325/:337）全部命中；`directives/for/whitespace.hrx`、
+      `libsass-closed-issues/{issue_1043,issue_783}.hrx` 三个文件均存在（`issue_783.hrx` 按注释
+      所述确在 `for.hrx::error` 段之外被注释掉）。
+      **审计闸未过（同上三批）**：`gc-auditor` 是 subagent，本会话工具集无 Task 触发器；按
+      `.qoder/rules/rust.md` 9.38「审计闸不可用时就不提交，不得改用内置代理顶替」，本批与 9.41/9.42/9.43
+      同处「已提交、待 `gc-auditor` 可用后先审」状态。
+      **未做（不得当作已交付）**：顶层余 **`brackets.rs` 136、`calculation.rs` 127、`structure.rs` 54、
+      `selector.rs` 43、`phases.rs` 40（5 件共 400 行）**与 `builtins/` 余下约 847 行；
+      顺修仍留 `builtins/color/modify.rs:78`。基线 run 自此为 `zh-comments-batch-d`。
+
+
