@@ -1,9 +1,9 @@
 ---
 name: sasspile-start
-description: Machine-read the ground truth before touching sasspile. Use at the start of any session (or after context compaction) before implementing, measuring, or claiming that a feature works, and whenever the user says "继续" on the sasspile project. It re-reads the hrx baseline from the ledger, re-runs the deterministic gates, prints the next unfinished task, and requires the readings be recited verbatim.
+description: 动手改 sasspile 之前先用机器读真值。任何会话开始（或上下文压缩之后）、在你实现、测量或声称某特性可用之前使用，只要用户在 sasspile 项目上说「继续」也要用。它会从 ledger 重读 hrx 基线、重跑确定性闸、打印下一条未完成项，并要求逐字复述读数。
 allowed-tools: Bash(cargo:*), Bash(git:*), Bash(openspec:*), Read, Grep, Glob
 license: MIT
-compatibility: Requires cargo, the `ledger` and `sasslint` workspace crates, and reports/hrx.db.
+compatibility: 需要 cargo、`ledger` 与 `sasslint` 两个 workspace crate，以及 reports/hrx.db。
 metadata:
   author: qrass
 ---

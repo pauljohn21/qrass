@@ -3672,6 +3672,21 @@ trait 名、`类型变`、`行号引用`、数字读数、交叉引用一律保�
 与原文一一对应；散文行无真英文残留。**纯文档改动，rust 代码零触碰。**
 **审计闸状态同 9.41~9.60**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
 **未做（不得当作已交付）**：文档中文化 S4 批 —— `rxrust-source-analysis/SKILL.md`（72 行）、
-`sasspile-start/SKILL.md` 正文英文部分。
+`sasspile-start/SKILL.md` 正文英文部分（已由 9.62 吃下）。
+
+- [x] 9.62 **文档中文化收尾批（S4）：`.qoder/skills/rxrust-source-analysis/SKILL.md`（72 → 70 行）
+  与 `.qoder/skills/sasspile-start/SKILL.md` frontmatter（2026-11-09）**。
+      前者按 9.60 口径通译：frontmatter `name` 留英、`description` 中文；`# rxrust 源码分析`
+      /`## 概览`/`## 何时使用`（8 条）/`## 速查 —— 问题 → 章节`（表头 + 9 行）/
+      `## 版本钉（关键）`/`## 查证契约`（4 条）/`## 备注`（3 条）；`rxrust = "=1.0.0-rc.6"`
+      代码行保留、toml 注释中文化；文件名链接（`01-philosophy-and-architecture.md` …）、
+      trait/文件/token 名、`file:line`、`§` 交叉引用（`06 §8`、`08 §5`、`01–07`）保留原文。
+      后者正文早已中文，仅 frontmatter 的 `description` 与 `compatibility` 两字段中文化；
+      `name`/`allowed-tools`/`license`/`metadata` 保留（CLI 语法与键值）。
+      闸口：两文件 diff 仅散文/注释行；source-analysis 代码块仅 toml 注释 1 行差异；
+      `##` 6/6、表格 10/10 与原文一一对应；残留扫描无真英文。**纯文档改动，rust 代码零触碰。**
+      **审计闸状态同 9.41~9.61**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
+      **未做（不得当作已交付）**：`.qoder/skills/` 技能文档中文化已收尾（三份全清）；
+      `openspec/` 工具链文档与 `docs/` 等其它域未动。
 
 

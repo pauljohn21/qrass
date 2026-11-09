@@ -28,9 +28,9 @@ alwaysApply: true
 `.qoder/skills/rxrust-reactive/SKILL.md`**（184→175 行、13 段；frontmatter 先例 `gc-auditor.md`：
 `name` 留英、`description` 中文；算子清单/文件名/函数签名/代码块本体保留原文，代码块内说明性注释
 中文化），**9.61 中文化 `.qoder/skills/rxrust-reactive/reference.md`（396→368 行、15 段；
-签名行/类型/trait 名/文件名/行号引用保留原文）**，项目知识域剩余英文为
-`.qoder/skills/rxrust-source-analysis/SKILL.md`（72 行）与 `sasspile-start/SKILL.md`
-正文英文部分（S4 批）；
+签名行/类型/trait 名/文件名/行号引用保留原文）**；**9.62 收尾批中文化
+`.qoder/skills/rxrust-source-analysis/SKILL.md`（72→70 行）与 `sasspile-start/SKILL.md`
+的 frontmatter 两字段（description、compatibility）—— `.qoder/skills/` 技能文档英文散文清零**；
 openspec 工具链文档（`.qoder/commands/opsx/**` + `openspec-*` skills 共 2,412 行）经用户口径不在该域内；
 `element-plus`/`sass-spec` 为 vendored 上游永不翻译；
   （此前 9.41/9.42 与 9.43 草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
