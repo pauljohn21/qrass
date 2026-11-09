@@ -3625,5 +3625,26 @@
       `sasspile/tests`（9.48~9.54）、`sasslint/src`（9.29）、`ledger/src`（9.30）、`ledger/tests`
       （9.57）、`sasslint/tests`（本批）之后，`crates/` 全域 src 与 tests 中文化候选清零。
       基线 run 自此为 `zh-comments-batch-r`。
+- [x] 9.59 **文档中文化第一批：根 `README.md`（255 行 → 220 行，2026-11-09）**。
+      口径经用户 AskQuestion 确认（选项「项目知识域」）由「代码注释中文化」延伸至文档域：
+      散文中文化；命令（`cargo test` …）、CLI 语法、代码块本体、crate/文件路径、函数签名、
+      数字读数、交叉引用一律保留原文。翻译 14 段（标题/工作区/快照注/闸表/P0′/pass_substantive/
+      一致性权威/库用法/管线/反 GC 红线 11 条/验证段/规则住哪/基本规则/已知缺口/许可证）。
+      范围经全仓 md 的 han/total 扫描加抽样坐实：`docs/` 主文档（`rxrust-source-analysis/01-09`、
+      `rxrust-ai-manual.md`、`sasspile-framework-design-report.md`、`superpowers/**`、
+      `rxrust-from-scratch/**`）与 `openspec` change 的 `design.md`/`proposal.md`、`.qoder/rules/`
+      本就中文为主；英文实存仅剩根 `README.md`（han=2/255）与 `.qoder/skills/` 四个 SKILL
+      （详见未做条）。
+      闸口：代码块与 HEAD 逐字比对仅 4 处有意差异（`compile` 示例注释、`RUST_LOG` 注释、
+      管线图括注 3 行——均属说明性注释，符合口径）；`##` 章节 10/10、表格 3/3 与原文一一对应；
+      残留英文行扫描无真散文（命中均为术语/代码/命令/`PASS-FAIL` 标记）。**纯文档改动，rust
+      代码零触碰。**
+      **审计闸状态同 9.41~9.58**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
+      **未做（不得当作已交付）**：文档中文化 S2~S4 批 —— `rxrust-reactive/SKILL.md`（184 行英文）、
+      `rxrust-reactive/reference.md`（396 行英文）、`rxrust-source-analysis/SKILL.md`（72 行英文）、
+      `sasspile-start/SKILL.md` 正文英文部分；openspec 工具链文档（`.qoder/commands/opsx/**` +
+      `openspec-*` skills 共 2,412 行）经用户口径不属「项目知识域」；`element-plus`/`sass-spec`
+      为 vendored 上游，永不翻译。skill frontmatter 机器字段的中文化口径待 S2 批实际触碰时定
+      （先例：`gc-auditor.md` 的 `description` 已中文、`name`/`tools` 留英）。
 
 
