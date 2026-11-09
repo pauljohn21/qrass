@@ -3646,5 +3646,18 @@
       `openspec-*` skills 共 2,412 行）经用户口径不属「项目知识域」；`element-plus`/`sass-spec`
       为 vendored 上游，永不翻译。skill frontmatter 机器字段的中文化口径待 S2 批实际触碰时定
       （先例：`gc-auditor.md` 的 `description` 已中文、`name`/`tools` 留英）。
+- [x] 9.60 **文档中文化第二批：`.qoder/skills/rxrust-reactive/SKILL.md`（184 行 → 175 行，2026-11-09）**。
+      口径承接 9.59：散文中文化；命令（`cargo add rxrust` …）、CLI 语法、代码块本体、crate/文件路径、
+      函数签名、数字读数、交叉引用一律保留原文；**代码块内说明性注释**中文化（toml 1 行、内核 text 图
+      5 行、rust 示例 2 行）。frontmatter 先例 `gc-auditor.md`：`name` 留英、`description` 中文。
+      译 13 段（响应式流核心/版本钉/跨算子不变量指针/先选动词+算子清单/Need×Use×Never 表 12 行/
+      把相写成内核/内核终点唯一性/`Option<O>` 交付/`RcMut`·`RcCell` 共享/不要搭建框架层/
+      选 Local 还是 Shared/执行模型/元素按值与引/最小源形状/已定版单一源 Law 表 11 行/相关纪律/
+      Do·Don't 回顾）。
+      闸口：代码块与 HEAD 逐字比对仅注释行差异（符合口径）；表格 25/25 行与原文一一对应；
+      `##` 10/10；残留英文行扫描无真散文（命中均为算子清单代码词）。**纯文档改动，rust 代码零触碰。**
+      **审计闸状态同 9.41~9.59**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
+      **未做（不得当作已交付）**：文档中文化 S3~S4 批 —— `rxrust-reactive/reference.md`（396 行）、
+      `rxrust-source-analysis/SKILL.md`（72 行）、`sasspile-start/SKILL.md` 正文英文部分。
 
 

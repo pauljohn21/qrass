@@ -24,11 +24,13 @@ alwaysApply: true
 9.58 中文化 `crates/sasslint/tests/` 四件（`trace_span`/`cli_directory`/`defence_fitness`/`lint`，
 散文注释译中文，夹具字面量与断言消息保留英文原文），**`crates/` 全域 src 与 tests 中文化候选自此清零**；
 **9.59 起中文化延伸至文档域**（2026-11-09 用户 AskQuestion 确认口径「项目知识域」）：根 `README.md`
-散文中文化（255→220 行、14 段；命令/代码块本体/路径/数字/函数签名保留原文），项目知识域剩余英文为
-`.qoder/skills/rxrust-reactive/{SKILL.md,reference.md}`（580 行）、`.qoder/skills/rxrust-source-analysis/SKILL.md`
-（72 行）、`sasspile-start/SKILL.md` 正文英文部分（S2~S4 批）；openspec 工具链文档
-（`.qoder/commands/opsx/**` + `openspec-*` skills 共 2,412 行）经用户口径不在该域内；`element-plus`/
-`sass-spec` 为 vendored 上游永不翻译；
+散文中文化（255→220 行、14 段；命令/代码块本体/路径/数字/函数签名保留原文）；**9.60 中文化
+`.qoder/skills/rxrust-reactive/SKILL.md`**（184→175 行、13 段；frontmatter 先例 `gc-auditor.md`：
+`name` 留英、`description` 中文；算子清单/文件名/函数签名/代码块本体保留原文，代码块内说明性注释
+中文化），项目知识域剩余英文为 `.qoder/skills/rxrust-reactive/reference.md`（396 行）、
+`.qoder/skills/rxrust-source-analysis/SKILL.md`（72 行）、`sasspile-start/SKILL.md` 正文英文部分（S3~S4 批）；
+openspec 工具链文档（`.qoder/commands/opsx/**` + `openspec-*` skills 共 2,412 行）经用户口径不在该域内；
+`element-plus`/`sass-spec` 为 vendored 上游永不翻译；
   （此前 9.41/9.42 与 9.43 草稿把这份清单漏计成「余 4 文件」，漏掉的正是 `exec.rs`/`brackets.rs`/
   `calculation.rs` 三件 —— 现量复核：`tasks.md` 9.29 附近的原始清点列过 `exec.rs` 204、`brackets.rs` 136、
   `calculation.rs` 127，与现测逐字一致，已在 9.43 条订正；9.45 完成后余 3 文件 210 行经逐件现量复核，
