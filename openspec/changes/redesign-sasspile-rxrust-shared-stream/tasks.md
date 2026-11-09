@@ -3657,7 +3657,21 @@
       闸口：代码块与 HEAD 逐字比对仅注释行差异（符合口径）；表格 25/25 行与原文一一对应；
       `##` 10/10；残留英文行扫描无真散文（命中均为算子清单代码词）。**纯文档改动，rust 代码零触碰。**
       **审计闸状态同 9.41~9.59**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
-      **未做（不得当作已交付）**：文档中文化 S3~S4 批 —— `rxrust-reactive/reference.md`（396 行）、
-      `rxrust-source-analysis/SKILL.md`（72 行）、`sasspile-start/SKILL.md` 正文英文部分。
+**未做（不得当作已交付）**：文档中文化 S3~S4 批 —— `rxrust-source-analysis/SKILL.md`（72 行）、
+`sasspile-start/SKILL.md` 正文英文部分（`rxrust-reactive/reference.md` 已由 9.61 吃下）。
+
+- [x] 9.61 **文档中文化第三批：`.qoder/skills/rxrust-reactive/reference.md`（396 行 → 368 行，15 段，2026-11-09）**。
+口径承接 9.60：散文中文化；命令、CLI 语法、代码块本体、crate/文件路径、函数签名、
+trait 名、`类型变`、`行号引用`、数字读数、交叉引用一律保留原文；**代码块内说明性注释**中文化
+（§1 架构 text 图 5 行、§4 工厂表 18 行、§5 各签名行注、§6/§8 rust 示例注释）。
+译 15 段（标题/深入 API 笔记/rc.5→rc.6 差异/架构三层 trait 图/Local·Shared 决策表/执行模型/
+工厂清单 18 行/算子目录 5.1~5.6/终点 `(a)~(e)`+同步终点+错误协议+Shared 入口+排序陷阱+
+`subscribe_with` sink/类型擦除 box_it 家族/直接组合+compile 示例/Subject 多播/RxJS 与 0.15
+差异表 8 行/所有权红线 5 条/常见编译错误表 9 行/共享状态原语/`rc.rs` 图 4 行/Subscription 与 RAII）。
+闸口：代码块逐行 diff 全部为「代码 token 保留 + 注释中文化」；`##` 14/14、表格 23/23
+与原文一一对应；散文行无真英文残留。**纯文档改动，rust 代码零触碰。**
+**审计闸状态同 9.41~9.60**（`gc-auditor` 不可用）；按项目规则 commit 后等用户确认再推送。
+**未做（不得当作已交付）**：文档中文化 S4 批 —— `rxrust-source-analysis/SKILL.md`（72 行）、
+`sasspile-start/SKILL.md` 正文英文部分。
 
 
